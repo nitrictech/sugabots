@@ -10,8 +10,6 @@ import {
 	collaboration,
 	event,
 	message,
-	pod,
-	podMember,
 	thread,
 	threadSummary,
 	turn,
@@ -21,7 +19,6 @@ import {
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../../database/testing.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
-import { ChatView } from "../../chats/chat-view.ts";
 import { Chats } from "../../chats/chats.ts";
 import { conversationsForTests } from "../../testing.ts";
 import { ThreadView } from "../../thread-view.ts";
@@ -55,20 +52,14 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
 	const chatsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
-	const chatViewAs = (userId: string) =>
-		onPostgresAs(userId)(Context.get(conversations, ChatView.Service));
 	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
 	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
 	let workspaceId: string;
-	let podId: string;
 	let memberId: string;
 	let host: { id: string; name: string };
 	let helper: { id: string; name: string };
 	let checker: { id: string; name: string };
 	let rootThreadId: string;
-	let hostChatId: string;
-	let helperConversationId: string;
-	let helperMainThreadId: string;
 	/** The host's reply in the root thread, which its collaborations hang off. */
 	let reply: Awaited<ReturnType<typeof openReply>>;
 
@@ -94,29 +85,12 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		workspaceId = space.id;
 		memberId = member.id;
 		await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId: memberId }));
-		const [room] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId,
-					ownerId: memberId,
-					kind: "shared",
-					name: "Room",
-					slug: `room-${suffix}`,
-					createdById: memberId,
-				})
-				.returning(),
-		);
-		if (!room) throw new Error("fixture");
-		podId = room.id;
-		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
 		const crew = await onDatabase((db) =>
 			db
 				.insert(agent)
 				.values([
 					{
 						workspaceId,
-						podId,
 						name: `Host ${suffix}`,
 						handle: handleFromName(`Host ${suffix}`),
 						color: "rose",
@@ -126,7 +100,6 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 					},
 					{
 						workspaceId,
-						podId,
 						name: `Helper ${suffix}`,
 						handle: handleFromName(`Helper ${suffix}`),
 						description: "Knows things.",
@@ -137,7 +110,6 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 					},
 					{
 						workspaceId,
-						podId,
 						name: `Checker ${suffix}`,
 						handle: handleFromName(`Checker ${suffix}`),
 						description: "Checks things.",
@@ -154,25 +126,12 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		host = hostRow;
 		helper = helperRow;
 		checker = checkerRow;
-		const opened = await chatsAs(memberId).openBotChannel({
-			workspace: workspaceId,
-			podId,
-			hostAgentId: host.id,
-		});
-		hostChatId = opened.id;
-		await chatsAs(memberId).post({
-			conversationId: opened.id,
+		const started = await chatsAs(memberId).startTask({
+			agentId: host.id,
 			messageId: crypto.randomUUID(),
 			content: "Please look into the release",
 		});
-		rootThreadId = opened.id;
-		const helperChat = await chatsAs(memberId).openBotChannel({
-			workspace: workspaceId,
-			podId,
-			hostAgentId: helper.id,
-		});
-		helperConversationId = helperChat.id;
-		helperMainThreadId = helperChat.id;
+		rootThreadId = started.conversation.id;
 		reply = await openReply(rootThreadId, host.id);
 	});
 
@@ -229,23 +188,13 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			},
 		]);
 		expect(child?.participants.map(({ id }) => id)).toEqual([host.id, helper.id]);
-		// Child threads hang off their parent rather than appearing beside either Chat.
+		// The collaboration's task hangs off the asking task rather than being listed beside it.
 		const visibleThreadIds = (await threadsAs(memberId).list(workspaceId)).map(({ id }) => id);
-		expect(visibleThreadIds).toEqual(expect.arrayContaining([rootThreadId, helperMainThreadId]));
-		expect(visibleThreadIds).toHaveLength(2);
+		expect(visibleThreadIds).toEqual([rootThreadId]);
 		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
 			{ request: { agentId: helper.id } },
 		]);
-		// The helper's channel lists it, and its watchers are told.
-		expect((await chatViewAs(memberId).messages(helperConversationId))?.items).toEqual([
-			expect.objectContaining({
-				kind: "collaboration",
-				threadId: opened.collaboration.threadId,
-				title: "Check the changelog",
-				initiator: expect.objectContaining({ id: host.id }),
-				state: "running",
-			}),
-		]);
+		// The lists showing the collaboration's task are told of it.
 		const recipientEvents = await onDatabase((db) =>
 			db
 				.select({ payload: event.payload })
@@ -254,11 +203,33 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		);
 		expect(recipientEvents.map(({ payload }) => payload)).toContainEqual(
 			expect.objectContaining({
-				type: "conversation.thread_changed",
-				conversationId: helperConversationId,
+				type: "thread.changed",
 				threadId: opened.collaboration.threadId,
 			}),
 		);
+	});
+
+	it("asks a private bot, which another bot may ask for help though people cannot reach it", async () => {
+		const [other] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Kim", email: `kim-${crypto.randomUUID()}@example.com` })
+				.returning(),
+		);
+		if (!other) throw new Error("fixture");
+		await onDatabase((db) =>
+			db
+				.update(agent)
+				.set({ visibility: "private", createdById: other.id })
+				.where(eq(agent.id, checker.id)),
+		);
+
+		const opened = await collaborations.open({ from: from(), to: checker.name, brief: "Check" });
+
+		expect(opened.collaborator).toEqual(checker);
+		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
+			{ request: { agentId: checker.id } },
+		]);
 	});
 
 	it("composes the collaboration into the reply's parts where it was made", async () => {
@@ -373,7 +344,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			}),
 		);
 		await chatsAs(memberId).post({
-			conversationId: hostChatId,
+			conversationId: rootThreadId,
 			messageId: crypto.randomUUID(),
 			content: "Who did you ask?",
 		});

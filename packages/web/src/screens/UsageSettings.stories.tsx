@@ -36,14 +36,14 @@ const september: WorkspaceUsage = {
 	unpricedRequests: 0,
 	days: days("2026-09", SEPTEMBER_DAYS, 30),
 	bots: [
-		bot("Growth Desk", "green", "pill", "Revenue", 30.14),
-		bot("Linear Handler", "orange", "square", "Engineering", 16.01),
-		bot("Chief", "purple", "arc", "Personal", 13.19),
-		bot("Account Manager", "sky", "dot", "Revenue", 10.36),
-		bot("Lead Researcher", "ice", "wink", "Revenue", 7.54),
-		bot("On-call", "rose", "dot", "Engineering", 4.71),
-		bot("Inbox Manager", "yellow", "pill", "Personal", 3.77),
-		bot("Scheduler", "teal", "square", "Personal", 2.83),
+		bot("Growth Desk", "green", "pill", 30.14),
+		bot("Linear Handler", "orange", "square", 16.01),
+		bot("Chief", "purple", "arc", 13.19),
+		bot("Account Manager", "sky", "dot", 10.36),
+		bot("Lead Researcher", "ice", "wink", 7.54),
+		bot("On-call", "rose", "dot", 4.71),
+		bot("Inbox Manager", "yellow", "pill", 3.77),
+		bot("Scheduler", "teal", "square", 2.83),
 	],
 	models: [
 		model("claude-sonnet-4-5", "Claude Sonnet", "Anthropic", "anthropic", 47.1),
@@ -60,19 +60,14 @@ const september: WorkspaceUsage = {
 		),
 		model("qwen3.5:4b", "Qwen 3.5 4B", "Ollama", "ollama", 0),
 	],
-	pods: [
-		pod("Revenue", "green", 3, 48.04),
-		pod("Engineering", "orange", 2, 20.72),
-		pod("Personal", "purple", 3, 19.78),
-	],
 	systemAgents: { usd: 5.65, unpricedRequests: 0 },
+	personalAssistants: { usd: 0, unpricedRequests: 0 },
 };
 
 function bot(
 	name: string,
 	color: WorkspaceUsage["bots"][number]["color"],
 	face: WorkspaceUsage["bots"][number]["face"],
-	podName: string,
 	usd: number,
 ) {
 	return {
@@ -81,7 +76,6 @@ function bot(
 		color,
 		face,
 		shape: "circle" as const,
-		podName,
 		usd,
 		unpricedRequests: 0,
 	};
@@ -102,15 +96,6 @@ function model(
 		usd,
 		unpricedRequests: 0,
 	};
-}
-
-function pod(
-	name: string,
-	color: WorkspaceUsage["pods"][number]["color"],
-	botCount: number,
-	usd: number,
-) {
-	return { podId: `pod-${name}`, name, color, botCount, usd, unpricedRequests: 0 };
 }
 
 const august: WorkspaceUsage = {
@@ -136,8 +121,8 @@ const nothingSpent = (month: string): WorkspaceUsage => ({
 	days: days(month, [], 30),
 	bots: [],
 	models: [],
-	pods: [],
 	systemAgents: { usd: 0, unpricedRequests: 0 },
+	personalAssistants: { usd: 0, unpricedRequests: 0 },
 });
 
 function QueryPreview({ children }: { children: ReactNode }) {
@@ -270,7 +255,7 @@ export const SomeUnpriced = meta.story({
 				unpricedRequests: 3,
 				bots: [
 					...september.bots,
-					{ ...bot("Custom Endpoint", "teal", "wink", "Engineering", 0), unpricedRequests: 3 },
+					{ ...bot("Custom Endpoint", "teal", "wink", 0), unpricedRequests: 3 },
 				],
 			}),
 		);

@@ -13,7 +13,7 @@ export const BOT_BRANCH_PREFIX = "sugabots/";
 const TOKEN_USERNAME = "x-access-token";
 
 /**
- * A pod's GitHub connection as its turns and sandbox use it: each token is
+ * A bot's GitHub app as its turns and computer use it: each token is
  * for its account's installation, and only for its repositories.
  */
 export class Connected {
@@ -76,7 +76,7 @@ export class Connected {
 	}
 
 	/**
-	 * What the pod's sandbox reads the repositories with: git's sign-in to the
+	 * What the bot's computer reads the repositories with: git's sign-in to the
 	 * account's paths, added outside the sandbox by its provider. Nothing for
 	 * GitHub's API, whose paths don't all name the account: bots read through
 	 * the connection's tools instead.
@@ -386,7 +386,7 @@ export class Connected {
 	}
 }
 
-/** What a pod's sandbox is signed in to GitHub with, and when it must be replaced. */
+/** What a bot's computer is signed in to GitHub with, and when it must be replaced. */
 export interface SandboxSignIn {
 	readonly credentials: readonly Sandboxes.Credential[];
 	readonly expiresAt: GitHub.AccessToken["expiresAt"];
@@ -498,6 +498,6 @@ export class PermissionNotGranted
 		return `The connection's GitHub App hasn't been granted ${this.permissions}. Whoever owns the app adds it under Permissions in the app's settings on GitHub, then the account it is installed on accepts the new permissions.`;
 	}
 	get userMessage() {
-		return userText`The pod's GitHub App needs more permissions. Its owner adds them in the app's settings on GitHub.`;
+		return userText`The bot's GitHub App needs more permissions. Its owner adds them in the app's settings on GitHub.`;
 	}
 }

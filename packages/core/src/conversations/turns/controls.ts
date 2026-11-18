@@ -1,8 +1,8 @@
 import { userText } from "@sugabots/errors";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
-import { mayDecideApprovals, ResourceHidden } from "../../authorization/access.ts";
-import { Authorization } from "../../authorization/authorization.ts";
+import { agentStandingFor, mayDecideToolCall, ResourceHidden } from "../../authorization/access.ts";
+import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
 import { thread, toolCall, turn } from "../../database/schema.ts";
@@ -24,7 +24,6 @@ import { WorkAdmission } from "./work-admission.ts";
  */
 export const makeControls = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Turns.ControlsInterface>("Turns.Controls");
-	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
 	const turns = yield* TurnRepository.Service;
 	const toolCalls = yield* ToolCallRepository.Service;
@@ -64,28 +63,20 @@ export const makeControls = Effect.gen(function* () {
 					Effect.gen(function* () {
 						// Inside the transaction that sends or records the decision, so a
 						// demotion a moment earlier is seen.
-						// Reaching the pod is enough to ask: who decides depends on the call.
-						const decider = yield* authorization.pod(input.podId, "pod.read");
-						const { pod } = decider;
 						if (!isUuid(input.toolCallId)) return yield* new ToolApprovalNotFound();
 						const [candidate] = yield* query((db) =>
 							db
 								.select({
 									call: toolCall,
 									threadId: thread.id,
+									agentId: turn.agentId,
 									owner: turn.owner,
 									turn: { status: turn.status, cancelRequested: turn.cancelRequested },
 								})
 								.from(toolCall)
 								.innerJoin(turn, eq(turn.id, toolCall.turnId))
 								.innerJoin(thread, eq(thread.id, toolCall.threadId))
-								.where(
-									and(
-										eq(toolCall.id, input.toolCallId),
-										eq(thread.workspaceId, pod.workspaceId),
-										eq(thread.podId, pod.id),
-									),
-								)
+								.where(eq(toolCall.id, input.toolCallId))
 								.limit(1)
 								// The call alone: the turn is locked by whoever transitions it.
 								.for("update", { of: toolCall }),
@@ -93,13 +84,19 @@ export const makeControls = Effect.gen(function* () {
 						if (!candidate?.call.approvalId || !awaitsDecisions(candidate.turn)) {
 							return yield* new ToolApprovalNotFound();
 						}
+						// Seeing the thread is enough to ask; who decides is `mayDecideToolCall`'s to say.
+						const reached = yield* visibility
+							.thread(candidate.threadId)
+							.pipe(Effect.mapError(() => new ToolApprovalNotFound()));
+						const { userId } = yield* CurrentActor.Service;
+						const asking = yield* query((db) => agentStandingFor(db, candidate.agentId, userId));
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
 						const forRoutine = yield* admission.forRoutine(candidate.threadId);
-						if (!mayDecideApprovals(decider, forRoutine, decidersOf(candidate.call.tool))) {
+						if (!mayDecideToolCall(reached, asking, forRoutine, decidersOf(candidate.call.tool))) {
 							return yield* new ToolApprovalForbidden();
 						}
 						const approvalId = candidate.call.approvalId;
-						const decision = { decision: input.decision, userId: decider.actor.userId };
+						const decision = { decision: input.decision, userId };
 						if (!candidate.owner) return yield* new ToolApprovalNotFound();
 						// Recorded and sent in one transaction: the engine writes the signal
 						// through the same connection, so both commit or neither does, and

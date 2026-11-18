@@ -9,9 +9,8 @@ import { uuidSchema } from "../../uuid.ts";
 import { refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
-const root = "/pods/:podId/artifacts";
-const pod = { podId: uuidSchema };
-const artifact = { podId: uuidSchema, artifactId: uuidSchema };
+const root = "/artifacts";
+const artifact = { artifactId: uuidSchema };
 const version = {
 	...artifact,
 	version: Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThan(0)),
@@ -19,8 +18,15 @@ const version = {
 
 export class ArtifactsApi extends HttpApiGroup.make("artifacts")
 	.add(
-		HttpApiEndpoint.get("list", root, {
-			params: pod,
+		/** The files bots made in the channel's conversations. */
+		HttpApiEndpoint.get("listInPod", "/pods/:podId/artifacts", {
+			params: { podId: uuidSchema },
+			success: Schema.Array(artifactSummarySchema),
+			error: refused,
+		}),
+		/** The files the bot made in its tasks. */
+		HttpApiEndpoint.get("listForAgent", "/agents/:agentId/artifacts", {
+			params: { agentId: uuidSchema },
 			success: Schema.Array(artifactSummarySchema),
 			error: refused,
 		}),

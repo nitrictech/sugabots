@@ -4,7 +4,6 @@ import { ChevronRight, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useApprovalApp } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
-import { conversationLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
@@ -12,6 +11,7 @@ import { useReviewToolCall } from "@/lib/threads.ts";
 import { Answer, FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
 import { awaitsApproval } from "@/screens/tool-activity.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
+import { ConversationLink } from "@/shell/ConversationLink.tsx";
 import { ListTime, Page } from "@/shell/Page.tsx";
 
 /** How many answered requests show before Show older. */
@@ -127,7 +127,7 @@ function approvalLink(request: ApprovalRequest) {
 
 /**
  * A request waiting on the person, as a card: what the bot would do, which
- * bot, in which pod and when, the request itself, and Allow and Deny, with a
+ * bot, in which channel and when, the request itself, and Allow and Deny, with a
  * way to the conversation it was asked in.
  */
 function WaitingCard({ request }: { request: ApprovalRequest }) {
@@ -135,7 +135,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 	const { action } = useApprovalApp(request);
 	const { data: pods } = usePods();
 	const pod = pods?.find((candidate) => candidate.id === request.podId);
-	const review = useReviewToolCall(request.threadId, request.podId);
+	const review = useReviewToolCall(request.threadId);
 	// A phone answers with two wide buttons, and opens the request whole from its name.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const asked = [
@@ -187,17 +187,17 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 					</p>
 				)}
 				<span className="flex-1 max-md:hidden" />
-				{pod && request.conversationId && (
-					<Link
-						{...conversationLink(
-							{ pod, conversationId: request.conversationId },
-							request.threadId === request.conversationId ? {} : { thread: request.threadId },
-						)}
+				{request.conversationId && (
+					<ConversationLink
+						pod={pod}
+						agent={request.agent}
+						conversationId={request.conversationId}
+						search={request.threadId === request.conversationId ? {} : { thread: request.threadId }}
 						// A phone reaches the conversation from the request's own page.
 						className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-foreground max-md:hidden"
 					>
 						Open conversation
-					</Link>
+					</ConversationLink>
 				)}
 			</div>
 		</article>

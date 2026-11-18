@@ -9,31 +9,36 @@ import { podPermissions } from "../../authorization/permissions.ts";
 import type * as schema from "../../database/schema.ts";
 
 /** The row as the API returns it: timestamps as ISO strings, no internals. */
-function toPod(row: schema.PodRow, permissions: PodPermissions): Pod {
+function toPod(row: schema.PodRow, isMember: boolean, permissions: PodPermissions): Pod {
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
-		ownerId: row.ownerId,
-		kind: row.kind,
 		name: row.name,
 		slug: row.slug,
-		color: row.kind === "shared" ? podColorOf(row.color) : null,
+		color: podColorOf(row.color),
+		description: row.description,
+		visibility: row.visibility,
+		isMember,
 		permissions,
 		createdAt: row.createdAt.toISOString(),
 	};
 }
 
 /**
- * The pod as one person sees it, permissions and all.
+ * The channel as one person sees it, permissions and all.
  *
- * Takes a standing rather than a pod and a person, so the permissions on a pod
- * are always the ones the caller who asked for it holds.
+ * Takes a standing rather than a channel and a person, so the permissions on
+ * it are always the ones the caller who asked for it holds.
  */
 export function podSeenBy({ pod: row, actor, facts }: PodStanding): Pod {
-	return toPod(row, podPermissions(actor, facts));
+	return toPod(
+		row,
+		facts.isMember,
+		podPermissions(actor, { ...facts, isPublic: row.visibility === "public" }),
+	);
 }
 
-/** A shared pod's stored colour, or the default when it has none. */
+/** A channel's stored colour, or the default when it has none. */
 export function podColorOf(stored: PodColor | null): PodColor {
 	return stored ?? DEFAULT_POD_COLOR;
 }

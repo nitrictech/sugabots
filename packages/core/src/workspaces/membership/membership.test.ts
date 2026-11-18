@@ -18,6 +18,7 @@ import {
 import { closeDatabase, onDatabase, testInfrastructure } from "../../database/testing.ts";
 import { Email } from "../../email/email.ts";
 import { Installation } from "../../installation/installation.ts";
+import { noComputers } from "../../sandboxes/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { Membership } from "./membership.ts";
 
@@ -37,6 +38,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			Membership.layer.pipe(
 				Layer.provide([
 					testInfrastructure,
+					noComputers,
 					Installation.layer,
 					unimplemented(Accounts.Service, { requireEmailVerification }),
 					Layer.succeed(
@@ -139,7 +141,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		return member;
 	}
 
-	it("makes the creator its owner, and provisions the workspace and their Personal pod", async () => {
+	it("makes the creator its owner, and provisions the workspace and their Personal Assistant", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 
 		expect(await run(ada.id, (m) => m.members({ workspace: workspace.id }))).toEqual([
@@ -164,11 +166,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ ownerId: pod.ownerId })
-					.from(pod)
-					.where(and(eq(pod.workspaceId, workspace.id), eq(pod.kind, "personal"))),
+					.select({ assistantOf: agent.assistantOf })
+					.from(agent)
+					.where(and(eq(agent.workspaceId, workspace.id), isNotNull(agent.assistantOf))),
 			),
-		).toEqual([{ ownerId: ada.id }]);
+		).toEqual([{ assistantOf: ada.id }]);
 		expect(await run(ada.id, (m) => m.workspaces)).toEqual([workspace]);
 	});
 
@@ -257,9 +259,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ id: pod.id })
-					.from(pod)
-					.where(and(eq(pod.workspaceId, workspace.id), eq(pod.ownerId, bob.id))),
+					.select({ id: agent.id })
+					.from(agent)
+					.where(and(eq(agent.workspaceId, workspace.id), eq(agent.assistantOf, bob.id))),
 			),
 		).toHaveLength(1);
 	});
@@ -337,14 +339,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			db
 				.select({ model: agent.model })
 				.from(agent)
-				.innerJoin(pod, eq(pod.id, agent.podId))
-				.where(
-					and(
-						eq(pod.workspaceId, workspace.id),
-						eq(pod.ownerId, bob.id),
-						eq(agent.provisionedKey, "personal-assistant"),
-					),
-				),
+				.where(and(eq(agent.workspaceId, workspace.id), eq(agent.assistantOf, bob.id))),
 		);
 		expect(assistant?.model).toBe("offered");
 	});
@@ -540,7 +535,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
-	it("puts an administrator in every shared pod, whether invited or promoted", async () => {
+	it("puts an administrator in every channel, whether invited or promoted", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const kim = await person("Kim");
@@ -549,13 +544,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				.insert(pod)
 				.values({
 					workspaceId: workspace.id,
-					kind: "shared",
 					name: "Launch",
 					slug: `launch-${unique()}`,
 				})
 				.returning(),
 		);
-		if (!shared) throw new Error("The pod was not created");
+		if (!shared) throw new Error("The channel was not created");
 		const inShared = () =>
 			onDatabase((db) =>
 				db
@@ -654,7 +648,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
 	});
 
-	it("transfers ownership, making the new owner an administrator of every shared pod and the old one an admin", async () => {
+	it("transfers ownership, putting the new owner in every channel and making the old one an admin", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const bobMember = await join(workspace.id, ada.id, bob, "viewer");
@@ -663,13 +657,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				.insert(pod)
 				.values({
 					workspaceId: workspace.id,
-					kind: "shared",
 					name: "Launch",
 					slug: `launch-${unique()}`,
 				})
 				.returning(),
 		);
-		if (!shared) throw new Error("The pod was not created");
+		if (!shared) throw new Error("The channel was not created");
 
 		expect(
 			await run(ada.id, (m) =>
@@ -740,7 +733,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
-	it("takes a removed member's Personal pod and pod grants, and does not restore them when they rejoin", async () => {
+	it("takes a removed member out of their channels, does not put them back when they rejoin, and gives them one Personal Assistant", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const bobMember = await join(workspace.id, ada.id, bob);
@@ -749,13 +742,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				.insert(pod)
 				.values({
 					workspaceId: workspace.id,
-					kind: "shared",
 					name: "Private",
 					slug: `private-${unique()}`,
 				})
 				.returning(),
 		);
-		if (!shared) throw new Error("The pod was not created");
+		if (!shared) throw new Error("The channel was not created");
 		await onDatabase((db) =>
 			db.insert(podMember).values({ workspaceId: workspace.id, podId: shared.id, userId: bob.id }),
 		);
@@ -774,14 +766,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ id: pod.id })
-					.from(pod)
-					.where(and(eq(pod.workspaceId, workspace.id), eq(pod.ownerId, bob.id))),
+					.select({ id: agent.id })
+					.from(agent)
+					.where(and(eq(agent.workspaceId, workspace.id), eq(agent.assistantOf, bob.id))),
 			),
 		).toHaveLength(1);
 	});
 
-	it("lets somebody who created a shared pod leave, and keeps the pod", async () => {
+	it("lets somebody who created a channel leave, and keeps the channel", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		await join(workspace.id, ada.id, bob);
@@ -790,14 +782,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				.insert(pod)
 				.values({
 					workspaceId: workspace.id,
-					kind: "shared",
 					name: "Launch",
 					slug: `launch-${unique()}`,
 					createdById: bob.id,
 				})
 				.returning(),
 		);
-		if (!shared) throw new Error("The pod was not created");
+		if (!shared) throw new Error("The channel was not created");
 
 		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
 		expect(

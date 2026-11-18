@@ -31,7 +31,6 @@ import { useEffect, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { useAgents } from "@/lib/agents.ts";
-import type { ComposerAttachments } from "@/lib/composer-attachments.ts";
 import { NotReadyError } from "@/lib/failure.ts";
 import { countOf, listNames } from "@/lib/name-list.ts";
 import { findPod, usePods } from "@/lib/pods.ts";
@@ -43,8 +42,8 @@ const PAGE_SIZE = 30;
 const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
 
 /**
- * A pod's conversation list, by the pod's slug: what a chat page's address
- * names, so a page can ask for it before it knows the pod's id.
+ * A channel's conversations, by the channel's slug: what a chat page's
+ * address names, so a page can ask for it before it knows the channel's id.
  */
 function chatListQuery(workspaceId: string | undefined, podSlug: string | undefined) {
 	return queryOptions({
@@ -63,12 +62,32 @@ function chatListQuery(workspaceId: string | undefined, podSlug: string | undefi
 	});
 }
 
-/** The conversation list for a pod, by its slug: its chats, its threads newest first, and its routines. */
+/** A channel's conversations, by its slug: its main chat, then its threads in the order they were started. */
 export function useChatList(podSlug: string | undefined) {
 	return useQuery(chatListQuery(useWorkspace().workspace?.id, podSlug));
 }
 
-/** How each pod stands for the pod menu: its unread messages, and whether any chat waits on the person. */
+/** A bot's tasks, most recent message first, and its automations. */
+function botTasksQuery(workspaceId: string | undefined, agentId: string | undefined) {
+	return queryOptions({
+		queryKey: ["bot-tasks", workspaceId, agentId],
+		queryFn:
+			workspaceId && agentId
+				? ({ signal }) =>
+						Effect.runPromise(client.api.chats.botTasks({ params: { agentId } }), { signal })
+				: skipToken,
+	});
+}
+
+/** The tasks and automations of the bot `agentId`; nothing is asked while it is undefined. */
+export function useBotTasks(agentId: string | undefined) {
+	return useQuery(botTasksQuery(useWorkspace().workspace?.id, agentId));
+}
+
+/**
+ * How each channel and bot stands for the sidebar: its unread messages,
+ * whether any conversation waits on the person, and a bot's failed automations.
+ */
 export function usePodChatMarkers() {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
@@ -292,7 +311,7 @@ export type AttentionCounts = {
 
 /**
  * How much in the workspace is waiting for the person, which the sidebar and the
- * app's badge count. Mentions in pods, and what else is unread, come from the
+ * app's badge count. Mentions, and what else is unread, come from the
  * activity feed, so they are counted among its latest items only; what is
  * unread in direct messages comes from their list, which counts all of it.
  */
@@ -300,13 +319,16 @@ export function useAttentionCounts(): AttentionCounts {
 	const { data: approvals } = useApprovalInbox();
 	const { data: activity } = useActivityFeed();
 	const { data: directMessages } = useDirectMessages();
-	const mentionsInPods =
-		activity?.items.filter((item) => item.unread && item.podId !== null && mentionsYou(item))
-			.length ?? 0;
+	// A mention in a direct message is counted with the direct message's unread messages.
+	const directIds = new Set(directMessages?.items.map((item) => item.conversation.id));
+	const mentionsElsewhere =
+		activity?.items.filter(
+			(item) => item.unread && !directIds.has(item.conversationId) && mentionsYou(item),
+		).length ?? 0;
 	const unreadInDirectMessages =
 		directMessages?.items.reduce((sum, item) => sum + item.unreadMessages, 0) ?? 0;
 	return {
-		unreadForYou: mentionsInPods + unreadInDirectMessages,
+		unreadForYou: mentionsElsewhere + unreadInDirectMessages,
 		unreadInInbox: activity?.items.filter((item) => item.unread).length ?? 0,
 		waitingApprovals: approvals?.waiting.length ?? 0,
 	};
@@ -413,16 +435,15 @@ export function useMarkReadWhileSeen(
  */
 function readRevision(item: ChatMessageItem): string {
 	if (item.kind === "message") return `${item.message.id}:${item.message.status}`;
-	// A run or a collaboration seen while it runs is read again once it ends.
-	return item.kind === "routine" || item.kind === "collaboration"
-		? `${item.id}:${item.state}`
-		: item.id;
+	// A run seen while it runs is read again once it ends.
+	return item.kind === "routine" ? `${item.id}:${item.state}` : item.id;
 }
 
 /** Fetches again what shows which chats are unread: the lists, the sidebar and activity. */
 export function refreshChatMarkers(queries: QueryClient, workspaceId: string | undefined) {
 	return Promise.all([
 		queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+		queries.invalidateQueries({ queryKey: ["bot-tasks", workspaceId] }),
 		queries.invalidateQueries({ queryKey: ["chat-pod-markers", workspaceId] }),
 		queries.invalidateQueries({ queryKey: activityFeedKey(workspaceId) }),
 		queries.invalidateQueries({ queryKey: directMessagesKey(workspaceId) }),
@@ -431,7 +452,7 @@ export function refreshChatMarkers(queries: QueryClient, workspaceId: string | u
 
 /**
  * Fetches every workspace's approvals inbox again, for a request answered
- * where only its pod is known.
+ * where its workspace is not known.
  */
 export function refreshEveryApprovalInbox(queries: QueryClient) {
 	return queries.invalidateQueries({ queryKey: [APPROVAL_INBOX] });
@@ -449,170 +470,164 @@ export function refreshAfterThreadChange(queries: QueryClient, workspaceId: stri
 }
 
 /**
- * The bot's channel in the pod, for an address that names the bot rather
- * than the channel. It is read from the pod's conversation list, which the
- * screen loads anyway, so one that exists costs no request of its own. Only
- * a bot the list shows without one, because nobody opened it yet or it was
- * opened after the list loaded, has one opened with a request. Waits while
- * `hostAgentId` is not yet known.
- */
-export function useOpenBotChannel(pod: Pod, hostAgentId: string | undefined) {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	return useQuery({
-		queryKey: ["bot-channel", workspaceId, pod.id, hostAgentId],
-		queryFn:
-			workspaceId && hostAgentId
-				? async ({ signal }) => {
-						const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
-						const listed = list.channels.find(
-							(item) => item.conversation.hostAgentId === hostAgentId,
-						)?.conversation;
-						if (listed) return listed;
-						const opened = await Effect.runPromise(
-							client.api.chats.openBotChannel({
-								params: { workspace: workspaceId },
-								payload: { podId: pod.id, hostAgentId },
-							}),
-							{ signal },
-						);
-						// The list was loaded without the channel just opened.
-						void queries.invalidateQueries({ queryKey: ["chat-list", workspaceId, pod.slug] });
-						return opened;
-					}
-				: skipToken,
-	});
-}
-
-/**
  * Which kind of conversation is open, and the bot it is with when it has one:
- * a direct message is between people, one other or a group, with no bot.
+ * a channel's main chat or thread, a bot's task or automation thread, or a
+ * direct message between people, one other or a group, with no bot.
  */
 export type ConversationKind =
 	| { kind: "podChat" }
-	| { kind: "botChannel"; agent: Agent }
 	| { kind: "botThread"; agent: Agent }
-	| { kind: "peopleThread" }
 	| ({ kind: "direct" } & DirectPeople);
 
-/** A conversation's pod, and which kind of conversation it is. */
-export interface ConversationPlace {
+/** A conversation in a channel. */
+export interface ChannelPlace {
 	pod: Pod;
-	conversation: Exclude<ConversationKind, { kind: "direct" }>;
+	conversation: { kind: "podChat" };
 }
 
-/** A direct message between people, which is in no pod, and who is in it. */
+/** A bot's task or automation thread, which is in no channel. */
+export interface BotPlace {
+	pod: null;
+	conversation: { kind: "botThread"; agent: Agent };
+}
+
+/** A conversation with bots in it: in a channel, or a bot's own. */
+export type ConversationPlace = ChannelPlace | BotPlace;
+
+/** A direct message between people, which is in no channel, and who is in it. */
 export interface DirectPlace {
 	pod: null;
 	conversation: Extract<ConversationKind, { kind: "direct" }>;
 }
 
+/** The bot a place's conversation is with, if any. */
+export function placeAgent(place: { conversation: ConversationKind }): Agent | undefined {
+	return place.conversation.kind === "botThread" ? place.conversation.agent : undefined;
+}
+
 /**
- * Where the conversation `conversationId` is, in the pod at `podSlug`;
- * `undefined` when there is none or it is not one in that pod. Read from the
- * pod's conversation list, which the screen loads anyway, and from the
- * conversation itself only when the list does not have it, so the screen does
- * not wait on the conversation to know whose it is.
+ * Where the conversation `conversationId` is, in the channel at `podSlug`;
+ * `undefined` when there is none or it is not one in that channel. Read from
+ * the channel's list, and from the conversation itself only when the list
+ * does not have it, as an archived thread.
  */
-export function useConversationPlace(
+export function useChannelConversationPlace(
 	podSlug: string,
 	conversationId: string | undefined,
-): { found: ConversationPlace | undefined; isPending: boolean; error: unknown } {
+): { found: ChannelPlace | undefined; isPending: boolean; error: unknown } {
 	const pods = usePods();
-	const roster = useAgents();
 	const list = useChatList(podSlug);
-	const listedPodChat =
-		list.data?.chats.some((chat) => chat.conversation.id === conversationId) ?? false;
-	const listedChannel = list.data?.channels.find((item) => item.conversation.id === conversationId);
-	const listedThread =
-		list.data?.threads.find((item) => item.conversation.id === conversationId) ??
-		list.data?.routines.find((item) => item.conversation?.id === conversationId);
-	const listed = listedPodChat || listedChannel !== undefined || listedThread !== undefined;
+	const listed = list.data?.chats.some((chat) => chat.conversation.id === conversationId) ?? false;
 	const unlisted = useQuery({
 		...threadQuery(conversationId),
 		enabled: conversationId !== undefined && list.isSuccess && !listed,
 	});
 	const pod = findPod(pods.data, podSlug);
-	const thread = unlisted.data?.thread?.podId === pod?.id ? unlisted.data?.thread : undefined;
-	const hostAgentId =
-		listedChannel?.agent.id ??
-		(listedThread ? (listedThread.agent?.id ?? null) : thread?.hostAgentId);
-	const agent =
-		roster.agents?.find((candidate) => candidate.id === hostAgentId) ?? listedChannel?.agent;
-	const conversation = conversationKindOf({
-		isPodChat: listedPodChat || thread?.type === "pod_chat",
-		isBotChannel: listedChannel !== undefined || thread?.type === "bot_channel",
-		isThread:
-			listedThread !== undefined ||
-			thread?.type === "conversation" ||
-			thread?.type === "routine_feed",
-		hostAgentId,
-		agent,
-	});
+	const inPod =
+		listed ||
+		(unlisted.data?.thread?.type === "pod_chat" && unlisted.data.thread.podId === pod?.id);
 	return {
-		found: pod && conversation ? { pod, conversation } : undefined,
+		found: pod && inPod ? { pod, conversation: { kind: "podChat" } } : undefined,
 		isPending:
-			pods.isPending ||
-			roster.isPending ||
-			list.isPending ||
-			(list.isSuccess && !listed && unlisted.isPending),
-		error: pods.error ?? roster.error ?? list.error ?? unlisted.error,
+			pods.isPending || list.isPending || (list.isSuccess && !listed && unlisted.isPending),
+		error: pods.error ?? list.error ?? unlisted.error,
 	};
 }
 
-/** Which kind a conversation is, once enough is known to say; a channel or thread with a bot waits for the bot. */
-function conversationKindOf(known: {
-	isPodChat: boolean;
-	isBotChannel: boolean;
-	isThread: boolean;
-	hostAgentId: string | null | undefined;
-	agent: Agent | undefined;
-}): ConversationPlace["conversation"] | undefined {
-	if (known.isPodChat) return { kind: "podChat" };
-	if (known.isBotChannel) return known.agent && { kind: "botChannel", agent: known.agent };
-	if (!known.isThread) return undefined;
-	if (known.hostAgentId === null) return { kind: "peopleThread" };
-	return known.agent && { kind: "botThread", agent: known.agent };
+/**
+ * Where the conversation `conversationId` is when it is one of the bot
+ * `agent`'s: one of its tasks or automation threads; `undefined` when it is
+ * not.
+ */
+export function useBotConversationPlace(
+	agent: Agent,
+	conversationId: string | undefined,
+): { found: BotPlace | undefined; isPending: boolean; error: unknown } {
+	const list = useBotTasks(agent.id);
+	const listed =
+		list.data?.tasks.some((item) => item.conversation.id === conversationId) ||
+		list.data?.routines.some((item) => item.conversation?.id === conversationId) ||
+		false;
+	const unlisted = useQuery({
+		...threadQuery(conversationId),
+		enabled: conversationId !== undefined && list.isSuccess && !listed,
+	});
+	const ours = listed || unlisted.data?.thread?.hostAgentId === agent.id;
+	return {
+		found: ours ? { pod: null, conversation: { kind: "botThread", agent } } : undefined,
+		isPending: list.isPending || (list.isSuccess && !listed && unlisted.isPending),
+		error: list.error ?? unlisted.error,
+	};
 }
 
 /**
- * The pod's first chat, read from its conversation list when somebody has
- * opened it, and otherwise opened with a request. A Personal pod has none,
- * so it waits there.
+ * Where any conversation `conversationId` is, read from the conversation
+ * itself: in a channel, a bot's, or a direct message. For a page, such as
+ * Inbox's, whose address names only the conversation.
+ */
+export function useAnyConversationPlace(conversationId: string): {
+	found: ConversationPlace | DirectPlace | undefined;
+	isPending: boolean;
+	error: unknown;
+} {
+	const pods = usePods();
+	const roster = useAgents();
+	const thread = useQuery(threadQuery(conversationId));
+	const details = thread.data?.thread;
+	const direct = useDirectMessage(conversationId);
+	if (details?.type === "direct") return direct;
+	const pod = details?.podId ? pods.data?.find((one) => one.id === details.podId) : undefined;
+	const agent = details?.hostAgentId
+		? roster.agents?.find((one) => one.id === details.hostAgentId)
+		: undefined;
+	const found: ConversationPlace | undefined = pod
+		? { pod, conversation: { kind: "podChat" } }
+		: agent
+			? { pod: null, conversation: { kind: "botThread", agent } }
+			: undefined;
+	return {
+		found,
+		isPending: thread.isPending || pods.isPending || roster.isPending,
+		error: thread.error ?? pods.error ?? roster.error,
+	};
+}
+
+/**
+ * The channel's main chat, read from its list when somebody has opened it,
+ * and otherwise opened with a request.
  */
 export function useOpenPodChat(pod: Pod) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["pod-chat", workspaceId, pod.id],
-		queryFn:
-			workspaceId && pod.kind === "shared"
-				? async ({ signal }) => {
-						const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
-						return (
-							list.chats.find((chat) => chat.conversation.main)?.conversation ??
-							Effect.runPromise(
-								client.api.chats.openPodChat({ params: { workspace: workspaceId, podId: pod.id } }),
-								{ signal },
-							)
-						);
-					}
-				: skipToken,
+		queryFn: workspaceId
+			? async ({ signal }) => {
+					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
+					return (
+						list.chats.find((chat) => chat.conversation.main)?.conversation ??
+						Effect.runPromise(
+							client.api.chats.openPodChat({ params: { workspace: workspaceId, podId: pod.id } }),
+							{ signal },
+						)
+					);
+				}
+			: skipToken,
 	});
 }
 
 /**
- * The routine's own thread, read from its pod's list when it has one, and
+ * The automation's own thread, read from its bot's list when it has one, and
  * otherwise opened with a request.
  */
-export function useOpenRoutineFeed(pod: Pod, routineId: string) {
+export function useOpenRoutineFeed(agentId: string, routineId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["routine-feed", workspaceId, routineId],
 		queryFn: workspaceId
 			? async ({ signal }) => {
-					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
+					const list = await queries.ensureQueryData(botTasksQuery(workspaceId, agentId));
 					return (
 						list.routines.find((item) => item.routine.id === routineId)?.conversation ??
 						Effect.runPromise(
@@ -753,99 +768,66 @@ export function useSendChatMessage(conversationId: string, user: SessionUser) {
 				queries.invalidateQueries({ queryKey: ["chat-history", conversationId] }),
 				queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
 				queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+				queries.invalidateQueries({ queryKey: ["bot-tasks", workspaceId] }),
 			]);
 		},
 	});
 }
 
-/** A thread to start, with the files uploaded to the conversation that its first message attaches. */
-export type ThreadToStart = Omit<NewThread, "attachments"> & { files?: readonly FilePart[] };
+/** What the composer says when the API did not start a task. */
+export const TASK_NOT_STARTED = "The task was not started. Your draft is still here.";
 
 /**
- * Starts a thread from `conversationId`, a pod's chat or a bot's channel,
- * with its first message, for the bot it names. The conversation and its
- * list show the thread once it has.
+ * How starting a task from a draft went: started; refused by the API; or not
+ * sent, because the draft has no words to title it.
  */
-function useStartThread(conversationId: string | undefined) {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	return useMutation({
-		mutationFn: ({ files = [], ...thread }: ThreadToStart) => {
-			if (!conversationId)
-				throw new Error("A thread was started before its conversation had opened");
-			const payload: NewThread = {
-				...thread,
-				...(files.length > 0 && { attachments: files.map((file) => file.id) }),
-			};
-			return Effect.runPromise(
-				client.api.chats.startThread({ params: { conversationId }, payload }),
-			);
-		},
-		onSettled: () => conversationId && refreshThreadsFrom(queries, workspaceId, conversationId),
-	});
-}
-
-/** What the composer says when the API did not start a thread. */
-export const THREAD_NOT_STARTED = "The thread was not started. Your draft is still here.";
-
-/**
- * How starting a thread from a draft went: started; refused by the API, with
- * its files put back; or not sent, because the draft has no words to title it
- * or its files are not ready.
- */
-export type ThreadStart =
-	| { outcome: "started"; thread: StartedThread }
+export type TaskStart =
+	| { outcome: "started"; task: StartedThread }
 	| { outcome: "refused" }
 	| { outcome: "notSent" };
 
 /**
- * Starts threads from `conversationId`, a pod's chat or a bot's channel, each
- * with a draft as its first message and the files staged in `attachments`.
+ * Starts tasks with the bot `agentId`, each with a draft as its first message;
+ * files are added once it has started. The bot's list shows each task once it
+ * has.
  */
-export function useThreadStarter(
-	conversationId: string | undefined,
-	attachments: ComposerAttachments,
-) {
-	const startThread = useStartThread(conversationId);
-	async function start(
-		draft: string,
-		options: { hostAgentId?: string; replyTo?: string } = {},
-	): Promise<ThreadStart> {
+export function useTaskStarter(agentId: string) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	const startTask = useMutation({
+		mutationFn: (payload: NewThread) =>
+			Effect.runPromise(client.api.chats.startTask({ params: { agentId }, payload })),
+		onSettled: () => queries.invalidateQueries({ queryKey: ["bot-tasks", workspaceId, agentId] }),
+	});
+	async function start(draft: string): Promise<TaskStart> {
 		const message = draft.trim();
-		if (!conversationId || startThread.isPending || message === "") return { outcome: "notSent" };
-		const files = attachments.takeForSending(draft);
-		if (!files) return { outcome: "notSent" };
+		if (startTask.isPending || message === "") return { outcome: "notSent" };
 		try {
-			const thread = await startThread.mutateAsync({
-				id: uuidv4(),
-				message,
-				files: files.parts,
-				...options,
-			});
-			return { outcome: "started", thread };
-		} catch (failure) {
-			files.putBack(failure);
+			const task = await startTask.mutateAsync({ id: uuidv4(), message });
+			return { outcome: "started", task };
+		} catch {
 			return { outcome: "refused" };
 		}
 	}
-	return { start, isPending: startThread.isPending };
+	return { start, isPending: startTask.isPending };
 }
 
 /**
- * Starts a thread from a message in `conversationId`, a pod's chat or a bot's
- * channel, or finds the one it has.
+ * Starts the task in which a bot its maker just made interviews them, when
+ * the bot is due one; resolves to the task, or null.
  */
-export function useThreadFrom(conversationId: string) {
+export function useStartInterview() {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
-		mutationFn: (messageId: string) =>
-			Effect.runPromise(client.api.chats.threadFrom({ params: { messageId } })),
-		onSettled: () => refreshThreadsFrom(queries, workspaceId, conversationId),
+		mutationFn: (agentId: string) =>
+			Effect.runPromise(client.api.chats.startInterview({ params: { agentId } })),
+		onSettled: (_task, _error, agentId) =>
+			queries.invalidateQueries({ queryKey: ["bot-tasks", workspaceId, agentId] }),
 	});
 }
 
-/** Marks the conversation done, or reopens it. Its thread and the pod's list show it once it has. */
+/** Marks the task done, or reopens it. The task and its bot's list show it once it has. */
 export function useSetDone(conversationId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
@@ -859,7 +841,7 @@ export function useSetDone(conversationId: string) {
 		onSettled: () =>
 			Promise.all([
 				queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
-				queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+				queries.invalidateQueries({ queryKey: ["bot-tasks", workspaceId] }),
 			]),
 	});
 }
@@ -870,7 +852,7 @@ export function useSetDone(conversationId: string) {
  * rename it.
  * `pending` is shared by every control of the routine on screen, so none
  * starts another change while one is on its way. The thread, its page and
- * the pod's list are fetched again after each.
+ * its bot's list are fetched again after each.
  */
 export function useRoutineControls(
 	conversationId: string,
@@ -884,7 +866,7 @@ export function useRoutineControls(
 		Promise.all([
 			queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
 			queries.invalidateQueries({ queryKey: ["chat-messages", conversationId] }),
-			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+			queries.invalidateQueries({ queryKey: ["bot-tasks", workspaceId] }),
 		]);
 	const scope = { agentId: routine.agentId, routineId: routine.id };
 	const runAgain = useMutation({
@@ -906,7 +888,7 @@ export function useRoutineControls(
 	};
 }
 
-/** Starts another chat in the pod, named `name`. The pod's list shows it once it has. */
+/** Starts a thread in the channel, named `name`. The channel's list shows it once it has. */
 export function useStartChat(pod: Pod) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
@@ -919,7 +901,7 @@ export function useStartChat(pod: Pod) {
 	});
 }
 
-/** Renames the pod's chat `conversationId`. The pod's list and the chat show it once it has. */
+/** Renames the channel's thread `conversationId`. The channel's list and the thread show it once it has. */
 export function useRenameChat(conversationId: string) {
 	const refresh = useRefreshChat(conversationId);
 	return useMutation({
@@ -931,7 +913,7 @@ export function useRenameChat(conversationId: string) {
 	});
 }
 
-/** Archives the pod's chat `conversationId`, which takes it off the pod's list. */
+/** Archives the channel's thread `conversationId`, which takes it off the channel's list. */
 export function useArchiveChat(conversationId: string) {
 	const refresh = useRefreshChat(conversationId);
 	return useMutation({
@@ -941,7 +923,7 @@ export function useArchiveChat(conversationId: string) {
 	});
 }
 
-/** Fetches again what shows a pod's chat as it is: the chat, and the pod's list. */
+/** Fetches again what shows a channel's thread as it is: the thread, and the channel's list. */
 function useRefreshChat(conversationId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
@@ -950,18 +932,6 @@ function useRefreshChat(conversationId: string) {
 			queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
 			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
 		]);
-}
-
-/** Fetches again what shows the threads started from `conversationId`: it and the pod's list. */
-function refreshThreadsFrom(
-	queries: QueryClient,
-	workspaceId: string | undefined,
-	conversationId: string,
-) {
-	return Promise.all([
-		queries.invalidateQueries({ queryKey: ["chat-messages", conversationId] }),
-		queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
-	]);
 }
 
 /**

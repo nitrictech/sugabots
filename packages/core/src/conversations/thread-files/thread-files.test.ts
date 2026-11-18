@@ -5,9 +5,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BlobStore } from "../../blob-store/blob-store.ts";
 import { BlobDeletions } from "../../blob-store/deletions.ts";
 import {
+	agent,
 	blobDeletion,
 	message,
-	pod,
 	thread,
 	threadFile,
 	toolCall,
@@ -31,7 +31,7 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 	});
 	afterAll(closeDatabase);
 
-	/** A thread in a pod of its own. */
+	/** A task with a bot of its own. */
 	async function aThread() {
 		const owner = await aRoutineOwner();
 		const [created] = await onDatabase((db) =>
@@ -39,7 +39,6 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 				.insert(thread)
 				.values({
 					workspaceId: owner.workspaceId,
-					podId: owner.podId,
 					hostAgentId: owner.agentId,
 					type: "conversation",
 					title: "Files",
@@ -49,7 +48,6 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 		if (!created) throw new Error("Could not create thread");
 		return {
 			threadId: created.id,
-			podId: owner.podId,
 			agentId: owner.agentId,
 			userId: owner.userId,
 		};
@@ -443,13 +441,13 @@ describe.skipIf(!process.env.DATABASE_URL)("thread files, against Postgres", () 
 	});
 
 	it("deletes a thread's blobs once a cascade has deleted the thread", async () => {
-		const { threadId, podId } = await aThread();
-		const written = await files.write({ threadId, content: text("kept until the pod goes") });
+		const { threadId, agentId } = await aThread();
+		const written = await files.write({ threadId, content: text("kept until the bot goes") });
 		const folder = BlobStore.key("threads", threadId);
 		const blobsUnder = () =>
 			runOnPostgres(Effect.flatMap(BlobStore.Service, (blobs) => blobs.list(folder)));
 
-		await onDatabase((db) => db.delete(pod).where(eq(pod.id, podId)));
+		await onDatabase((db) => db.delete(agent).where(eq(agent.id, agentId)));
 
 		expect(
 			await onDatabase((db) => db.select().from(threadFile).where(eq(threadFile.id, written.id))),

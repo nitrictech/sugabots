@@ -1,7 +1,6 @@
 import type { ThreadParticipant } from "@sugabots/contracts";
 import type { HistoryState } from "@tanstack/react-router";
 import { agentSettingsLink, memberSettingsLink } from "@/lib/links.ts";
-import { usePods } from "@/lib/pods.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 
@@ -16,25 +15,18 @@ export type AuthorLink =
 	| { kind: "person"; options: ReturnType<typeof memberSettingsLink> & BackState };
 
 /**
- * Where an author's name in a pod's chat leads, with Back returning to the
- * chat: a person's page among the workspace's members, or a bot's settings in
- * the pod. Undefined until the pods and members are loaded, and for a person
- * who has left the workspace.
+ * Where an author's name in a conversation leads, with Back returning to it:
+ * a person's page among the workspace's members, or a bot's settings.
+ * Undefined until the members are loaded, and for a person who has left the
+ * workspace.
  */
-export function useAuthorLinks(
-	podId: string | undefined,
-): (author: PagedAuthor) => AuthorLink | undefined {
+export function useAuthorLinks(): (author: PagedAuthor) => AuthorLink | undefined {
 	const { workspace } = useWorkspace();
 	const members = useWorkspaceMembers(workspace?.id);
-	const pod = usePods().data?.find((one) => one.id === podId);
 	const backToChat = useBackToHere("Chat");
 	return (author) => {
 		if (author.kind === "agent") {
-			if (!pod) return undefined;
-			return {
-				kind: "agent",
-				options: { ...agentSettingsLink({ pod, agent: author }), state: backToChat },
-			};
+			return { kind: "agent", options: { ...agentSettingsLink(author), state: backToChat } };
 		}
 		const membership = members.data?.find((member) => member.user.id === author.id);
 		if (!membership) return undefined;

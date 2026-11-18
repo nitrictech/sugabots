@@ -16,6 +16,7 @@ import {
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
+import { agentSandboxRoutes } from "../routes/agent-sandbox/routes.ts";
 import { agentRoutes } from "../routes/agents/routes.ts";
 import { artifactRoutes } from "../routes/artifacts/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
@@ -26,7 +27,6 @@ import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
 import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
 import { notificationRoutes } from "../routes/notifications/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
-import { podSandboxRoutes } from "../routes/pod-sandbox/routes.ts";
 import { podRoutes } from "../routes/pods/routes.ts";
 import { referralRoutes } from "../routes/referrals/routes.ts";
 import { routineRoutes } from "../routes/routines/routes.ts";
@@ -89,7 +89,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				modelProviderRoutes,
 				searchProviderRoutes,
 				sandboxProviderRoutes,
-				podSandboxRoutes,
+				agentSandboxRoutes,
 				gitHubConnectionRoutes,
 				gitHubWebhookRoutes,
 				connectionRoutes,

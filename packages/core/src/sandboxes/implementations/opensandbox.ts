@@ -418,8 +418,8 @@ function rulesFor(action: NetworkRuleAction, hosts: readonly string[]): NetworkR
 	return hosts.map((host) => ({ action, target: host }));
 }
 
-const MADE_WITHOUT_CREDENTIAL_PROXY = userText`The pod's sandbox was made before sandboxes could be signed in to the services the pod uses, such as its repositories. Upgrade it under Sandbox in the pod's settings: its work is kept.`;
-const MADE_WITHOUT_NETWORK_RULES = userText`The pod's sandbox was made before sandboxes had network rules, so it can't be kept to them. Upgrade it under Sandbox in the pod's settings: its work is kept.`;
+const MADE_WITHOUT_CREDENTIAL_PROXY = userText`This bot's computer was made before computers could be signed in to the services the bot uses, such as its repositories. Upgrade it under Computer in the bot's settings: its work is kept.`;
+const MADE_WITHOUT_NETWORK_RULES = userText`This bot's computer was made before computers had network rules, so it can't be kept to them. Upgrade it under Computer in the bot's settings: its work is kept.`;
 
 async function run(
 	sandbox: OpenSandbox,

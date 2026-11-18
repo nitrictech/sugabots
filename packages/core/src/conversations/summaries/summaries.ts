@@ -1,6 +1,7 @@
 export * as Summaries from "./summaries.ts";
 
-import { eq } from "drizzle-orm";
+import type { ThreadType } from "@sugabots/contracts";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
 	afterCommit,
@@ -11,13 +12,14 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
-import { threadSummary } from "../../database/schema.ts";
+import { agent, agentSummary, thread, threadSummary } from "../../database/schema.ts";
 import { Lanes } from "../../workflows/lanes.ts";
 import {
 	findRunnableSystemAgent,
 	SUMMARISE_SYSTEM_AGENT,
 } from "../../workspaces/agents/system-agents.ts";
 import type { ConversationEvent } from "../events.ts";
+import { crewAgent } from "../threads/participants.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { isThread, type ThreadId } from "../threads/rooms.ts";
 import {
@@ -44,6 +46,17 @@ export interface Interface {
 	 * nothing to do.
 	 */
 	readonly prepare: (request: SummaryRequest) => Effect.Effect<PreparedSummary | SummarySkipped>;
+	/**
+	 * What rewriting the summary of the bot whose thread `threadId` is takes:
+	 * the newest summaries of its threads, and what it said before. Nothing
+	 * for a thread no bot people made hosts.
+	 */
+	readonly prepareBotSummary: (threadId: string) => Effect.Effect<PreparedBotSummary | undefined>;
+	/** Replaces what the bot has been doing lately. */
+	readonly completeBotSummary: (
+		prepared: PreparedBotSummary,
+		content: string,
+	) => Effect.Effect<void>;
 	/** Records the summary, and titles the thread on its first. */
 	readonly complete: (
 		prepared: PreparedSummary,
@@ -93,11 +106,7 @@ export const make = Effect.gen(function* () {
 						// anyway. The driver queues them, and warns that it is about to stop accepting
 						// them at all.
 						const previous = yield* query((db) => loadThreadSummary(db, scope.threadId));
-						const transcriptRows = yield* query((db) =>
-							loadTranscript(db, scope.threadId, {
-								startingMessageId: scope.startingMessageId,
-							}),
-						);
+						const transcriptRows = yield* query((db) => loadTranscript(db, scope.threadId));
 						const sourceIndex = transcriptRows.findIndex(
 							(row) => row.id === request.sourceMessageId,
 						);
@@ -117,7 +126,6 @@ export const make = Effect.gen(function* () {
 							served: {
 								id: scope.threadId,
 								workspaceId: scope.workspaceId,
-								podId: scope.podId,
 								initiatorUserId: scope.initiatorUserId,
 							},
 							systemAgentId: summariser.id,
@@ -130,7 +138,6 @@ export const make = Effect.gen(function* () {
 							scribe: { threadId: systemAgentThreadId, agentId: summariser.id },
 							threadId: served.id,
 							workspaceId: scope.workspaceId,
-							podId: scope.podId,
 							sourceMessageId: request.sourceMessageId,
 							threadTitle: scope.threadTitle,
 							model: summariser.model,
@@ -144,6 +151,74 @@ export const make = Effect.gen(function* () {
 						};
 					}),
 				),
+			),
+
+		prepareBotSummary: (threadId) =>
+			operation(
+				"prepareBotSummary",
+				Effect.gen(function* () {
+					const [host] = yield* query((db) =>
+						db
+							.select({
+								id: agent.id,
+								name: agent.name,
+								workspaceId: agent.workspaceId,
+								previous: agentSummary.content,
+							})
+							.from(thread)
+							.innerJoin(agent, and(eq(agent.id, thread.hostAgentId), crewAgent))
+							.leftJoin(agentSummary, eq(agentSummary.agentId, agent.id))
+							.where(and(eq(thread.id, threadId), inArray(thread.type, [...BOT_SUMMARY_SOURCES])))
+							.limit(1),
+					);
+					if (!host) return undefined;
+					const summariser = yield* query((db) =>
+						findRunnableSystemAgent(db, host.workspaceId, SUMMARISE_SYSTEM_AGENT),
+					);
+					if (!summariser) return undefined;
+					const threads = yield* query((db) =>
+						db
+							.select({
+								title: thread.title,
+								summary: threadSummary.content,
+								updatedAt: threadSummary.updatedAt,
+								doneAt: thread.doneAt,
+							})
+							.from(threadSummary)
+							.innerJoin(thread, eq(thread.id, threadSummary.threadId))
+							.where(
+								and(
+									eq(thread.hostAgentId, host.id),
+									inArray(thread.type, [...BOT_SUMMARY_SOURCES]),
+								),
+							)
+							.orderBy(desc(threadSummary.updatedAt))
+							.limit(BOT_SUMMARY_THREADS),
+					);
+					return {
+						agentId: host.id,
+						botName: host.name,
+						workspaceId: host.workspaceId,
+						model: summariser.model,
+						previousContent: host.previous ?? undefined,
+						threads,
+					} satisfies PreparedBotSummary;
+				}),
+			),
+
+		completeBotSummary: (prepared, content) =>
+			operation(
+				"completeBotSummary",
+				Effect.gen(function* () {
+					const [newest] = prepared.threads;
+					// Written from no thread's summary, it has nothing to say.
+					if (!newest) return;
+					yield* summaries.saveBotSummary({
+						agentId: prepared.agentId,
+						content,
+						coversThrough: newest.updatedAt,
+					});
+				}),
 			),
 
 		complete: (prepared, result) =>
@@ -162,7 +237,6 @@ export const make = Effect.gen(function* () {
 						}
 						yield* summaries.save({
 							workspaceId: prepared.workspaceId,
-							podId: prepared.podId,
 							threadId: prepared.threadId,
 							content: result.content,
 							sourceMessageId: prepared.sourceMessageId,
@@ -195,6 +269,35 @@ export const layer = layerNoDeps.pipe(Layer.provide(ThreadRepository.layer));
 
 const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
 
+/** How many of a bot's most recently summarised threads its own summary is written from. */
+const BOT_SUMMARY_THREADS = 15;
+
+/**
+ * The threads a bot's summary is written from: its own tasks and automation
+ * feeds, which everyone who reaches the bot sees. A collaboration it was asked
+ * in belongs to the conversation that asked, which they may not see.
+ */
+const BOT_SUMMARY_SOURCES = [
+	"conversation",
+	"routine_feed",
+] as const satisfies readonly ThreadType[];
+
+/** What the Summariser writes a bot's summary from. */
+export interface PreparedBotSummary {
+	readonly agentId: string;
+	readonly botName: string;
+	readonly workspaceId: string;
+	readonly model: string;
+	readonly previousContent: string | undefined;
+	/** Its threads' summaries, most recently changed first. */
+	readonly threads: ReadonlyArray<{
+		title: string;
+		summary: string;
+		updatedAt: Date;
+		doneAt: Date | null;
+	}>;
+}
+
 /**
  * A summary that has nothing to do: its thread or source is gone, it is
  * already written, or the Scribe's turn may not run. `reason` is for the logs.
@@ -212,7 +315,6 @@ export interface PreparedSummary {
 	scribe: { threadId: string; agentId: string };
 	threadId: ThreadId;
 	workspaceId: string;
-	podId: string;
 	/** The last message this summary will cover. */
 	sourceMessageId: string;
 	threadTitle: string;

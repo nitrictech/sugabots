@@ -131,7 +131,7 @@ export function useThread(threadId: string | undefined) {
 	};
 }
 
-export function useReviewToolCall(threadId: string, podId: string) {
+export function useReviewToolCall(threadId: string) {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: async ({
@@ -142,7 +142,7 @@ export function useReviewToolCall(threadId: string, podId: string) {
 			decision: ToolApprovalDecision["decision"];
 		}) =>
 			Effect.runPromise(
-				client.api.toolApprovals.decide({ params: { podId, toolCallId }, payload: { decision } }),
+				client.api.toolApprovals.decide({ params: { toolCallId }, payload: { decision } }),
 			),
 		onSuccess: () =>
 			Promise.all([

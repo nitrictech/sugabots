@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { expect, fn, type within } from "storybook/test";
 import preview from "#storybook/preview";
 import type { Session } from "@/lib/session.ts";
-import { personal } from "@/shell/story-fixtures.ts";
+import { BOT_PERMISSIONS } from "@/shell/story-fixtures.ts";
 import { Login } from "./Login.tsx";
 import { Onboarding } from "./Onboarding.tsx";
 
@@ -28,11 +28,9 @@ const session: Session = {
 	error: undefined,
 	refresh: async () => {},
 };
-const ownPersonal = { ...personal, ownerId: user.id };
 const placeholder = {
 	id: "0199a3a0-0000-7000-8000-0000000001ff",
 	workspaceId: WORKSPACE,
-	podId: ownPersonal.id,
 	name: "Personal Assistant",
 	handle: "personal-assistant",
 	systemAgentKey: null,
@@ -45,7 +43,11 @@ const placeholder = {
 	disabledTools: [],
 	usesSandbox: false,
 	naturalBrowsing: false,
-	createdById: null,
+	createdById: user.id,
+	visibility: "private",
+	assistant: true,
+	pinned: false,
+	permissions: BOT_PERMISSIONS,
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
 const enabledModel = {
@@ -77,7 +79,7 @@ function Preview({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 		});
 		client.setQueryData(["workspaces"], stage === "new" ? [] : [workspace]);
-		client.setQueryData(["pods", WORKSPACE], [ownPersonal]);
+		client.setQueryData(["pods", WORKSPACE], []);
 		client.setQueryData(["agents", WORKSPACE], [placeholder]);
 		client.setQueryData(["models", WORKSPACE], {
 			models: stage === "model" ? [enabledModel] : [],

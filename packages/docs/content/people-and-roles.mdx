@@ -4,7 +4,8 @@ description: Who can join a workspace, and what its owner, admins, members and v
 ---
 
 Everyone in a workspace has a role: owner, admin, member or viewer. The role decides
-what they can change, and pods decide what they can see.
+what they can change. Which bots are public and which channels they're in decide
+what they can see.
 
 ## Who gets in
 
@@ -20,7 +21,7 @@ gets an email with a link to join.
 <Tip>
 
 Invites expire after two days. Anyone who joins gets their own
-[Personal pod](/docs/pods#your-personal-pod) straight away.
+[Personal Assistant](/docs/bots#your-personal-assistant) straight away.
 
 </Tip>
 
@@ -40,8 +41,10 @@ There are four. Pick one to see what it can do.
 
 <RoleMatrix />
 
-Members and viewers only see the pods they've been added to. The owner and admins
-can reach every shared pod, but nobody can see into someone else's Personal pod.
+Everyone can talk to the workspace's public bots and find its public channels.
+A private bot is for its creator alone, and a private channel for the people in
+it. The owner and admins are in every channel, and see that private bots exist,
+but not their tasks. Nobody can see into someone else's Personal Assistant.
 
 Each workspace has exactly one owner: whoever created it. The owner can do
 everything an admin can, and is the only one who can make someone an admin, stop
@@ -50,8 +53,9 @@ them being one, or remove them.
 ## Leaving and removing
 
 Open a person in **Settings → Members** to change their role or remove them.
-Removing someone takes away their access to the workspace and every pod in it. Their Personal pod
-and its conversations are deleted, but pods they made stay.
+Removing someone takes away their access to the workspace and every channel in
+it. Their Personal Assistant and its tasks are deleted, but the channels and
+bots they made stay.
 
 The owner can't be removed or lose their role, and can't leave. To hand the
 workspace on, the owner opens another person in **Settings → Members** and makes

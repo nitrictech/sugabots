@@ -6,7 +6,6 @@ import type {
 	RoutineExecutionState,
 	RoutineExecutionTrigger,
 	RoutineExecutionTriggerKind,
-	RoutineResults,
 	RoutineState,
 	RoutineTrigger,
 	RoutineTriggerAuthor,
@@ -51,13 +50,6 @@ export const routine = pgTable(
 		 * somebody turns it on again or pauses it by hand.
 		 */
 		pausedAfterFailuresAt: timestamp("paused_after_failures_at", { withTimezone: true }),
-		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
-		/**
-		 * The pod's chat its results go to when they are posted to chat; the
-		 * pod's first chat when unset, or once this one is archived. Always a
-		 * chat in its agent's pod, which `Routines` checks before writing it.
-		 */
-		chatId: uuid("chat_id").references((): AnyPgColumn => thread.id, { onDelete: "set null" }),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		/** Set when the routine's own agent made it, at `createdById`'s request. */
 		createdByAgentId: uuid("created_by_agent_id"),
@@ -76,7 +68,6 @@ export const routine = pgTable(
 			"routine_paused_after_failures_valid",
 			sql`${table.pausedAfterFailuresAt} is null or ${table.state} = 'paused'`,
 		),
-		check("routine_results_valid", sql`${table.results} in ('keep_in_run', 'post_to_chat')`),
 		check(
 			"routine_created_by_agent_valid",
 			sql`${table.createdByAgentId} is null or ${table.createdByAgentId} = ${table.agentId}`,
@@ -153,7 +144,6 @@ export const routineTrigger = pgTable(
 export const CONVERSATION_TYPES = [
 	"conversation",
 	"pod_chat",
-	"bot_channel",
 	"routine_feed",
 	"direct",
 ] as const satisfies readonly ThreadType[];
@@ -202,10 +192,6 @@ export const thread = pgTable(
 		initiatorUserId: uuid("initiator_user_id").references(() => user.id, {
 			onDelete: "restrict",
 		}),
-		/** On a thread started from a pod's chat or a bot's channel: the message there it hangs off. */
-		originMessageId: uuid("origin_message_id").references((): AnyPgColumn => message.id, {
-			onDelete: "set null",
-		}),
 		/** When somebody marked the conversation done, until it is reopened. */
 		doneAt: timestamp("done_at", { withTimezone: true }),
 		/** On a routine's own thread: the routine, each of whose runs posts in it. */
@@ -231,13 +217,20 @@ export const thread = pgTable(
 	(table) => [
 		check(
 			"thread_type_valid",
-			sql`${table.type} in ('conversation', 'pod_chat', 'bot_channel', 'collaboration', 'routine', 'routine_feed', 'system_agent', 'direct')`,
+			sql`${table.type} in ('conversation', 'pod_chat', 'collaboration', 'routine', 'routine_feed', 'system_agent', 'direct')`,
 		),
-		// A pod's chat and a direct message are people's, a conversation may be
-		// with a bot or only people, and every other thread is some bot's.
+		// A channel's conversations and a direct message are people's, and
+		// every other thread is some bot's.
 		check(
 			"thread_host_valid",
-			sql`case ${table.type} when 'pod_chat' then ${table.hostAgentId} is null when 'direct' then ${table.hostAgentId} is null when 'conversation' then true else ${table.hostAgentId} is not null end`,
+			sql`(${table.type} in ('pod_chat', 'direct')) = (${table.hostAgentId} is null)`,
+		),
+		// Only a channel's conversations are in a channel.
+		check("thread_pod_valid", sql`(${table.type} = 'pod_chat') = (${table.podId} is not null)`),
+		// A direct message is named by its key.
+		check(
+			"thread_direct_valid",
+			sql`(${table.type} = 'direct') = (${table.directKey} is not null)`,
 		),
 		foreignKey({
 			columns: [table.podId, table.workspaceId],
@@ -251,9 +244,9 @@ export const thread = pgTable(
 		}).onDelete("cascade"),
 		uniqueIndex("thread_system_agent_key_idx").on(table.parentThreadId, table.systemAgentKey),
 		index("thread_workspace_created_at_idx").on(table.workspaceId, table.createdAt),
-		index("thread_pod_host_created_at_idx").on(table.podId, table.hostAgentId, table.createdAt),
+		index("thread_pod_updated_at_idx").on(table.podId, table.updatedAt),
+		index("thread_host_updated_at_idx").on(table.hostAgentId, table.updatedAt),
 		index("thread_workspace_updated_at_idx").on(table.workspaceId, table.updatedAt),
-		index("thread_pod_host_updated_at_idx").on(table.podId, table.hostAgentId, table.updatedAt),
 		index("thread_conversation_updated_at_idx").on(table.conversationId, table.updatedAt),
 		check(
 			"thread_routine_valid",
@@ -261,21 +254,10 @@ export const thread = pgTable(
 		),
 		// One thread per routine.
 		uniqueIndex("thread_routine_feed_idx").on(table.routineId),
-		// One channel per bot in a pod.
-		uniqueIndex("thread_bot_channel_idx")
-			.on(table.podId, table.hostAgentId)
-			.where(sql`${table.type} = 'bot_channel'`),
-		// A direct message is in no pod and named by its key; every other thread is in a pod.
-		check(
-			"thread_direct_valid",
-			sql`case when ${table.type} = 'direct' then ${table.podId} is null and ${table.directKey} is not null else ${table.podId} is not null and ${table.directKey} is null end`,
-		),
 		// One direct message per set of people in a workspace.
 		uniqueIndex("thread_direct_key_idx")
 			.on(table.workspaceId, table.directKey)
 			.where(sql`${table.type} = 'direct'`),
-		// One thread per message in a pod's chat.
-		uniqueIndex("thread_origin_message_idx").on(table.originMessageId),
 		check("thread_main_valid", sql`not ${table.main} or ${table.type} = 'pod_chat'`),
 		check(
 			"thread_archived_valid",
@@ -307,8 +289,6 @@ export const routineExecution = pgTable(
 		trigger: jsonb("trigger").$type<RoutineExecutionTrigger>().notNull(),
 		routineName: text("routine_name").notNull(),
 		instructions: text("instructions").notNull(),
-		/** The routine's `results` when the run was accepted. */
-		results: text("results").$type<RoutineResults>().notNull().default("keep_in_run"),
 		state: text("state").$type<RoutineExecutionState>().notNull().default("queued"),
 		error: text("error").$type<UserText>(),
 		pendingTerminalState: text("pending_terminal_state").$type<"failed" | "cancelled">(),
@@ -357,10 +337,6 @@ export const routineExecution = pgTable(
 			sql`(${table.pendingTerminalState} is null and ${table.pendingTerminalError} is null)
 				or (${table.state} = 'running' and ${table.pendingTerminalState} = 'cancelled' and ${table.pendingTerminalError} is null)
 				or (${table.state} = 'running' and ${table.pendingTerminalState} = 'failed')`,
-		),
-		check(
-			"routine_execution_results_valid",
-			sql`${table.results} in ('keep_in_run', 'post_to_chat')`,
 		),
 		uniqueIndex("routine_execution_thread_idx").on(table.threadId),
 		// A trigger's retry of a delivery or an occurrence lands on the run it started.
@@ -760,6 +736,26 @@ export const threadSummary = pgTable("thread_summary", {
 	sourceMessageId: uuid("source_message_id")
 		.notNull()
 		.references(() => message.id, { onDelete: "cascade" }),
+	updatedAt: updatedStamp("updated_at"),
+});
+
+/**
+ * What a bot has been doing lately, at a glance: written by the Summariser
+ * from the summaries of the bot's newest tasks and automation threads, each
+ * time one of them is summarised. People who reach the bot read it on its
+ * page, and their Personal Assistant reads it to know what the bot is up to.
+ */
+export const agentSummary = pgTable("agent_summary", {
+	agentId: uuid("agent_id")
+		.primaryKey()
+		.references(() => agent.id, { onDelete: "cascade" }),
+	content: text("content").notNull(),
+	/**
+	 * When the newest thread summary it was written from was written. A
+	 * summary written from older ones never replaces it, however late it
+	 * arrives.
+	 */
+	coversThrough: timestamp("covers_through", { withTimezone: true }).notNull(),
 	updatedAt: updatedStamp("updated_at"),
 });
 

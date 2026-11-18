@@ -106,7 +106,8 @@ export function artifactTools({
 
 	return {
 		[ARTIFACT_LIST_TOOL]: tool({
-			description: "List the documents and HTML pages kept in this pod, newest first.",
+			description:
+				"List the files you can read, newest first: those you made, and those made in the channel you are in.",
 			inputSchema: noInputSchema,
 			execute: async (): Promise<{ artifacts: ArtifactListing[] }> => ({
 				artifacts: (await run(authoring.list(by))).map(listing),
@@ -133,7 +134,7 @@ export function artifactTools({
 		}),
 
 		[ARTIFACT_WRITE_TOOL]: tool({
-			description: `Write an artifact the pod keeps, for work people will come back to: a plan, report, notes or a page. Without \`artifactId\` it creates one, with \`kind\` and \`title\`. With \`artifactId\` and \`baseVersion\` it replaces that artifact's whole content as a new version; pass them whenever you change an artifact that already exists, rather than making another, and use artifact_edit for a small change. ${KIND_RULES}`,
+			description: `Write a file, for work people will come back to: a plan, report, notes or a page. Without \`artifactId\` it creates one, with \`kind\` and \`title\`. With \`artifactId\` and \`baseVersion\` it replaces that artifact's whole content as a new version; pass them whenever you change an artifact that already exists, rather than making another, and use artifact_edit for a small change. ${KIND_RULES}`,
 			inputSchema: Schema.Struct({
 				artifactId: Schema.optional(
 					Schema.String.annotate({

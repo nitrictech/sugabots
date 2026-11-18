@@ -13,10 +13,9 @@ import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
- * The pod routes, over doubles of `PodAdministration`, so what is under test
- * is the routing, who the administration is asked as, and what each refusal
- * means over HTTP. Who may do what is decided, and tested, in
- * `pods/pods.test.ts`.
+ * The channel routes, over doubles of `PodAdministration`, so what is under
+ * test is the routing, who the administration is asked as, and what each
+ * refusal means over HTTP. Who may do what is decided, and tested, in core.
  */
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
@@ -46,18 +45,18 @@ const resolveUser: UserResolver = async (headers) => {
 	return user ?? null;
 };
 
-const podFor = (userId: string, kind: Pod["kind"] = "shared"): Pod => ({
+const BOT = "0199a3a0-0000-7000-8000-0000000000b1";
+
+const podFor = (userId: string, isMember = true): Pod => ({
 	id: POD,
 	workspaceId: WORKSPACE,
-	ownerId: kind === "personal" ? userId : null,
-	kind,
 	name: "Suga-Team",
 	slug: "suga-team",
-	color: kind === "shared" ? "green" : null,
-	permissions: podPermissions(
-		{ userId, workspaceRole: "admin" },
-		{ kind, ownerId: kind === "personal" ? userId : null, isMember: true },
-	),
+	color: "green",
+	description: null,
+	visibility: "public",
+	isMember,
+	permissions: podPermissions({ userId, workspaceRole: "admin" }, { isMember, isPublic: true }),
 	createdAt: "2026-09-09T00:00:00.000Z",
 });
 
@@ -84,7 +83,7 @@ const errorTag = async (response: Response) =>
 	Schema.decodeUnknownSync(failure)(await response.json())._tag;
 
 describe("GET /workspaces/:workspace/pods", () => {
-	it("lists the pods as the person the session belongs to sees them", async () => {
+	it("lists the channels as the person the session belongs to sees them", async () => {
 		let asked: unknown;
 		const response = await app({
 			list: (input) =>
@@ -145,36 +144,9 @@ describe("POST /workspaces/:workspace/pods", () => {
 
 		expect(response.status).toBe(400);
 		expect(Schema.decodeUnknownSync(BadRequest)(await response.json()).message).toBe(
-			"That name cannot be a pod's address",
+			"That name cannot be a channel's address",
 		);
 	});
-
-	it.each(["Personal", "PERSONAL!!!"])(
-		"explains the reserved address with a public message for %s",
-		async (name) => {
-			const response = await app({}).request(
-				`/workspaces/${WORKSPACE}/pods`,
-				as("admin-token", json({ name })),
-			);
-
-			expect(response.status).toBe(400);
-			expect(Schema.decodeUnknownSync(BadRequest)(await response.json()).message).toBe(
-				'"personal" is reserved for your Personal pod. Choose another name.',
-			);
-		},
-	);
-
-	it.each([{ name: "Personal" }, { name: "Mine", slug: "personal" }])(
-		"keeps the Personal pods' slug from a shared pod: %o",
-		async (body) => {
-			const response = await app({}).request(
-				`/workspaces/${WORKSPACE}/pods`,
-				as("admin-token", json(body)),
-			);
-
-			expect(response.status).toBe(400);
-		},
-	);
 
 	it("rejects a body that is not a pod, with the field issues", async () => {
 		const response = await app({}).request(
@@ -194,13 +166,13 @@ describe("POST /workspaces/:workspace/pods", () => {
 		expect(response.status).toBe(409);
 		expect(await response.json()).toEqual({
 			_tag: "Conflict",
-			message: "A pod with that address already exists in this workspace",
+			message: "A channel with that address already exists in this workspace",
 		});
 	});
 });
 
-describe("changing a pod", () => {
-	it("renames the pod in the path", async () => {
+describe("changing a channel", () => {
+	it("renames the channel in the path", async () => {
 		const response = await app({
 			update: ({ podId, changes }) =>
 				Effect.succeed({ ...podFor(admin.id), id: podId, name: changes.name ?? "" }),
@@ -213,7 +185,7 @@ describe("changing a pod", () => {
 		expect(Schema.decodeUnknownSync(podSchema)(await response.json()).name).toBe("Platform");
 	});
 
-	it("answers a pod hidden from the caller as not found", async () => {
+	it("answers a channel hidden from the caller as not found", async () => {
 		const response = await app({
 			update: () => Effect.fail(new ResourceHidden({ resource: "pod" })),
 		}).request(
@@ -233,35 +205,16 @@ describe("changing a pod", () => {
 		expect(response.status).toBe(400);
 	});
 
-	it("reports the refusal to rename a Personal pod as a bad request", async () => {
-		const response = await app({
-			update: () => Effect.fail(new PodRepository.PersonalPodFixed({ attempted: "rename" })),
-		}).request(
-			`/pods/${POD}`,
-			as("admin-token", { method: "PATCH", body: JSON.stringify({ name: "Mine" }) }),
-		);
-
-		expect(response.status).toBe(400);
-	});
-
-	it("deletes a pod", async () => {
+	it("deletes a channel", async () => {
 		const response = await app({ remove: () => Effect.void }).request(
 			`/pods/${POD}`,
 			as("admin-token", { method: "DELETE" }),
 		);
 		expect(response.status).toBe(204);
 	});
-
-	it("reports the refusal to delete a Personal pod as a bad request", async () => {
-		const response = await app({
-			remove: () => Effect.fail(new PodRepository.PersonalPodFixed({ attempted: "delete" })),
-		}).request(`/pods/${POD}`, as("admin-token", { method: "DELETE" }));
-
-		expect(response.status).toBe(400);
-	});
 });
 
-describe("pod membership", () => {
+describe("channel membership", () => {
 	it("reports somebody outside the workspace as a bad request", async () => {
 		const response = await app({
 			addMember: () => Effect.fail(new PodAdministration.NotInWorkspace()),
@@ -278,15 +231,15 @@ describe("pod membership", () => {
 		expect(response.status).toBe(404);
 	});
 
-	it("refuses taking an administrator out of a shared pod", async () => {
+	it("refuses taking an administrator out of a channel", async () => {
 		const response = await app({
-			removeMember: () => Effect.fail(new PodAdministration.AdministratorInEverySharedPod()),
+			removeMember: () => Effect.fail(new PodAdministration.AdministratorInEveryChannel()),
 		}).request(`/pods/${POD}/members/${admin.id}`, as("admin-token", { method: "DELETE" }));
 
 		expect(response.status).toBe(400);
 	});
 
-	it("takes the person the session belongs to out of the pod", async () => {
+	it("takes the person the session belongs to out of the channel", async () => {
 		let asked: unknown;
 		const response = await app({
 			leave: (input) =>
@@ -299,21 +252,55 @@ describe("pod membership", () => {
 		expect(asked).toEqual({ podId: POD, userId: admin.id });
 	});
 
-	it("reports the refusal to leave a Personal pod as a bad request", async () => {
+	it("puts the person the session belongs to in a public channel", async () => {
+		let asked: unknown;
 		const response = await app({
-			leave: () =>
-				Effect.fail(new PodAdministration.PersonalPodMembershipFixed({ attempted: "remove" })),
-		}).request(`/pods/${POD}/membership`, as("admin-token", { method: "DELETE" }));
+			join: (input) =>
+				Effect.map(CurrentActor.Service, ({ userId }) => {
+					asked = { ...input, userId };
+					return podFor(userId);
+				}),
+		}).request(`/pods/${POD}/membership`, as("admin-token", { method: "PUT" }));
 
-		expect(response.status).toBe(400);
+		expect(response.status).toBe(200);
+		expect(asked).toEqual({ podId: POD, userId: admin.id });
+		expect(Schema.decodeUnknownSync(podSchema)(await response.json()).isMember).toBe(true);
+	});
+});
+
+describe("a channel's bots", () => {
+	it("adds and removes the bot named", async () => {
+		const asked: unknown[] = [];
+		const routes = app({
+			addBot: (input) => Effect.sync(() => void asked.push({ add: input })),
+			removeBot: (input) => Effect.sync(() => void asked.push({ remove: input })),
+		});
+
+		const added = await routes.request(
+			`/pods/${POD}/agents`,
+			as("admin-token", json({ agentId: BOT })),
+		);
+		const removed = await routes.request(
+			`/pods/${POD}/agents/${BOT}`,
+			as("admin-token", { method: "DELETE" }),
+		);
+
+		expect(added.status).toBe(204);
+		expect(removed.status).toBe(204);
+		expect(asked).toEqual([
+			{ add: { podId: POD, agentId: BOT } },
+			{ remove: { podId: POD, agentId: BOT } },
+		]);
 	});
 
-	it("reports the refusal to staff a Personal pod as a bad request", async () => {
+	it("reports adding a private bot as a bad request", async () => {
 		const response = await app({
-			addMember: () =>
-				Effect.fail(new PodAdministration.PersonalPodMembershipFixed({ attempted: "add" })),
-		}).request(`/pods/${POD}/members`, as("admin-token", json({ userId: outsider.id })));
+			addBot: () => Effect.fail(new PodRepository.BotNotPublic()),
+		}).request(`/pods/${POD}/agents`, as("admin-token", json({ agentId: BOT })));
 
 		expect(response.status).toBe(400);
+		expect(Schema.decodeUnknownSync(BadRequest)(await response.json()).message).toBe(
+			"Only a public bot can be added to a channel",
+		);
 	});
 });

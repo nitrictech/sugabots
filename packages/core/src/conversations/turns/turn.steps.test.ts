@@ -13,21 +13,29 @@ import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import { AssistantGuide } from "../assistant/assistant-guide.ts";
 import { BotThreads } from "../chats/bot-threads.ts";
 import { BotRoutines } from "../routines/bot-routines.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
+import {
+	ADD_BOT_TO_CHANNEL_TOOL,
+	CREATE_CHANNEL_TOOL,
+	JOIN_CHANNEL_TOOL,
+	PIN_BOT_TOOL,
+	WORKSPACE_GUIDE_TOOL,
+} from "../tools/assistant/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { ConnectionTools } from "../tools/connections.ts";
 import { MARK_DONE_TOOL } from "../tools/mark-done/tool.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/network-access/tool.ts";
-import { LIST_THREADS_TOOL, READ_THREAD_TOOL } from "../tools/pod-threads/tool.ts";
 import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
 import { ROUTINE_TOOLS } from "../tools/routines/tool.ts";
 import { SandboxTools } from "../tools/sandbox.ts";
 import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
+import { START_THREAD_TOOL } from "../tools/start-thread/tool.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
@@ -92,7 +100,6 @@ const prepared: PreparedTurn = {
 		},
 		agent: {
 			id: run.request.agentId,
-			podId: "0199a3a0-0000-7000-8000-000000000004",
 			name: "Host Agent",
 			handle: "host-agent",
 			model: "claude-sonnet-4-20250514",
@@ -100,16 +107,16 @@ const prepared: PreparedTurn = {
 			disabledTools: [],
 			usesSandbox: false,
 			naturalBrowsing: false,
+			assistantOf: null,
+			visibility: "public",
 			color: "orange",
 			acceptsImages: false,
 		},
 		reason: "default",
 		windowTokens: 128_000,
 		compaction: undefined,
-		startedFrom: undefined,
 		routineInstructions: new Map(),
-		podName: "Release",
-		podSlug: "release",
+		channel: null,
 		workspaceName: "Suga",
 		workspaceSlug: "suga",
 		workspaceTimeZone: "UTC",
@@ -137,7 +144,6 @@ describe("runSegment", () => {
 				context: {
 					...prepared.context,
 					compaction: { summary: "Earlier work.", historyStartsAt: keptFrom, keptFrom },
-					startedFrom: undefined,
 				},
 			}),
 		);
@@ -195,7 +201,7 @@ describe("runSegment", () => {
 				collaborations: collaborations(),
 				toolCalls: calls,
 				connectionTools: {
-					forPod: () =>
+					forAgent: () =>
 						Effect.succeed({
 							tools: {
 								wiki__wipe: {
@@ -306,6 +312,93 @@ describe("runSegment", () => {
 		});
 	});
 
+	it("gives a Personal Assistant answering its person its guide, and asks them before it acts, with no instructions or automations of its own", async () => {
+		const { execution, turns } = fakes();
+		const connectionTool = (name: string, mutating: boolean) => ({
+			tool: tool({
+				inputSchema: Schema.Struct({}).pipe(
+					Schema.toStandardSchemaV1,
+					Schema.toStandardJSONSchemaV1,
+				),
+				execute: async () => ({ content: [] }),
+			}),
+			mutating,
+			access: "allow" as const,
+			connectionId: "0199a3a0-0000-7000-8000-0000000000cc",
+			handle: "notes",
+			description: "",
+			inputSchema: { type: "object" as const, properties: {} },
+			connectionRevision: 1,
+			remoteToolName: name,
+		});
+		const personId = "0199a3a0-0000-7000-8000-0000000000aa";
+		vi.mocked(execution.prepare).mockReturnValue(
+			Effect.succeed({
+				...prepared,
+				context: {
+					...prepared.context,
+					agent: { ...prepared.context.agent, assistantOf: personId },
+					askedBy: personId,
+				},
+			}),
+		);
+		let received: Models.StreamRequest | undefined;
+		const model = Models.fromStream((input) => {
+			received = input;
+			return Effect.succeed(streamed(chunks("Done")));
+		});
+
+		await runWithServices(
+			segmentWith({
+				execution,
+				turns,
+				model,
+				events: eventBus(),
+				collaborations: collaborations(),
+				toolCalls: toolCalls(),
+				connectionTools: {
+					forAgent: () =>
+						Effect.succeed({
+							tools: {
+								notes__write: connectionTool("write", true),
+								notes__read: connectionTool("read", false),
+							},
+							unavailable: [],
+							signInExpired: [],
+							instructions: {},
+							addable: [],
+							close: async () => undefined,
+						}),
+				},
+			}),
+		);
+
+		const offered = Object.keys(received?.tools ?? {});
+		expect(offered).toEqual(
+			expect.arrayContaining([
+				WORKSPACE_GUIDE_TOOL,
+				CREATE_CHANNEL_TOOL,
+				JOIN_CHANNEL_TOOL,
+				ADD_BOT_TO_CHANNEL_TOOL,
+				PIN_BOT_TOOL,
+				START_THREAD_TOOL,
+			]),
+		);
+		expect(offered).not.toContain(SAVE_INSTRUCTIONS_TOOL);
+		for (const routineTool of ROUTINE_TOOLS) expect(offered).not.toContain(routineTool);
+		const approvals = received?.toolApproval as
+			| Record<string, (input: unknown) => unknown>
+			| undefined;
+		expect(approvals?.[CREATE_CHANNEL_TOOL]?.({ name: "Launch" })).toBe("user-approval");
+		expect(approvals?.[START_THREAD_TOOL]?.({ title: "Report", brief: "Write it." })).toBe(
+			"user-approval",
+		);
+		expect(approvals?.[WORKSPACE_GUIDE_TOOL]).toBeUndefined();
+		// A call that may change something asks, though its connection allows it.
+		expect(approvals?.[CALL_TOOL]?.({ tool: "notes__write", arguments: {} })).toBe("user-approval");
+		expect(approvals?.[CALL_TOOL]?.({ tool: "notes__read", arguments: {} })).toBeUndefined();
+	});
+
 	it("reaches connection tools, and Sugabots' own occasional ones, through tool search, asking first only for connection tools that ask", async () => {
 		const { execution, turns } = fakes();
 		const lookup = tool({
@@ -342,7 +435,7 @@ describe("runSegment", () => {
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 				connectionTools: {
-					forPod: () =>
+					forAgent: () =>
 						Effect.succeed({
 							tools: {
 								wiki__lookup: offered("lookup", "allow"),
@@ -363,8 +456,6 @@ describe("runSegment", () => {
 			TOOL_SEARCH,
 			CALL_TOOL,
 			SEARCH_HISTORY_TOOL,
-			LIST_THREADS_TOOL,
-			READ_THREAD_TOOL,
 			READ_THREAD_FILE_TOOL,
 			...ROUTINE_TOOLS,
 			// No person asked this turn, so it is offered no start_thread.
@@ -787,6 +878,7 @@ function segmentWith(given: Given) {
 					Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
 				),
 				unimplemented(BotThreads.Service, {}),
+				unimplemented(AssistantGuide.Service, {}),
 				unimplemented(
 					ApprovedToolCalls.Service,
 					given.approvals ?? {
@@ -840,7 +932,7 @@ function segmentAskingApproval(
 		collaborations: collaborations(),
 		toolCalls: toolCalls(),
 		connectionTools: {
-			forPod: () =>
+			forAgent: () =>
 				Effect.succeed({
 					tools: {
 						wiki__wipe: {

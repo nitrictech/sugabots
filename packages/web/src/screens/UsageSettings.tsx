@@ -35,7 +35,7 @@ import { ProviderTile } from "./ProviderSettings.tsx";
 
 /**
  * What the workspace's models cost, a month at a time: the total and each
- * day's spend, then the month broken down by bot, by model or by pod. Amounts
+ * day's spend, then the month broken down by bot or by model. Amounts
  * are estimates from each provider's published prices; a request that could
  * not be priced is counted, not guessed at.
  */
@@ -232,12 +232,11 @@ function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string 
 	);
 }
 
-type BreakdownView = "bot" | "model" | "pod";
+type BreakdownView = "bot" | "model";
 
 const breakdownViews: readonly { value: BreakdownView; label: string }[] = [
 	{ value: "bot", label: "Bot" },
 	{ value: "model", label: "Model" },
-	{ value: "pod", label: "Pod" },
 ];
 
 /** One line of a breakdown: what the spend was for, and how much. */
@@ -245,7 +244,7 @@ interface Line {
 	key: string;
 	icon: ReactNode;
 	label: string;
-	sub: string;
+	sub?: string;
 	/** The bar's colour, as a CSS colour. */
 	color: string;
 	usd: number;
@@ -254,7 +253,9 @@ interface Line {
 
 const SYSTEM_AGENTS_WORK = "Summaries, titles, compaction, model tests";
 
-/** A bar for what isn't one bot's or pod's, drawn in the neutral grey the design gives it. */
+const PERSONAL_ASSISTANTS_WORK = "Everyone's, together";
+
+/** A bar for what isn't one bot's, drawn in the neutral grey the design gives it. */
 const NEUTRAL_BAR = "var(--subtle-foreground)";
 
 function Breakdown({ usage, stale }: { usage: WorkspaceUsage; stale: boolean }) {
@@ -349,6 +350,16 @@ function providerColors(models: readonly ModelUsage[]): (model: ModelUsage) => s
 }
 
 function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
+	const spent = (line: Line) => line.usd > 0 || line.unpricedRequests > 0;
+	// Each is its own person's, so they are shown together, never one by one.
+	const personalAssistants: Line = {
+		key: "personal-assistants",
+		icon: <LetterTile name="Personal Assistants" />,
+		label: "Personal Assistants",
+		sub: PERSONAL_ASSISTANTS_WORK,
+		color: NEUTRAL_BAR,
+		...usage.personalAssistants,
+	};
 	const systemAgents: Line = {
 		key: "system-agents",
 		icon: <LetterTile name="System agents" />,
@@ -357,10 +368,10 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 		color: NEUTRAL_BAR,
 		...usage.systemAgents,
 	};
-	const withSystemAgents = (lines: Line[]) =>
-		usage.systemAgents.usd > 0 || usage.systemAgents.unpricedRequests > 0
-			? [...lines, systemAgents]
-			: lines;
+	const withSystemAgents = (lines: Line[]) => [
+		...lines,
+		...[personalAssistants, systemAgents].filter(spent),
+	];
 
 	switch (view) {
 		case "bot":
@@ -369,7 +380,6 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 					key: bot.agentId,
 					icon: <BotIcon color={bot.color} face={bot.face} shape={bot.shape} name={bot.name} />,
 					label: bot.name ?? "Deleted bot",
-					sub: bot.podName ?? "No pod",
 					color: bot.color ? botColors[bot.color].face : NEUTRAL_BAR,
 					usd: bot.usd,
 					unpricedRequests: bot.unpricedRequests,
@@ -393,21 +403,6 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 				};
 			});
 		}
-		case "pod":
-			return withSystemAgents(
-				usage.pods.map((pod) => {
-					const label = pod.name ?? "Deleted pod";
-					return {
-						key: pod.podId,
-						icon: <LetterTile name={label} />,
-						label,
-						sub: `${pod.botCount} ${pod.botCount === 1 ? "bot" : "bots"}`,
-						color: pod.color ? podPalettes[pod.color].swatch : NEUTRAL_BAR,
-						usd: pod.usd,
-						unpricedRequests: pod.unpricedRequests,
-					};
-				}),
-			);
 	}
 }
 

@@ -26,7 +26,7 @@ export function markDoneTool({
 }) {
 	return tool({
 		description:
-			"Mark this thread done, when the person asks you to or agrees the work in it is finished. It leaves the pod's open threads, and opens again when anyone posts in it. Don't mark it done unasked.",
+			"Mark this task done, when the person asks you to or agrees the work in it is finished. It leaves your open tasks, and opens again when anyone posts in it. Don't mark it done unasked.",
 		inputSchema: noInputSchema,
 		execute: (): Promise<MarkDoneResult> =>
 			run(

@@ -12,20 +12,12 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/agents.ts";
-import { useAttentionCounts, useChatList } from "@/lib/chats.ts";
-import {
-	activityLink,
-	agentChatLink,
-	conversationLink,
-	directMessagesLink,
-	podLink,
-} from "@/lib/links.ts";
+import { useAttentionCounts, useBotTasks } from "@/lib/chats.ts";
+import { activityLink, botLink, directMessagesLink, podLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { usePods } from "@/lib/pods.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { FAILED_DOT_LABEL, FailedDot } from "@/shell/FailedDot.tsx";
 import { InboxNews } from "@/shell/InboxNews.tsx";
-import { LockGlyph, ONLY_YOU, OnlyYou } from "@/shell/PersonalPrivacy.tsx";
 import { StageBack, type StageParent } from "@/shell/Stage.tsx";
 import { BACK_BUTTON, BackChevron, isPlainClick, useLeave } from "@/ui/back-button.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -44,10 +36,8 @@ import { ChatSandbox } from "./SandboxButton.tsx";
 export type BackTo =
 	| { to: "pod"; pod: Pod }
 	| { to: "activity" }
-	/** A thread with a bot goes back to the bot's chat. */
-	| { to: "bot"; pod: Pod; agent: Agent }
-	/** A thread started from one of a pod's channels goes back to it. */
-	| { to: "channel"; pod: Pod; conversationId: string; name: string }
+	/** A task goes back to its bot. */
+	| { to: "bot"; agent: Agent }
 	/** A direct message goes back to the list of them. */
 	| { to: "directMessages" };
 
@@ -94,7 +84,6 @@ export interface DetailsToggle {
  */
 export function ChatHeader({
 	agent,
-	inPersonalPod,
 	title,
 	done,
 	conversationId,
@@ -105,8 +94,6 @@ export function ChatHeader({
 	details,
 }: HeaderPlace & {
 	agent: Agent;
-	/** Whether the chat is in the viewer's Personal pod, which its header says only they see into. */
-	inPersonalPod: boolean;
 	/** The thread's title, shown in place of the bot's name once it is loaded. */
 	title?: string;
 	/** Whether the thread is done, and how to mark it done or reopen it. */
@@ -121,9 +108,8 @@ export function ChatHeader({
 	const openDetails = details && (() => details.onChange(!details.open));
 	// A phone shows the computer in a sheet first, from which it opens full screen.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
-	const pod = usePods().data?.find((candidate) => candidate.id === agent.podId);
 	const [computerOpen, setComputerOpen] = useState(false);
-	const openComputer = phone && pod ? () => setComputerOpen(true) : onOpenDesktop;
+	const openComputer = phone ? () => setComputerOpen(true) : onOpenDesktop;
 	return (
 		<HeaderBar
 			back={back}
@@ -140,14 +126,12 @@ export function ChatHeader({
 						}
 						name={agent.name}
 						detail={modelName ?? undefined}
-						inPersonalPod={inPersonalPod}
 						onClick={openDetails}
 					/>
 				) : (
 					<ThreadBadge
 						title={title}
 						within={modelName ? `${agent.name} · ${modelName}` : agent.name}
-						inPersonalPod={inPersonalPod}
 						onClick={openDetails}
 					/>
 				)
@@ -172,7 +156,6 @@ export function ChatHeader({
 						{modelName}
 					</span>
 				)}
-				{inPersonalPod && <OnlyYou lock side="bottom" className="text-xs text-muted-foreground" />}
 			</div>
 			{done ? (
 				<>
@@ -193,20 +176,17 @@ export function ChatHeader({
 			)}
 			{details && <DetailsButton {...details} />}
 			{trailing}
-			{pod && (
-				<Dialog open={computerOpen} onOpenChange={setComputerOpen}>
-					<ComputerSheet
-						agent={agent}
-						pod={pod}
-						threadId={conversationId}
-						onDismiss={() => setComputerOpen(false)}
-						onOpenFull={() => {
-							setComputerOpen(false);
-							onOpenDesktop();
-						}}
-					/>
-				</Dialog>
-			)}
+			<Dialog open={computerOpen} onOpenChange={setComputerOpen}>
+				<ComputerSheet
+					agent={agent}
+					threadId={conversationId}
+					onDismiss={() => setComputerOpen(false)}
+					onOpenFull={() => {
+						setComputerOpen(false);
+						onOpenDesktop();
+					}}
+				/>
+			</Dialog>
 		</HeaderBar>
 	);
 }
@@ -233,7 +213,7 @@ function ThreadMenu({
 			<DropdownMenuTrigger
 				render={
 					<IconButton
-						label="More for this thread"
+						label="More for this task"
 						variant="bar"
 						className={cn(FLOATING_ON_PHONE, "md:hidden")}
 					>
@@ -313,21 +293,17 @@ function HeaderBar({
 
 /**
  * Whose chat it is, in a phone's header: its face beside its name, and under
- * the name `detail`, such as a bot's model, after "Only you" in a Personal
- * pod. It opens its Details where it has them.
+ * the name `detail`, such as a bot's model. It opens its Details where it has them.
  */
 function FaceBadge({
 	face,
 	name,
 	detail,
-	inPersonalPod = false,
 	onClick,
 }: {
 	face: ReactNode;
 	name: string;
 	detail?: string;
-	/** Whether the chat is in the viewer's Personal pod. */
-	inPersonalPod?: boolean;
 	onClick?: () => void;
 }) {
 	const content = (
@@ -335,10 +311,8 @@ function FaceBadge({
 			{face}
 			<span className="flex min-w-0 flex-col items-start text-left leading-tight">
 				<span className="max-w-full truncate font-semibold text-base text-foreground">{name}</span>
-				{(detail || inPersonalPod) && (
-					<span className="max-w-full truncate text-xs text-muted-foreground">
-						<BadgeDetail inPersonalPod={inPersonalPod}>{detail}</BadgeDetail>
-					</span>
+				{detail && (
+					<span className="max-w-full truncate text-xs text-muted-foreground">{detail}</span>
 				)}
 			</span>
 		</>
@@ -388,14 +362,11 @@ type ChatMark = "channel" | "routine";
 function ThreadBadge({
 	title,
 	within,
-	inPersonalPod = false,
 	onClick,
 }: {
 	title: string;
 	/** What the thread is in or with, such as its bot. */
 	within?: string;
-	/** Whether the thread is in the viewer's Personal pod. */
-	inPersonalPod?: boolean;
 	onClick?: () => void;
 }) {
 	return (
@@ -408,39 +379,24 @@ function ThreadBadge({
 			className="glass flex h-11 min-w-0 max-w-full flex-col items-start justify-center rounded-full px-4 text-left text-foreground active:bg-hover-strong"
 		>
 			<span className="max-w-full truncate font-semibold text-base leading-tight">{title}</span>
-			{(within || inPersonalPod) && (
+			{within && (
 				<span className="max-w-full truncate text-xs text-muted-foreground leading-tight">
-					<BadgeDetail inPersonalPod={inPersonalPod}>{within && `in ${within}`}</BadgeDetail>
+					in {within}
 				</span>
 			)}
 		</button>
 	);
 }
 
-/** The second line of a phone header's badge: `children`, after a locked "Only you" in a Personal pod. */
-function BadgeDetail({ inPersonalPod, children }: { inPersonalPod: boolean; children: ReactNode }) {
-	if (!inPersonalPod) return children;
-	return (
-		<>
-			<LockGlyph size={8} className="mr-1 inline align-baseline" />
-			{ONLY_YOU}
-			{children && <> · {children}</>}
-		</>
-	);
-}
-
 /**
- * Opens the bot's routines beside its chat, with a red dot while one of them
- * failed its latest run. A phone reaches them from the bot's Details instead.
+ * Opens the bot's automations beside its task, with a red dot while one of
+ * them failed its latest run. A phone reaches them from the bot's Details instead.
  */
 function RoutinesButton({ agent, onOpen }: { agent: Agent; onOpen: () => void }) {
-	const pod = usePods().data?.find((candidate) => candidate.id === agent.podId);
-	const failed = useChatList(pod?.slug).data?.routines.some(
-		(row) => row.agent.id === agent.id && row.routine.failed,
-	);
+	const failed = useBotTasks(agent.id).data?.routines.some((row) => row.routine.failed);
 	return (
 		<HeaderButton
-			label="Routines"
+			label="Automations"
 			icon={<RefreshCcw size={16} strokeWidth={1.75} />}
 			onClick={onOpen}
 			mark={failed ? { dot: <FailedDot labelled={false} />, label: FAILED_DOT_LABEL } : undefined}
@@ -619,17 +575,7 @@ function backAddress(router: ReturnType<typeof useRouter>, back: BackTo) {
 		case "pod":
 			return { href: router.buildLocation(podLink(back.pod)).href, name: back.pod.name };
 		case "bot":
-			return {
-				href: router.buildLocation(agentChatLink({ pod: back.pod, agent: back.agent })).href,
-				name: back.agent.name,
-			};
-		case "channel":
-			return {
-				href: router.buildLocation(
-					conversationLink({ pod: back.pod, conversationId: back.conversationId }),
-				).href,
-				name: back.name,
-			};
+			return { href: router.buildLocation(botLink(back.agent)).href, name: back.agent.name };
 		case "activity":
 			return { href: router.buildLocation(activityLink()).href, name: "Inbox" };
 		case "directMessages":

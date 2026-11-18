@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { isoTimestampSchema } from "./timestamps.ts";
 
 /**
- * Where GitHub sends the browser, under the API, once a pod's GitHub App is
+ * Where GitHub sends the browser, under the API, once a bot's GitHub App is
  * made from its manifest, and once it is installed. Each answers with a
  * redirect to {@link GITHUB_SETUP_RETURN_PATH} in the web app.
  */
@@ -14,7 +14,7 @@ export const GITHUB_WEBHOOK_PATH = "/hooks/connections";
 
 /**
  * Where the web app takes the browser back from GitHub: `workspace` and
- * `pod` name the pod, `connection` its GitHub connection once it is made,
+ * `agent` name the bot, `connection` its GitHub app once it is made,
  * and `github_error`, when set, a {@link GitHubSetupFailure}.
  */
 export const GITHUB_SETUP_RETURN_PATH = "/connections/github/return";

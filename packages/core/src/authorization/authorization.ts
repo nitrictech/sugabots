@@ -15,7 +15,12 @@ import {
 	workspaceStandingFor,
 } from "./access.ts";
 import { CurrentActor } from "./current-actor.ts";
-import { mayInWorkspace, type PodPermission, type WorkspacePermission } from "./permissions.ts";
+import {
+	type AgentPermission,
+	mayInWorkspace,
+	type PodPermission,
+	type WorkspacePermission,
+} from "./permissions.ts";
 
 /**
  * Whether the current actor may take an action, asked by every use case
@@ -37,15 +42,26 @@ export interface Interface {
 		workspaceRef: string,
 		permission: WorkspacePermission,
 	) => Effect.Effect<WorkspaceStanding, AuthorizationDenied, CurrentActor.Service>;
-	/** `podId` names a pod the actor reaches, and the action is one they may take in it. */
+	/**
+	 * `podId` names a channel of a workspace the actor belongs to, whether or
+	 * not they are in it, as the directory shows a public one to join.
+	 */
+	readonly podFound: (
+		podId: string,
+	) => Effect.Effect<PodStanding, ResourceHidden, CurrentActor.Service>;
+	/** `podId` names a channel the actor is in, and the action is one they may take in it. */
 	readonly pod: (
 		podId: string,
 		permission: PodPermission,
 	) => Effect.Effect<PodStanding, AuthorizationDenied, CurrentActor.Service>;
-	/** A crew agent, on the same terms as the pod it lives in. */
+	/**
+	 * `agentId` names a bot, and the action is one the actor may take on it.
+	 * A bot they don't reach is hidden, unless the action is one they may take
+	 * anyway, as an administrator changes a private bot.
+	 */
 	readonly agent: (
 		agentId: string,
-		permission: PodPermission,
+		permission: AgentPermission,
 	) => Effect.Effect<AgentStanding, AuthorizationDenied, CurrentActor.Service>;
 }
 
@@ -80,13 +96,28 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
+		podFound: (podId) =>
+			operation(
+				"podFound",
+				Effect.gen(function* () {
+					const { userId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => podStandingFor(db, podId, userId));
+					if (!standing?.actor.workspaceRole) return yield* new ResourceHidden({ resource: "pod" });
+					return standing;
+				}),
+			),
+
 		agent: (agentId, permission) =>
 			operation(
 				"agent",
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					const standing = yield* query((db) => agentStandingFor(db, agentId, userId));
-					return yield* decideInPod(standing, permission, "agent");
+					if (!standing) return yield* new ResourceHidden({ resource: "agent" });
+					if (standing.may(permission)) return standing;
+					return yield* standing.may("agent.read")
+						? new ActionForbidden({ permission })
+						: new ResourceHidden({ resource: "agent" });
 				}),
 			),
 	});
@@ -102,7 +133,7 @@ export const layer = Layer.effect(Service, make);
 function decideInPod<Standing extends PodStanding>(
 	standing: Standing | undefined,
 	permission: PodPermission,
-	resource: "pod" | "agent",
+	resource: "pod",
 ): Effect.Effect<Standing, AuthorizationDenied> {
 	return requireReach(standing, resource).pipe(
 		Effect.filterOrFail(

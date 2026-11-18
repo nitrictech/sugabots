@@ -62,12 +62,18 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 			.handle("removeMember", ({ params }) =>
 				membership
 					.remove({ workspace: params.workspace, memberId: params.memberId })
-					.pipe(asSessionUser, asHttpError({ ...refusals, OwnerStays: BadRequest })),
+					.pipe(
+						asSessionUser,
+						asHttpError({ ...refusals, OwnerStays: BadRequest, SandboxUnavailable: Conflict }),
+					),
 			)
 			.handle("leave", ({ params }) =>
 				membership
 					.leave({ workspace: params.workspace })
-					.pipe(asSessionUser, asHttpError({ ...refusals, OwnerStays: BadRequest })),
+					.pipe(
+						asSessionUser,
+						asHttpError({ ...refusals, OwnerStays: BadRequest, SandboxUnavailable: Conflict }),
+					),
 			)
 			.handle("transferOwnership", ({ params, payload }) =>
 				membership

@@ -78,7 +78,7 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 		const [room] = await onDatabase((db) =>
 			db
 				.insert(pod)
-				.values({ workspaceId, kind: "shared", name: "Ops", slug: `ops-${suffix}` })
+				.values({ workspaceId, name: "Ops", slug: `ops-${suffix}` })
 				.returning(),
 		);
 		if (!room) throw new Error("Could not create the pod");

@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
-import { modelIdSchema } from "../../agents.ts";
+import { agentSchema } from "../../agents.ts";
 import {
 	newPodMemberSchema,
 	newPodSchema,
@@ -10,15 +10,12 @@ import {
 } from "../../pods.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { Conflict, refused } from "../errors.ts";
+import { BadRequest, Conflict, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /**
- * Pods, and who is in them.
- *
- * Domain law — a Personal pod cannot be renamed, deleted or given other
- * members — is enforced by core, whatever entry point reaches it. These say
- * what each refusal means over HTTP.
+ * Channels, who is in them, and their bots. `list` answers the channels the
+ * caller is in and the public ones they could join, as the directory shows.
  */
 export class PodsApi extends HttpApiGroup.make("pods")
 	.add(
@@ -32,12 +29,6 @@ export class PodsApi extends HttpApiGroup.make("pods")
 			payload: newPodSchema,
 			success: podSchema.pipe(HttpApiSchema.status(201)),
 			error: [Conflict, ...refused],
-		}),
-		HttpApiEndpoint.post("ensurePersonal", "/workspaces/:workspace/personal-pod", {
-			params: { workspace: workspaceIdOrSlugSchema },
-			payload: Schema.Struct({ model: modelIdSchema }),
-			success: podSchema.pipe(HttpApiSchema.status(201)),
-			error: refused,
 		}),
 		HttpApiEndpoint.patch("update", "/pods/:podId", {
 			params: { podId: uuidSchema },
@@ -63,9 +54,29 @@ export class PodsApi extends HttpApiGroup.make("pods")
 			params: { podId: uuidSchema, userId: Schema.String },
 			error: refused,
 		}),
-		/** Takes the caller out of the pod. */
+		/** Takes the caller out of the channel. */
 		HttpApiEndpoint.delete("leave", "/pods/:podId/membership", {
 			params: { podId: uuidSchema },
+			error: refused,
+		}),
+		/** Puts the caller in a public channel. */
+		HttpApiEndpoint.put("join", "/pods/:podId/membership", {
+			params: { podId: uuidSchema },
+			success: podSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.get("listBots", "/pods/:podId/agents", {
+			params: { podId: uuidSchema },
+			success: Schema.Array(agentSchema),
+			error: refused,
+		}),
+		HttpApiEndpoint.post("addBot", "/pods/:podId/agents", {
+			params: { podId: uuidSchema },
+			payload: Schema.Struct({ agentId: uuidSchema }),
+			error: [BadRequest, ...refused],
+		}),
+		HttpApiEndpoint.delete("removeBot", "/pods/:podId/agents/:agentId", {
+			params: { podId: uuidSchema, agentId: uuidSchema },
 			error: refused,
 		}),
 	)

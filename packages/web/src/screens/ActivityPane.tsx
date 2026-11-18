@@ -33,7 +33,8 @@ export function ActivityPane({
 	staged,
 	onStagedChange,
 }: {
-	pod: Pod;
+	/** The channel the item is in; null for a bot's task or a direct message. */
+	pod: Pod | null;
 	/** Which kind of conversation the item is in, and its bot when it has one. */
 	conversation: ConversationKind;
 	/** The conversation the item is in. */
@@ -50,26 +51,36 @@ export function ActivityPane({
 	staged?: Staged;
 	onStagedChange: StagedChange;
 }) {
-	// A routine's own thread opens on the Routines page, beside the pod's other routines.
+	// An automation's own thread opens on its bot's Automations page, beside its other automations.
 	const routineId = useThread(conversationId).data?.routine?.id;
-	// A phone shows the thread itself, whole, with Back to Inbox; it needs no way to another copy of it.
-	const openChat = (
-		<Link
-			{...(routineId
-				? routineThreadLink(pod, routineId)
-				: conversationLink({ pod, conversationId }))}
-			className={cn(buttonStyles({ variant: "outline", size: "sm" }), "shrink-0 max-md:hidden")}
-		>
-			Open thread
-		</Link>
+	const agent = conversation.kind === "botThread" ? conversation.agent : undefined;
+	const openClassName = cn(
+		buttonStyles({ variant: "outline", size: "sm" }),
+		"shrink-0 max-md:hidden",
 	);
-	// Runs and collaborations are a bot's, so only a channel or thread with a bot has them.
-	if (threadPageId && (conversation.kind === "botThread" || conversation.kind === "botChannel")) {
+	// A phone shows the thread itself, whole, with Back to Inbox; it needs no way to another copy of it.
+	const openChat =
+		routineId && agent ? (
+			<Link {...routineThreadLink(agent, routineId)} className={openClassName}>
+				Open thread
+			</Link>
+		) : pod ? (
+			<Link {...conversationLink({ pod, conversationId })} className={openClassName}>
+				Open thread
+			</Link>
+		) : agent ? (
+			<Link {...conversationLink({ agent, conversationId })} className={openClassName}>
+				Open thread
+			</Link>
+		) : null;
+	// Runs and collaborations are a bot's, so only a task or automation thread has them.
+	if (threadPageId && conversation.kind === "botThread") {
 		return (
 			<ActivityThread
 				agent={conversation.agent}
 				conversationId={conversationId}
 				threadId={threadPageId}
+				back={BACK_TO_ACTIVITY}
 				trailing={openChat}
 				onOpenThread={onThreadPageChange}
 			/>
@@ -91,17 +102,22 @@ export function ActivityPane({
 	);
 }
 
-/** A run or collaboration in `agent`'s chat, as a page of its own, read while it is seen. */
-function ActivityThread({
+/**
+ * A run or collaboration in `agent`'s conversation, as a page of its own,
+ * read while it is seen, with `back` before its name.
+ */
+export function ActivityThread({
 	agent,
 	conversationId,
 	threadId,
+	back,
 	trailing,
 	onOpenThread,
 }: {
 	agent: Agent;
 	conversationId: string;
 	threadId: string;
+	back: BackTo;
 	trailing: ReactNode;
 	onOpenThread: (threadId: string) => void;
 }) {
@@ -109,7 +125,7 @@ function ActivityThread({
 	useMarkItemReadWhileSeen(threadId);
 	return (
 		<ChatThreadPanel
-			frame={{ kind: "page", back: BACK_TO_ACTIVITY, trailing }}
+			frame={{ kind: "page", back, trailing }}
 			conversationId={conversationId}
 			chatAgentId={agent.id}
 			threadId={threadId}

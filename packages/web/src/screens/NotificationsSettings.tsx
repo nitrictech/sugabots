@@ -193,7 +193,7 @@ function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
 	return (
 		<SettingsGroup
 			label="Also notify me when"
-			note="Runs of routines you made or started. Muting a pod or bot quiets these too."
+			note="Runs of automations you made or started. Muting a channel or bot quiets these too."
 		>
 			<SettingsRow
 				label="A bot can't finish its reply to me"
@@ -294,8 +294,8 @@ function PodLevels({ settings }: { settings: NotificationSettings }) {
 	if (!pods || pods.length === 0) return null;
 	return (
 		<SettingsGroup
-			label="Pods"
-			note="A pod set to Default follows what you chose above. Right-click a pod or a bot in the sidebar to change it there; a bot's choice wins over its pod's."
+			label="Channels"
+			note="A channel or bot set to Default follows what you chose above. Right-click a channel or a bot in the sidebar to change it there."
 		>
 			{pods.map((pod) => (
 				<SettingsRow

@@ -35,8 +35,8 @@ import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-s
 import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
-import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
-import { PodSandboxes } from "@sugabots/core/sandboxes/pod-sandboxes";
+import { AgentSandboxSetup } from "@sugabots/core/sandboxes/agent-sandbox-setup";
+import { AgentSandboxes } from "@sugabots/core/sandboxes/agent-sandboxes";
 import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
 import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
 import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
@@ -103,7 +103,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	SearchProviderSetup.layer,
 	SandboxProviderSetup.layer,
 	SandboxNetwork.layer,
-	PodSandboxSetup.layer,
+	AgentSandboxSetup.layer,
 	GitHubApps.layer,
 	GitHubConnections.layer,
 	ConnectionSetup.layer,
@@ -134,7 +134,7 @@ const Background = Layer.mergeAll(
 	BlobDeletions.layer,
 	UnsentUploads.layer,
 	PresetSeeding.layer,
-	PodSandboxes.sweepLayer,
+	AgentSandboxes.sweepLayer,
 );
 
 /** The API and the web app on `PORT`, with better-auth answering who is calling. */

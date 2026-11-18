@@ -4,8 +4,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CurrentActor } from "../../../authorization/current-actor.ts";
 import {
 	agent,
-	pod,
-	podMember,
 	thread,
 	threadParticipant,
 	user,
@@ -14,7 +12,7 @@ import {
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { Egress } from "../../../providers/network/egress.ts";
-import { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
+import { AgentSandboxes } from "../../../sandboxes/agent-sandboxes.ts";
 import { SandboxCredentials } from "../../../sandboxes/sandbox-credentials.ts";
 import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
 import { recordingIds, removeWorkVolumes } from "../../../sandboxes/testing.ts";
@@ -36,7 +34,7 @@ const SLOW = 180_000;
 describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandbox", () => {
 	let tools: ToolSet;
 	let viewer: DesktopViewer.Interface;
-	let podSandboxes: PodSandboxes.Interface;
+	let agentSandboxes: AgentSandboxes.Interface;
 	let workspaceId: string;
 	let ownerId: string;
 	let outsiderId: string;
@@ -51,18 +49,18 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	beforeAll(async () => {
 		let sandboxTools: SandboxTools.Interface;
 		let providers: SandboxProviderRepository.Interface;
-		[sandboxTools, viewer, podSandboxes, providers] = await runOnPostgres(
+		[sandboxTools, viewer, agentSandboxes, providers] = await runOnPostgres(
 			Effect.all([
 				SandboxTools.Service,
 				DesktopViewer.Service,
-				PodSandboxes.Service,
+				AgentSandboxes.Service,
 				SandboxProviderRepository.Service,
 			]).pipe(
 				Effect.provide(
 					Layer.mergeAll(
 						SandboxTools.layer,
 						DesktopViewer.layer,
-						PodSandboxes.layer,
+						AgentSandboxes.layer,
 						SandboxProviderRepository.layer,
 					),
 				),
@@ -97,32 +95,13 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		watcherId = watcher.id;
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values([
-				// An administrator is put in every shared pod.
+				// The outsider is in no workspace.
 				{ workspaceId, userId: ownerId, role: "admin" },
-				{ workspaceId, userId: outsiderId },
 				{ workspaceId, userId: watcherId, role: "viewer" },
 			]),
 		);
-		const [shared] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId,
-					ownerId,
-					kind: "shared",
-					name: "Builders",
-					slug: "builders",
-					createdById: ownerId,
-				})
-				.returning(),
-		);
-		if (!shared) throw new Error("fixture");
-		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId, podId: shared.id, userId: watcherId }),
-		);
 		const agentIn = (name: string, usesSandbox: boolean): typeof agent.$inferInsert => ({
 			workspaceId,
-			podId: shared.id,
 			name,
 			handle: `${name.toLowerCase().replaceAll(" ", "-")}-${suffix}`,
 			color: "green",
@@ -150,7 +129,6 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 				.insert(thread)
 				.values({
 					workspaceId,
-					podId: shared.id,
 					hostAgentId: agentId,
 					type: "conversation",
 					title: "Look something up",
@@ -179,7 +157,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		tools = await runOnPostgres(
 			Scope.provide(scope)(
 				sandboxTools.forTurn({
-					pod: { workspaceId, podId: shared.id },
+					workspaceId,
 					usesSandbox: true,
 					naturalBrowsing: false,
 					turnId: "turn-1",
@@ -198,7 +176,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			Effect.provide(SandboxProviderRepository.Service, SandboxProviderRepository.layer),
 		);
 		const provider = await runOnPostgres(providers.enabled(workspaceId));
-		if (provider) await runOnPostgres(podSandboxes.destroyAllMadeBy(workspaceId, provider));
+		if (provider) await runOnPostgres(agentSandboxes.destroyAllMadeBy(workspaceId, provider));
 		await closeDatabase();
 		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
@@ -245,7 +223,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	);
 
 	it(
-		"shows the desktop to a pod's viewer to watch only, from another server",
+		"shows the desktop to a viewer to watch only, from another server",
 		async () => {
 			const exit = await openAs(watcherId);
 			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
@@ -268,7 +246,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	);
 
 	it(
-		"hides it from someone who can't reach the thread's pod",
+		"hides it from someone who can't reach the task",
 		async () => {
 			const exit = await openAs(outsiderId);
 
@@ -277,7 +255,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		SLOW,
 	);
 
-	it("refuses an agent of the pod that isn't in the thread", async () => {
+	it("refuses a bot that isn't in the task", async () => {
 		const exit = await openAs(ownerId, bystanderId);
 
 		expect(Exit.isFailure(exit) && exit.toString()).toContain("DesktopUnavailable");

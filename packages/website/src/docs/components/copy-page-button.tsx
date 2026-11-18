@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 
 const COPIED_FEEDBACK_MS = 1600;
 
-/** Copies the page as Markdown, for pasting into a chat with an agent. */
+/** Copies the page as Markdown, for pasting into a chat with an AI assistant. */
 export function CopyPageButton({ markdown }: { markdown: string }) {
 	const [copied, setCopied] = useState(false);
 

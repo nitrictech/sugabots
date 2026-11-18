@@ -42,8 +42,9 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 	afterAll(closeDatabase);
 
 	/**
-	 * A workspace with a member in a shared pod, an administrator the database
-	 * has put in it too, and one person left outside the workspace.
+	 * A workspace with a member in a channel, an administrator the database has
+	 * put in it too, another member outside the channel, and one person left
+	 * outside the workspace.
 	 */
 	async function fixture() {
 		const suffix = crypto.randomUUID();
@@ -84,55 +85,124 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 			]),
 		);
 
-		// A pod the member is in, with a thread hosted by an agent placed there.
+		// A task with a public bot, one with a private bot the member made, and
+		// a thread in a channel the member is in.
+		const [publicBot, privateBot] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values(
+					(["public", "private"] as const).map((visibility) => ({
+						workspaceId: space.id,
+						name: `Host ${visibility} ${suffix}`,
+						handle: handleFromName(`Host ${visibility} ${suffix}`),
+						visibility,
+						color: "rose" as const,
+						face: "pill" as const,
+						model: "m",
+						createdById: member.id,
+					})),
+				)
+				.returning(),
+		);
 		const [room] = await onDatabase((db) =>
 			db
 				.insert(pod)
 				.values({
 					workspaceId: space.id,
-					kind: "shared",
 					name: "Room",
 					slug: `room-${suffix}`,
 					createdById: member.id,
 				})
 				.returning(),
 		);
-		const [host] = await onDatabase((db) =>
-			db
-				.insert(agent)
-				.values({
-					workspaceId: space.id,
-					podId: room?.id ?? "",
-					name: `Host ${suffix}`,
-					handle: handleFromName(`Host ${suffix}`),
-					color: "rose",
-					face: "pill",
-					model: "m",
-				})
-				.returning(),
-		);
-		if (!room || !host) {
+		if (!publicBot || !privateBot || !room) {
 			throw new Error("fixture did not insert");
 		}
 		await onDatabase((db) =>
 			db.insert(podMember).values({ workspaceId: space.id, podId: room.id, userId: member.id }),
 		);
-		const [conversation] = await onDatabase((db) =>
+		const [conversation, privateTask, channelThread] = await onDatabase((db) =>
 			db
 				.insert(thread)
+				.values([
+					{
+						workspaceId: space.id,
+						hostAgentId: publicBot.id,
+						type: "conversation",
+						title: "A task",
+						initiatorUserId: member.id,
+					},
+					{
+						workspaceId: space.id,
+						hostAgentId: privateBot.id,
+						type: "conversation",
+						title: "A private task",
+						initiatorUserId: member.id,
+					},
+					{
+						workspaceId: space.id,
+						podId: room.id,
+						type: "pod_chat",
+						title: "A thread",
+					},
+				])
+				.returning(),
+		);
+		if (!conversation || !privateTask || !channelThread) {
+			throw new Error("fixture did not insert");
+		}
+		const [elsewhere] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Elsewhere", email: `elsewhere-${suffix}@example.com` })
+				.returning(),
+		);
+		if (!elsewhere) throw new Error("fixture did not insert");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId: space.id, userId: elsewhere.id }),
+		);
+		// A private bot of somebody outside the channel, asked from it, and the
+		// public bot asked from the member's private task.
+		const [elsewhereBot] = await onDatabase((db) =>
+			db
+				.insert(agent)
 				.values({
 					workspaceId: space.id,
-					podId: room.id,
-					hostAgentId: host.id,
-					type: "conversation",
-					title: "A thread",
-					initiatorUserId: member.id,
+					name: `Elsewhere's ${suffix}`,
+					handle: handleFromName(`Elsewhere's ${suffix}`),
+					visibility: "private",
+					color: "rose",
+					face: "pill",
+					model: "m",
+					createdById: elsewhere.id,
 				})
 				.returning(),
 		);
-		if (!conversation) {
-			throw new Error("fixture did not insert");
-		}
+		if (!elsewhereBot) throw new Error("fixture did not insert");
+		const [askedFromChannel, askedFromPrivateTask] = await onDatabase((db) =>
+			db
+				.insert(thread)
+				.values([
+					{
+						workspaceId: space.id,
+						hostAgentId: elsewhereBot.id,
+						conversationId: channelThread.id,
+						parentThreadId: channelThread.id,
+						type: "collaboration",
+						title: "Asked from the channel",
+					},
+					{
+						workspaceId: space.id,
+						hostAgentId: publicBot.id,
+						conversationId: privateTask.id,
+						parentThreadId: privateTask.id,
+						type: "collaboration",
+						title: "Asked from a private task",
+					},
+				])
+				.returning(),
+		);
+		if (!askedFromChannel || !askedFromPrivateTask) throw new Error("fixture did not insert");
 
 		// The real services, over the real database, since that is what the
 		// visibility joins are being checked against.
@@ -145,8 +215,14 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 			member,
 			administrator,
 			outsider,
+			elsewhere,
 			space,
+			room,
 			conversation,
+			privateTask,
+			channelThread,
+			askedFromChannel,
+			askedFromPrivateTask,
 		};
 	}
 
@@ -181,13 +257,13 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(member.id).workspace("not-a-uuid")).toBeUndefined();
 	});
 
-	it("gives a pod member the thread's channel", async () => {
-		const { access, member, conversation } = await fixture();
+	it("gives a member a public bot's task's channel", async () => {
+		const { access, elsewhere, conversation } = await fixture();
 
-		expect(await access(member.id).thread(conversation.id)).toBe(`thread:${conversation.id}`);
+		expect(await access(elsewhere.id).thread(conversation.id)).toBe(`thread:${conversation.id}`);
 	});
 
-	it("gives someone outside the pod nothing for its thread", async () => {
+	it("gives someone outside the workspace nothing for its tasks", async () => {
 		const { access, outsider, conversation } = await fixture();
 
 		expect(await access(outsider.id).thread(conversation.id)).toBeUndefined();
@@ -199,44 +275,68 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(member.id).thread(crypto.randomUUID())).toBeUndefined();
 	});
 
-	it("lets only people who reach a pod hear the workspace's events about it", async () => {
-		const { access, member, administrator, space, conversation } = await fixture();
-		const [elsewhere] = await onDatabase((db) =>
-			db
-				.insert(user)
-				.values({ name: "Elsewhere", email: `elsewhere-${crypto.randomUUID()}@example.com` })
-				.returning(),
-		);
-		if (!elsewhere) throw new Error("fixture did not insert");
-		await onDatabase((db) =>
-			db.insert(workspaceMember).values({ workspaceId: space.id, userId: elsewhere.id }),
-		);
+	it("lets every member hear the workspace's events about a public bot's task", async () => {
+		const { access, member, elsewhere, outsider, conversation } = await fixture();
 
-		expect(await access(member.id).hears(podAudience(conversation.podId))).toBe(true);
-		expect(await access(administrator.id).hears(podAudience(conversation.podId))).toBe(true);
-		expect(await access(elsewhere.id).workspace(space.id)).toBe(`workspace:${space.id}`);
-		expect(await access(elsewhere.id).hears(podAudience(conversation.podId))).toBe(false);
+		expect(await access(member.id).hears(threadAudience(conversation.id))).toBe(true);
+		expect(await access(elsewhere.id).hears(threadAudience(conversation.id))).toBe(true);
+		expect(await access(outsider.id).hears(threadAudience(conversation.id))).toBe(false);
 	});
 
-	it("gives an administrator without a row in the pod nothing, since reach is the row", async () => {
-		const { access, administrator, conversation } = await fixture();
+	it("lets only a private bot's creator hear about its tasks, not an administrator", async () => {
+		const { access, member, administrator, elsewhere, privateTask } = await fixture();
+
+		expect(await access(member.id).hears(threadAudience(privateTask.id))).toBe(true);
+		expect(await access(administrator.id).hears(threadAudience(privateTask.id))).toBe(false);
+		expect(await access(elsewhere.id).hears(threadAudience(privateTask.id))).toBe(false);
+	});
+
+	it("lets only the people in a channel hear about its threads", async () => {
+		const { access, member, administrator, elsewhere, space, channelThread } = await fixture();
+
+		expect(await access(member.id).hears(threadAudience(channelThread.id))).toBe(true);
+		expect(await access(administrator.id).hears(threadAudience(channelThread.id))).toBe(true);
+		expect(await access(elsewhere.id).workspace(space.id)).toBe(`workspace:${space.id}`);
+		expect(await access(elsewhere.id).hears(threadAudience(channelThread.id))).toBe(false);
+	});
+
+	it("keeps a collaboration with the conversation it was opened from, not the bot asked", async () => {
+		const { access, member, elsewhere, askedFromPrivateTask } = await fixture();
+
+		expect(await access(member.id).thread(askedFromPrivateTask.id)).toBe(
+			`thread:${askedFromPrivateTask.id}`,
+		);
+		expect(await access(member.id).hears(threadAudience(askedFromPrivateTask.id))).toBe(true);
+		// Everyone reaches the public bot that was asked, but not the private task.
+		expect(await access(elsewhere.id).thread(askedFromPrivateTask.id)).toBeUndefined();
+		expect(await access(elsewhere.id).hears(threadAudience(askedFromPrivateTask.id))).toBe(false);
+	});
+
+	it("shows the channel a collaboration with a private bot opened from it", async () => {
+		const { access, member, administrator, elsewhere, askedFromChannel } = await fixture();
+
+		expect(await access(member.id).thread(askedFromChannel.id)).toBe(
+			`thread:${askedFromChannel.id}`,
+		);
+		expect(await access(administrator.id).hears(threadAudience(askedFromChannel.id))).toBe(true);
+		// The private bot's creator is not in the channel.
+		expect(await access(elsewhere.id).thread(askedFromChannel.id)).toBeUndefined();
+		expect(await access(elsewhere.id).hears(threadAudience(askedFromChannel.id))).toBe(false);
+	});
+
+	it("gives an administrator without a row in the channel nothing, since reach is the row", async () => {
+		const { access, administrator, room, channelThread } = await fixture();
 		await onDatabase((db) =>
 			db
 				.delete(podMember)
-				.where(
-					and(
-						eq(podMember.podId, podAudience(conversation.podId).podId),
-						eq(podMember.userId, administrator.id),
-					),
-				),
+				.where(and(eq(podMember.podId, room.id), eq(podMember.userId, administrator.id))),
 		);
 
-		expect(await access(administrator.id).thread(conversation.id)).toBeUndefined();
+		expect(await access(administrator.id).thread(channelThread.id)).toBeUndefined();
 	});
 });
 
-/** Who hears what is said of a thread in the pod `podId`, which a fixture's conversation is always in. */
-function podAudience(podId: string | null) {
-	if (podId === null) throw new Error("The fixture's conversation is in no pod");
-	return { kind: "pod" as const, podId };
+/** Who hears what is said of the thread `threadId`. */
+function threadAudience(threadId: string) {
+	return { kind: "thread" as const, threadId };
 }

@@ -30,7 +30,8 @@ export type ArtifactAuthor = typeof artifactAuthorSchema.Type;
 
 export const artifactSummarySchema = Schema.Struct({
 	id: uuidSchema,
-	podId: uuidSchema,
+	/** The conversation it was made in. */
+	threadId: uuidSchema,
 	kind: artifactKindSchema,
 	title: Schema.String,
 	/** The number of the current version, counting from 1. */

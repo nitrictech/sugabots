@@ -1,4 +1,4 @@
-import type { Agent, AgentUpdate, NewAgentInPod, Pod } from "@sugabots/contracts";
+import type { Agent, AgentUpdate, NewAgent } from "@sugabots/contracts";
 import {
 	queryOptions,
 	skipToken,
@@ -9,18 +9,17 @@ import {
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { NotReadyError } from "@/lib/failure.ts";
-import { findPod, usePods } from "@/lib/pods.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 /**
- * The agents in the workspace being looked at.
+ * The bots in the workspace being looked at.
  *
- * One query for the whole roster, which the sidebar lists and every agent route
- * resolves its agent handle out of — the same arrangement pods have, and the
+ * One query for the whole roster, which the sidebar lists and every bot route
+ * resolves its handle out of — the same arrangement channels have, and the
  * reason there is no by-id fetch on the way into a page.
  *
- * The API scopes it: an agent is visible through the pods you are in, and
- * an admin sees all of them because placing agents into pods is their job.
+ * The API scopes it: every public bot, your own private ones and your
+ * Personal Assistant; an administrator also sees others' private bots listed.
  */
 export function useAgents(): {
 	agents: readonly Agent[] | undefined;
@@ -39,7 +38,7 @@ export function useAgents(): {
 	};
 }
 
-/** The agents of one workspace, which need not be the one being looked at. */
+/** The bots of one workspace, which need not be the one being looked at. */
 export function agentsQuery(workspaceId: string | undefined) {
 	return queryOptions({
 		queryKey: ["agents", workspaceId],
@@ -53,40 +52,74 @@ export function agentsQuery(workspaceId: string | undefined) {
 }
 
 /**
- * The pod and agent an address names. A handle is unique only within its pod,
- * so the same handle in another pod is a different agent, not a fallback.
+ * The handle every Personal Assistant shares, each person's own; the
+ * workspace's other bots' handles are unique.
  */
-export function findPodAgent(
-	pods: readonly Pod[] | undefined,
-	agents: readonly Agent[] | undefined,
-	podSlug: string,
-	handle: string,
-): { pod: Pod; agent: Agent } | undefined {
-	const pod = findPod(pods, podSlug);
-	const agent = pod && agents?.find((one) => one.podId === pod.id && one.handle === handle);
-	return pod && agent ? { pod, agent } : undefined;
+export const ASSISTANT_HANDLE = "personal-assistant";
+
+/**
+ * The bot an address names by its handle. `personal-assistant` names the
+ * person's own Personal Assistant, never someone else's.
+ */
+export function findBot(agents: readonly Agent[] | undefined, handle: string): Agent | undefined {
+	if (handle === ASSISTANT_HANDLE) return agents?.find((one) => one.assistant);
+	return agents?.find((one) => one.handle === handle);
 }
 
-export function usePodAgent(
-	podSlug: string,
-	handle: string,
-): { found: { pod: Pod; agent: Agent } | undefined; isPending: boolean; error: unknown } {
-	const pods = usePods();
+/** The bot at `handle`, once the roster has loaded. */
+export function useBot(handle: string): {
+	agent: Agent | undefined;
+	isPending: boolean;
+	error: unknown;
+} {
 	const { agents, isPending, error } = useAgents();
-	return {
-		found: findPodAgent(pods.data, agents, podSlug, handle),
-		isPending: pods.isPending || isPending,
-		error: pods.error ?? error,
-	};
+	return { agent: findBot(agents, handle), isPending, error };
 }
 
-/** An agent and its pod, by the agent's id, or `undefined` until both rosters have them. */
-export function useAgentWithPod(agentId: string): { pod: Pod; agent: Agent } | undefined {
+/** The bot with `agentId`, or `undefined` until the roster has it. */
+export function useAgent(agentId: string | null | undefined): Agent | undefined {
 	const { agents } = useAgents();
-	const { data: pods } = usePods();
-	const agent = agents?.find((one) => one.id === agentId);
-	const pod = pods?.find((one) => one.id === agent?.podId);
-	return agent && pod ? { pod, agent } : undefined;
+	return agentId ? agents?.find((one) => one.id === agentId) : undefined;
+}
+
+/** The person's own Personal Assistant, once the roster has it. */
+export function useAssistant(): Agent | undefined {
+	return useAgents().agents?.find((one) => one.assistant);
+}
+
+/**
+ * Makes sure the person has a Personal Assistant, made on `model` when one is
+ * given, and puts it in the roster.
+ */
+export function useEnsureAssistant() {
+	const invalidate = useInvalidateAgents();
+	const workspaceId = useWorkspace().workspace?.id;
+	return useMutation({
+		mutationFn: (model?: string) => {
+			if (!workspaceId) throw new NotReadyError();
+			return Effect.runPromise(
+				client.api.agents.ensureAssistant({
+					params: { workspace: workspaceId },
+					payload: model === undefined ? {} : { model },
+				}),
+			);
+		},
+		onSuccess: invalidate,
+	});
+}
+
+/** Pins a bot to the person's sidebar, or unpins it. */
+export function usePinAgent() {
+	const invalidate = useInvalidateAgents();
+	return useMutation({
+		mutationFn: ({ agentId, pinned }: { agentId: string; pinned: boolean }) =>
+			Effect.runPromise(
+				pinned
+					? client.api.agents.pin({ params: { agentId } })
+					: client.api.agents.unpin({ params: { agentId } }),
+			),
+		onSuccess: invalidate,
+	});
 }
 
 export function useModels(enabled = true) {
@@ -113,16 +146,18 @@ export function useModelName(model: string | null): string | null {
 	return inUse?.displayName ?? model;
 }
 
-export function useCreateAgent(podId: string) {
+export function useCreateAgent() {
 	const invalidate = useInvalidateAgents();
 	const workspaceId = useWorkspace().workspace?.id;
 
 	return useMutation({
-		mutationFn: (input: NewAgentInPod) => {
+		mutationFn: (input: NewAgent) => {
 			if (!workspaceId) {
 				throw new NotReadyError();
 			}
-			return Effect.runPromise(client.api.agents.create({ params: { podId }, payload: input }));
+			return Effect.runPromise(
+				client.api.agents.create({ params: { workspace: workspaceId }, payload: input }),
+			);
 		},
 		onSuccess: invalidate,
 	});
@@ -177,8 +212,8 @@ function useInvalidateAgents(): () => Promise<void> {
 	return async () => {
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["agents", workspaceId] }),
-			// Every bot is a row in its pod's conversation list.
-			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+			// A bot's tasks list shows it.
+			queries.invalidateQueries({ queryKey: ["bot-tasks", workspaceId] }),
 		]);
 	};
 }

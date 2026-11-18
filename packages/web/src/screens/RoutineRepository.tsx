@@ -37,23 +37,23 @@ export function repositoryTrigger(draft: RepositoryDraft) {
 export const PICK_AN_EVENT_NOTE = "Pick at least one thing for it to run on.";
 
 /**
- * The repository and events groups, for a routine on a bot in `podId`.
- * Its pod's GitHub connection's repositories are the ones to choose from.
+ * The repository and events groups, for a routine on the bot `agentId`.
+ * Its GitHub app's repositories are the ones to choose from.
  */
 export function RepositoryGroups({
-	podId,
-	podName,
+	agentId,
+	botName,
 	draft,
 	onChange,
 }: {
-	podId: string;
-	podName: string;
+	agentId: string;
+	botName: string;
 	draft: RepositoryDraft;
 	onChange: (draft: RepositoryDraft) => void;
 }) {
-	const connections = useConnections(podId);
+	const connections = useConnections(agentId);
 	const connectionId = connections.data?.find((one) => one.kind === "github")?.id;
-	const { repositories } = useConnectionRepositories(podId, connectionId);
+	const { repositories } = useConnectionRepositories(agentId, connectionId);
 	if (connections.isPending) return null;
 	if (connections.isError) return <Alert>{failureMessage(connections.error)}</Alert>;
 	if (connectionId && repositories.isPending) return null;
@@ -62,8 +62,8 @@ export function RepositoryGroups({
 	if (!connectionId || choices.length === 0) {
 		return (
 			<Note>
-				{podName} isn't connected to any GitHub repositories yet. Someone who manages its
-				connections can connect GitHub in the pod's settings.
+				{botName} isn't connected to any GitHub repositories yet. Someone who manages its
+				connections can connect GitHub in its settings.
 			</Note>
 		);
 	}
@@ -73,7 +73,7 @@ export function RepositoryGroups({
 		choice.repository.toLowerCase() === chosen.repository.toLowerCase();
 	return (
 		<>
-			<SettingsGroup label="Repository" note={`${podName}'s repositories.`}>
+			<SettingsGroup label="Repository" note={`${botName}'s repositories.`}>
 				{choices.map((choice) => (
 					<SettingsRow
 						key={choice.repository}

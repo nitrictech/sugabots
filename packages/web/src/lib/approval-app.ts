@@ -8,7 +8,7 @@ import { connectionLabel, splitToolKey, stepLabel } from "@/lib/tool-names.ts";
  * that is not a connection's tool is named by its action.
  */
 export function useApprovalApp(request: ApprovalRequest) {
-	const looks = useConnectionLooks(request.podId);
+	const looks = useConnectionLooks([request.agent.id]);
 	const { handle, name } = splitToolKey(request.call.tool);
 	const look = looks.get(handle);
 	const action = stepLabel(request.call.tool, name);

@@ -204,8 +204,8 @@ export function WebhookGroups({
 	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
 	onChangeFilter: (filter: WebhookCondition[]) => Promise<unknown>;
 }) {
-	const { routine, agent, pod } = placed;
-	const canManage = pod.permissions.manageRoutines;
+	const { routine, agent } = placed;
+	const canManage = agent.permissions.manageRoutines;
 	const address = { agentId: agent.id, routineId: routine.id, triggerId };
 	const saved = useRoutineSecret({ ...address, canManage }).data;
 	const url = webhookAddress(triggerId);

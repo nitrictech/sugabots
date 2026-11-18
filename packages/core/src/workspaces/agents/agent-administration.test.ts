@@ -1,12 +1,13 @@
-import { PERSONAL_POD_SLUG } from "@sugabots/contracts";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
+import { Authorization } from "../../authorization/authorization.ts";
 import {
 	agent,
 	modelProvider,
 	pod,
-	podMember,
+	podAgent,
 	providerModel,
 	user,
 	workspace,
@@ -19,27 +20,52 @@ import {
 	servedOnPostgres,
 } from "../../database/testing.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
+import { AgentSandboxes } from "../../sandboxes/agent-sandboxes.ts";
+import { Sandboxes } from "../../sandboxes/sandboxes.ts";
+import { unimplemented } from "../../testing.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
+import { PersonalAssistants } from "./personal-assistants.ts";
 
 /** Agents run only on a model the workspace offers, which here is `OFFERED`. */
 const OFFERED = "offered-model";
+const ALSO_OFFERED = "also-offered-model";
 
-describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => {
+describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 	let agents: Promised<AgentRepository.Interface>;
+	let assistants: Promised<PersonalAssistants.Interface>;
 	let administrationAs: (userId: string) => Promised<AgentAdministration.Interface>;
 	/** The administration as the workspace's administrator. */
 	let administration: Promised<AgentAdministration.Interface>;
 	let workspaceId: string;
 	let creatorId: string;
-	let podId: string;
+	/** The bots whose computers were destroyed, in order. */
+	let destroyedComputers: string[] = [];
+	let providerReachable = true;
 
 	beforeAll(async () => {
 		agents = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
+		assistants = await servedOnPostgres(PersonalAssistants.Service, PersonalAssistants.layer);
 		administrationAs = await servedOnPostgresAs(
 			AgentAdministration.Service,
-			AgentAdministration.layer,
+			AgentAdministration.layerNoDeps.pipe(
+				Layer.provide([
+					Authorization.layer,
+					AgentRepository.layer,
+					ModelProviderRepository.layer,
+					unimplemented(AgentSandboxes.Service, {
+						destroy: ({ agentId }) =>
+							providerReachable
+								? Effect.sync(() => {
+										destroyedComputers.push(agentId);
+									})
+								: Effect.fail(
+										new Sandboxes.Unavailable({ provider: "opensandbox", cause: "unreachable" }),
+									),
+					}),
+				]),
+			),
 		);
 	});
 
@@ -48,6 +74,8 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 	});
 
 	beforeEach(async () => {
+		destroyedComputers = [];
+		providerReachable = true;
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const [space] = await onDatabase((db) =>
 			db
@@ -68,12 +96,6 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId, userId: creatorId, role: "admin" }),
 		);
-		const [room] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({ workspaceId, kind: "shared", name: "Support", slug: "support" })
-				.returning(),
-		);
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)
@@ -86,19 +108,25 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 				})
 				.returning(),
 		);
-		if (!room || !provider) throw new Error("could not create the fixtures");
-		podId = room.id;
+		if (!provider) throw new Error("could not create the fixtures");
 		await onDatabase((db) =>
 			db.insert(providerModel).values([
 				{ workspaceId, providerId: provider.id, modelId: OFFERED, enabled: true, source: "manual" },
+				{
+					workspaceId,
+					providerId: provider.id,
+					modelId: ALSO_OFFERED,
+					enabled: true,
+					source: "manual",
+				},
 				{ workspaceId, providerId: provider.id, modelId: "switched-off", source: "manual" },
 			]),
 		);
 	});
 
-	it("creates an agent on a model the workspace offers", async () => {
+	it("creates a bot on a model the workspace offers", async () => {
 		const made = await administration.create({
-			podId,
+			workspace: workspaceId,
 			agent: {
 				name: "Triage",
 				model: OFFERED,
@@ -109,21 +137,21 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 	});
 
 	it.each(["unknown-model", "switched-off"])(
-		"refuses to create an agent on %s, and creates nothing",
+		"refuses to create a bot on %s, and creates nothing",
 		async (model) => {
 			await expect(
-				administration.create({ podId, agent: { name: "Triage", model } }),
+				administration.create({ workspace: workspaceId, agent: { name: "Triage", model } }),
 			).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
 
 			expect(
-				await onDatabase((db) => db.select().from(agent).where(eq(agent.podId, podId))),
+				await onDatabase((db) => db.select().from(agent).where(eq(agent.workspaceId, workspaceId))),
 			).toEqual([]);
 		},
 	);
 
-	it("refuses to move an agent to a model the workspace does not offer, but lets it be cleared", async () => {
+	it("refuses to move a bot to a model the workspace does not offer, but lets it be cleared", async () => {
 		const made = await administration.create({
-			podId,
+			workspace: workspaceId,
 			agent: {
 				name: "Triage",
 				model: OFFERED,
@@ -140,7 +168,7 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 
 	it("refuses a change that changes nothing", async () => {
 		const made = await administration.create({
-			podId,
+			workspace: workspaceId,
 			agent: {
 				name: "Triage",
 				model: OFFERED,
@@ -173,8 +201,11 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 		).toBe(OFFERED);
 	});
 
-	it("refuses what the pod does not let somebody do, and hides it from who cannot reach it", async () => {
-		const made = await administration.create({ podId, agent: { name: "Triage", model: OFFERED } });
+	it("refuses what a viewer may not do, and hides a bot from somebody outside the workspace", async () => {
+		const made = await administration.create({
+			workspace: workspaceId,
+			agent: { name: "Triage", model: OFFERED },
+		});
 		const [viewer, stranger] = await onDatabase((db) =>
 			db
 				.insert(user)
@@ -188,12 +219,12 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId, userId: viewer.id, role: "viewer" }),
 		);
-		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId, podId, userId: viewer.id }),
-		);
 
 		await expect(
-			administrationAs(viewer.id).create({ podId, agent: { name: "Scout", model: OFFERED } }),
+			administrationAs(viewer.id).create({
+				workspace: workspaceId,
+				agent: { name: "Scout", model: OFFERED },
+			}),
 		).rejects.toBeInstanceOf(ActionForbidden);
 		await expect(
 			administrationAs(viewer.id).setSystemAgentModel({
@@ -213,7 +244,8 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 		);
 	});
 
-	it("lets only somebody who may manage the pod's sandbox let an agent use it", async () => {
+	/** Lee, a member of the workspace. */
+	const aMember = async () => {
 		const [member] = await onDatabase((db) =>
 			db
 				.insert(user)
@@ -224,66 +256,197 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId, userId: member.id, role: "member" }),
 		);
-		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId, podId, userId: member.id }),
-		);
-		const asMember = administrationAs(member.id);
+		return member.id;
+	};
+
+	it("lets only a bot's creator or an admin let it use its computer", async () => {
+		const asMember = administrationAs(await aMember());
+		const admins = await administration.create({
+			workspace: workspaceId,
+			agent: { name: "Triage", model: OFFERED },
+		});
 
 		await expect(
-			asMember.create({ podId, agent: { name: "Scout", model: OFFERED, usesSandbox: true } }),
+			asMember.update({ agentId: admins.id, changes: { usesSandbox: true } }),
 		).rejects.toBeInstanceOf(ActionForbidden);
-		const made = await asMember.create({ podId, agent: { name: "Triage", model: OFFERED } });
-		await expect(
-			asMember.update({ agentId: made.id, changes: { usesSandbox: true } }),
-		).rejects.toBeInstanceOf(ActionForbidden);
+		const own = await asMember.create({
+			workspace: workspaceId,
+			agent: { name: "Scout", model: OFFERED, usesSandbox: true },
+		});
+		expect(own.usesSandbox).toBe(true);
 		expect(
-			(await administration.update({ agentId: made.id, changes: { usesSandbox: true } }))
-				.usesSandbox,
-		).toBe(true);
-		await expect(
-			asMember.update({ agentId: made.id, changes: { usesSandbox: false } }),
-		).rejects.toBeInstanceOf(ActionForbidden);
+			(await asMember.update({ agentId: own.id, changes: { usesSandbox: false } })).usesSandbox,
+		).toBe(false);
 	});
 
-	describe("in a pod the actor is not in", () => {
-		/** Sam, a member with a Personal pod holding an agent of his own. */
-		const aMemberWithPersonalAgent = async () => {
-			const [person] = await onDatabase((db) =>
-				db
-					.insert(user)
-					.values({ name: "Sam", email: `sam-${crypto.randomUUID()}@example.com` })
-					.returning(),
-			);
-			if (!person) throw new Error("could not create the member");
-			await onDatabase((db) =>
-				db.insert(workspaceMember).values({ workspaceId, userId: person.id, role: "member" }),
-			);
-			const [personal] = await onDatabase((db) =>
-				db
-					.insert(pod)
-					.values({
-						workspaceId,
-						kind: "personal",
-						ownerId: person.id,
-						name: "Personal",
-						slug: PERSONAL_POD_SLUG,
-					})
-					.returning(),
-			);
-			if (!personal) throw new Error("could not create the Personal pod");
-			await onDatabase((db) =>
-				db.insert(podMember).values({ workspaceId, podId: personal.id, userId: person.id }),
-			);
-			const made = await administrationAs(person.id).create({
-				podId: personal.id,
-				agent: { name: "Helper", model: OFFERED },
-			});
-			return { memberId: person.id, agentId: made.id };
-		};
+	it("destroys a deleted bot's computer, and keeps the bot when its provider can't be reached", async () => {
+		const made = await administration.create({
+			workspace: workspaceId,
+			agent: { name: "Builder", model: OFFERED },
+		});
 
-		it("lets an administrator change and remove a shared pod's agent without joining it", async () => {
-			const made = await administration.create({
-				podId,
+		providerReachable = false;
+		await expect(administration.remove({ agentId: made.id })).rejects.toMatchObject({
+			_tag: "SandboxUnavailable",
+		});
+		expect(
+			await onDatabase((db) =>
+				db.select({ id: agent.id }).from(agent).where(eq(agent.id, made.id)),
+			),
+		).toEqual([{ id: made.id }]);
+
+		providerReachable = true;
+		await administration.remove({ agentId: made.id });
+		expect(destroyedComputers).toEqual([made.id]);
+		expect(await onDatabase((db) => db.select().from(agent).where(eq(agent.id, made.id)))).toEqual(
+			[],
+		);
+	});
+
+	it("pins a bot to the actor's sidebar and takes it off again", async () => {
+		const asMember = administrationAs(await aMember());
+		const made = await administration.create({
+			workspace: workspaceId,
+			agent: { name: "Triage", model: OFFERED },
+		});
+
+		expect(await asMember.setPinned({ agentId: made.id, pinned: true })).toMatchObject({
+			pinned: true,
+		});
+		expect(await asMember.setPinned({ agentId: made.id, pinned: false })).toMatchObject({
+			pinned: false,
+		});
+		expect(await administration.get({ agentId: made.id })).toMatchObject({ pinned: true });
+	});
+
+	it("takes a bot made private out of every channel it was in", async () => {
+		const made = await administration.create({
+			workspace: workspaceId,
+			agent: { name: "Triage", model: OFFERED },
+		});
+		const [channel] = await onDatabase((db) =>
+			db.insert(pod).values({ workspaceId, name: "Launch", slug: "launch" }).returning(),
+		);
+		if (!channel) throw new Error("could not create the channel");
+		await onDatabase((db) =>
+			db.insert(podAgent).values({ workspaceId, podId: channel.id, agentId: made.id }),
+		);
+
+		await administration.update({ agentId: made.id, changes: { visibility: "private" } });
+
+		expect(
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(podAgent)
+					.where(and(eq(podAgent.podId, channel.id), eq(podAgent.agentId, made.id))),
+			),
+		).toEqual([]);
+	});
+
+	describe("a Personal Assistant", () => {
+		it("is made once for the person who asks, and kept private", async () => {
+			const first = await administration.ensureAssistant({
+				workspace: workspaceId,
+				model: OFFERED,
+			});
+			const again = await administration.ensureAssistant({ workspace: workspaceId });
+
+			expect(first).toMatchObject({ assistant: true, model: OFFERED });
+			expect(again.id).toBe(first.id);
+			await expect(
+				administration.update({ agentId: first.id, changes: { visibility: "public" } }),
+			).rejects.toBeInstanceOf(AgentAdministration.AssistantStaysPrivate);
+		});
+
+		it("keeps what its person changed when it is asked for again", async () => {
+			const made = await administration.ensureAssistant({ workspace: workspaceId, model: OFFERED });
+			await onDatabase((db) =>
+				db.update(agent).set({ name: "Friday", prompt: "Keep this." }).where(eq(agent.id, made.id)),
+			);
+
+			const again = await assistants.provisionWithModel({
+				workspaceId,
+				userId: creatorId,
+				model: ALSO_OFFERED,
+			});
+
+			expect(again).toMatchObject({
+				id: made.id,
+				name: "Friday",
+				prompt: "Keep this.",
+				model: OFFERED,
+			});
+		});
+
+		it("moves to the model named when the workspace does not offer its own", async () => {
+			// Made without a model, as for somebody joining a workspace that offers none.
+			const unassigned = await assistants.provision({ workspaceId, userId: creatorId });
+			expect(unassigned.model).toBeNull();
+
+			const moved = await assistants.provisionWithModel({
+				workspaceId,
+				userId: creatorId,
+				model: ALSO_OFFERED,
+			});
+
+			expect(moved).toMatchObject({ id: unassigned.id, model: ALSO_OFFERED });
+		});
+
+		it("is not made on a model the workspace does not offer", async () => {
+			await expect(
+				administration.ensureAssistant({ workspace: workspaceId, model: "switched-off" }),
+			).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
+		});
+
+		it("lets its person change only its name and look", async () => {
+			const assistant = await administration.ensureAssistant({
+				workspace: workspaceId,
+				model: OFFERED,
+			});
+
+			expect(
+				await administration.update({
+					agentId: assistant.id,
+					changes: { name: "Friday", color: "green", face: "square", shape: "circle" },
+				}),
+			).toMatchObject({ name: "Friday", color: "green" });
+			for (const changes of [
+				{ description: "Mine" },
+				{ handle: "friday" },
+				{ model: ALSO_OFFERED },
+				{ usesSandbox: false },
+				{ disabledTools: ["routines"] },
+				{ name: "Saturday", naturalBrowsing: true },
+			]) {
+				await expect(
+					administration.update({ agentId: assistant.id, changes }),
+				).rejects.toBeInstanceOf(AgentAdministration.AssistantManaged);
+			}
+		});
+
+		it("is hidden from everybody but its person, an admin included", async () => {
+			const memberId = await aMember();
+			const assistant = await administrationAs(memberId).ensureAssistant({
+				workspace: workspaceId,
+			});
+
+			await expect(administration.get({ agentId: assistant.id })).rejects.toBeInstanceOf(
+				ResourceHidden,
+			);
+			expect(
+				(await administration.list({ workspace: workspaceId })).map(({ id }) => id),
+			).not.toContain(assistant.id);
+			await expect(administration.remove({ agentId: assistant.id })).rejects.toBeInstanceOf(
+				ResourceHidden,
+			);
+		});
+	});
+
+	describe("a bot the actor did not make", () => {
+		it("lets an administrator change and remove another person's public bot", async () => {
+			const made = await administrationAs(await aMember()).create({
+				workspace: workspaceId,
 				agent: { name: "Triage", model: OFFERED },
 			});
 
@@ -297,24 +460,43 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing what agents run on", () => 
 			).toEqual([]);
 		});
 
-		it("hides an agent in somebody else's Personal pod from an administrator", async () => {
-			const { agentId } = await aMemberWithPersonalAgent();
+		it("lets an administrator read and change another person's private bot, but not talk to it", async () => {
+			const made = await administrationAs(await aMember()).create({
+				workspace: workspaceId,
+				agent: { name: "Diary", model: OFFERED, visibility: "private" },
+			});
 
-			await expect(administration.get({ agentId })).rejects.toBeInstanceOf(ResourceHidden);
-			await expect(
-				administration.update({ agentId, changes: { name: "Mine now" } }),
-			).rejects.toBeInstanceOf(ResourceHidden);
-			await expect(administration.remove({ agentId })).rejects.toBeInstanceOf(ResourceHidden);
+			expect(await administration.get({ agentId: made.id })).toMatchObject({
+				name: "Diary",
+				permissions: { talk: false, update: true },
+			});
+			expect(
+				await administration.update({ agentId: made.id, changes: { name: "Journal" } }),
+			).toMatchObject({ name: "Journal", permissions: { talk: false } });
 		});
 
-		it("lets the owner of a Personal pod remove its agent", async () => {
-			const { memberId, agentId } = await aMemberWithPersonalAgent();
+		it("lets a member use another person's public bot but not change it, and hides a private one", async () => {
+			const asMember = administrationAs(await aMember());
+			const shared = await administration.create({
+				workspace: workspaceId,
+				agent: { name: "Triage", model: OFFERED },
+			});
+			const hidden = await administration.create({
+				workspace: workspaceId,
+				agent: { name: "Ledger", model: OFFERED, visibility: "private" },
+			});
 
-			await administrationAs(memberId).remove({ agentId });
-
-			expect(
-				await onDatabase((db) => db.select().from(agent).where(eq(agent.id, agentId))),
-			).toEqual([]);
+			expect(await asMember.get({ agentId: shared.id })).toMatchObject({
+				permissions: { talk: true, update: false },
+			});
+			await expect(
+				asMember.update({ agentId: shared.id, changes: { name: "Mine now" } }),
+			).rejects.toBeInstanceOf(ActionForbidden);
+			await expect(asMember.remove({ agentId: shared.id })).rejects.toBeInstanceOf(ActionForbidden);
+			await expect(asMember.get({ agentId: hidden.id })).rejects.toBeInstanceOf(ResourceHidden);
+			await expect(
+				asMember.update({ agentId: hidden.id, changes: { name: "Mine now" } }),
+			).rejects.toBeInstanceOf(ResourceHidden);
 		});
 	});
 });

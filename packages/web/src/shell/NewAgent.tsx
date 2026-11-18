@@ -5,6 +5,7 @@ import {
 	type AgentColor,
 	type AgentFace,
 	type AgentShape,
+	type AgentVisibility,
 	agentColors,
 	agentFaces,
 	agentShapes,
@@ -47,6 +48,7 @@ import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
+import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /** How a bot looks: its colour, head and eyes. */
 export interface Look {
@@ -78,24 +80,18 @@ export type Part = "shape" | "eyes";
  * its name written over it, and a few looks drawn at random, with Customise
  * for its colour, head and eyes, which open at the right in place of the
  * models. At the right the models it can think with, the suggested first,
- * then each provider's. It starts by asking its creator what it's for in its
- * first chat.
+ * then each provider's. It is public unless made private, and starts by
+ * asking its creator what it's for in its first task.
  */
-export function NewAgentDialog({
-	podId,
-	onCreated,
-}: {
-	/** The pod the bot is made in. */
-	podId: string;
-	onCreated: (agent: Agent) => Promise<void>;
-}) {
+export function NewAgentDialog({ onCreated }: { onCreated: (agent: Agent) => Promise<void> }) {
 	const [name, setName] = useState("");
 	const [looks, setLooks] = useState(randomLooks);
 	const [chosenLook, setChosenLook] = useState(0);
 	const [customising, setCustomising] = useState(false);
 	const [part, setPart] = useState<Part>("shape");
 	const [chosenModel, setChosenModel] = useState<string>();
-	const create = useCreateAgent(podId);
+	const create = useCreateAgent();
+	const [visibility, setVisibility] = useState<AgentVisibility>("public");
 	const models = useModels();
 	const offered: readonly OfferedModel[] = models.data?.models ?? [];
 	// The default goes unoffered while a failed test has its provider off.
@@ -115,7 +111,7 @@ export function NewAgentDialog({
 		if (!trimmedName || !model) return;
 		try {
 			// Made without a prompt, a bot starts by interviewing its creator.
-			const agent = await create.mutateAsync({ name: trimmedName, model, ...look });
+			const agent = await create.mutateAsync({ name: trimmedName, model, visibility, ...look });
 			await onCreated(agent);
 		} catch {
 			return;
@@ -153,11 +149,12 @@ export function NewAgentDialog({
 						canCreate={canCreate}
 						alerts={
 							<>
+								<VisibilityChoice value={visibility} onChange={setVisibility} />
 								{create.error && (
 									<Alert>
 										{failureMessage(create.error, {
 											Conflict: "A bot with that name already exists. Try another name.",
-											Forbidden: "Only a workspace admin can create a bot.",
+											Forbidden: "You can't make a bot in this workspace.",
 										})}
 									</Alert>
 								)}
@@ -206,11 +203,12 @@ export function NewAgentDialog({
 								customising={customising}
 								onCustomise={() => setCustomising(!customising)}
 							/>
+							<VisibilityChoice value={visibility} onChange={setVisibility} />
 							{create.error && (
 								<Alert>
 									{failureMessage(create.error, {
 										Conflict: "A bot with that name already exists. Try another name.",
-										Forbidden: "Only a workspace admin can create a bot.",
+										Forbidden: "You can't make a bot in this workspace.",
 									})}
 								</Alert>
 							)}
@@ -898,5 +896,27 @@ function ProviderMark({ model }: { model: OfferedModel }) {
 		>
 			{model.providerName.trim().charAt(0).toUpperCase()}
 		</span>
+	);
+}
+
+/** Whether the new bot is public, for everyone in the workspace, or private, for its creator alone. */
+function VisibilityChoice({
+	value,
+	onChange,
+}: {
+	value: AgentVisibility;
+	onChange: (value: AgentVisibility) => void;
+}) {
+	return (
+		<SegmentedControl
+			label="Who can see it"
+			options={[
+				{ value: "public", label: "Public" },
+				{ value: "private", label: "Only me" },
+			]}
+			value={value}
+			onChange={onChange}
+			className="w-full"
+		/>
 	);
 }

@@ -1,0 +1,657 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "3ae2a0e9-cf9c-4c7a-8244-45632447f264",
+  "prevIds": [
+    "6c37cbef-dd3d-4a10-8d76-e3a51157d36f"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "connection"
+      ],
+      "writes": [
+        "s|fk|public.connection.connection_pod_workspace_fkey",
+        "n|fk|public.connection.connection_pod_workspace_fkey",
+        "e|fk|public.connection.connection_pod_workspace_fkey",
+        "n|con|public.connection.connection_pod_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "e|col|public.connection.pod_id",
+        "e|col|public.connection.workspace_id"
+      ]
+    },
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "sandbox"
+      ],
+      "writes": [
+        "s|fk|public.sandbox.sandbox_pod_workspace_fkey",
+        "n|fk|public.sandbox.sandbox_pod_workspace_fkey",
+        "e|fk|public.sandbox.sandbox_pod_workspace_fkey",
+        "n|con|public.sandbox.sandbox_pod_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public",
+        "e|col|public.sandbox.pod_id",
+        "e|col|public.sandbox.workspace_id"
+      ]
+    },
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "routine"
+      ],
+      "writes": [
+        "s|fk|public.routine.routine_chat_id_thread_id_fkey",
+        "n|fk|public.routine.routine_chat_id_thread_id_fkey",
+        "e|fk|public.routine.routine_chat_id_thread_id_fkey",
+        "n|con|public.routine.routine_chat_id_thread_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.routine",
+        "n|sch|public",
+        "e|col|public.routine.chat_id"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "sandbox_pod_allowed_host"
+      ],
+      "writes": [
+        "s|tbl|public.sandbox_pod_allowed_host",
+        "n|tbl|public.sandbox_pod_allowed_host",
+        "e|tbl|public.sandbox_pod_allowed_host",
+        "n|rel|public.sandbox_pod_allowed_host",
+        "n|type|public.sandbox_pod_allowed_host"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "routine"
+      ],
+      "writes": [
+        "s|ck|public.routine.routine_results_valid",
+        "n|ck|public.routine.routine_results_valid",
+        "e|ck|public.routine.routine_results_valid",
+        "n|con|public.routine.routine_results_valid"
+      ],
+      "reads": [
+        "n|tbl|public.routine",
+        "n|sch|public",
+        "e|col|public.routine.results"
+      ]
+    },
+    {
+      "statementType": "drop_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "routine_execution"
+      ],
+      "writes": [
+        "s|ck|public.routine_execution.routine_execution_results_valid",
+        "n|ck|public.routine_execution.routine_execution_results_valid",
+        "e|ck|public.routine_execution.routine_execution_results_valid",
+        "n|con|public.routine_execution.routine_execution_results_valid"
+      ],
+      "reads": [
+        "n|tbl|public.routine_execution",
+        "n|sch|public",
+        "e|col|public.routine_execution.results"
+      ]
+    },
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "sandbox",
+        "sandbox_pod_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.sandbox_pod_id_idx",
+        "n|idx|public.sandbox_pod_id_idx",
+        "e|idx|public.sandbox_pod_id_idx",
+        "n|rel|public.sandbox_pod_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public",
+        "e|col|public.sandbox.pod_id"
+      ],
+      "sharedWrites": [
+        "e|uniqueness|public.sandbox.pod_id"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connection",
+        "pod_id"
+      ],
+      "writes": [
+        "s|col|public.connection.pod_id",
+        "n|col|public.connection.pod_id",
+        "e|col|public.connection.pod_id"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "routine",
+        "results"
+      ],
+      "writes": [
+        "s|col|public.routine.results",
+        "n|col|public.routine.results",
+        "e|col|public.routine.results"
+      ],
+      "reads": [
+        "n|tbl|public.routine",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "routine",
+        "chat_id"
+      ],
+      "writes": [
+        "s|col|public.routine.chat_id",
+        "n|col|public.routine.chat_id",
+        "e|col|public.routine.chat_id"
+      ],
+      "reads": [
+        "n|tbl|public.routine",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "routine_execution",
+        "results"
+      ],
+      "writes": [
+        "s|col|public.routine_execution.results",
+        "n|col|public.routine_execution.results",
+        "e|col|public.routine_execution.results"
+      ],
+      "reads": [
+        "n|tbl|public.routine_execution",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "sandbox",
+        "pod_id"
+      ],
+      "writes": [
+        "s|col|public.sandbox.pod_id",
+        "n|col|public.sandbox.pod_id",
+        "e|col|public.sandbox.pod_id"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connection",
+        "agent_id"
+      ],
+      "writes": [
+        "s|colprop|public.connection.agent_id.notNull"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|col|public.connection.agent_id"
+      ],
+      "sqlHash": "01207cac95211097"
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "sandbox",
+        "agent_id"
+      ],
+      "writes": [
+        "s|colprop|public.sandbox.agent_id.notNull"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public",
+        "n|col|public.sandbox.agent_id"
+      ],
+      "sqlHash": "919868a833985e5e"
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "connection",
+        "connection_name_idx"
+      ],
+      "writes": [
+        "s|idx|public.connection_name_idx",
+        "n|idx|public.connection_name_idx",
+        "e|idx|public.connection_name_idx",
+        "n|rel|public.connection_name_idx"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|col|public.connection.agent_id",
+        "n|col|public.connection.name"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "connection",
+        "connection_handle_idx"
+      ],
+      "writes": [
+        "s|idx|public.connection_handle_idx",
+        "n|idx|public.connection_handle_idx",
+        "e|idx|public.connection_handle_idx",
+        "n|rel|public.connection_handle_idx"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|col|public.connection.agent_id",
+        "n|col|public.connection.handle"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "connection",
+        "connection_github_agent_idx"
+      ],
+      "writes": [
+        "s|idx|public.connection_github_agent_idx",
+        "n|idx|public.connection_github_agent_idx",
+        "e|idx|public.connection_github_agent_idx",
+        "n|rel|public.connection_github_agent_idx"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|col|public.connection.agent_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "sandbox",
+        "sandbox_agent_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.sandbox_agent_id_idx",
+        "n|idx|public.sandbox_agent_id_idx",
+        "e|idx|public.sandbox_agent_id_idx",
+        "n|rel|public.sandbox_agent_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public",
+        "n|col|public.sandbox.agent_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "connection"
+      ],
+      "writes": [
+        "s|fk|public.connection.connection_agent_workspace_fkey",
+        "n|fk|public.connection.connection_agent_workspace_fkey",
+        "e|fk|public.connection.connection_agent_workspace_fkey",
+        "n|con|public.connection.connection_agent_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|tbl|public.agent",
+        "n|sch|public",
+        "n|col|public.connection.agent_id",
+        "n|col|public.connection.workspace_id",
+        "n|col|public.agent.id",
+        "n|col|public.agent.workspace_id",
+        "e|uniqueness|public.agent.id.workspace_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "sandbox"
+      ],
+      "writes": [
+        "s|fk|public.sandbox.sandbox_agent_workspace_fkey",
+        "n|fk|public.sandbox.sandbox_agent_workspace_fkey",
+        "e|fk|public.sandbox.sandbox_agent_workspace_fkey",
+        "n|con|public.sandbox.sandbox_agent_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.sandbox",
+        "n|sch|public",
+        "n|tbl|public.agent",
+        "n|sch|public",
+        "n|col|public.sandbox.agent_id",
+        "n|col|public.sandbox.workspace_id",
+        "n|col|public.agent.id",
+        "n|col|public.agent.workspace_id",
+        "e|uniqueness|public.agent.id.workspace_id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connection",
+        "name": "connection_name_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "agent_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "name",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connection",
+        "name": "connection_handle_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "agent_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "handle",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connection",
+        "name": "connection_github_agent_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "agent_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"kind\" = 'github'",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "sandbox",
+        "name": "sandbox_agent_id_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "agent_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connection",
+        "name": "connection_agent_workspace_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "agent_id",
+          "workspace_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "agent",
+        "columnsTo": [
+          "id",
+          "workspace_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "sandbox",
+        "name": "sandbox_agent_workspace_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "agent_id",
+          "workspace_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "agent",
+        "columnsTo": [
+          "id",
+          "workspace_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"sandbox_pod_allowed_host\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"connection\",\"pod_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"routine\",\"results\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"routine_execution\",\"results\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"sandbox\",\"pod_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"sandbox_pod_allowed_host\",\"workspace_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"sandbox_pod_allowed_host\",\"pod_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"sandbox_pod_allowed_host\",\"host\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"sandbox_pod_allowed_host\",\"added_by_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"sandbox_pod_allowed_host\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"routine\",\"chat_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"sandbox_pod_id_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"connection\",\"connection_pod_workspace_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"sandbox\",\"sandbox_pod_workspace_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"sandbox_pod_allowed_host\",\"sandbox_pod_allowed_host_added_by_id_user_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"sandbox_pod_allowed_host\",\"sandbox_pod_allowed_host_pod_workspace_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"routine\",\"routine_chat_id_thread_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"sandbox_pod_allowed_host\",\"sandbox_pod_allowed_host_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"public\",\"routine\",\"routine_results_valid\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"public\",\"routine_execution\",\"routine_execution_results_valid\"]"
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"connection\",\"agent_id\"]",
+      "set": {
+        "notNull": true
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"sandbox\",\"agent_id\"]",
+      "set": {
+        "notNull": true
+      }
+    }
+  ]
+}

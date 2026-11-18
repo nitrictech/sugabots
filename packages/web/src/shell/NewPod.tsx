@@ -1,8 +1,10 @@
 import {
 	leastUsedPodColor,
+	POD_DESCRIPTION_MAX_LENGTH,
 	POD_NAME_MAX_LENGTH,
 	type Pod,
 	type PodColor,
+	type PodVisibility,
 	slugify,
 } from "@sugabots/contracts";
 import { type FormEvent, useState } from "react";
@@ -17,29 +19,38 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
+import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SettingsControlRow, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 
 /**
- * Making a pod: a name and a colour, under the pod as the sidebar will show it, laid
- * out as New bot is. Its bots, people and connections come after.
+ * Making a channel: a name, what it's for, whether anyone may join it, and a
+ * colour, under the channel as the sidebar will show it. Its people and bots
+ * come after.
  */
 export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<void> }) {
 	const [name, setName] = useState("");
 	const { data: pods } = usePods();
 	const [chosenColor, setChosenColor] = useState<PodColor>();
-	// Until somebody picks one, the colour the workspace's pods have least of,
-	// so pods made without a second thought still look unlike each other.
+	const [description, setDescription] = useState("");
+	const [visibility, setVisibility] = useState<PodVisibility>("public");
+	// Until somebody picks one, the colour the workspace's channels have least of,
+	// so channels made without a second thought still look unlike each other.
 	const color = chosenColor ?? leastUsedPodColor(pods?.map((pod) => pod.color) ?? []);
 	const create = useCreatePod();
-	// The API makes the pod's address from its name, so a name with nothing to make one from is no name.
+	// The API makes the channel's address from its name, so a name with nothing to make one from is no name.
 	const usable = slugify(name) !== "";
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
 		if (!usable) return;
 		try {
-			const pod = await create.mutateAsync({ name, color });
-			if (!pod) throw new Error("pod creation returned no pod");
+			const pod = await create.mutateAsync({
+				name,
+				color,
+				visibility,
+				description: description.trim() || null,
+			});
+			if (!pod) throw new Error("channel creation returned no channel");
 			await onCreated(pod);
 		} catch {
 			return;
@@ -48,18 +59,14 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 
 	return (
 		<DialogForm onSubmit={submit}>
-			<DialogFormHeader title="New pod" />
+			<DialogFormHeader title="New channel" />
 
 			<DialogFormBody gap="compact">
 				<div className="flex justify-center pt-1 pb-2">
-					{/* The pod as the sidebar will show it: its initial, once named, on its colour. */}
-					<PodInitial
-						pod={{ name, color, kind: "shared" }}
-						size="lg"
-						className="size-16 rounded-2xl text-2xl"
-					/>
+					{/* The channel as the sidebar will show it: its initial, once named, on its colour. */}
+					<PodInitial pod={{ name, color }} size="lg" className="size-16 rounded-2xl text-2xl" />
 				</div>
-				<SettingsGroup note="You'll add bots, people and connections next.">
+				<SettingsGroup note="You can add people and bots next.">
 					<SettingsFieldRow
 						label="Name"
 						value={name}
@@ -67,6 +74,24 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 						placeholder="e.g. Support"
 						maxLength={POD_NAME_MAX_LENGTH}
 					/>
+					<SettingsFieldRow
+						label="Description"
+						value={description}
+						onChange={setDescription}
+						placeholder="What it's for"
+						maxLength={POD_DESCRIPTION_MAX_LENGTH}
+					/>
+					<SettingsControlRow label="Who can join">
+						<SegmentedControl
+							label="Who can join"
+							options={[
+								{ value: "public", label: "Anyone" },
+								{ value: "private", label: "Invited only" },
+							]}
+							value={visibility}
+							onChange={setVisibility}
+						/>
+					</SettingsControlRow>
 					<SettingsControlRow label="Colour">
 						<PodColourPicker value={color} onChange={setChosenColor} />
 					</SettingsControlRow>
@@ -75,8 +100,8 @@ export function NewPodDialog({ onCreated }: { onCreated: (pod: Pod) => Promise<v
 				{create.error && (
 					<Alert>
 						{failureMessage(create.error, {
-							Conflict: "A pod with that name already exists. Try another name.",
-							Forbidden: "Only a workspace admin can create a pod.",
+							Conflict: "A channel with that name already exists. Try another name.",
+							Forbidden: "You can't make a channel in this workspace.",
 						})}
 					</Alert>
 				)}

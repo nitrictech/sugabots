@@ -14,7 +14,7 @@ import { createTestApp, identifiedBy, type UserResolver } from "../../http/app.t
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
 const MESSAGE = "0199a3a0-0000-7000-8000-000000000501";
 const BOT = "0199a3a0-0000-7000-8000-000000000601";
-const QUOTED = "0199a3a0-0000-7000-8000-000000000701";
+const UPLOAD = "0199a3a0-0000-7000-8000-000000000701";
 
 const resolveUser: UserResolver = async () => ({
 	id: "0199a3a0-0000-7000-8000-000000000002",
@@ -37,44 +37,33 @@ const signedIn = (init: RequestInit = {}) => ({
 	headers: { authorization: "Bearer member", "content-type": "application/json" },
 });
 
-const startThread = (body: object) =>
+const startTask = (body: object = {}) =>
 	signedIn({ method: "POST", body: JSON.stringify({ id: MESSAGE, message: "Hi", ...body }) });
 
-describe("starting a thread from a pod's chat", () => {
-	it("hands on the bot and the message it quotes", async () => {
-		let asked: Parameters<Chats.Interface["startThread"]>[0] | undefined;
+describe("starting a task with a bot", () => {
+	it("hands on the bot and the message, and no files, which can't be uploaded before it starts", async () => {
+		let asked: Parameters<Chats.Interface["startTask"]>[0] | undefined;
 		await app({
-			startThread: (input) => {
+			startTask: (input) => {
 				asked = input;
 				return Effect.fail(new Chats.HostHasNoModel());
 			},
-		}).request(
-			`/conversations/${CHAT}/threads`,
-			startThread({ hostAgentId: BOT, replyTo: QUOTED }),
-		);
+		}).request(`/agents/${BOT}/tasks`, startTask({ attachments: [UPLOAD] }));
 
-		expect(asked).toMatchObject({
-			conversationId: CHAT,
-			messageId: MESSAGE,
-			hostAgentId: BOT,
-			replyTo: QUOTED,
-		});
+		expect(asked).toEqual({ agentId: BOT, messageId: MESSAGE, content: "Hi" });
 	});
 
-	it("is a bad request with a bot that is not crew, and a conflict with one that has no model", async () => {
-		const refusing = (failure: Chats.HostNotCrew | Chats.HostHasNoModel) =>
-			app({ startThread: () => Effect.fail(failure) }).request(
-				`/conversations/${CHAT}/threads`,
-				startThread({ hostAgentId: BOT }),
-			);
+	it("is a conflict with a bot that has no model, and not found with one the person cannot see", async () => {
+		const refusing = (failure: Chats.HostHasNoModel | ResourceHidden) =>
+			app({ startTask: () => Effect.fail(failure) }).request(`/agents/${BOT}/tasks`, startTask());
 
-		expect((await refusing(new Chats.HostNotCrew())).status).toBe(400);
 		expect((await refusing(new Chats.HostHasNoModel())).status).toBe(409);
+		expect((await refusing(new ResourceHidden({ resource: "agent" }))).status).toBe(404);
 	});
 });
 
-describe("changing a pod's chat", () => {
-	it("is a conflict once the chat is archived, or when it is the pod's first", async () => {
+describe("changing a channel's thread", () => {
+	it("is a conflict once the chat is archived, or when it is the channel's main chat", async () => {
 		const renamed = await app({
 			changeChat: () => Effect.fail(new Chats.ChatArchived()),
 		}).request(

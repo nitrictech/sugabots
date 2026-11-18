@@ -1,94 +1,101 @@
 export * as PodAdministration from "./pod-administration.ts";
 
-import type { Pod, PodColor, PodMember, PodUpdate } from "@sugabots/contracts";
+import type {
+	Agent,
+	Pod,
+	PodColor,
+	PodMember,
+	PodUpdate,
+	PodVisibility,
+} from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { Context, Data, Effect, Layer } from "effect";
-import { type AuthorizationDenied, creatorStanding } from "../../authorization/access.ts";
+import {
+	type AuthorizationDenied,
+	joinedStanding,
+	listedPodStandingsFor,
+	ResourceHidden,
+} from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
-import { Visibility } from "../../authorization/visibility.ts";
-import { serviceOperations } from "../../database/database.ts";
+import { query, serviceOperations } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import type { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { PersonalPods } from "./personal-pods.ts";
+import { crewAgentRow, toAgent } from "../agents/agent.ts";
 import { podSeenBy } from "./pod.ts";
 import { podMembers } from "./pod-reads.ts";
 import { PodRepository } from "./pod-repository.ts";
 
 /**
- * A workspace's pods, who is in them, and what each one is set up with. Pods
- * are returned as the current actor sees them, permissions and all.
+ * A workspace's channels, who is in them, and their bots. Channels are
+ * returned as the current actor sees them, permissions and all.
  */
 export interface Interface {
-	/** The pods the actor reaches in the workspace, by name. */
+	/** The channels the actor is in, and the public ones they could join, by name. */
 	readonly list: (input: {
 		workspace: string;
 	}) => Effect.Effect<Pod[], AuthorizationDenied, CurrentActor.Service>;
-	/** A shared pod with the actor in it. */
+	/** A channel with the actor in it. */
 	readonly create: (input: {
 		workspace: string;
 		name: string;
 		slug: string;
 		color?: PodColor;
+		description?: string | null;
+		visibility?: PodVisibility;
 	}) => Effect.Effect<Pod, AuthorizationDenied | PodRepository.PodSlugTaken, CurrentActor.Service>;
-	/** The actor's Personal pod, provisioned as {@link PersonalPods.Interface.provisionWithModel} does. */
-	readonly ensurePersonal: (input: {
-		workspace: string;
-		model: string;
-	}) => Effect.Effect<
-		Pod,
-		AuthorizationDenied | ModelProviderRepository.ModelNotEnabled,
-		CurrentActor.Service
-	>;
 	readonly update: (input: {
 		podId: string;
 		changes: PodUpdate;
 	}) => Effect.Effect<
 		Pod,
-		| AuthorizationDenied
-		| EmptyPodUpdate
-		| PodRepository.PersonalPodFixed
-		| PodRepository.PodGone
-		| PodRepository.PodSlugTaken,
+		AuthorizationDenied | EmptyPodUpdate | PodRepository.PodGone | PodRepository.PodSlugTaken,
 		CurrentActor.Service
 	>;
 	readonly remove: (input: {
 		podId: string;
-	}) => Effect.Effect<
-		void,
-		AuthorizationDenied | PodRepository.PersonalPodFixed,
-		CurrentActor.Service
-	>;
+	}) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
 	readonly members: (input: {
 		podId: string;
 	}) => Effect.Effect<PodMember[], AuthorizationDenied, CurrentActor.Service>;
-	/** Adds `userId` to the pod. Adding somebody already in it changes nothing. */
+	/** Adds `userId` to the channel. Adding somebody already in it changes nothing. */
 	readonly addMember: (input: {
 		podId: string;
 		userId: string;
-	}) => Effect.Effect<
-		void,
-		AuthorizationDenied | PersonalPodMembershipFixed | NotInWorkspace,
-		CurrentActor.Service
-	>;
-	/** Takes `userId` out of the pod. Refuses an administrator, who belongs to every shared pod. */
+	}) => Effect.Effect<void, AuthorizationDenied | NotInWorkspace, CurrentActor.Service>;
+	/** Takes `userId` out of the channel. Refuses an administrator, who belongs to every one. */
 	readonly removeMember: (input: {
 		podId: string;
 		userId: string;
 	}) => Effect.Effect<
 		void,
-		AuthorizationDenied | PersonalPodMembershipFixed | AdministratorInEverySharedPod | NotInPod,
+		AuthorizationDenied | AdministratorInEveryChannel | NotInPod,
 		CurrentActor.Service
 	>;
-	/** Takes the caller out of the pod, on the same terms as {@link Interface.removeMember}. */
+	/** Takes the caller out of the channel, on the same terms as {@link Interface.removeMember}. */
 	readonly leave: (input: {
 		podId: string;
 	}) => Effect.Effect<
 		void,
-		AuthorizationDenied | PersonalPodMembershipFixed | AdministratorInEverySharedPod | NotInPod,
+		AuthorizationDenied | AdministratorInEveryChannel | NotInPod,
 		CurrentActor.Service
 	>;
+	/** Puts the caller in a public channel. Joining one they are in changes nothing. */
+	readonly join: (input: {
+		podId: string;
+	}) => Effect.Effect<Pod, AuthorizationDenied, CurrentActor.Service>;
+	/** The channel's bots, by name. */
+	readonly bots: (input: {
+		podId: string;
+	}) => Effect.Effect<Agent[], AuthorizationDenied, CurrentActor.Service>;
+	readonly addBot: (input: {
+		podId: string;
+		agentId: string;
+	}) => Effect.Effect<void, AuthorizationDenied | PodRepository.BotNotPublic, CurrentActor.Service>;
+	readonly removeBot: (input: {
+		podId: string;
+		agentId: string;
+	}) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -98,20 +105,16 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("PodAdministration");
 	const authorization = yield* Authorization.Service;
-	const visibility = yield* Visibility.Service;
 	const pods = yield* PodRepository.Service;
-	const personalPods = yield* PersonalPods.Service;
 
-	const takeOut = (pod: schema.PodRow, userId: string) =>
+	const takeOut = (channel: schema.PodRow, userId: string) =>
 		Effect.gen(function* () {
-			const outcome = yield* pods.removeMember(pod.workspaceId, pod.id, userId);
+			const outcome = yield* pods.removeMember(channel.workspaceId, channel.id, userId);
 			switch (outcome) {
 				case "removed":
 					return;
-				case "personal_pod":
-					return yield* new PersonalPodMembershipFixed({ attempted: "remove" });
 				case "administrator":
-					return yield* new AdministratorInEverySharedPod();
+					return yield* new AdministratorInEveryChannel();
 				case "not_a_member":
 					return yield* new NotInPod();
 			}
@@ -122,40 +125,22 @@ export const make = Effect.gen(function* () {
 			operation(
 				"list",
 				Effect.gen(function* () {
-					const { workspaceId } = yield* authorization.workspace(input.workspace, "workspace.read");
-					return (yield* visibility.pods(workspaceId)).map(podSeenBy);
+					const { workspaceId, actor } = yield* authorization.workspace(
+						input.workspace,
+						"workspace.read",
+					);
+					const listed = yield* query((db) => listedPodStandingsFor(db, workspaceId, actor.userId));
+					return listed.map(podSeenBy);
 				}),
 			),
 
-		create: ({ workspace, name, slug, color }) =>
+		create: ({ workspace, ...input }) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
 					const { workspaceId, actor } = yield* authorization.workspace(workspace, "pod.create");
-					const row = yield* pods.create(workspaceId, {
-						creatorId: actor.userId,
-						name,
-						slug,
-						color,
-					});
-					return podSeenBy(creatorStanding(row, actor));
-				}),
-			),
-
-		ensurePersonal: ({ workspace, model }) =>
-			operation(
-				"ensurePersonal",
-				Effect.gen(function* () {
-					const { workspaceId, actor } = yield* authorization.workspace(
-						workspace,
-						"workspace.read",
-					);
-					const personal = yield* personalPods.provisionWithModel({
-						workspaceId,
-						userId: actor.userId,
-						model,
-					});
-					return podSeenBy(creatorStanding(personal, actor));
+					const row = yield* pods.create(workspaceId, { creatorId: actor.userId, ...input });
+					return podSeenBy(joinedStanding(row, actor));
 				}),
 			),
 
@@ -175,29 +160,26 @@ export const make = Effect.gen(function* () {
 		remove: ({ podId }) =>
 			operation(
 				"remove",
-				Effect.flatMap(authorization.pod(podId, "pod.delete"), ({ pod }) =>
-					pods.remove(pod.workspaceId, pod.id),
+				Effect.flatMap(authorization.pod(podId, "pod.delete"), ({ pod: channel }) =>
+					pods.remove(channel.workspaceId, channel.id),
 				),
 			),
 
 		members: ({ podId }) =>
 			operation(
 				"members",
-				Effect.flatMap(authorization.pod(podId, "pod.read"), ({ pod }) => podMembers(pod.id)),
+				Effect.flatMap(authorization.pod(podId, "pod.read"), ({ pod: channel }) =>
+					podMembers(channel.id),
+				),
 			),
 
 		addMember: ({ podId, userId }) =>
 			operation(
 				"addMember",
 				Effect.gen(function* () {
-					const { pod } = yield* authorization.pod(podId, "pod.members.manage");
-					const outcome = yield* pods.addMember(pod.workspaceId, pod.id, userId);
-					if (outcome === "personal_pod") {
-						return yield* new PersonalPodMembershipFixed({ attempted: "add" });
-					}
-					if (outcome === "not_workspace_member") {
-						return yield* new NotInWorkspace();
-					}
+					const { pod: channel } = yield* authorization.pod(podId, "pod.members.manage");
+					const outcome = yield* pods.addMember(channel.workspaceId, channel.id, userId);
+					if (outcome === "not_workspace_member") return yield* new NotInWorkspace();
 				}),
 			),
 
@@ -205,8 +187,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"removeMember",
 				Effect.gen(function* () {
-					const { pod } = yield* authorization.pod(podId, "pod.members.manage");
-					return yield* takeOut(pod, userId);
+					const { pod: channel } = yield* authorization.pod(podId, "pod.members.manage");
+					return yield* takeOut(channel, userId);
 				}),
 			),
 
@@ -214,49 +196,84 @@ export const make = Effect.gen(function* () {
 			operation(
 				"leave",
 				Effect.gen(function* () {
-					const { pod, actor } = yield* authorization.pod(podId, "pod.leave");
-					return yield* takeOut(pod, actor.userId);
+					const { pod: channel, actor } = yield* authorization.pod(podId, "pod.leave");
+					return yield* takeOut(channel, actor.userId);
 				}),
+			),
+
+		join: ({ podId }) =>
+			operation(
+				"join",
+				Effect.gen(function* () {
+					const standing = yield* authorization.podFound(podId);
+					const channel = standing.pod;
+					if (!standing.facts.isMember) {
+						// Only a public channel is joined from the directory; a private one
+						// is answered as if it weren't there.
+						if (channel.visibility !== "public" || !standing.actor.workspaceRole) {
+							return yield* new ResourceHidden({ resource: "pod" });
+						}
+						yield* pods.addMember(channel.workspaceId, channel.id, standing.actor.userId);
+					}
+					return podSeenBy(joinedStanding(channel, standing.actor));
+				}),
+			),
+
+		bots: ({ podId }) =>
+			operation(
+				"bots",
+				Effect.gen(function* () {
+					const { pod: channel, actor } = yield* authorization.pod(podId, "pod.read");
+					return (yield* pods.bots(channel.id)).flatMap((row) => {
+						const crew = crewAgentRow(row);
+						return crew ? [toAgent(crew, { actor })] : [];
+					});
+				}),
+			),
+
+		addBot: ({ podId, agentId }) =>
+			operation(
+				"addBot",
+				Effect.gen(function* () {
+					const { pod: channel } = yield* authorization.pod(podId, "pod.bots.manage");
+					// A bot the person can't see is answered as if it weren't there.
+					yield* authorization.agent(agentId, "agent.read");
+					yield* pods.addBot(channel.workspaceId, channel.id, agentId);
+				}),
+			),
+
+		removeBot: ({ podId, agentId }) =>
+			operation(
+				"removeBot",
+				Effect.flatMap(authorization.pod(podId, "pod.bots.manage"), ({ pod: channel }) =>
+					pods.removeBot(channel.workspaceId, channel.id, agentId),
+				),
 			),
 	});
 });
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, Visibility.layer, PodRepository.layer, PersonalPods.layer]),
-);
+export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, PodRepository.layer]));
 
-/** A pod update that names nothing to change. */
+/** A channel update that names nothing to change. */
 export class EmptyPodUpdate extends Data.TaggedError("EmptyPodUpdate") implements UserFacing {
 	get userMessage() {
 		return userText`Nothing to change`;
 	}
 }
 
-/** A Personal pod has exactly one member, its owner. */
-export class PersonalPodMembershipFixed
-	extends Data.TaggedError("PersonalPodMembershipFixed")<{ readonly attempted: "add" | "remove" }>
+/** Administrators belong to every channel, so nobody takes one out of it. */
+export class AdministratorInEveryChannel
+	extends Data.TaggedError("AdministratorInEveryChannel")
 	implements UserFacing
 {
 	get userMessage() {
-		return this.attempted === "add"
-			? userText`Personal pods cannot have other members`
-			: userText`Personal pod membership cannot be changed`;
+		return userText`Administrators are in every channel`;
 	}
 }
 
-/** Administrators belong to every shared pod, so nobody takes one out of it. */
-export class AdministratorInEverySharedPod
-	extends Data.TaggedError("AdministratorInEverySharedPod")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`Administrators are in every shared pod`;
-	}
-}
-
-/** Only a member of the pod's workspace can be added to it. */
+/** Only a member of the channel's workspace can be added to it. */
 export class NotInWorkspace extends Data.TaggedError("NotInWorkspace") implements UserFacing {
 	get userMessage() {
 		return userText`That person is not in this workspace`;
@@ -265,6 +282,6 @@ export class NotInWorkspace extends Data.TaggedError("NotInWorkspace") implement
 
 export class NotInPod extends Data.TaggedError("NotInPod") implements UserFacing {
 	get userMessage() {
-		return userText`That person is not in this pod`;
+		return userText`That person is not in this channel`;
 	}
 }

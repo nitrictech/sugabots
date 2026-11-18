@@ -1,5 +1,5 @@
 import { messageAuthorName, type ThreadType } from "@sugabots/contracts";
-import { and, asc, eq, gte, or } from "drizzle-orm";
+import { and, asc, eq, gte } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { agent, message, thread, user } from "../../database/schema.ts";
@@ -12,10 +12,9 @@ import {
 	withReplyTo,
 } from "./participants.ts";
 import { loadPlacedParts } from "./placed-parts.ts";
-import { threadPodId } from "./rooms.ts";
 
 /**
- * What the system agents that work on a thread after a reply (the Scribe and
+ * What the system agents that work on a thread after a reply (the Summariser and
  * the Compaction agent) read: the thread they work on, and its transcript.
  * Each keeps its own turns in a child thread that `ThreadRepository` opens.
  */
@@ -23,13 +22,10 @@ import { threadPodId } from "./rooms.ts";
 /** The thread a system agent works on, as much of it as preparing that work needs. */
 export interface SystemAgentScope {
 	threadId: string;
-	podId: string;
 	workspaceId: string;
 	threadType: ThreadType;
 	threadTitle: string;
 	initiatorUserId: string | null;
-	/** On a thread started from a message in a channel: that message, which stays in the channel. */
-	startingMessageId: string | null;
 	/** The model of the agent whose reply asked for this work, which reads the thread next. */
 	agentModel: string | null;
 }
@@ -52,12 +48,10 @@ export const loadSystemAgentScope = Effect.fn("SystemAgentThreads.loadSystemAgen
 	const [row] = yield* db
 		.select({
 			threadId: thread.id,
-			podId: thread.podId,
 			workspaceId: thread.workspaceId,
 			threadType: thread.type,
 			threadTitle: thread.title,
 			initiatorUserId: thread.initiatorUserId,
-			startingMessageId: thread.originMessageId,
 			agentModel: agent.model,
 		})
 		.from(thread)
@@ -72,21 +66,18 @@ export const loadSystemAgentScope = Effect.fn("SystemAgentThreads.loadSystemAgen
 		)
 		.where(eq(thread.id, request.threadId))
 		.limit(1);
-	return (
-		row && ({ ...row, podId: threadPodId(row.threadId, row.podId) } satisfies SystemAgentScope)
-	);
+	return row satisfies SystemAgentScope | undefined;
 });
 
 /**
  * Every complete message in the thread, oldest first, or only those created
- * at or after `from`, including `startingMessageId` when provided: the message
- * in a channel the thread was started from. A message with nothing to read,
+ * at or after `from`. A message with nothing to read,
  * such as a reply that only called tools that left no record, has no `entry`.
  */
 export const loadTranscript = Effect.fn("SystemAgentThreads.loadTranscript")(function* (
 	db: Executor,
 	threadId: string,
-	{ from, startingMessageId }: { from?: Date; startingMessageId?: string | null } = {},
+	{ from }: { from?: Date } = {},
 ) {
 	const rows = yield* db
 		.select({
@@ -98,10 +89,7 @@ export const loadTranscript = Effect.fn("SystemAgentThreads.loadTranscript")(fun
 		.leftJoin(agent, eq(agent.id, message.authorAgentId))
 		.where(
 			and(
-				or(
-					eq(message.threadId, threadId),
-					startingMessageId ? eq(message.id, startingMessageId) : undefined,
-				),
+				eq(message.threadId, threadId),
 				eq(message.status, "complete"),
 				from ? gte(message.createdAt, from) : undefined,
 			),

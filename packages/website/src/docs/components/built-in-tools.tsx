@@ -22,7 +22,7 @@ const toolIcons: Record<BuiltInToolKey, LucideIcon> = {
 	artifact_edit: PencilLineIcon,
 };
 
-/** The tools every agent comes with, from the product's own catalog. */
+/** The tools every bot comes with, from the product's own catalog. */
 export function BuiltInTools() {
 	return (
 		<Reveal className="my-8 grid gap-3 sm:grid-cols-2">

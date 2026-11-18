@@ -5,6 +5,7 @@ import { user } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
+import { noComputers } from "@sugabots/core/sandboxes/testing";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
@@ -58,6 +59,7 @@ async function appWith(
 				),
 			]),
 			Layer.provide(Installation.layer),
+			Layer.provide(noComputers),
 			Layer.provide(testInfrastructure),
 			Layer.provide(
 				ConfigProvider.layer(

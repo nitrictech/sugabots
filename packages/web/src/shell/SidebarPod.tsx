@@ -1,37 +1,36 @@
 import type { NotificationSettings, Pod } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, User } from "lucide-react";
-import { type ReactNode, useId } from "react";
+import { ChevronRight, Lock } from "lucide-react";
+import type { ReactNode } from "react";
 import { podSettingsLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import type { useBackToHere } from "@/lib/settings-back.tsx";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
 import { NESTED_INDENT } from "@/shell/ConversationList.tsx";
-import { Locked, OnlyYou, PERSONAL_POD_PRIVACY_IN_FULL } from "@/shell/PersonalPrivacy.tsx";
 import { podPalettes } from "@/shell/PodTile.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
-/** A pod the viewer reaches, with how its chats stand for them. */
+/** A channel the viewer is in, with how its conversations stand for them. */
 export interface PodStanding {
 	pod: Pod;
-	/** How many unread messages its chats hold. */
+	/** How many unread messages its conversations hold. */
 	unreadMessages: number;
-	/** Whether a chat in it waits on the viewer. */
+	/** Whether a conversation in it waits on the viewer. */
 	needsApproval: boolean;
-	/** How many of its routines failed their latest run. */
+	/** How many automations failed their latest run: always none for a channel. */
 	failedRoutines: number;
 }
 
 /**
- * A pod in the sidebar: its name, which folds it away or opens it, and under
- * it, while open, `children`. Under the pointer or on focus, a caret takes
- * the place of the pod's mark, and `newMenu` and its settings come in at the end. Folded, it
- * says how much is new in it, and is shaded while it holds the page open.
- * Right-clicked, it offers its notifications. A Personal pod's name says that
- * only you see into it.
+ * A channel in the sidebar: its name, which folds it away or opens it, and
+ * under it, while open, `children`. Under the pointer or on focus, a caret
+ * takes the place of the channel's mark, and `newMenu` and its settings come
+ * in at the end. Folded, it says how much is new in it, and is shaded while it
+ * holds the page open. Right-clicked, it offers its notifications. A private
+ * channel's name carries a lock.
  */
 export function SidebarPod({
 	standing,
@@ -45,23 +44,22 @@ export function SidebarPod({
 }: {
 	standing: PodStanding;
 	open: boolean;
-	/** Whether the page open is in this pod. */
+	/** Whether the page open is in this channel. */
 	holdsSelected: boolean;
 	onToggle: () => void;
 	/** History state for the settings link, so its Back returns to the page it left. */
 	settingsBack?: ReturnType<typeof useBackToHere>;
 	/** What the viewer is notified about, once loaded. */
 	notificationSettings?: NotificationSettings;
-	/** What makes something new in the pod, such as a channel or a bot. */
+	/** What makes something new in the channel, such as a thread. */
 	newMenu?: ReactNode;
 	children: ReactNode;
 }) {
 	const { pod } = standing;
 	const notificationPlace = { kind: "pod", id: pod.id } as const;
-	const personal = pod.kind === "personal";
-	const privacyId = useId();
+	const isPrivate = pod.visibility === "private";
 	return (
-		// biome-ignore lint/a11y/useSemanticElements: a pod's part of a sidebar holds links, not form controls, so a fieldset is wrong.
+		// biome-ignore lint/a11y/useSemanticElements: a channel's part of a sidebar holds links, not form controls, so a fieldset is wrong.
 		<div role="group" aria-label={pod.name} className="flex flex-col">
 			<NotificationsContextMenu settings={notificationSettings} place={notificationPlace}>
 				<div
@@ -73,7 +71,6 @@ export function SidebarPod({
 					<button
 						type="button"
 						aria-expanded={open}
-						aria-describedby={personal ? privacyId : undefined}
 						onClick={onToggle}
 						className="focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-sm pl-2 text-left"
 					>
@@ -104,15 +101,17 @@ export function SidebarPod({
 							>
 								{pod.name}
 							</span>
-							{personal && <OnlyYou className="text-xs text-subtle-foreground" />}
+							{isPrivate && (
+								<Lock
+									aria-label="Private"
+									size={11}
+									strokeWidth={2.25}
+									className="shrink-0 text-subtle-foreground"
+								/>
+							)}
 						</span>
 						<MutedMark settings={notificationSettings} place={notificationPlace} />
 					</button>
-					{personal && (
-						<span id={privacyId} hidden>
-							{PERSONAL_POD_PRIVACY_IN_FULL}
-						</span>
-					)}
 					{!open && <PodNews standing={standing} />}
 					{/* Kept in view while its menu is open, which takes the pointer and focus away from the row. */}
 					<span className="hidden group-hover/pod:contents group-has-focus-visible/pod:contents group-has-data-popup-open/pod:contents">
@@ -138,7 +137,7 @@ function hasNews({ unreadMessages, needsApproval, failedRoutines }: PodStanding)
 }
 
 /**
- * What is new in a folded pod: a dot while something waits on the viewer's
+ * What is new in a folded channel: a dot while something waits on the viewer's
  * approval. Anything else shows in the pod's bold name, so it is only counted
  * for a screen reader.
  */
@@ -161,41 +160,30 @@ function PodNews({ standing }: { standing: PodStanding }) {
 	return <span className="sr-only">{news.join(", ")}</span>;
 }
 
-/**
- * A pod as a small square holding its initial, in the pod's colour, or for
- * Personal a person, locked except at `sm`.
- */
+/** A channel as a small square holding its initial, in the channel's colour. */
 export function PodInitial({
 	pod,
 	size = "md",
 	className,
 }: {
-	/** Only what it is drawn from, so a pod not made yet, such as New pod's, can be drawn too. */
+	/** Only what it is drawn from, so a channel not made yet, such as New channel's, can be drawn too. */
 	pod: PodMarkSource;
 	/**
 	 * `sm` is a quieter mark for a row that names its pod: the letter in the
-	 * pod's colour on a tint of it. `lg` stands beside the title of the pod's
-	 * own settings.
+	 * channel's colour on a tint of it. `lg` stands beside the title of the
+	 * channel's own settings.
 	 */
 	size?: PodInitialSize;
 	className?: string;
 }) {
-	// Too small for its lock at `sm`, where the row names the pod anyway.
-	if (pod.kind !== "personal" || size === "sm") {
-		return <PodSquare pod={pod} size={size} className={className} />;
-	}
-	return (
-		<Locked lockSize={size === "lg" ? 16 : 8} className={className}>
-			<PodSquare pod={pod} size={size} />
-		</Locked>
-	);
+	return <PodSquare pod={pod} size={size} className={className} />;
 }
 
-type PodMarkSource = Pick<Pod, "name" | "color" | "kind">;
+type PodMarkSource = Pick<Pod, "name" | "color">;
 
 type PodInitialSize = "lg" | "md" | "sm";
 
-/** The square itself, without a Personal pod's lock. */
+/** The square itself. */
 function PodSquare({
 	pod,
 	size,
@@ -228,11 +216,7 @@ function PodSquare({
 					: { background: palette.swatch })
 			}
 		>
-			{pod.kind === "personal" ? (
-				<User size={{ sm: 10, md: 11, lg: 20 }[size]} strokeWidth={2.25} />
-			) : (
-				(Array.from(pod.name.trim())[0]?.toUpperCase() ?? "")
-			)}
+			{Array.from(pod.name.trim())[0]?.toUpperCase() ?? ""}
 		</span>
 	);
 }

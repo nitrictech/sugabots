@@ -55,7 +55,7 @@ describe("a refused tool", () => {
 	it("refuses every call, recording why without running it", async () => {
 		const calls = fakeCalls();
 		const execute = vi.fn(async () => "ran");
-		const refusal = userText`This tool is turned off for bots in this pod.`;
+		const refusal = userText`This tool is turned off for this bot.`;
 		const off = refused("wiki__wipe", tool({ inputSchema: jsonSchema({}), execute }), refusal, {
 			calls,
 			run,

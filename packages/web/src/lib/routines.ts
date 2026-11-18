@@ -93,8 +93,8 @@ export function useRoutineActions() {
 	const refresh = () =>
 		Promise.all([
 			queries.invalidateQueries({ queryKey: [ROUTINES_KEY] }),
-			// A pod's chat list holds its routines, by name and how they stand.
-			queries.invalidateQueries({ queryKey: ["chat-list"] }),
+			// A bot's list holds its automations, by name and how they stand.
+			queries.invalidateQueries({ queryKey: ["bot-tasks"] }),
 		]);
 	const keepSecret = (triggerId: string, current: RoutineCurrentSecret) =>
 		queries.setQueryData([SECRET_KEY, triggerId], current);

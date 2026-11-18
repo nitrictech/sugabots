@@ -51,9 +51,7 @@ export function useUpdateNotificationPreferences() {
  * Where a level applies in place of the one above it: a pod, in place of the
  * person's own, or one of its bots, in place of the pod's.
  */
-export type NotificationPlace =
-	| { kind: "pod"; id: string }
-	| { kind: "bot"; id: string; podId: string };
+export type NotificationPlace = { kind: "pod"; id: string } | { kind: "bot"; id: string };
 
 /** Sets the level for a place, or with null goes back to the one above it. */
 export function useSetNotificationLevel() {
@@ -390,10 +388,10 @@ export function levelChosenFor(
 	return settings[field][id] ?? null;
 }
 
-/** The level a place follows when none is chosen for it: its pod's, or the person's own. */
+/** The level a place follows when none is chosen for it: the person's own. */
 export function levelAbove(
 	settings: NotificationSettings,
-	place: NotificationPlace,
+	_place: NotificationPlace,
 ): NotificationLevel {
-	return (place.kind === "bot" ? settings.pods[place.podId] : undefined) ?? settings.level;
+	return settings.level;
 }

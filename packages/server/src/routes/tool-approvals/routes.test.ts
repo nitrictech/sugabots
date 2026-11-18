@@ -13,7 +13,6 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
  */
 
 const MEMBER_ID = "0199a3a0-0000-7000-8000-000000000003";
-const POD_ID = "0199a3a0-0000-7000-8000-000000000004";
 const CALL_ID = "0199a3a0-0000-7000-8000-000000000005";
 
 const resolveUser: UserResolver = async () => ({
@@ -30,7 +29,7 @@ function app(decide: Turns.ControlsInterface["decide"]) {
 }
 
 const approve = (routes: ReturnType<typeof app>, decision: string) =>
-	routes.request(`/pods/${POD_ID}/tool-calls/${CALL_ID}/approval`, {
+	routes.request(`/tool-calls/${CALL_ID}/approval`, {
 		method: "POST",
 		headers: { authorization: "Bearer member", "content-type": "application/json" },
 		body: JSON.stringify({ decision }),
@@ -49,7 +48,6 @@ describe("tool approval routes", () => {
 
 		expect(response.status).toBe(202);
 		expect(decide).toHaveBeenCalledWith({
-			podId: POD_ID,
 			toolCallId: CALL_ID,
 			decision: "allow_once",
 		});

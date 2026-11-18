@@ -14,8 +14,6 @@ import {
 	agent,
 	collaboration,
 	message,
-	pod,
-	podMember,
 	turn,
 	user,
 	workspace,
@@ -25,6 +23,7 @@ import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/da
 import { Notifications } from "@sugabots/core/notifications/notifications";
 import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
+import { noComputers } from "@sugabots/core/sandboxes/testing";
 import { unimplemented } from "@sugabots/core/testing";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
@@ -79,6 +78,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						Layer.succeed(SandboxTools.Service, SandboxTools.none),
 						Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
 						unimplemented(Notifications.Service, { handler: () => Effect.void }),
+						noComputers,
 					),
 				),
 				Layer.provideMerge(Layer.mergeAll(EventOutbox.layer, ConversationWorkflows.lanes)),
@@ -98,7 +98,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await closeDatabase();
 		});
 
-		/** A workspace with a pod, a host agent and a helper the host can collaborate with. */
+		/** A workspace with a host bot and a helper bot the host can collaborate with. */
 		async function aRoom() {
 			const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 			const [space] = await onDatabase((db) =>
@@ -117,32 +117,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await onDatabase((db) =>
 				db.insert(workspaceMember).values({ workspaceId: space.id, userId: member.id }),
 			);
-			const [madePod] = await onDatabase((db) =>
-				db
-					.insert(pod)
-					.values({
-						workspaceId: space.id,
-						ownerId: member.id,
-						kind: "shared",
-						name: "Room",
-						slug: `room-${suffix}`,
-						createdById: member.id,
-					})
-					.returning(),
-			);
-			if (!madePod) throw new Error("fixture");
-			await onDatabase((db) =>
-				db
-					.insert(podMember)
-					.values({ workspaceId: space.id, podId: madePod.id, userId: member.id }),
-			);
 			const crew = await onDatabase((db) =>
 				db
 					.insert(agent)
 					.values([
 						{
 							workspaceId: space.id,
-							podId: madePod.id,
 							name: "Host",
 							handle: "host",
 							color: "rose",
@@ -152,7 +132,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						},
 						{
 							workspaceId: space.id,
-							podId: madePod.id,
 							name: "Helper",
 							handle: "helper",
 							description: "Has pets.",
@@ -166,43 +145,30 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			);
 			const host = crew.find((one) => one.name === "Host");
 			if (!host) throw new Error("fixture");
-			return { space, member, pod: madePod, host };
+			return { member, host };
 		}
 
-		async function openConversationAndPost(input: {
-			workspaceId: string;
-			podId: string;
-			hostAgentId: string;
-			userId: string;
-			content: string;
-		}) {
+		async function startTask(input: { hostAgentId: string; userId: string; content: string }) {
 			const asPerson = CurrentActor.provide(
 				CurrentActor.AuthenticatedUserId.vouchedFor(input.userId),
 			);
 			return runtime.runPromise(
 				Effect.gen(function* () {
 					const chats = yield* Chats.Service;
-					const opened = yield* chats.openBotChannel({
-						workspace: input.workspaceId,
-						podId: input.podId,
-						hostAgentId: input.hostAgentId,
-					});
-					yield* chats.post({
-						conversationId: opened.id,
+					const started = yield* chats.startTask({
+						agentId: input.hostAgentId,
 						messageId: crypto.randomUUID(),
 						content: input.content,
 					});
-					return opened;
+					return started.conversation;
 				}).pipe(asPerson),
 			);
 		}
 
 		it("finishes the host's turn when the helper answers", async () => {
-			const { space, pod: room, member, host } = await aRoom();
+			const { member, host } = await aRoom();
 			const started = Date.now();
-			const opened = await openConversationAndPost({
-				workspaceId: space.id,
-				podId: room.id,
+			const opened = await startTask({
 				hostAgentId: host.id,
 				userId: member.id,
 				content: "What pets does Helper have?",

@@ -67,7 +67,7 @@ export function notConnectionRepository(
 ): Failed {
 	return failed(
 		repositories.length === 0
-			? "The GitHub connection has no repositories. Someone who manages the pod's connections adds them in its settings."
+			? "The GitHub connection has no repositories. Someone who manages your connections adds them in your settings."
 			: `${repository} isn't one of the GitHub connection's repositories: ${repositories.join(", ")}.`,
 	);
 }

@@ -3,24 +3,18 @@ import { type TestConnection, testPerson } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import {
-	accountManager,
-	chief,
-	growthDesk,
-	linearHandler,
-	revenue,
-} from "@/shell/story-fixtures.ts";
+import { chief, growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	chatPath,
 	connectionHandlers,
 	StoryApp,
 	storyBots,
-	storyChannelFor,
 	storyChatDetails,
 	storyPodChatDetails,
 	storyPodChatFor,
 	storyPods,
+	storyTaskFor,
 	storyUser,
 	storyWorkspace,
 } from "../story-app.tsx";
@@ -32,7 +26,7 @@ import {
  */
 
 function said(id: string, by: "you" | "bot", text: string, at: string): Message {
-	const thread = storyChannelFor(growthDesk).id;
+	const thread = storyTaskFor(growthDesk).id;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000005${id}`,
 		threadId: thread,
@@ -108,7 +102,7 @@ function expiredConnection(n: number, name: string, url: string): TestConnection
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000007${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		podId: revenue.id,
+		agentId: "0199a3a0-0000-7000-8000-00000000b071",
 		name,
 		handle: name.toLowerCase(),
 		url,
@@ -173,7 +167,7 @@ export const SignInsExpired = meta.story({
 		await expect(await canvas.findByText("3 connections' sign-ins expired.")).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Open connections" })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/settings/pods/${revenue.slug}/connections`,
+			`/${storyWorkspace.slug}/settings/channels/${revenue.slug}/connections`,
 		);
 	},
 });
@@ -240,7 +234,7 @@ export const SignInExpiredOnAPhone = meta.story({
 
 /** A shared pod opened from the sidebar opens its chat. */
 export const PodOpensTopChat = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(canvas.getByRole("heading", { name: "General", level: 1 })).toBeInTheDocument();
@@ -278,7 +272,7 @@ export const PodChat = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...appHandlers({ podChatMessages: { [revenue.id]: podChat } }));
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(await within(log).findByText(/Drinks on Friday/)).toBeInTheDocument();
@@ -313,7 +307,7 @@ export const PodChatRoutineResult = meta.story({
 			...appHandlers({ podChatMessages: { [revenue.id]: [...podChat, routineResult] } }),
 		);
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
 	play: async ({ canvas, userEvent }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		const result = (await within(log).findByText(/overnight leads replied/)).closest("article");
@@ -333,7 +327,7 @@ export const PodChatRoutineResult = meta.story({
 
 /** A pod's chat before anyone has written in it opens on the pod: who is in it, and what it is for. */
 export const PodChatEmpty = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(
@@ -343,116 +337,9 @@ export const PodChatEmpty = meta.story({
 	},
 });
 
-/**
- * A thread started from a message sits under it as a collaboration does, with
- * the faces of who started it and its bot, when it last moved and how many
- * replies it has. Naming bots in the draft says they will reply in the chat.
- */
-export const PodChatThreadsAndReplies = meta.story({
-	beforeEach({ msw }) {
-		msw.use(
-			...appHandlers({
-				podChatMessages: { [revenue.id]: podChat },
-				podChatThreads: {
-					[revenue.id]: [
-						{
-							kind: "thread",
-							id: "0199a3a0-0000-7000-8000-00000000c991",
-							threadId: "0199a3a0-0000-7000-8000-00000000c991",
-							originMessageId: podChat[0]?.id ?? null,
-							title: "Pricing for the Northwind renewal",
-							agent: {
-								kind: "agent",
-								id: growthDesk.id,
-								name: growthDesk.name,
-								handle: growthDesk.handle,
-								color: growthDesk.color,
-								face: growthDesk.face,
-								shape: growthDesk.shape,
-							},
-							replies: 3,
-							lastReplyAt: "2026-09-18T06:20:00.000Z",
-							working: false,
-							createdAt: "2026-09-18T06:14:00.000Z",
-						},
-					],
-				},
-			}),
-		);
-	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
-	play: async ({ canvas, userEvent }) => {
-		const log = await canvas.findByRole("log", { name: "Chat messages" });
-		const thread = within(log).getByRole("button", {
-			name: /^Open thread: Pricing for the Northwind renewal/,
-		});
-		await expect(thread).toHaveTextContent("Pricing for the Northwind renewal");
-		await expect(thread).toHaveAccessibleName(/Last reply \d/);
-		await expect(thread).toHaveTextContent("3 replies");
-		// Under the message it was started from, before the next one.
-		const started = within(log).getByText("Northwind signed. Thanks for the push, everyone.");
-		const next = within(log).getByText("Drinks on Friday?");
-		await expect(
-			started.compareDocumentPosition(thread) & Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
-		await expect(
-			thread.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
-		await expect(canvas.getByText("Mention a bot to have it reply here.")).toBeInTheDocument();
-		await userEvent.type(
-			canvas.getByRole("textbox", { name: "Message General" }),
-			`@${growthDesk.handle} draft the renewal note with @${accountManager.handle} `,
-		);
-		await expect(
-			canvas.getByText(`${growthDesk.name} and ${accountManager.name} will reply here.`),
-		).toBeInTheDocument();
-	},
-});
-
-const botGreeting: Message = {
-	...said("24", "bot", "Hey! What would you like to talk about?", "2026-09-18T06:14:00.000Z"),
-	threadId: storyPodChatFor(revenue).id,
-};
-
-/**
- * A thread opened from a bot's own message, which asks the bot nothing: its
- * line shows the bot's face once, and no dots while nobody has written in it.
- */
-export const PodChatThreadFromABotsMessage = meta.story({
-	beforeEach({ msw }) {
-		msw.use(
-			...appHandlers({
-				podChatMessages: { [revenue.id]: [...podChat, botGreeting] },
-				podChatThreads: {
-					[revenue.id]: [
-						{
-							kind: "thread",
-							id: "0199a3a0-0000-7000-8000-00000000c992",
-							threadId: "0199a3a0-0000-7000-8000-00000000c992",
-							originMessageId: botGreeting.id,
-							title: "Hey!",
-							agent: botGreeting.author.kind === "agent" ? botGreeting.author : null,
-							replies: 0,
-							lastReplyAt: null,
-							working: false,
-							createdAt: "2026-09-18T06:15:00.000Z",
-						},
-					],
-				},
-			}),
-		);
-	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
-	play: async ({ canvas }) => {
-		const log = await canvas.findByRole("log", { name: "Chat messages" });
-		const thread = await within(log).findByRole("button", { name: /^Open thread: Hey!/ });
-		await expect(thread).not.toHaveAccessibleName(/Working/);
-	},
-});
-
 /** Starting a thread from its first message, with a chip for each of the pod's bots. */
 export const NewThread = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/threads/new`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/new`} />,
 	play: async ({ canvas, userEvent }) => {
 		await canvas.findByRole("heading", { name: `New thread in ${revenue.name}`, level: 2 });
 		const bots = await canvas.findByRole("list", { name: "Bots" });
@@ -471,7 +358,7 @@ export const NewThread = meta.story({
 export const NewThreadWithABot = meta.story({
 	render: () => (
 		<StoryApp
-			path={`/${storyWorkspace.slug}/pods/${revenue.slug}/threads/new?agent=${growthDesk.handle}`}
+			path={`/${storyWorkspace.slug}/channels/${revenue.slug}/new?agent=${growthDesk.handle}`}
 		/>
 	),
 	play: async ({ canvas }) => {
@@ -539,7 +426,7 @@ function failingRoutineHandlers() {
 }
 
 const failingRoutineThread = () => (
-	<StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/threads/${failingRoutine.feed}`} />
+	<StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/${failingRoutine.feed}`} />
 );
 
 /**
@@ -615,7 +502,7 @@ export const NamedChat = meta.story({
 		);
 	},
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/threads/${pricingChat.id}`} />
+		<StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/${pricingChat.id}`} />
 	),
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Pricing", level: 1 })).toBeVisible();
@@ -637,7 +524,7 @@ export const PodChatOnAPhone = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...appHandlers({ podChatMessages: { [revenue.id]: podChat } }));
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/chat`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("link", { name: `Back to ${revenue.name}` }),
@@ -648,7 +535,7 @@ export const PodChatOnAPhone = meta.story({
 /** On a phone the sidebar is the page, so a pod stays open on it rather than on a chat. */
 export const PodOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("link", { name: growthDesk.name })).toBeVisible();
 		await expect(canvas.queryByRole("log", { name: "Chat messages" })).toBeNull();
@@ -972,13 +859,13 @@ const collaboration: ThreadDetails = {
 	thread: {
 		id: collaborationId,
 		workspaceId: growthDesk.workspaceId,
-		podId: growthDesk.podId,
+		podId: null,
 		hostAgentId: linearHandler.id,
-		conversationId: storyChannelFor(growthDesk).id,
+		conversationId: storyTaskFor(growthDesk).id,
 		type: "collaboration",
 		title: "Check Sentry and open an issue if nothing is tracked",
 		status: "done",
-		parentThreadId: storyChannelFor(growthDesk).id,
+		parentThreadId: storyTaskFor(growthDesk).id,
 		initiatorUserId: storyUser.id,
 		doneAt: null,
 		createdAt: "2026-09-18T06:03:00.000Z",
@@ -986,7 +873,6 @@ const collaboration: ThreadDetails = {
 	},
 	capabilities: { approveToolCalls: true },
 	routineExecution: null,
-	startedFrom: null,
 	participants: [asked, asker],
 	crew: [asker, asked],
 	members: [],

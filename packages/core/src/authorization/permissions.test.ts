@@ -2,11 +2,15 @@ import type { WorkspaceRole } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import {
 	type Actor,
+	type AgentFacts,
+	type AgentPermission,
+	agentPermissions,
 	mayInPod,
 	mayInWorkspace,
-	type PodFacts,
+	mayOnAgent,
 	type PodPermission,
 	podPermissions,
+	reachesAgent,
 	type WorkspacePermission,
 } from "./permissions.ts";
 
@@ -26,71 +30,32 @@ const actor = (workspaceRole: WorkspaceRole | undefined, userId = ALICE): Actor 
 	workspaceRole,
 });
 
-const sharedPod = (isMember: boolean): PodFacts => ({
-	kind: "shared",
-	ownerId: null,
-	isMember,
+const publicBotBy = (createdById: string | null): AgentFacts => ({
+	visibility: "public",
+	createdById,
+	assistantOf: null,
 });
 
-const personalPodOf = (ownerId: string): PodFacts => ({
-	kind: "personal",
-	ownerId,
-	isMember: ownerId === ALICE,
+const privateBotBy = (createdById: string): AgentFacts => ({
+	visibility: "private",
+	createdById,
+	assistantOf: null,
+});
+
+/** A Personal Assistant, which the workspace makes rather than its person. */
+const assistantOf = (userId: string): AgentFacts => ({
+	visibility: "private",
+	createdById: null,
+	assistantOf: userId,
 });
 
 /**
- * Every pod permission there is.
+ * Every permission of each kind there is.
  *
- * Spelled as a `Record` and then taken apart, so a permission added to
- * `PodPermission` stops this file compiling rather than quietly dropping out
- * of every table below.
+ * Spelled as a `Record` and then taken apart, so a permission added to the
+ * type stops this file compiling rather than quietly dropping out of every
+ * table below.
  */
-const POD_PERMISSIONS = Object.keys({
-	"pod.read": true,
-	"pod.update": true,
-	"pod.delete": true,
-	"pod.members.manage": true,
-	"pod.leave": true,
-	"agent.read": true,
-	"agent.create": true,
-	"agent.update": true,
-	"agent.delete": true,
-	"connection.read": true,
-	"connection.manage": true,
-	"routine.read": true,
-	"routine.manage": true,
-	"routine.run": true,
-	"routine.history.read": true,
-	"approval.decide": true,
-	"approval.routine.decide": true,
-	"sandbox.manage": true,
-	"sandbox.desktop.use": true,
-} satisfies Record<PodPermission, true>) as PodPermission[];
-
-/** What a Member holds in a shared pod they have been added to. */
-const MEMBER_IN_JOINED_POD: PodPermission[] = [
-	"pod.read",
-	"pod.leave",
-	"agent.read",
-	"agent.create",
-	"agent.update",
-	"connection.read",
-	"routine.read",
-	"routine.history.read",
-	"approval.decide",
-	"sandbox.desktop.use",
-];
-
-/** What a Viewer holds there: reading, taking part, and nothing else. */
-const VIEWER_IN_JOINED_POD: PodPermission[] = [
-	"pod.read",
-	"pod.leave",
-	"agent.read",
-	"connection.read",
-	"routine.read",
-	"routine.history.read",
-];
-
 const WORKSPACE_PERMISSIONS = Object.keys({
 	"workspace.read": true,
 	"workspace.update": true,
@@ -102,13 +67,103 @@ const WORKSPACE_PERMISSIONS = Object.keys({
 	"workspace.builtInAgents.configure": true,
 	"workspace.usage.manage": true,
 	"pod.create": true,
+	"agent.create": true,
 } satisfies Record<WorkspacePermission, true>) as WorkspacePermission[];
+
+const POD_PERMISSIONS = Object.keys({
+	"pod.read": true,
+	"pod.update": true,
+	"pod.delete": true,
+	"pod.members.manage": true,
+	"pod.bots.manage": true,
+	"pod.leave": true,
+	"approval.decide": true,
+} satisfies Record<PodPermission, true>) as PodPermission[];
+
+const AGENT_PERMISSIONS = Object.keys({
+	"agent.read": true,
+	"agent.settings.read": true,
+	"agent.update": true,
+	"agent.delete": true,
+	"connection.read": true,
+	"connection.manage": true,
+	"routine.read": true,
+	"routine.manage": true,
+	"routine.run": true,
+	"routine.history.read": true,
+	"approval.decide": true,
+	"approval.routine.decide": true,
+	"sandbox.manage": true,
+	"sandbox.request.decide": true,
+	"sandbox.desktop.use": true,
+} satisfies Record<AgentPermission, true>) as AgentPermission[];
 
 /** What only the owner may do: decide who administers, hand the workspace on, and delete it. */
 const OWNER_ONLY: WorkspacePermission[] = [
 	"workspace.admins.manage",
 	"workspace.ownership.transfer",
 	"workspace.delete",
+];
+
+/** What a member may do in the workspace: belong to it, and make channels and bots. */
+const MEMBER_IN_WORKSPACE: WorkspacePermission[] = ["workspace.read", "pod.create", "agent.create"];
+
+/** What a member holds in a channel they are in: everything but changing or deleting it. */
+const MEMBER_IN_CHANNEL: PodPermission[] = [
+	"pod.read",
+	"pod.leave",
+	"pod.members.manage",
+	"pod.bots.manage",
+	"approval.decide",
+];
+
+/** What a viewer holds in a channel they are in: reading, taking part, and leaving. */
+const VIEWER_IN_CHANNEL: PodPermission[] = ["pod.read", "pod.leave"];
+
+/** What anybody who reaches a bot may do with it without managing it. */
+const USING_A_BOT: AgentPermission[] = [
+	"agent.read",
+	"agent.settings.read",
+	"connection.read",
+	"routine.read",
+	"routine.history.read",
+	"routine.run",
+	"approval.decide",
+	"sandbox.desktop.use",
+];
+
+/** What a viewer who reaches a bot may do with it: read, and take part in its tasks. */
+const VIEWING_A_BOT: AgentPermission[] = [
+	"agent.read",
+	"agent.settings.read",
+	"connection.read",
+	"routine.read",
+	"routine.history.read",
+];
+
+/**
+ * What a bot's creator, or an administrator, may do with it besides use it,
+ * with reading the configuration they change, but not its tasks, files or
+ * automations' runs.
+ */
+const MANAGING_A_BOT: AgentPermission[] = [
+	"agent.settings.read",
+	"connection.read",
+	"routine.read",
+	"agent.update",
+	"agent.delete",
+	"connection.manage",
+	"routine.manage",
+	"approval.routine.decide",
+	"sandbox.manage",
+	"sandbox.request.decide",
+];
+
+/** What a person may do with their Personal Assistant besides use it: change its look and connections, and decide its computer's requests. */
+const OWNING_AN_ASSISTANT: AgentPermission[] = [
+	"agent.update",
+	"connection.manage",
+	"sandbox.request.decide",
 ];
 
 describe("workspace actions", () => {
@@ -120,149 +175,230 @@ describe("workspace actions", () => {
 		expect(mayInWorkspace(actor("admin"), permission)).toBe(!OWNER_ONLY.includes(permission));
 	});
 
-	it.each(["member", "viewer"] as const)(
-		"a %s belongs to the workspace but configures nothing in it",
-		(role) => {
-			expect(mayInWorkspace(actor(role), "workspace.read")).toBe(true);
-			expect(mayInWorkspace(actor(role), "workspace.providers.manage")).toBe(false);
-			expect(mayInWorkspace(actor(role), "workspace.members.manage")).toBe(false);
-			expect(mayInWorkspace(actor(role), "workspace.admins.manage")).toBe(false);
-			expect(mayInWorkspace(actor(role), "workspace.ownership.transfer")).toBe(false);
-			expect(mayInWorkspace(actor(role), "workspace.builtInAgents.configure")).toBe(false);
-			expect(mayInWorkspace(actor(role), "workspace.usage.manage")).toBe(false);
-			expect(mayInWorkspace(actor(role), "pod.create")).toBe(false);
-		},
-	);
+	it.each(WORKSPACE_PERMISSIONS)("a member may %s only when granted", (permission) => {
+		expect(mayInWorkspace(actor("member"), permission)).toBe(
+			MEMBER_IN_WORKSPACE.includes(permission),
+		);
+	});
+
+	it.each(WORKSPACE_PERMISSIONS)("a viewer may %s only if it is belonging", (permission) => {
+		expect(mayInWorkspace(actor("viewer"), permission)).toBe(permission === "workspace.read");
+	});
 
 	it.each(WORKSPACE_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
 		expect(mayInWorkspace(actor(undefined), permission)).toBe(false);
 	});
 });
 
-describe("shared pods", () => {
+describe("channel actions", () => {
 	describe.each(["owner", "admin"] as const)("as %s", (role) => {
-		it.each(POD_PERMISSIONS)("in the pod may %s unless it is leaving", (permission) => {
-			expect(mayInPod(actor(role), permission, sharedPod(true))).toBe(permission !== "pod.leave");
+		it.each(POD_PERMISSIONS)("in the channel may %s unless it is leaving", (permission) => {
+			expect(mayInPod(actor(role), permission, { isMember: true })).toBe(
+				permission !== "pod.leave",
+			);
 		});
 
-		it.each(POD_PERMISSIONS)("outside the pod may not %s", (permission) => {
-			expect(mayInPod(actor(role), permission, sharedPod(false))).toBe(false);
+		it.each(POD_PERMISSIONS)("outside the channel may not %s", (permission) => {
+			expect(mayInPod(actor(role), permission, { isMember: false })).toBe(false);
 		});
 	});
 
-	it.each(POD_PERMISSIONS)("a member in the pod may %s only when granted", (permission) => {
-		expect(mayInPod(actor("member"), permission, sharedPod(true))).toBe(
-			MEMBER_IN_JOINED_POD.includes(permission),
+	it.each(POD_PERMISSIONS)("a member in the channel may %s only when granted", (permission) => {
+		expect(mayInPod(actor("member"), permission, { isMember: true })).toBe(
+			MEMBER_IN_CHANNEL.includes(permission),
 		);
 	});
 
-	it.each(POD_PERMISSIONS)("a member outside the pod may not %s", (permission) => {
-		expect(mayInPod(actor("member"), permission, sharedPod(false))).toBe(false);
-	});
-
-	it.each(POD_PERMISSIONS)("a viewer in the pod may %s only when granted", (permission) => {
-		expect(mayInPod(actor("viewer"), permission, sharedPod(true))).toBe(
-			VIEWER_IN_JOINED_POD.includes(permission),
+	it.each(POD_PERMISSIONS)("a viewer in the channel may %s only when granted", (permission) => {
+		expect(mayInPod(actor("viewer"), permission, { isMember: true })).toBe(
+			VIEWER_IN_CHANNEL.includes(permission),
 		);
 	});
 
-	it.each(POD_PERMISSIONS)("a viewer outside the pod may not %s", (permission) => {
-		expect(mayInPod(actor("viewer"), permission, sharedPod(false))).toBe(false);
-	});
-
-	it.each(POD_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
-		expect(mayInPod(actor(undefined), permission, sharedPod(true))).toBe(false);
-	});
-
-	it("a member creates and edits agents but cannot delete them", () => {
-		const inPod = sharedPod(true);
-		expect(mayInPod(actor("member"), "agent.create", inPod)).toBe(true);
-		expect(mayInPod(actor("member"), "agent.update", inPod)).toBe(true);
-		expect(mayInPod(actor("member"), "agent.delete", inPod)).toBe(false);
-	});
-
-	it("a member approves ordinary tool calls but not Routine ones", () => {
-		const inPod = sharedPod(true);
-		expect(mayInPod(actor("member"), "approval.decide", inPod)).toBe(true);
-		expect(mayInPod(actor("member"), "approval.routine.decide", inPod)).toBe(false);
-	});
-
-	it("lets a viewer read and take part, and change nothing", () => {
-		const inPod = sharedPod(true);
-		expect(mayInPod(actor("viewer"), "pod.read", inPod)).toBe(true);
-		expect(mayInPod(actor("viewer"), "agent.read", inPod)).toBe(true);
-		expect(mayInPod(actor("viewer"), "agent.create", inPod)).toBe(false);
-		expect(mayInPod(actor("viewer"), "agent.update", inPod)).toBe(false);
-		expect(mayInPod(actor("viewer"), "approval.decide", inPod)).toBe(false);
-	});
-
-	it("gives a viewer strictly less than a member in the same pod", () => {
-		const inPod = sharedPod(true);
-		for (const permission of POD_PERMISSIONS) {
-			if (!mayInPod(actor("viewer"), permission, inPod)) continue;
-			expect(
-				mayInPod(actor("member"), permission, inPod),
-				`a member should hold ${permission} wherever a viewer does`,
-			).toBe(true);
-		}
-	});
-
-	it("agent editing does not carry Routine management with it", () => {
-		const inPod = sharedPod(true);
-		expect(mayInPod(actor("member"), "agent.update", inPod)).toBe(true);
-		expect(mayInPod(actor("member"), "routine.manage", inPod)).toBe(false);
-		expect(mayInPod(actor("member"), "routine.run", inPod)).toBe(false);
-	});
-});
-
-describe("personal pods", () => {
-	it.each(POD_PERMISSIONS)("the owner may %s in their own pod", (permission) => {
-		expect(mayInPod(actor("member"), permission, personalPodOf(ALICE))).toBe(true);
-	});
-
-	it.each(POD_PERMISSIONS)("a viewer may %s in their own pod", (permission) => {
-		// A role says what somebody may do in shared space. Their own pod is
-		// theirs whatever it says.
-		expect(mayInPod(actor("viewer"), permission, personalPodOf(ALICE))).toBe(true);
-	});
-
-	it.each(POD_PERMISSIONS)(
-		"an admin, or the workspace's owner, may not %s in somebody else's pod",
-		(permission) => {
-			expect(mayInPod(actor("admin"), permission, personalPodOf(BOB))).toBe(false);
-			expect(mayInPod(actor("owner"), permission, personalPodOf(BOB))).toBe(false);
+	it.each(["member", "viewer"] as const)(
+		"a %s outside the channel may do nothing in it",
+		(role) => {
+			for (const permission of POD_PERMISSIONS) {
+				expect(mayInPod(actor(role), permission, { isMember: false })).toBe(false);
+			}
 		},
 	);
 
-	it("an admin is an ordinary owner of their own personal pod", () => {
-		expect(mayInPod(actor("admin"), "agent.delete", personalPodOf(ALICE))).toBe(true);
+	it.each(POD_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
+		expect(mayInPod(actor(undefined), permission, { isMember: true })).toBe(false);
+	});
+});
+
+describe("reaching a bot", () => {
+	it.each(["owner", "admin", "member", "viewer"] as const)(
+		"lets a %s reach a public bot somebody else made",
+		(role) => {
+			expect(reachesAgent(actor(role), publicBotBy(BOB))).toBe(true);
+		},
+	);
+
+	it("lets only its creator reach a private bot, not an admin", () => {
+		expect(reachesAgent(actor("member", BOB), privateBotBy(BOB))).toBe(true);
+		expect(reachesAgent(actor("member"), privateBotBy(BOB))).toBe(false);
+		expect(reachesAgent(actor("admin"), privateBotBy(BOB))).toBe(false);
+		expect(reachesAgent(actor("owner"), privateBotBy(BOB))).toBe(false);
 	});
 
-	it("ownership grants nothing to somebody outside the workspace", () => {
-		expect(mayInPod(actor(undefined), "pod.read", personalPodOf(ALICE))).toBe(false);
+	it("lets only its person reach a Personal Assistant", () => {
+		expect(reachesAgent(actor("viewer"), assistantOf(ALICE))).toBe(true);
+		expect(reachesAgent(actor("owner", BOB), assistantOf(ALICE))).toBe(false);
+	});
+
+	it("lets nobody outside the workspace reach any bot, even one they made", () => {
+		expect(reachesAgent(actor(undefined), publicBotBy(ALICE))).toBe(false);
+		expect(reachesAgent(actor(undefined), privateBotBy(ALICE))).toBe(false);
+		expect(reachesAgent(actor(undefined), assistantOf(ALICE))).toBe(false);
+	});
+});
+
+describe("bot actions", () => {
+	it.each(AGENT_PERMISSIONS)(
+		"a member may %s on a public bot somebody else made only to use it",
+		(permission) => {
+			expect(mayOnAgent(actor("member"), permission, publicBotBy(BOB))).toBe(
+				USING_A_BOT.includes(permission),
+			);
+		},
+	);
+
+	it.each(AGENT_PERMISSIONS)("a member may %s on a bot they made", (permission) => {
+		expect(mayOnAgent(actor("member"), permission, publicBotBy(ALICE))).toBe(true);
+		expect(mayOnAgent(actor("member"), permission, privateBotBy(ALICE))).toBe(true);
+	});
+
+	it.each(AGENT_PERMISSIONS)("an admin may %s on a public bot somebody else made", (permission) => {
+		expect(mayOnAgent(actor("admin"), permission, publicBotBy(BOB))).toBe(true);
+	});
+
+	it.each(AGENT_PERMISSIONS)(
+		"an admin may %s on another person's private bot only to manage it",
+		(permission) => {
+			expect(mayOnAgent(actor("admin"), permission, privateBotBy(BOB))).toBe(
+				MANAGING_A_BOT.includes(permission),
+			);
+		},
+	);
+
+	it.each(AGENT_PERMISSIONS)(
+		"a member may not %s on another person's private bot",
+		(permission) => {
+			expect(mayOnAgent(actor("member"), permission, privateBotBy(BOB))).toBe(false);
+		},
+	);
+
+	it.each(AGENT_PERMISSIONS)("a viewer may %s on a public bot only to view it", (permission) => {
+		expect(mayOnAgent(actor("viewer"), permission, publicBotBy(BOB))).toBe(
+			VIEWING_A_BOT.includes(permission),
+		);
+	});
+
+	it("does not let a viewer manage a bot they made before they became one", () => {
+		for (const permission of MANAGING_A_BOT.filter((one) => !VIEWING_A_BOT.includes(one))) {
+			expect(mayOnAgent(actor("viewer"), permission, publicBotBy(ALICE))).toBe(false);
+		}
+	});
+
+	it.each(AGENT_PERMISSIONS)(
+		"its person may %s on their Personal Assistant only to use it, change its look and connections, or decide its computer's requests",
+		(permission) => {
+			expect(mayOnAgent(actor("member"), permission, assistantOf(ALICE))).toBe(
+				USING_A_BOT.includes(permission) || OWNING_AN_ASSISTANT.includes(permission),
+			);
+		},
+	);
+
+	it.each(AGENT_PERMISSIONS)(
+		"nobody else may %s on a Personal Assistant, the workspace's owner included",
+		(permission) => {
+			expect(mayOnAgent(actor("owner", BOB), permission, assistantOf(ALICE))).toBe(false);
+		},
+	);
+
+	it.each(AGENT_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
+		expect(mayOnAgent(actor(undefined), permission, publicBotBy(ALICE))).toBe(false);
 	});
 });
 
 describe("what the API tells a client", () => {
-	it("refuses a Personal pod's rename and membership to its owner, who holds every permission", () => {
-		const own = personalPodOf(ALICE);
-		expect(mayInPod(actor("admin"), "pod.update", own)).toBe(true);
-		expect(mayInPod(actor("admin"), "pod.members.manage", own)).toBe(true);
-
-		const resolved = podPermissions(actor("admin"), own);
-		expect(resolved.rename).toBe(false);
-		expect(resolved.manageMembers).toBe(false);
+	it("lets an admin change, staff and delete a channel, and not leave it", () => {
+		expect(podPermissions(actor("admin"), { isMember: true, isPublic: false })).toEqual({
+			rename: true,
+			manageMembers: true,
+			manageBots: true,
+			leave: false,
+			join: false,
+			delete: true,
+			deleteArtifacts: true,
+		});
 	});
 
-	it("lets an admin rename and staff a shared pod, and not leave it", () => {
-		const resolved = podPermissions(actor("admin"), sharedPod(true));
-		expect(resolved.rename).toBe(true);
-		expect(resolved.manageMembers).toBe(true);
-		expect(resolved.leave).toBe(false);
+	it("lets a member staff and leave a channel they are in, and not change or delete it", () => {
+		expect(podPermissions(actor("member"), { isMember: true, isPublic: true })).toEqual({
+			rename: false,
+			manageMembers: true,
+			manageBots: true,
+			leave: true,
+			join: false,
+			delete: false,
+			deleteArtifacts: false,
+		});
 	});
 
-	it("lets a member leave a shared pod but never their Personal pod", () => {
-		expect(podPermissions(actor("member"), sharedPod(true)).leave).toBe(true);
-		expect(podPermissions(actor("member"), personalPodOf(ALICE)).leave).toBe(false);
+	it("lets anyone in the workspace join a public channel they are not in, and nothing else", () => {
+		for (const role of ["member", "viewer"] as const) {
+			expect(podPermissions(actor(role), { isMember: false, isPublic: true })).toEqual({
+				rename: false,
+				manageMembers: false,
+				manageBots: false,
+				leave: false,
+				join: true,
+				delete: false,
+				deleteArtifacts: false,
+			});
+		}
+	});
+
+	it("does not offer to join a private channel, or a public one from outside the workspace", () => {
+		expect(podPermissions(actor("member"), { isMember: false, isPublic: false }).join).toBe(false);
+		expect(podPermissions(actor(undefined), { isMember: false, isPublic: true }).join).toBe(false);
+	});
+
+	it("lets a member talk to a public bot without managing it", () => {
+		expect(agentPermissions(actor("member"), publicBotBy(BOB))).toEqual({
+			update: false,
+			delete: false,
+			manageConnections: false,
+			manageSandbox: false,
+			useDesktop: true,
+			manageRoutines: false,
+			runRoutines: true,
+			decideApprovals: true,
+			talk: true,
+		});
+	});
+
+	it("lets an admin manage another person's private bot without talking to it", () => {
+		expect(agentPermissions(actor("admin"), privateBotBy(BOB))).toEqual({
+			update: true,
+			delete: true,
+			manageConnections: true,
+			manageSandbox: true,
+			useDesktop: false,
+			manageRoutines: true,
+			runRoutines: false,
+			decideApprovals: false,
+			talk: false,
+		});
+	});
+
+	it("lets a person change their Personal Assistant but not delete it", () => {
+		const resolved = agentPermissions(actor("member"), assistantOf(ALICE));
+		expect(resolved).toMatchObject({ update: true, manageConnections: true, talk: true });
+		expect(resolved.delete).toBe(false);
 	});
 });

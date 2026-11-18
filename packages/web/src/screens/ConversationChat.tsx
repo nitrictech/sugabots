@@ -6,14 +6,11 @@ import {
 	type ChatHistoryEntry,
 	type ChatMessageItem,
 	type FilePart,
-	isAttached,
 	MESSAGE_MAX_LENGTH,
 	type Message,
 	mentionedHandles,
 	mentionPattern,
 	mentionsOnlyPeople,
-	messageAuthorName,
-	type PersonParticipant,
 	type Pod,
 	quotedPreview,
 	type SessionUser,
@@ -57,7 +54,6 @@ import {
 	useOptimisticChatItems,
 	useSendChatMessage,
 	useSetDone,
-	useThreadFrom,
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { keepFootInView, useFollowContentGrowth, useSettledAtLatest } from "@/lib/follow-latest.ts";
@@ -106,7 +102,6 @@ import {
 } from "./DetailsSidebar.tsx";
 import { DirectMembersButton } from "./DirectMembers.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
-import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
 import { botsNamed, groupMentionsBy, mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { RoutinePanel } from "./RoutinePanel.tsx";
@@ -126,15 +121,15 @@ import { findAnsweringFace, startsNewDay } from "./thread-layout.ts";
  */
 const LATEST_IN_VIEW_TOLERANCE_PX = 48;
 
-/** Shown when marking a thread done, or reopening it, did not save. */
-const DONE_FAILURE_MESSAGE = "This thread was not marked done or reopened. Try again.";
-/** Names the bots a pod's chat message asks, as "Ada, Bea and Cy". */
+/** Shown when marking a task done, or reopening it, did not save. */
+const DONE_FAILURE_MESSAGE = "This task was not marked done or reopened. Try again.";
+/** Names the bots a channel message asks, as "Ada, Bea and Cy". */
 const BOT_LIST = new Intl.ListFormat("en", { type: "conjunction" });
 
 /**
- * What is open large beside a chat: an artifact, at its current version when
- * `version` is absent, the bot's sandbox desktop, the bot's routines, at
- * the view of them that is open, or the bot's threads, at the tab open.
+ * What is open large beside a chat: a file, at its current version when
+ * `version` is absent, the bot's computer's desktop, the bot's automations,
+ * at the view of them that is open, or the bot's tasks, at the tab open.
  */
 export type Staged =
 	| { kind: "artifact"; artifactId: string; version?: number }
@@ -162,7 +157,7 @@ export function ConversationChat({
 }: {
 	/** Which kind of conversation it is, and its bot when it has one. */
 	conversation: ConversationKind;
-	/** The pod it is in; null for a direct message between people, which is in none. */
+	/** The channel it is in; null for a bot's task or a direct message, which are in none. */
 	pod: Pod | null;
 	/** The conversation shown. */
 	conversationId: string;
@@ -189,15 +184,14 @@ export function ConversationChat({
 	const messages = useChatMessages(conversationId);
 	const history = useChatHistory(conversationId);
 	const mainThread = useThread(conversationId);
-	// A direct message between people is in no pod, and has no bots in it.
+	// Drafts are kept by the channel they are written in; elsewhere, by the conversation alone.
 	const podId = pod?.id ?? null;
-	const authorLinkOf = useAuthorLinks(pod?.id);
+	const authorLinkOf = useAuthorLinks();
 	useThreadEvents(conversationId);
 	const notices = useThreadNotices(conversationId);
 	const optimistic = useOptimisticChatItems(conversationId);
 	const send = useSendChatMessage(conversationId, user);
 	const setDone = useSetDone(conversationId);
-	const threadFrom = useThreadFrom(conversationId);
 	const navigate = useNavigate();
 	const { pathname } = useLocation();
 	const { leaveFor } = useLeave();
@@ -219,14 +213,11 @@ export function ConversationChat({
 	// at the latest message, which can be set before the scroll that gets there.
 	const [latestInView, setLatestInView] = useState(true);
 	const details = mainThread.data;
-	const agent =
-		conversation.kind === "botThread" || conversation.kind === "botChannel"
-			? conversation.agent
-			: null;
+	const agent = conversation.kind === "botThread" ? conversation.agent : null;
 	const isPodChat = conversation.kind === "podChat";
-	// Where people talk among themselves, the bots they name reply; elsewhere the
-	// chat's own bot does, asking any other bot named for its help.
-	const namedBotsReply = isPodChat || conversation.kind === "peopleThread";
+	// In a channel, the bots people name reply; in a task its own bot does,
+	// asking any other bot named for its help.
+	const namedBotsReply = isPodChat;
 	// A direct message between people goes by the others' names.
 	const peopleName = conversation.kind === "direct" ? directPeopleTitle(conversation) : undefined;
 	const host = agent
@@ -241,7 +232,6 @@ export function ConversationChat({
 	const sending = sendingIds(optimistic, messages.items, details?.messages ?? []);
 	const routineFeed = details?.thread.type === "routine_feed";
 	const groups = chatGroupsOf(items, routineFeed);
-	const startedThreads = threadsByMessage(items);
 	const latestItemRevision = chatItemRevision(items.at(-1));
 	const newest = items.at(-1);
 	useMarkReadWhileSeen(conversationId, newest, latestInView && !covered);
@@ -299,14 +289,14 @@ export function ConversationChat({
 	// Beside an artifact or a computer, the chat is as wide as the viewer last dragged it.
 	const [chatWidth, setChatWidth] = usePaneWidth("staged-chat");
 	const chatColumn = useRef<HTMLDivElement>(null);
-	// The model of the bot a message here goes to: the one named in the pod's chat, else this chat's own.
+	// The model of the bot a message here goes to: the one named in the channel, else this task's own.
 	const { agents } = useAgents();
 	const answeringModel = useModelName(
 		(namedBotsReply
 			? agents?.find((one) => one.id === answeringBots[0]?.id)?.model
 			: agent?.model) ?? null,
 	);
-	// Everyone here and the pod's bots, not yourself. Naming a bot has it reply where
+	// Everyone here and the channel's bots, not yourself. Naming a bot has it reply where
 	// people talk among themselves, and asks this chat's own bot to bring it in elsewhere.
 	const composerMentionable = useMemo(
 		() =>
@@ -418,29 +408,14 @@ export function ConversationChat({
 		}
 	}
 
-	/** Opens a thread started from a message here in its own place. */
-	function openPodThread(threadId: string) {
-		if (!pod) return;
-		void navigate(conversationLink({ pod, conversationId: threadId }));
-	}
-
-	/**
-	 * Starts a thread from `message`, with this channel's bot if it is one, or
-	 * opens the one it has; a routine's result opens its routine instead.
-	 */
-	async function threadFromMessage(message: Message) {
-		if (message.routineResultOf) {
-			openThread(message.routineResultOf.threadId);
-			return;
-		}
-		// Threads start from a pod's chats and bots' channels, which are all in pods.
-		if (!pod) return;
-		try {
-			const thread = await threadFrom.mutateAsync(message.id);
-			await navigate(conversationLink({ pod, conversationId: thread.id }));
-		} catch {
-			setStartError("The thread was not started. Try again.");
-		}
+	/** Opens a task a bot started from its reply, with whichever bot it is with. */
+	function openStartedTask(started: BotStartedThread) {
+		const other = started.withBotId
+			? details?.crew.find((member) => member.id === started.withBotId)
+			: undefined;
+		const withBot = other ?? agent;
+		if (!withBot) return;
+		void navigate(conversationLink({ agent: withBot, conversationId: started.id }));
 	}
 
 	function replyTo(message: Message) {
@@ -470,8 +445,8 @@ export function ConversationChat({
 		// opens in its place, unless that is the chat already open.
 		if (runThreadIds.has(nextThreadId)) {
 			const run = runsResulting.get(nextThreadId);
-			if (run && pod && run.routineId !== details?.routine?.id) {
-				void navigate(routineThreadLink(pod, run.routineId));
+			if (run && agent && run.routineId !== details?.routine?.id) {
+				void navigate(routineThreadLink(agent, run.routineId));
 			}
 			return;
 		}
@@ -482,18 +457,11 @@ export function ConversationChat({
 	const title = details?.thread.title;
 	const chats = useChatList(pod?.slug).data?.chats;
 	const listedChat = chats?.find((chat) => chat.conversation.id === conversationId)?.conversation;
-	// The channel a thread between people was started from, which its header names it as in.
-	const startedIn = chats?.find((chat) => chat.conversation.id === details?.thread.parentThreadId)
-		?.conversation.title;
-	// An archived chat is not listed, so it goes by the name it was archived with.
+	// An archived thread is not listed, so it goes by the name it was archived with.
 	const podChatName = listedChat?.title ?? title ?? "";
-	// A bot's channel goes by the bot's name, and is kept going rather than marked done;
-	// in a Personal pod it is the person's own with their bot.
-	const ongoing = conversation.kind === "botChannel";
-	const personalChannel = conversation.kind === "botChannel" && pod?.kind === "personal";
-	// Only a conversation is ever done: not the pod's chat, nor a routine's thread.
+	// Only a task is ever done: not a channel, nor an automation's thread.
 	const done =
-		details?.thread.type === "conversation" && !ongoing
+		details?.thread.type === "conversation"
 			? {
 					isDone: details.thread.doneAt !== null,
 					onChange: (to: boolean) =>
@@ -503,15 +471,12 @@ export function ConversationChat({
 						),
 				}
 			: undefined;
-	// Back from a thread returns to where it lives: its bot's chat, or the channel it was started from.
-	const parentChannelId = details?.thread.parentThreadId;
-	const back: BackTo = !pod
-		? { to: "directMessages" }
-		: conversation.kind === "botThread" && !details?.routine
-			? { to: "bot", pod, agent: conversation.agent }
-			: startedIn !== undefined && parentChannelId
-				? { to: "channel", pod, conversationId: parentChannelId, name: `#${startedIn}` }
-				: { to: "pod", pod };
+	// Back returns to where the conversation lives: its bot, its channel, or the direct messages.
+	const back: BackTo = agent
+		? { to: "bot", agent }
+		: pod
+			? { to: "pod", pod }
+			: { to: "directMessages" };
 	const headerPlace: HeaderPlace =
 		place.kind === "away"
 			? { back: place.back, trailing: place.trailing }
@@ -526,12 +491,11 @@ export function ConversationChat({
 	const header =
 		conversation.kind === "botThread" && details?.routine ? (
 			<PeopleChatHeader {...headerPlace} title={title ?? details.thread.title} mark="routine" />
-		) : conversation.kind === "botThread" || conversation.kind === "botChannel" ? (
+		) : conversation.kind === "botThread" ? (
 			<ChatHeader
 				{...headerPlace}
 				agent={conversation.agent}
-				inPersonalPod={pod?.kind === "personal"}
-				title={ongoing ? undefined : title}
+				title={title}
 				done={done}
 				conversationId={conversationId}
 				onOpenDesktop={openDesktop}
@@ -566,14 +530,7 @@ export function ConversationChat({
 					)
 				}
 			/>
-		) : (
-			<PeopleChatHeader
-				{...headerPlace}
-				title={title ?? ""}
-				done={done}
-				within={startedIn === undefined ? pod?.name : `#${startedIn}`}
-			/>
-		);
+		) : null;
 	if (!details || (agent && !host))
 		return (
 			<div className="flex min-w-0 flex-1 flex-col">
@@ -702,27 +659,14 @@ export function ConversationChat({
 							)}
 							{messages.isSuccess &&
 								!messages.hasNextPage &&
-								(details.thread.parentThreadId && pod ? (
-									<ThreadIntro details={details} pod={pod} />
-								) : isPodChat && pod ? (
+								(isPodChat && pod ? (
 									<PodChatIntro pod={pod} name={podChatName} details={details} />
 								) : conversation.kind === "direct" ? (
 									<DirectIntro {...conversation} />
 								) : details.thread.type === "routine_feed" ? (
 									agent && <RoutineIntro title={details.thread.title} agent={agent} />
 								) : (
-									agent && (
-										<ChatIntro
-											agent={agent}
-											place={
-												personalChannel
-													? { kind: "personal" }
-													: conversation.kind === "botChannel"
-														? { kind: "channel" }
-														: { kind: "thread", title }
-											}
-										/>
-									)
+									agent && <ChatIntro agent={agent} title={title} />
 								))}
 							{groups.map((group) => (
 								<Fragment key={group.key}>
@@ -742,7 +686,6 @@ export function ConversationChat({
 											onOpenDesktop={openDesktop}
 											fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
 											previews={!staged}
-											podId={podId}
 											approvalCapabilities={details.capabilities}
 											queued={queued}
 											sending={sending}
@@ -753,61 +696,34 @@ export function ConversationChat({
 											threadActivityAt={threadActivityAt}
 											authorLinkOf={authorLinkOf}
 											onReply={replyTo}
-											onStartThread={
-												isPodChat || conversation.kind === "botChannel"
-													? threadFromMessage
-													: undefined
-											}
 											inRoutineThread={routineFeed}
-											threadLinesOf={(message) => [
-												...(startedThreads.get(message.id) ?? []).map((thread) => (
-													<ThreadLine
-														key={thread.id}
-														item={thread}
-														startedBy={message.author}
-														onOpen={() => openPodThread(thread.threadId)}
-													/>
-												)),
-												...threadsStartedBy(message).map((started) => (
+											threadLinesOf={(message) =>
+												threadsStartedBy(message).map((started) => (
 													<BotStartedThreadLine
 														key={started.id}
 														started={started}
 														startedBy={message.author}
 														crew={details?.crew ?? []}
-														onOpen={() => openPodThread(started.id)}
+														onOpen={() => openStartedTask(started)}
 													/>
-												)),
-											]}
+												))
+											}
 											onJumpToMessage={jumpTo}
 											reacting={reacting}
 										/>
-									) : group.item.kind === "thread" ? (
-										<div className="px-5 py-0.5 pl-17.5">
-											<ThreadLine
-												item={group.item}
-												startedBy={undefined}
-												onOpen={openPodThread.bind(null, group.item.threadId)}
-											/>
-										</div>
 									) : group.item.kind === "routine_paused" ? (
 										<PausedLine at={group.item.createdAt} />
-									) : group.item.kind === "routine" && details.routine && host && pod ? (
+									) : details.routine && host && agent ? (
 										<RunMessage
 											item={group.item}
 											agent={host}
-											pod={pod}
 											routine={details.routine}
 											conversationId={conversationId}
 											latest={details.routine.failed && group.item.id === latestRunId(items)}
 											mentionable={mentionable}
 										/>
 									) : (
-										<ActivityLine
-											item={group.item}
-											host={host}
-											entries={entries}
-											onOpenThread={openThread}
-										/>
+										<ActivityLine item={group.item} entries={entries} onOpenThread={openThread} />
 									)}
 								</Fragment>
 							))}
@@ -824,8 +740,8 @@ export function ConversationChat({
 						</div>
 					</div>
 					<div className="shrink-0 px-4 max-md:pb-tab-bar md:px-5">
-						{agent?.model === null && pod ? (
-							<AgentNotSetUp agent={agent} pod={pod} />
+						{agent?.model === null ? (
+							<AgentNotSetUp agent={agent} />
 						) : (
 							<ChatComposer
 								label={composerLabel}
@@ -855,7 +771,7 @@ export function ConversationChat({
 									onClearInherited: () => takeOff(addressedBots.map((bot) => bot.id)),
 								}}
 								attachments={attachments}
-								notice={pod && <ConnectionsNotice pod={pod} botName={agent?.name} />}
+								notice={agent && <ConnectionsNotice agent={agent} />}
 							/>
 						)}
 						{/*
@@ -874,9 +790,9 @@ export function ConversationChat({
 				</FileDropTarget>
 			</div>
 			{/* One beside the chat at a time: what is staged, else a thread, else Details. */}
-			{staged?.kind === "artifact" && pod ? (
+			{staged?.kind === "artifact" && (pod || agent) ? (
 				<ArtifactStage
-					pod={pod}
+					owner={pod ? { pod } : { agent: agent as Agent }}
 					artifactId={staged.artifactId}
 					version={staged.version}
 					onVersionChange={(version) => onStagedChange({ ...staged, version })}
@@ -890,26 +806,23 @@ export function ConversationChat({
 							: onStagedChange(undefined)
 					}
 				/>
-			) : staged?.kind === "desktop" && agent && pod ? (
+			) : staged?.kind === "desktop" && agent ? (
 				<DesktopStage
 					threadId={details.thread.id}
 					agent={agent}
-					pod={pod}
-					mayUse={pod.permissions.useDesktops}
+					mayUse={agent.permissions.useDesktop}
 					onClose={() => onStagedChange(undefined)}
 				/>
-			) : staged?.kind === "threads" && agent && pod ? (
+			) : staged?.kind === "threads" && agent ? (
 				<ThreadsStage
 					agent={agent}
-					pod={pod}
 					tab={staged.tab}
 					onTabChange={(tab) => onStagedChange({ kind: "threads", tab }, { replace: true })}
 					onClose={() => onStagedChange(undefined)}
 				/>
-			) : staged?.kind === "routines" && agent && pod ? (
+			) : staged?.kind === "routines" && agent ? (
 				<RoutinesStage
 					agent={agent}
-					pod={pod}
 					user={user}
 					view={staged.view}
 					onViewChange={openRoutines}
@@ -945,18 +858,16 @@ export function ConversationChat({
 						contents={contents}
 						onClose={() => place.onDetailsChange(false)}
 					/>
-				) : details.routine && agent && pod ? (
+				) : details.routine && agent ? (
 					<RoutinePanel
 						agent={agent}
-						pod={pod}
 						conversationId={conversationId}
 						standing={details.routine}
 						onClose={() => place.onDetailsChange(false)}
 					/>
-				) : agent && pod ? (
+				) : agent ? (
 					<DetailsSidebar
 						agent={agent}
-						pod={pod}
 						threadId={details.thread.id}
 						user={user}
 						contents={contents}
@@ -991,48 +902,27 @@ function sendFailureMessage(failure: unknown): string {
 	return "Message not sent. Your draft is still here.";
 }
 
-type ChatActivityItem = Extract<
-	ChatMessageItem,
-	{ kind: "routine" | "collaboration" | "thread" | "routine_paused" }
->;
+type ChatActivityItem = Extract<ChatMessageItem, { kind: "routine" | "routine_paused" }>;
 
-/** A routine run, or another bot asking the chat's bot for help, as a row among the messages. */
+/** An automation run, as a row among the messages. */
 function ActivityLine({
 	item,
-	host,
 	entries,
 	onOpenThread,
 }: {
-	item: Extract<ChatMessageItem, { kind: "routine" | "collaboration" }>;
-	/** The chat's bot, which a collaboration in its chat asked for help. */
-	host: AgentParticipant | undefined;
+	item: Extract<ChatMessageItem, { kind: "routine" }>;
 	/** The threads opened beside the chat, where how a run stands is read. */
 	entries: readonly ChatHistoryEntry[];
 	onOpenThread: (threadId: string) => void;
 }) {
-	const onOpen = () => onOpenThread(item.threadId);
-	if (item.kind === "routine") {
-		return (
-			<ChatActivityRow
-				type="routine"
-				routineName={item.routineName}
-				triggerKind={item.triggerKind}
-				state={activityStateOf(entries.find((entry) => entry.threadId === item.threadId))}
-				at={item.createdAt}
-				onOpen={onOpen}
-			/>
-		);
-	}
-	if (!host) return null;
 	return (
 		<ChatActivityRow
-			type="collaboration"
-			initiator={item.initiator}
-			recipient={host}
-			title={item.title}
-			state={item.state}
+			type="routine"
+			routineName={item.routineName}
+			triggerKind={item.triggerKind}
+			state={activityStateOf(entries.find((entry) => entry.threadId === item.threadId))}
 			at={item.createdAt}
-			onOpen={onOpen}
+			onOpen={() => onOpenThread(item.threadId)}
 		/>
 	);
 }
@@ -1051,13 +941,7 @@ type ChatGroup = { key: string; at: string; separated: boolean } & (
 function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean): ChatGroup[] {
 	const groups: ChatGroup[] = [];
 	let previousAt: string | undefined;
-	// A thread is drawn under the message it was started from, when that message is here.
-	const underTheirMessages = new Set(
-		[...threadsByMessage(items).values()].flat().map((thread) => thread.id),
-	);
-	for (const item of items.filter(
-		(one) => one.kind !== "thread" || !underTheirMessages.has(one.id),
-	)) {
+	for (const item of items) {
 		const at = item.kind === "message" ? item.message.createdAt : item.createdAt;
 		// A routine's thread is marked where each run starts; any other, where each day does.
 		const separated = byRun ? startsRoutineRun(item) : startsNewDay(previousAt, at);
@@ -1246,44 +1130,8 @@ function PausedLine({ at }: { at: string }) {
 }
 
 /**
- * A thread started from a message in the pod's chat, hanging off that
- * message, drawn as a collaboration is: the faces of who started it and its
- * bot, how many replies it has, its name, and when it last moved; or, before
- * any reply, its name. Dots follow while its bot is answering.
- */
-function ThreadLine({
-	item,
-	startedBy,
-	onOpen,
-}: {
-	item: ChatThreadItem;
-	startedBy: Message["author"] | undefined;
-	onOpen: () => void;
-}) {
-	// A thread opened from its own bot's message would otherwise show that bot twice.
-	const faces = [
-		...(startedBy && startedBy.kind !== "routine_trigger" && startedBy.id !== item.agent?.id
-			? [startedBy]
-			: []),
-		...(item.agent ? [item.agent] : []),
-	];
-	const replied = item.replies > 0;
-	return (
-		<SideThreadLine
-			faces={faces}
-			label={replied ? countOf(item.replies, "reply", "replies") : item.title}
-			detail={replied ? item.title : undefined}
-			description={`Open thread: ${item.title}`}
-			lastActivityAt={item.lastReplyAt ?? undefined}
-			status={item.working ? "working" : undefined}
-			onOpen={onOpen}
-		/>
-	);
-}
-
-/**
- * A thread a bot started with `start_thread` in its reply. It hangs off no
- * message, so it is shown from the call, under the reply that names it.
+ * A task a bot started with `start_thread` in its reply, shown from the call,
+ * under the reply that names it.
  */
 function BotStartedThreadLine({
 	started,
@@ -1305,7 +1153,7 @@ function BotStartedThreadLine({
 		<SideThreadLine
 			faces={faces}
 			label={started.title}
-			description={`Open thread: ${started.title}`}
+			description={`Open task: ${started.title}`}
 			onOpen={onOpen}
 		/>
 	);
@@ -1315,7 +1163,7 @@ const decodeStartThreadOutput = Schema.decodeUnknownOption(
 	Schema.Struct({ thread: botStartedThreadSchema }),
 );
 
-/** The threads a bot's message started with `start_thread`, in the order it started them. */
+/** The tasks a bot's message started with `start_thread`, in the order it started them. */
 function threadsStartedBy(message: Message): BotStartedThread[] {
 	return message.parts.flatMap((part) => {
 		if (part.type !== "tool_call" || part.tool !== START_THREAD_TOOL) return [];
@@ -1327,91 +1175,7 @@ function threadsStartedBy(message: Message): BotStartedThread[] {
 	});
 }
 
-type ChatThreadItem = Extract<ChatMessageItem, { kind: "thread" }>;
-
-/** The threads in `items` started from a message among them, by that message's id. */
-function threadsByMessage(items: readonly ChatMessageItem[]): Map<string, ChatThreadItem[]> {
-	const messageIds = new Set(
-		items.flatMap((item) => (item.kind === "message" ? [item.message.id] : [])),
-	);
-	const byMessage = new Map<string, ChatThreadItem[]>();
-	for (const item of items) {
-		if (item.kind !== "thread" || !item.originMessageId) continue;
-		if (!messageIds.has(item.originMessageId)) continue;
-		byMessage.set(item.originMessageId, [...(byMessage.get(item.originMessageId) ?? []), item]);
-	}
-	return byMessage;
-}
-
-/**
- * The top of a thread started from the pod's chat: what it is called, who
- * started it and where, and the message it was started from.
- */
-function ThreadIntro({ details, pod }: { details: ThreadDetails; pod: Pod }) {
-	const { thread } = details;
-	const starter = details.members.find((member) => member.id === thread.initiatorUserId);
-	return (
-		<div className="flex flex-col gap-1.5 px-5 pt-6 pb-4">
-			<h2 className="m-0 font-bold text-xl text-foreground leading-tight">{thread.title}</h2>
-			<p className="m-0 text-xs text-muted-foreground">
-				{starter ? `Started by ${starter.name} in ${pod.name}` : `Started in ${pod.name}`},{" "}
-				{formatListTime(new Date(thread.createdAt), new Date())}
-			</p>
-			{details.startedFrom && (
-				<StartedFrom
-					message={details.startedFrom}
-					mentionable={mentionableIn(details)}
-					members={details.members}
-				/>
-			)}
-		</div>
-	);
-}
-
-/**
- * In a thread's intro, the whole of the message in the pod's chat it was
- * started from, and what is attached to it by name: its files, or a routine
- * result's artifacts.
- */
-function StartedFrom({
-	message,
-	mentionable,
-	members,
-}: {
-	message: Message;
-	mentionable: ThreadParticipant[];
-	/** The pod's people, whom its writer's `@here` or `@channel` would notify. */
-	members: readonly PersonParticipant[];
-}) {
-	const attached = message.parts
-		.filter(isAttached)
-		.map((part) => (part.type === "file" ? part.name : part.title));
-	return (
-		<div className="mt-1 flex max-w-180 flex-col gap-1 border-border-strong border-l-2 pl-3">
-			<span className="font-semibold text-sm text-foreground">
-				{messageAuthorName(message.author)}
-			</span>
-			{message.content !== "" && (
-				<div className="min-w-0 text-sm text-soft-foreground leading-normal">
-					<MessageMarkdown
-						text={message.content}
-						mentionable={[
-							...mentionable,
-							// Written in a pod's chat or a bot's channel, as every message a thread starts from is.
-							...groupMentionsBy(message.author, members, "pod_chat"),
-						]}
-						writer={writerOf(message.author)}
-					/>
-				</div>
-			)}
-			{attached.length > 0 && (
-				<p className="m-0 truncate text-xs text-muted-foreground">{attached.join(", ")}</p>
-			)}
-		</div>
-	);
-}
-
-/** The top of a routine's own thread: what the routine is called, and the bot that runs it. */
+/** The top of an automation's own thread: what the automation is called, and the bot that runs it. */
 function RoutineIntro({ title, agent }: { title: string; agent: Agent }) {
 	return (
 		<div className="flex flex-col gap-1.5 px-5 pt-6 pb-4">
@@ -1423,7 +1187,7 @@ function RoutineIntro({ title, agent }: { title: string; agent: Agent }) {
 	);
 }
 
-/** The top of a pod's chat: how many are in it, and what the chat is for. */
+/** The top of a channel's conversation: how many are in it, and what it is for. */
 function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details: ThreadDetails }) {
 	const people = details.members.length;
 	const bots = details.crew.filter((member) => member.kind === "agent").length;
@@ -1433,30 +1197,23 @@ function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details:
 			<h2 className="m-0 pt-1 font-bold text-2xl text-foreground tracking-normal">{name}</h2>
 			<p className="m-0 max-w-140 text-sm text-muted-foreground leading-normal">
 				This is the start of {name}, with {countOf(people, "person", "people")} and{" "}
-				{countOf(bots, "bot", "bots")}. Talk here, or mention a bot to start a thread with it.
+				{countOf(bots, "bot", "bots")}. Talk here, and mention a bot to have it reply.
 			</p>
 		</div>
 	);
 }
 
 /**
- * Where a bot's chat is: the person's own with it, its channel, or a thread
- * with it, which starts under the thread's name once that is known.
+ * The top of a task, once there is nothing older to load: what it is about,
+ * with whom, or, before it has a name, whom it is with.
  */
-type IntroPlace = { kind: "personal" } | { kind: "channel" } | { kind: "thread"; title?: string };
-
-/**
- * The top of a chat, once there is nothing older to load: whom it is with;
- * in a thread, what they do; in a Personal pod, that it is the person's own;
- * or, in a bot's channel, that it is the channel's start.
- */
-function ChatIntro({ agent, place }: { agent: Agent; place: IntroPlace }) {
-	// A thread is about something, so its name leads and the bot is beside it, smaller.
-	if (place.kind === "thread" && place.title) {
+function ChatIntro({ agent, title }: { agent: Agent; title: string | undefined }) {
+	// A task is about something, so its name leads and the bot is beside it, smaller.
+	if (title) {
 		return (
 			<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
 				<h2 className="m-0 font-bold text-2xl text-foreground leading-tight tracking-normal text-balance max-md:text-xl">
-					{place.title}
+					{title}
 				</h2>
 				<p className="m-0 flex max-w-140 items-center gap-2 text-sm text-muted-foreground leading-normal">
 					<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={20} />
@@ -1470,16 +1227,8 @@ function ChatIntro({ agent, place }: { agent: Agent; place: IntroPlace }) {
 			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
 			<h2 className="m-0 pt-1 font-bold text-2xl text-foreground tracking-normal">{agent.name}</h2>
 			<p className="m-0 max-w-140 text-sm text-muted-foreground leading-normal">
-				{place.kind === "personal" ? (
-					"Your own bot. It works for you only, and nobody else can see this conversation, workspace admins included."
-				) : place.kind === "channel" ? (
-					`This is the start of ${agent.name}'s channel.`
-				) : (
-					<>
-						This is the start of your conversation with {agent.name}.
-						{agent.description && ` ${agent.description}`}
-					</>
-				)}
+				This is the start of your task with {agent.name}.
+				{agent.description && ` ${agent.description}`}
 			</p>
 		</div>
 	);
@@ -1518,15 +1267,15 @@ function everyoneNamed(others: readonly string[]): string {
  * message anyway, so offering a box to type into would only lose the draft.
  * Only somebody who may edit the agent is offered the way to fix it.
  */
-function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
+function AgentNotSetUp({ agent }: { agent: Agent }) {
 	const backToChat = useBackToHere("Chat");
 	return (
 		<p className="mx-auto m-0 w-full max-w-190 rounded-2xl border border-border-strong px-4 py-3.5 text-sm text-muted-foreground leading-relaxed">
 			{agent.name} has no model yet, so it cannot answer.{" "}
-			{pod.permissions.updateAgents ? (
+			{agent.permissions.update ? (
 				<>
 					<Link
-						{...agentSettingsLink({ pod, agent })}
+						{...agentSettingsLink(agent)}
 						state={backToChat}
 						className={buttonStyles({ variant: "link", size: "bare" })}
 					>
@@ -1535,13 +1284,13 @@ function AgentNotSetUp({ agent, pod }: { agent: Agent; pod: Pod }) {
 					to start chatting.
 				</>
 			) : (
-				"Somebody who can edit this agent chooses its model."
+				"Somebody who can change this bot chooses its model."
 			)}
 		</p>
 	);
 }
 
-/** Whether `item` is where a run starts in a routine's thread: its result, or the run itself when it posted none. */
+/** Whether `item` is where a run starts in an automation's thread: its result, or the run itself when it posted none. */
 function startsRoutineRun(item: ChatMessageItem): boolean {
 	return item.kind === "routine" || (item.kind === "message" && !!item.message.routineResultOf);
 }

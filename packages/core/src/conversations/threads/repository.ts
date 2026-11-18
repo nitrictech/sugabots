@@ -45,8 +45,7 @@ import {
 	toReplyTo,
 	withReplyTo,
 } from "./participants.ts";
-import type { Channel, ThreadId } from "./rooms.ts";
-import { threadPodId } from "./rooms.ts";
+import type { ThreadId } from "./rooms.ts";
 
 /**
  * The only writer of `thread`, `thread_participant` and `thread_read`,
@@ -58,16 +57,6 @@ import { threadPodId } from "./rooms.ts";
  */
 export interface Interface {
 	/**
-	 * The channel of the pod's crew agent `hostAgentId`, created on first use
-	 * with the agent in it.
-	 */
-	readonly openBotChannel: (placement: {
-		workspaceId: string;
-		podId: string;
-		hostAgentId: string;
-		initiatorUserId: string | null;
-	}) => Effect.Effect<schema.ThreadRow>;
-	/**
 	 * The direct message between `memberIds` in the workspace, in no pod,
 	 * created on first use with them as its members: one for each set of
 	 * people, whichever of them opens it, however their ids are written.
@@ -78,27 +67,20 @@ export interface Interface {
 		initiatorUserId: string;
 	}) => Effect.Effect<schema.ThreadRow>;
 	/**
-	 * The thread hanging off the message `originMessageId` in the channel
-	 * `parent`, opened and announced when it has none: with the bot
-	 * `hostAgentId`, or between people when it is null, and `initiatorUserId`.
-	 * A message has one thread, so `opened` is false when it already had it.
-	 */
-	readonly openThread: (input: {
-		parent: Pick<Channel<schema.ThreadRow>, "id" | "workspaceId" | "podId">;
-		originMessageId: string;
-		hostAgentId: string | null;
-		title: string;
-		initiatorUserId: string;
-	}) => Effect.Effect<{ thread: schema.ThreadRow; opened: boolean }>;
-	/**
-	 * Starts a thread in the pod with the bot `hostAgentId`, for the person
+	 * Starts a task with the bot `hostAgentId`, for the person
 	 * `initiatorUserId`, both in it. Its first message is `brief`, written by
 	 * the bot `briefingAgentId`, which may be the host itself; announced so the
 	 * host takes its turn on the brief.
 	 */
+	/** Starts a task with the bot `hostAgentId` for `initiatorUserId`, who is in it with the bot. */
+	readonly startTask: (input: {
+		workspaceId: string;
+		hostAgentId: string;
+		initiatorUserId: string;
+		title: string;
+	}) => Effect.Effect<schema.ThreadRow>;
 	readonly startBriefedThread: (input: {
 		workspaceId: string;
-		podId: string;
 		hostAgentId: string;
 		initiatorUserId: string;
 		briefingAgentId: string;
@@ -111,7 +93,7 @@ export interface Interface {
 	 * thread is left as it is.
 	 */
 	readonly setDone: (
-		thread: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId">,
+		thread: Pick<schema.ThreadRow, "id" | "workspaceId">,
 		done: boolean,
 	) => Effect.Effect<void>;
 	/** The pod's first chat, created on first use, as opened by `initiatorUserId`. */
@@ -138,7 +120,7 @@ export interface Interface {
 	) => Effect.Effect<void>;
 	/** The routine's own thread, where each of its runs posts, with its agent in it, created on first use. */
 	readonly openRoutineFeed: (
-		owned: Pick<schema.RoutineRow, "id" | "workspaceId" | "agentId" | "name"> & { podId: string },
+		owned: Pick<schema.RoutineRow, "id" | "workspaceId" | "agentId" | "name">,
 	) => Effect.Effect<schema.ThreadRow>;
 	/**
 	 * Posts a person's message with the files they attach, making them a
@@ -171,10 +153,7 @@ export interface Interface {
 	 * and the brief as its first message, written by the asking agent.
 	 */
 	readonly openCollaborationThread: (input: {
-		parent: Pick<
-			schema.ThreadRow,
-			"id" | "workspaceId" | "podId" | "conversationId" | "initiatorUserId"
-		>;
+		parent: Pick<schema.ThreadRow, "id" | "workspaceId" | "conversationId" | "initiatorUserId">;
 		askingAgentId: string;
 		collaboratorId: string;
 		title: string;
@@ -183,7 +162,6 @@ export interface Interface {
 	/** Opens a routine run's thread in the agent's conversation, with the agent in it. */
 	readonly openRoutineThread: (input: {
 		workspaceId: string;
-		podId: string;
 		agentId: string;
 		conversationId: string;
 		title: string;
@@ -204,21 +182,12 @@ export interface Interface {
 		result: RunResult;
 	}) => Effect.Effect<schema.MessageRow>;
 	/**
-	 * Posts a copy of a routine run's result into the pod's chat `chatId`, from
-	 * the run's agent, as the run's result, which opens the run, and announces it.
-	 */
-	readonly postRunResultToChat: (input: {
-		chatId: string;
-		run: RunPosting;
-		result: RunResult;
-	}) => Effect.Effect<schema.MessageRow>;
-	/**
 	 * The thread the system agent `systemAgentKey` works in under `served`,
 	 * hosted by `systemAgentId`: one per system agent per thread, created on
 	 * first use.
 	 */
 	readonly openSystemAgentThread: (input: {
-		served: Pick<schema.ThreadRow, "id" | "workspaceId" | "podId" | "initiatorUserId">;
+		served: Pick<schema.ThreadRow, "id" | "workspaceId" | "initiatorUserId">;
 		systemAgentId: string;
 		systemAgentKey: SystemAgentKey;
 		title: string;
@@ -393,13 +362,12 @@ export const make = Effect.gen(function* () {
 					.update(thread)
 					.set({ updatedAt: now })
 					.where(eq(thread.id, input.threadId))
-					.returning({ workspaceId: thread.workspaceId, podId: thread.podId }),
+					.returning({ workspaceId: thread.workspaceId }),
 			).pipe(Effect.flatMap(writtenRow("thread")));
 			yield* emit([
 				ConversationEvent.MessagePosted({
 					threadId: input.threadId,
 					workspaceId: placed.workspaceId,
-					podId: placed.podId,
 					message: {
 						...toMessage(created, authorRow(null, author)),
 						routineResultOf: resultOf(input.run),
@@ -446,65 +414,6 @@ export const make = Effect.gen(function* () {
 	});
 
 	return Service.of({
-		openBotChannel: (placement) =>
-			operation(
-				"openBotChannel",
-				transaction(
-					Effect.gen(function* () {
-						const [host] = yield* query((db) =>
-							db
-								.select({ name: agent.name })
-								.from(agent)
-								.where(eq(agent.id, placement.hostAgentId))
-								.limit(1),
-						);
-						const id = yield* ids.next;
-						const [created] = yield* query((db) =>
-							db
-								.insert(thread)
-								.values({
-									id,
-									workspaceId: placement.workspaceId,
-									podId: placement.podId,
-									hostAgentId: placement.hostAgentId,
-									conversationId: id,
-									type: "bot_channel",
-									title: host?.name ?? "Bot",
-									initiatorUserId: placement.initiatorUserId,
-								})
-								.onConflictDoNothing({
-									target: [thread.podId, thread.hostAgentId],
-									where: sql`${thread.type} = 'bot_channel'`,
-								})
-								.returning(),
-						);
-						if (created) {
-							yield* query((db) =>
-								db
-									.insert(threadParticipant)
-									.values({ threadId: created.id, agentId: placement.hostAgentId }),
-							);
-							return created;
-						}
-						const [channel] = yield* query((db) =>
-							db
-								.select()
-								.from(thread)
-								.where(
-									and(
-										eq(thread.type, "bot_channel"),
-										eq(thread.podId, placement.podId),
-										eq(thread.hostAgentId, placement.hostAgentId),
-									),
-								)
-								.limit(1),
-						);
-						if (!channel) return yield* Effect.die(new Error("The bot's channel was not opened"));
-						return channel;
-					}),
-				),
-			),
-
 		openDirect: (placement) =>
 			operation(
 				"openDirect",
@@ -561,62 +470,39 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		openThread: (input) =>
+		startTask: (input) =>
 			operation(
-				"openThread",
+				"startTask",
 				transaction(
 					Effect.gen(function* () {
-						// Two people starting a thread from one message at once open one.
-						yield* query((db) =>
-							db.execute(
-								sql`select pg_advisory_xact_lock(hashtextextended(${`thread-from:${input.originMessageId}`}, 0))`,
-							),
-						);
-						const [existing] = yield* query((db) =>
-							db
-								.select()
-								.from(thread)
-								.where(eq(thread.originMessageId, input.originMessageId))
-								.limit(1),
-						);
-						if (existing) return { thread: existing, opened: false };
 						const id = yield* ids.next;
 						const created = yield* query((db) =>
 							db
 								.insert(thread)
 								.values({
 									id,
-									workspaceId: input.parent.workspaceId,
-									podId: input.parent.podId,
+									workspaceId: input.workspaceId,
 									hostAgentId: input.hostAgentId,
 									conversationId: id,
-									parentThreadId: input.parent.id,
 									type: "conversation",
 									title: input.title,
 									initiatorUserId: input.initiatorUserId,
-									originMessageId: input.originMessageId,
 								})
 								.returning(),
 						).pipe(Effect.flatMap(writtenRow("thread")));
 						yield* query((db) =>
-							db
-								.insert(threadParticipant)
-								.values([
-									{ threadId: created.id, userId: input.initiatorUserId },
-									...(input.hostAgentId
-										? [{ threadId: created.id, agentId: input.hostAgentId }]
-										: []),
-								]),
+							db.insert(threadParticipant).values([
+								{ threadId: created.id, userId: input.initiatorUserId },
+								{ threadId: created.id, agentId: input.hostAgentId },
+							]),
 						);
 						yield* emit([
-							ConversationEvent.ThreadOpened({
+							ConversationEvent.TaskStarted({
 								workspaceId: created.workspaceId,
-								podId: threadPodId(created.id, created.podId),
-								parentThreadId: input.parent.id,
 								threadId: created.id,
 							}),
 						]);
-						return { thread: created, opened: true };
+						return created;
 					}),
 				),
 			),
@@ -633,7 +519,6 @@ export const make = Effect.gen(function* () {
 								.values({
 									id,
 									workspaceId: input.workspaceId,
-									podId: input.podId,
 									hostAgentId: input.hostAgentId,
 									conversationId: id,
 									type: "conversation",
@@ -665,7 +550,6 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.BriefedThreadStarted({
 								workspaceId: created.workspaceId,
-								podId: threadPodId(created.id, created.podId),
 								threadId: created.id,
 								hostAgentId: input.hostAgentId,
 								briefMessageId: brief.id,
@@ -698,7 +582,6 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.ConversationDoneChanged({
 								workspaceId: conversation.workspaceId,
-								podId: threadPodId(conversation.id, conversation.podId),
 								threadId: conversation.id,
 							}),
 						]);
@@ -770,7 +653,6 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.PodChatChanged({
 								workspaceId: started.workspaceId,
-								podId: threadPodId(started.id, started.podId),
 								threadId: started.id,
 							}),
 						]);
@@ -802,7 +684,6 @@ export const make = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.PodChatChanged({
 								workspaceId: chat.workspaceId,
-								podId: threadPodId(chat.id, chat.podId),
 								threadId: chat.id,
 							}),
 						]);
@@ -817,11 +698,7 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						// Two sends of one message wait here for each other, so the second
 						// finds the first rather than failing on its primary key.
-						yield* query((db) =>
-							db.execute(
-								sql`select pg_advisory_xact_lock(hashtextextended(${`message:${input.id}`}, 0))`,
-							),
-						);
+						yield* lockMessageId(input.id);
 						const [existing] = yield* query((db) =>
 							db.select().from(message).where(eq(message.id, input.id)).limit(1),
 						);
@@ -870,7 +747,7 @@ export const make = Effect.gen(function* () {
 								.update(thread)
 								.set({ updatedAt: now })
 								.where(eq(thread.id, input.threadId))
-								.returning({ workspaceId: thread.workspaceId, podId: thread.podId }),
+								.returning({ workspaceId: thread.workspaceId }),
 						).pipe(Effect.flatMap(writtenRow("thread")));
 						yield* query((db) =>
 							db
@@ -892,7 +769,6 @@ export const make = Effect.gen(function* () {
 							ConversationEvent.MessagePosted({
 								threadId: input.threadId,
 								workspaceId: placed.workspaceId,
-								podId: placed.podId,
 								message: posted,
 							}),
 						]);
@@ -936,7 +812,6 @@ export const make = Effect.gen(function* () {
 								.insert(thread)
 								.values({
 									workspaceId: input.parent.workspaceId,
-									podId: input.parent.podId,
 									hostAgentId: input.collaboratorId,
 									conversationId: input.parent.conversationId,
 									type: "collaboration",
@@ -980,7 +855,6 @@ export const make = Effect.gen(function* () {
 								.insert(thread)
 								.values({
 									workspaceId: input.workspaceId,
-									podId: input.podId,
 									hostAgentId: input.agentId,
 									conversationId: input.conversationId,
 									type: "routine",
@@ -1027,7 +901,6 @@ export const make = Effect.gen(function* () {
 								.values({
 									id,
 									workspaceId: owned.workspaceId,
-									podId: owned.podId,
 									hostAgentId: owned.agentId,
 									conversationId: id,
 									routineId: owned.id,
@@ -1074,12 +947,6 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		postRunResultToChat: ({ chatId, run, result }) =>
-			operation(
-				"postRunResultToChat",
-				transaction(postFromRunAgent({ threadId: chatId, run, result })),
-			),
-
 		openSystemAgentThread: (input) =>
 			operation(
 				"openSystemAgentThread",
@@ -1089,9 +956,6 @@ export const make = Effect.gen(function* () {
 							.insert(thread)
 							.values({
 								workspaceId: input.served.workspaceId,
-								// It stays in the pod whose conversation it serves, even though
-								// the system agent hosting it belongs to the workspace.
-								podId: input.served.podId,
 								hostAgentId: input.systemAgentId,
 								conversationId: null,
 								type: "system_agent",
@@ -1329,6 +1193,15 @@ export interface AlreadyPosted {
 }
 
 /** The message `messageId` in `threadId`, as a reply quotes it, or nothing when it is not there. */
+/**
+ * Holds the message id `messageId` until the transaction ends, so two sends
+ * of one message, which may start what it is posted in, run one at a time.
+ */
+export const lockMessageId = (messageId: string) =>
+	query((db) =>
+		db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`message:${messageId}`}, 0))`),
+	);
+
 const quotedIn = (threadId: string, messageId: string | null | undefined) =>
 	messageId
 		? query((db) =>

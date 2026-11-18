@@ -8,7 +8,7 @@ import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/mo
 import { unimplemented } from "../../testing.ts";
 import type { ThreadId } from "../threads/rooms.ts";
 import { Turns } from "../turns/turns.ts";
-import { type PreparedSummary, Summaries } from "./summaries.ts";
+import { type PreparedBotSummary, type PreparedSummary, Summaries } from "./summaries.ts";
 import { summarise } from "./summary.steps.ts";
 import type { SummaryRequest } from "./summary.workflow.ts";
 
@@ -34,7 +34,6 @@ const prepared: PreparedSummary = {
 	// A thread, as `Summaries.prepare` would have found it.
 	threadId: request.threadId as ThreadId,
 	workspaceId: "0199a3a0-0000-7000-8000-000000000006",
-	podId: "0199a3a0-0000-7000-8000-000000000007",
 	sourceMessageId: request.sourceMessageId,
 	threadTitle: "Prepare release notes",
 	model: "claude-sonnet-4-20250514",
@@ -44,7 +43,80 @@ const prepared: PreparedSummary = {
 	],
 };
 
+const bot: PreparedBotSummary = {
+	agentId: request.agentId,
+	botName: "Release Agent",
+	workspaceId: prepared.workspaceId,
+	model: prepared.model,
+	previousContent: undefined,
+	threads: [
+		{
+			title: "Prepare release notes",
+			summary: "Notes are ready.",
+			updatedAt: new Date("2026-11-18T09:00:00.000Z"),
+			doneAt: null,
+		},
+	],
+};
+
+/** A model answering each ask with the next of `answers`, failing once they run out. */
+function answering(...answers: string[]) {
+	let next = 0;
+	return Models.fromStream(() =>
+		Effect.suspend(() => {
+			const answer = answers[next++];
+			return answer === undefined
+				? Effect.fail(
+						new Models.ProviderUnreachable({
+							provider: DisplayName.fromRecord("Test provider"),
+							model: DisplayName.fromRecord("test-model"),
+							cause: new Error("No more answers"),
+						}),
+					)
+				: Effect.succeed(streamed(chunks(answer), { contextTokens: 20 }));
+		}),
+	);
+}
+
 describe("summarise", () => {
+	it("rewrites the bot's summary after the thread's", async () => {
+		const { summaries, turns, ended } = fakes();
+		vi.mocked(summaries.prepareBotSummary).mockReturnValue(Effect.succeed(bot));
+
+		await runWithServices(
+			summarise(
+				request,
+				answering(
+					'{"title":"Prepare release notes","summary":"Notes are ready."}',
+					"Release notes for 2.4 are ready.",
+				),
+			).pipe(Effect.provide(services(summaries, turns))),
+		);
+
+		expect(summaries.prepareBotSummary).toHaveBeenCalledWith(prepared.threadId);
+		expect(summaries.completeBotSummary).toHaveBeenCalledWith(
+			bot,
+			"Release notes for 2.4 are ready.",
+		);
+		expect(ended).toEqual([{ completed: 20 }]);
+	});
+
+	it("keeps the thread's summary when the bot's can't be written", async () => {
+		const { summaries, turns, ended } = fakes();
+		vi.mocked(summaries.prepareBotSummary).mockReturnValue(Effect.succeed(bot));
+
+		await runWithServices(
+			summarise(
+				request,
+				answering('{"title":"Prepare release notes","summary":"Notes are ready."}'),
+			).pipe(Effect.provide(services(summaries, turns))),
+		);
+
+		expect(summaries.complete).toHaveBeenCalled();
+		expect(summaries.completeBotSummary).not.toHaveBeenCalled();
+		expect(ended).toEqual([{ completed: 20 }]);
+	});
+
 	it("records a timeout rather than a shutdown and aborts without retrying", async () => {
 		vi.useFakeTimers();
 		const { summaries, turns, ended } = fakes();
@@ -238,6 +310,10 @@ function fakes() {
 		summaries: {
 			prepare: vi.fn<Summaries.Interface["prepare"]>(() => Effect.succeed(prepared)),
 			complete: vi.fn<Summaries.Interface["complete"]>(() => Effect.void),
+			prepareBotSummary: vi.fn<Summaries.Interface["prepareBotSummary"]>(() =>
+				Effect.succeed(undefined),
+			),
+			completeBotSummary: vi.fn<Summaries.Interface["completeBotSummary"]>(() => Effect.void),
 		},
 		turns: { recordSystemTurn },
 		recorded,

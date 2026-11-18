@@ -1,4 +1,4 @@
-import type { Pod, RoutineTrigger, RoutineTriggerInput } from "@sugabots/contracts";
+import type { Agent, RoutineTrigger, RoutineTriggerInput } from "@sugabots/contracts";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
@@ -223,15 +223,15 @@ export function TriggersGroup({
  * secret, which save as they change.
  */
 export function TriggerDialog({
-	pod,
+	bot,
 	editing,
 	settings,
 	onSave,
 	onRemove,
 	done,
 }: {
-	/** The bot's pod, whose connections decide which integrations' triggers it may have. */
-	pod: Pod | undefined;
+	/** The bot; its connections decide which integrations' triggers it may have. */
+	bot: { agent: Agent } | undefined;
 	/** The trigger being changed, as a draft; undefined while adding one. */
 	editing: TriggerDraft | undefined;
 	settings?: ReactNode;
@@ -260,7 +260,7 @@ export function TriggerDialog({
 		return (
 			<DialogFormFrame>
 				<TriggerKindStep
-					pod={pod}
+					bot={bot}
 					onChoose={(kind) => setDraft(newTriggerDraft(kind))}
 					done={done}
 				/>
@@ -296,7 +296,7 @@ export function TriggerDialog({
 					<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 						{settings ?? (
 							<DraftGroups
-								pod={pod}
+								agent={bot?.agent}
 								draft={draft}
 								onChange={setDraft}
 								onFilterEditingChange={setFilterEditing}
@@ -332,12 +332,12 @@ export function TriggerDialog({
 
 /** The groups that set up a draft of its kind, under what it still needs or what it does. */
 function DraftGroups({
-	pod,
+	agent,
 	draft,
 	onChange,
 	onFilterEditingChange,
 }: {
-	pod: Pod | undefined;
+	agent: Agent | undefined;
 	draft: TriggerDraft;
 	onChange: (draft: TriggerDraft) => void;
 	onFilterEditingChange: (editing: boolean) => void;
@@ -366,10 +366,10 @@ function DraftGroups({
 				/>
 			);
 		case "github":
-			return pod ? (
+			return agent ? (
 				<RepositoryGroups
-					podId={pod.id}
-					podName={pod.name}
+					agentId={agent.id}
+					botName={agent.name}
 					draft={draft.repository}
 					onChange={(repository) => onChange({ ...draft, repository })}
 				/>

@@ -1,4 +1,4 @@
-import type { Agent, Pod } from "@sugabots/contracts";
+import type { Agent } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Monitor } from "lucide-react";
@@ -20,13 +20,11 @@ import { DesktopScreen } from "./DesktopViewer.tsx";
  */
 export function ComputerSheet({
 	agent,
-	pod,
 	threadId,
 	onOpenFull,
 	onDismiss,
 }: {
 	agent: Agent;
-	pod: Pod;
 	/** The conversation the desktop is watched from. */
 	threadId: string;
 	/** Opens the desktop full screen, where it can be taken over. */
@@ -90,12 +88,12 @@ export function ComputerSheet({
 				<NoComputer
 					text={`${agent.name} doesn't have a computer`}
 					detail={
-						pod.permissions.updateAgents
+						agent.permissions.update
 							? "Give it one to run commands, browse and make files."
 							: "Ask somebody who can edit it to give it one."
 					}
 				>
-					{pod.permissions.updateAgents && (
+					{agent.permissions.update && (
 						<>
 							<Button
 								className="h-11 w-full text-sm"

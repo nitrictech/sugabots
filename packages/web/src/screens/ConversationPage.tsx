@@ -10,7 +10,7 @@ import { ConversationChat, type Staged, type StagedChange } from "./Conversation
 interface ConversationPageProps {
 	/** Which kind of conversation it is, and its bot when it has one. */
 	conversation: ConversationKind;
-	/** The pod it is in; null for a direct message between people, which is in none. */
+	/** The channel it is in; null for a bot's task or a direct message, which are in none. */
 	pod: Pod | null;
 	/** The conversation shown. */
 	conversationId: string;
@@ -45,7 +45,7 @@ export function ConversationPage({ away, ...chat }: ConversationPageProps) {
 		<div
 			className="relative flex min-h-0 flex-1 overflow-hidden"
 			style={
-				chat.conversation.kind === "botThread" || chat.conversation.kind === "botChannel"
+				chat.conversation.kind === "botThread"
 					? botColorVariables(chat.conversation.agent.color)
 					: undefined
 			}

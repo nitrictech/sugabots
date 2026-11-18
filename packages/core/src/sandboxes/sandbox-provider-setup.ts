@@ -17,8 +17,8 @@ import { serviceOperations } from "../database/database.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../providers/tested-configuration.ts";
 import type { UserFacing } from "../user-message.ts";
+import { AgentSandboxes } from "./agent-sandboxes.ts";
 import { pinnedToDigest } from "./image-digest.ts";
-import { PodSandboxes } from "./pod-sandboxes.ts";
 import { toSandboxProvider } from "./sandbox-provider-reads.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
@@ -111,7 +111,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SandboxProviderSetup");
 	const authorization = yield* Authorization.Service;
 	const providers = yield* SandboxProviderRepository.Service;
-	const podSandboxes = yield* PodSandboxes.Service;
+	const agentSandboxes = yield* AgentSandboxes.Service;
 	const sandboxes = yield* Sandboxes.Service;
 	const egress = yield* Egress.Service;
 
@@ -175,7 +175,7 @@ export const make = Effect.gen(function* () {
 					const modeOf = (row: typeof before) =>
 						SandboxProviderRepository.networkModeIn(row.settings);
 					if (modeOf(updated) !== modeOf(before)) {
-						yield* podSandboxes.applyNetwork({ workspaceId });
+						yield* agentSandboxes.applyNetwork({ workspaceId });
 					}
 					return toSandboxProvider(updated);
 				}),
@@ -187,10 +187,10 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId } = yield* managed(workspace);
 					yield* requireProvider(workspaceId, providerId);
-					if (yield* podSandboxes.anyMadeBy(workspaceId, providerId)) {
+					if (yield* agentSandboxes.anyMadeBy(workspaceId, providerId)) {
 						const configured = yield* providers.connection(workspaceId, providerId);
 						if (!configured) return yield* new SandboxesNotDestroyed({ cause: "incomplete" });
-						yield* podSandboxes
+						yield* agentSandboxes
 							.destroyAllMadeBy(workspaceId, configured)
 							.pipe(Effect.mapError((cause) => new SandboxesNotDestroyed({ cause })));
 					}
@@ -282,7 +282,7 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
 		SandboxProviderRepository.layer,
-		PodSandboxes.layer,
+		AgentSandboxes.layer,
 		Sandboxes.layer,
 	]),
 );

@@ -36,8 +36,8 @@ const september: WorkspaceUsage = {
 	days: [],
 	bots: [],
 	models: [],
-	pods: [],
 	systemAgents: { usd: 5.65, unpricedRequests: 0 },
+	personalAssistants: { usd: 0, unpricedRequests: 0 },
 };
 
 describe("reading what the workspace's models cost", () => {

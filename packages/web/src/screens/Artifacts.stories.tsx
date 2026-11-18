@@ -21,7 +21,7 @@ const scribe = { agentId: growthDesk.id, name: growthDesk.name };
 
 const plan: ArtifactSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
-	podId: revenue.id,
+	threadId: "0199a3a0-0000-7000-8000-0000000000e1",
 	kind: "document",
 	title: "Q4 outreach plan",
 	version: 3,
@@ -32,7 +32,7 @@ const plan: ArtifactSummary = {
 
 const dashboard: ArtifactSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000000f2",
-	podId: revenue.id,
+	threadId: "0199a3a0-0000-7000-8000-0000000000e1",
 	kind: "html",
 	title: "Pipeline by stage",
 	version: 1,
@@ -103,7 +103,9 @@ const meta = preview.meta({
  * its kind, version and who made it. Each opens beside the list.
  */
 export const List = meta.story({
-	render: () => <ArtifactListView pod={revenue} artifacts={[plan, dashboard]} now={now} />,
+	render: () => (
+		<ArtifactListView owner={{ pod: revenue }} artifacts={[plan, dashboard]} now={now} />
+	),
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: /Q4 outreach plan/ })).toHaveAttribute(
 			"href",
@@ -121,9 +123,14 @@ export const List = meta.story({
 /** One open beside the list, its row marked. */
 export const ListWithOneOpen = meta.story({
 	render: () => (
-		<ArtifactListView pod={revenue} artifacts={[plan, dashboard]} selectedId={plan.id} now={now}>
+		<ArtifactListView
+			owner={{ pod: revenue }}
+			artifacts={[plan, dashboard]}
+			selectedId={plan.id}
+			now={now}
+		>
 			<ArtifactStageView
-				pod={revenue}
+				owner={{ pod: revenue }}
 				artifact={atVersion(plan, 3, planContent)}
 				versions={versions}
 				now={now}
@@ -143,7 +150,7 @@ export const ListWithOneOpen = meta.story({
 
 /** Before any bot has made one, the page says how one gets here. */
 export const Empty = meta.story({
-	render: () => <ArtifactListView pod={revenue} artifacts={[]} now={now} />,
+	render: () => <ArtifactListView owner={{ pod: revenue }} artifacts={[]} now={now} />,
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText(`No artifacts in ${revenue.name} yet`)).toBeVisible();
 	},
@@ -153,7 +160,7 @@ export const Empty = meta.story({
 export const Document = meta.story({
 	render: () => (
 		<ArtifactStageView
-			pod={revenue}
+			owner={{ pod: revenue }}
 			artifact={atVersion(plan, 3, planContent)}
 			versions={versions}
 			now={now}
@@ -186,7 +193,7 @@ export const Delete = meta.story({
 	args: { onDelete: fn() },
 	render: ({ onDelete }) => (
 		<ArtifactStageView
-			pod={revenue}
+			owner={{ pod: revenue }}
 			artifact={atVersion(plan, 3, planContent)}
 			versions={versions}
 			now={now}
@@ -209,7 +216,7 @@ export const EarlierVersion = meta.story({
 	args: { onVersionChange: fn() },
 	render: ({ onVersionChange }) => (
 		<ArtifactStageView
-			pod={revenue}
+			owner={{ pod: revenue }}
 			artifact={atVersion(plan, 1, "# Q4 outreach plan\n\n## Goals\n\nTo be decided.\n")}
 			versions={versions}
 			now={now}
@@ -235,7 +242,7 @@ export const HtmlPage = meta.story({
 	args: { onClose: fn() },
 	render: ({ onClose }) => (
 		<ArtifactStageView
-			pod={revenue}
+			owner={{ pod: revenue }}
 			artifact={atVersion(dashboard, 1, pageContent)}
 			versions={[{ number: 1, author: null, createdAt: dashboard.createdAt }]}
 			now={now}
@@ -287,7 +294,7 @@ const written = (tool: string, artifact: ArtifactSummary): ToolCallPart => ({
 export const InAThread = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${import.meta.env.VITE_API_URL}/pods/:podId/artifacts/:artifactId/versions/3`, () =>
+			http.get(`${import.meta.env.VITE_API_URL}/artifacts/:artifactId/versions/3`, () =>
 				HttpResponse.json(atVersion(plan, 3, planContent)),
 			),
 		);
@@ -297,7 +304,6 @@ export const InAThread = meta.story({
 			<div className="p-6 pl-12.5">
 				<ArtifactCards
 					parts={[written("artifact_edit", plan)]}
-					podId={revenue.id}
 					botName={scribe.name}
 					onOpen={fn()}
 				/>
@@ -354,7 +360,6 @@ export const InlineDocument = meta.story({
 	render: ({ onOpen }) => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
-				podId={revenue.id}
 				artifact={asWritten(plan)}
 				botName={scribe.name}
 				content={planContent}
@@ -379,7 +384,6 @@ export const InlineDeleted = meta.story({
 	render: () => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
-				podId={revenue.id}
 				artifact={asWritten(dashboard)}
 				botName={scribe.name}
 				content="deleted"
@@ -398,7 +402,6 @@ export const InlineFailed = meta.story({
 	render: () => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
-				podId={revenue.id}
 				artifact={asWritten(plan)}
 				botName={scribe.name}
 				content="failed"
@@ -445,7 +448,6 @@ export const InlinePage = meta.story({
 	render: () => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
-				podId={revenue.id}
 				artifact={asWritten(dashboard)}
 				botName={scribe.name}
 				content={chartPage}
@@ -469,7 +471,6 @@ export const InlinePageLoading = meta.story({
 	render: () => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
-				podId={revenue.id}
 				artifact={asWritten(dashboard)}
 				botName={scribe.name}
 				content={undefined}
@@ -493,7 +494,6 @@ export const InlinePageTall = meta.story({
 	render: () => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<ArtifactCardView
-				podId={revenue.id}
 				artifact={asWritten(dashboard, "Every deal")}
 				botName={scribe.name}
 				content={tallPage}
@@ -510,9 +510,8 @@ export const InlinePageTall = meta.story({
 });
 
 const pageAddress = (url: string | null) =>
-	http.get(
-		`${import.meta.env.VITE_API_URL}/pods/:podId/artifacts/:artifactId/versions/:version/page`,
-		() => HttpResponse.json({ url }),
+	http.get(`${import.meta.env.VITE_API_URL}/artifacts/:artifactId/versions/:version/page`, () =>
+		HttpResponse.json({ url }),
 	);
 
 /** In the app, with pages on the content origin. */
@@ -537,7 +536,6 @@ export const PageFromContentOrigin = meta.story({
 		<ContentOriginPreview>
 			<div className="w-full max-w-155 p-6 pl-12.5">
 				<ArtifactCardView
-					podId={revenue.id}
 					artifact={asWritten(dashboard)}
 					botName={scribe.name}
 					content={chartPage}
@@ -583,7 +581,7 @@ export const PageAddressFailed = meta.story({
 		let asked = 0;
 		msw.use(
 			http.get(
-				`${import.meta.env.VITE_API_URL}/pods/:podId/artifacts/:artifactId/versions/:version/page`,
+				`${import.meta.env.VITE_API_URL}/artifacts/:artifactId/versions/:version/page`,
 				() => {
 					asked += 1;
 					return asked === 1

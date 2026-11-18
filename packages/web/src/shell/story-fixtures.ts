@@ -2,6 +2,7 @@ import type {
 	Agent,
 	AgentColor,
 	AgentFace,
+	AgentPermissions,
 	AgentShape,
 	Direct,
 	DirectMessageListItem,
@@ -11,36 +12,45 @@ import type {
 import { testPerson } from "@sugabots/contracts/testing";
 
 /*
- * Pods and bots for the shell's stories, shaped like the design's example
- * workspace: Revenue and Engineering, plus Personal.
+ * Channels and bots for the shell's stories, shaped like the design's example
+ * workspace: Revenue, Engineering and Design, and the viewer's Personal
+ * Assistant.
  */
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 const PERMISSIONS: PodPermissions = {
 	rename: true,
 	manageMembers: true,
+	manageBots: true,
 	leave: false,
-	createAgents: true,
-	updateAgents: true,
-	deleteAgents: true,
-	manageConnections: true,
-	manageSandbox: true,
-	useDesktops: true,
-	manageRoutines: true,
-	runRoutines: true,
+	join: false,
+	delete: true,
 	deleteArtifacts: true,
 };
 
+/** What the viewer may do with a bot in the stories: everything. */
+export const BOT_PERMISSIONS: AgentPermissions = {
+	update: true,
+	delete: true,
+	manageConnections: true,
+	manageSandbox: true,
+	useDesktop: true,
+	manageRoutines: true,
+	runRoutines: true,
+	decideApprovals: true,
+	talk: true,
+};
+
 function pod(id: string, name: string, color: Pod["color"]): Pod {
-	const kind = color === null ? "personal" : "shared";
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000000${id}`,
 		workspaceId: WORKSPACE,
-		ownerId: null,
-		kind,
 		name,
-		slug: kind === "personal" ? "personal" : name.toLowerCase(),
+		slug: name.toLowerCase(),
 		color,
+		description: null,
+		visibility: "public",
+		isMember: true,
 		permissions: PERMISSIONS,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
@@ -49,21 +59,19 @@ function pod(id: string, name: string, color: Pod["color"]): Pod {
 export const revenue = pod("a1", "Revenue", "green");
 export const engineering = pod("a2", "Engineering", "blue");
 export const design = pod("a3", "Design", "plum");
-export const personal = pod("af", "Personal", null);
 
 let next = 0;
 function bot(
 	name: string,
-	home: Pod,
 	color: AgentColor,
 	face: AgentFace = "pill",
 	shape: AgentShape = "circle",
+	extra: Partial<Agent> = {},
 ): Agent {
 	next += 1;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000001${String(next).padStart(2, "0")}`,
 		workspaceId: WORKSPACE,
-		podId: home.id,
 		name,
 		handle: name.toLowerCase().replace(/\s+/g, "-"),
 		systemAgentKey: null,
@@ -77,22 +85,41 @@ function bot(
 		usesSandbox: false,
 		naturalBrowsing: false,
 		createdById: null,
+		visibility: "public",
+		assistant: false,
+		pinned: true,
+		permissions: BOT_PERMISSIONS,
 		createdAt: "2026-09-01T00:00:00.000Z",
+		...extra,
 	};
 }
 
-export const growthDesk = bot("Growth Desk", revenue, "green");
-export const accountManager = bot("Account Manager", revenue, "sky");
-export const leadResearcher = bot("Lead Researcher", revenue, "ice");
-export const linearHandler = bot("Linear Handler", engineering, "orange", "arc", "squircle");
-export const oncall = bot("On-call", engineering, "rose", "dot", "hexagon");
-export const chief = bot("Chief", personal, "purple", "wink", "blob");
+export const growthDesk = bot("Growth Desk", "green");
+export const accountManager = bot("Account Manager", "sky");
+export const leadResearcher = bot("Lead Researcher", "ice");
+export const linearHandler = bot("Linear Handler", "orange", "arc", "squircle");
+export const oncall = bot("On-call", "rose", "dot", "hexagon");
+/** The viewer's Personal Assistant. */
+export const chief = bot("Chief", "purple", "wink", "blob", {
+	assistant: true,
+	visibility: "private",
+});
 
+/** The channels, each with the bots added to it. */
 export const podsWithBots = [
 	{ pod: revenue, bots: [growthDesk, accountManager, leadResearcher] },
 	{ pod: engineering, bots: [linearHandler, oncall] },
 	{ pod: design, bots: [] },
-	{ pod: personal, bots: [chief] },
+];
+
+/** Every bot in the stories' workspace. */
+export const storyAgents: readonly Agent[] = [
+	chief,
+	growthDesk,
+	accountManager,
+	leadResearcher,
+	linearHandler,
+	oncall,
 ];
 
 /** The viewer's id in the shell's stories. */

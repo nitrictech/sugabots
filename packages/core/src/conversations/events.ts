@@ -19,15 +19,13 @@ import type { Turns } from "./turns/turns.ts";
  * to query back, such as a finished reply's content. A tool call or
  * collaboration is carried whole, as the thread shows it, because clients
  * replace the part rather than patch it. An event the workspace's lists hear
- * of carries its thread's pod, so only people who reach the pod are told.
+ * of carries its thread, so only people who reach the thread are told.
  */
 export type ConversationEvent = Data.TaggedEnum<{
-	/** A message was posted whole: a person's, or a routine run's result. */
+	/** A message was posted whole: a person's, or an automation run's result. */
 	MessagePosted: {
 		readonly threadId: string;
 		readonly workspaceId: string;
-		/** Null in a direct message between people, which is in no pod. */
-		readonly podId: string | null;
 		readonly message: Message;
 	};
 	/** Somebody reacted to a message or took a reaction back. `reactions` is all it has now. */
@@ -63,7 +61,6 @@ export type ConversationEvent = Data.TaggedEnum<{
 	TurnCompleted: {
 		readonly threadId: string;
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly turnId: string;
 		readonly agentId: string;
 		readonly messageId: string;
@@ -78,7 +75,6 @@ export type ConversationEvent = Data.TaggedEnum<{
 	TurnSuspended: {
 		readonly threadId: string;
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly turnId: string;
 	};
 	/**
@@ -88,7 +84,6 @@ export type ConversationEvent = Data.TaggedEnum<{
 	TurnFailed: {
 		readonly threadId: string;
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly turnId: string;
 		readonly agentId: string;
 		readonly messageId: string;
@@ -100,7 +95,6 @@ export type ConversationEvent = Data.TaggedEnum<{
 	TurnCancelled: {
 		readonly threadId: string;
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly turnId: string;
 		readonly agentId: string;
 		readonly messageId: string;
@@ -129,7 +123,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	/** A reply called a tool: the call is running, or waiting for a person to approve it. */
 	ToolCallStarted: ToolCallChange;
 	/** A person allowed or denied a call, which the lists hear of, since it no longer waits on anyone. */
-	ToolCallDecided: ToolCallChange & { readonly workspaceId: string; readonly podId: string };
+	ToolCallDecided: ToolCallChange & { readonly workspaceId: string };
 	/** An allowed call began running. */
 	ToolCallExecuting: ToolCallChange;
 	/** The call returned, failed, or was abandoned with its turn. */
@@ -137,10 +131,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	/** An agent opened a child thread to brief a collaborator. */
 	CollaborationOpened: CollaborationChange & {
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly collaboratorAgentId: string;
-		/** The collaborator's channel in the pod, which lists the collaboration, or null while it has none. */
-		readonly collaboratorChannelId: string | null;
 		/** The brief, the first message in the collaboration's thread. */
 		readonly briefMessageId: string;
 	};
@@ -160,11 +151,9 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly readThrough: Date;
 		readonly readAt: Date;
 	};
-	/** Somebody started a thread from a message in `parentThreadId`, a pod's chat or a bot's channel, which links to it. */
-	ThreadOpened: {
+	/** Somebody started the task `threadId` with a bot. */
+	TaskStarted: {
 		readonly workspaceId: string;
-		readonly podId: string;
-		readonly parentThreadId: string;
 		readonly threadId: string;
 	};
 	/**
@@ -173,7 +162,6 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 */
 	BriefedThreadStarted: {
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly threadId: string;
 		readonly hostAgentId: string;
 		readonly briefMessageId: string;
@@ -181,31 +169,26 @@ export type ConversationEvent = Data.TaggedEnum<{
 	/** Somebody started, renamed or archived the pod's chat `threadId`. */
 	PodChatChanged: {
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly threadId: string;
 	};
 	/** Somebody marked the conversation done, or reopened it. */
 	ConversationDoneChanged: {
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly threadId: string;
 	};
 	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
 	ThreadSummarised: {
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly threadId: string;
 	};
 	/** The compaction agent replaced the thread's older history with a summary for its bots. */
 	ThreadCompacted: {
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly threadId: string;
 	};
 	/** A routine run began in its own thread, listed in the agent's conversation. */
 	RoutineExecutionAccepted: {
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly conversationId: string;
 		readonly threadId: string;
 	};
@@ -215,13 +198,11 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 */
 	RoutineWorkCancelled: {
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly threadIds: readonly string[];
 	};
 	/** A routine run finished, failed, or was cancelled. */
 	RoutineExecutionSettled: {
 		readonly workspaceId: string;
-		readonly podId: string;
 		readonly conversationId: string;
 		readonly threadId: string;
 	};

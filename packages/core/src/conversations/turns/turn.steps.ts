@@ -23,16 +23,19 @@ import { Installation } from "../../installation/installation.ts";
 import { Models } from "../../providers/models/models.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import { AssistantGuide } from "../assistant/assistant-guide.ts";
 import { BotThreads } from "../chats/bot-threads.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { BotRoutines } from "../routines/bot-routines.ts";
 import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
+import { assistantRequests } from "../tools/assistant/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
-import { ConnectionTools } from "../tools/connections.ts";
-import { SandboxTools } from "../tools/sandbox.ts";
+import { ConnectionTools, type OfferedTool } from "../tools/connections.ts";
+import { type Request, SandboxTools } from "../tools/sandbox.ts";
+import { START_THREAD_TOOL, startThreadTool } from "../tools/start-thread/tool.ts";
 import {
 	callToolApproval,
 	findApprovalTarget,
@@ -55,7 +58,7 @@ import {
 	TurnRepository,
 } from "./repository.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
-import { bindingOf, toolsForTurn, withStartingFiles } from "./tools.ts";
+import { bindingOf, toolsForTurn } from "./tools.ts";
 import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
@@ -97,6 +100,7 @@ type SegmentServices =
 	| BotRoutines.Service
 	| Installation.Service
 	| BotThreads.Service
+	| AssistantGuide.Service
 	| Ids.Service;
 
 /** The turn workflow's steps, which its activities reach through `TurnSteps`. */
@@ -401,6 +405,7 @@ const streamReply = (
 			const routines = yield* BotRoutines.Service;
 			const installation = yield* Installation.Service;
 			const botThreads = yield* BotThreads.Service;
+			const assistantGuide = yield* AssistantGuide.Service;
 			const signal = yield* Effect.abortSignal;
 
 			// One writer at a time: the periodic save, the on-size save and a tool
@@ -415,6 +420,7 @@ const streamReply = (
 			// A tool runs inside the SDK as a promise, so it needs a way back to
 			// this runtime's database.
 			const context = yield* Effect.context<Database>();
+			const runInTurn = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) });
 			const now = yield* DateTime.nowAsDate;
 			const offeredBuiltIns = yield* builtInTools.forWorkspace(
 				prepared.context.thread.workspaceId,
@@ -427,10 +433,7 @@ const streamReply = (
 				),
 			};
 			const sandbox = yield* sandboxTools.forTurn({
-				pod: {
-					workspaceId: prepared.context.thread.workspaceId,
-					podId: prepared.context.agent.podId,
-				},
+				workspaceId: prepared.context.thread.workspaceId,
 				usesSandbox: prepared.context.agent.usesSandbox,
 				turnId: prepared.turnId,
 				threadId: prepared.context.thread.id,
@@ -438,33 +441,73 @@ const streamReply = (
 				color: prepared.context.agent.color,
 				naturalBrowsing: prepared.context.agent.naturalBrowsing,
 				acceptsImages: prepared.context.agent.acceptsImages,
-				// A conversation or a channel serves the files in its own thread, so only there can people be shown one.
+				// A task or a channel's conversation serves the files in its own thread, so only there can people be shown one.
 				...((prepared.context.thread.type === "conversation" ||
-					prepared.context.thread.type === "bot_channel") && {
+					prepared.context.thread.type === "pod_chat") && {
 					attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
 				}),
 			});
 			// The connections' sessions live as long as the turn.
 			const connections = yield* Effect.acquireRelease(
-				connectionTools.forPod(prepared.context.thread.workspaceId, prepared.context.agent.podId, {
+				connectionTools.forAgent(prepared.context.thread.workspaceId, prepared.context.agent.id, {
 					turnId: prepared.turnId,
 					agentId: prepared.context.agent.id,
 					threadId: prepared.context.thread.id,
-					files: withStartingFiles(files, prepared.context),
+					files,
 					workspace: sandbox.usable ? sandbox.workspace : undefined,
 					sandboxSignsIn: sandbox.signsIn,
 				}),
 				(opened) => Effect.promise(() => opened.close()),
 			);
+			const { assistantOf } = prepared.context.agent;
+			// A Personal Assistant asks its person before any call that may change
+			// something, whatever its connections allow without asking.
+			const offeredTools =
+				assistantOf === null ? connections.tools : askingBeforeChanges(connections.tools);
+			// A Personal Assistant knows and acts on its person's workspace only
+			// while it answers them.
+			const assistant =
+				assistantOf !== null && prepared.context.askedBy === assistantOf
+					? (() => {
+							const person: AssistantGuide.Person = {
+								userId: assistantOf,
+								workspaceId: prepared.context.thread.workspaceId,
+								workspaceSlug: prepared.context.workspaceSlug,
+							};
+							const startsThreads: Request = {
+								tool: startThreadTool({
+									bot: {
+										agentId: prepared.context.agent.id,
+										workspaceId: prepared.context.thread.workspaceId,
+										askedBy: assistantOf,
+									},
+									threads: botThreads,
+									run: runInTurn,
+								}),
+								refusal: () => undefined,
+							};
+							// A task it starts is seen by others, so it waits for its person too.
+							const requests: Record<string, Request> = {
+								...assistantRequests({ guide: assistantGuide, person, run: runInTurn }),
+								[START_THREAD_TOOL]: startsThreads,
+							};
+							return { guide: assistantGuide, person, requests };
+						})()
+					: undefined;
+			// The built-in tools whose calls wait for a person to allow them.
+			const builtInRequests = {
+				...(sandbox.usable ? sandbox.requests : {}),
+				...assistant?.requests,
+			};
 			const approvalBoundTools = new Set<string>();
 			for (const binding of prepared.checkpoint?.approvals ?? []) {
 				if ("builtIn" in binding) {
-					if (!sandbox.usable || !sandbox.requests[binding.tool]) {
+					if (!builtInRequests[binding.tool]) {
 						return yield* new ApprovedToolChanged({ tool: binding.tool });
 					}
 					continue;
 				}
-				const offered = connections.tools[binding.tool];
+				const offered = offeredTools[binding.tool];
 				if (
 					!offered ||
 					offered.connectionId !== binding.connectionId ||
@@ -476,13 +519,13 @@ const streamReply = (
 				approvalBoundTools.add(binding.tool);
 			}
 			const toolApproval: ToolApprovalConfiguration<ToolSet, unknown> = {
-				...callToolApproval(connections.tools),
+				...callToolApproval(offeredTools),
 				// A request refused outright runs at once, to be recorded as refused.
 				...Object.fromEntries(
-					Object.entries(sandbox.requests).map(([key, request]) => [
+					Object.entries({ ...sandbox.requests, ...assistant?.requests }).map(([key, request]) => [
 						key,
 						(input: unknown) =>
-							sandbox.usable && request.refusal(input) === undefined
+							builtInRequests[key] && request.refusal(input) === undefined
 								? "user-approval"
 								: "not-applicable",
 					]),
@@ -497,14 +540,15 @@ const streamReply = (
 				approvalBoundTools,
 				builtIn,
 				sandbox,
-				connections: connections.tools,
+				connections: offeredTools,
 				files,
 				agents,
 				webAppUrl: installation.webAppUrl,
 				routines,
 				threads: botThreads,
 				bus: events,
-				run: effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) }),
+				run: runInTurn,
+				...(assistant && { assistant }),
 				reply: {
 					length: () => Ref.getUnsafe(reply).content.length,
 					noteCollaboration: (collaboration) =>
@@ -535,7 +579,7 @@ const streamReply = (
 					signInExpired: connections.signInExpired,
 					instructions: connections.instructions,
 					addable: connections.addable,
-					connectionsPageUrl: `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/pods/${prepared.context.podSlug}/connections`,
+					connectionsPageUrl: `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/bots/${prepared.context.agent.handle}/connections`,
 				}),
 				sandbox: sandbox.note,
 			};
@@ -562,7 +606,6 @@ const streamReply = (
 				workspaceId: prepared.context.thread.workspaceId,
 				activity: {
 					purpose: "agent-turn",
-					podId: prepared.context.agent.podId,
 					agentId: prepared.context.agent.id,
 					threadId: prepared.context.thread.id,
 					turnId: prepared.turnId,
@@ -599,13 +642,13 @@ const streamReply = (
 				const atOffset = (yield* Ref.get(reply)).content.length;
 				const ids = yield* Ids.Service;
 				const pending = yield* Effect.forEach(finished.approvalRequests, (request) => {
-					const target = findApprovalTarget(connections.tools, request.toolCall);
+					const target = findApprovalTarget(offeredTools, request.toolCall);
 					const asked:
 						| Pick<
 								ToolCallRepository.PendingToolApproval,
 								"tool" | "input" | "binding" | "mutating"
 						  >
-						| undefined = sandbox.requests[request.toolCall.toolName]
+						| undefined = builtInRequests[request.toolCall.toolName]
 						? {
 								tool: request.toolCall.toolName,
 								input: request.toolCall.input,
@@ -794,3 +837,18 @@ const publishDelta = (
 			}),
 		),
 	).pipe(Effect.catchCause((cause) => Effect.logError("Publishing a message delta failed", cause)));
+
+/**
+ * `tools` with every one that may change something asking a person first,
+ * whatever its connection allows, as a Personal Assistant's do.
+ */
+function askingBeforeChanges(
+	tools: Readonly<Record<string, OfferedTool>>,
+): Record<string, OfferedTool> {
+	return Object.fromEntries(
+		Object.entries(tools).map(([key, offered]) => [
+			key,
+			offered.mutating && offered.access === "allow" ? { ...offered, access: "ask" } : offered,
+		]),
+	);
+}

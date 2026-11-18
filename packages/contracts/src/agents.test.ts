@@ -2,8 +2,7 @@ import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { agentColorSchema, agentUpdateSchema, newAgentSchema } from "./agents.ts";
 
-const ID = "0199a3a0-0000-7000-8000-000000000001";
-const request = { podId: ID, name: "Issue triager", model: "example/model" };
+const request = { name: "Issue triager", model: "example/model" };
 
 describe("agent request contracts", () => {
 	it("rejects duplicate request array values", () => {
@@ -66,7 +65,7 @@ describe("agent request contracts", () => {
 	});
 
 	it("makes updates shallow partials and strips pod placement", () => {
-		expect(Schema.decodeUnknownSync(agentUpdateSchema)({ podId: ID, extra: true })).toEqual({});
+		expect(Schema.decodeUnknownSync(agentUpdateSchema)({ extra: true })).toEqual({});
 		expect(Schema.decodeSync(agentUpdateSchema)({ name: "  Renamed  " })).toEqual({
 			name: "Renamed",
 		});

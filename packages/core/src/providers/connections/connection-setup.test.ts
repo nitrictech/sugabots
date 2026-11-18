@@ -7,14 +7,7 @@ import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
-import {
-	connection,
-	pod,
-	podMember,
-	user,
-	workspace,
-	workspaceMember,
-} from "../../database/schema.ts";
+import { agent, connection, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -70,7 +63,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
-	let podId: string;
+	let agentId: string;
 
 	/**
 	 * The setup as `as`, by default the workspace's administrator, under an
@@ -122,14 +115,14 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 			)
 		)(options.as ?? adminId);
 
-	const inPod = () => ({ podId });
+	const ofAgent = () => ({ agentId });
 
 	/**
 	 * An OAuth connection to `url` waiting on the sign-in whose state is
 	 * `state`, which `startedByUserId`, by default the administrator, started.
 	 */
 	const waitingOnSignIn = async (url: string, state: string, startedByUserId = adminId) => {
-		const made = await connections.create(workspaceId, podId, adminId, {
+		const made = await connections.create(workspaceId, agentId, adminId, {
 			name: `Signs in ${state}`,
 			url,
 			auth: "oauth",
@@ -173,22 +166,27 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 				{ workspaceId, userId: memberId, role: "member" },
 			]),
 		);
-		const [room] = await onDatabase((db) =>
+		const [bot] = await onDatabase((db) =>
 			db
-				.insert(pod)
-				.values({ workspaceId, kind: "shared", name: "Support", slug: `support-${stamp}` })
+				.insert(agent)
+				.values({
+					workspaceId,
+					name: "Helper",
+					handle: "helper",
+					color: "sky",
+					face: "pill",
+				})
 				.returning(),
 		);
-		if (!room) throw new Error("fixture");
-		podId = room.id;
-		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
+		if (!bot) throw new Error("fixture");
+		agentId = bot.id;
 	});
 
 	it("learns a server's tools as soon as it is added", async () => {
 		const setup = await setupWith();
 
 		const made = await setup.create({
-			...inPod(),
+			...ofAgent(),
 			connection: {
 				name: "Wiki",
 				url: `${serverUrl}/mcp`,
@@ -204,12 +202,12 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		const setup = await setupWith();
 
 		const tested = await setup.testUnsaved({
-			...inPod(),
+			...ofAgent(),
 			server: { url: `${serverUrl}/mcp`, secretHeader: "x-fixture-key", secret: "open-sesame" },
 		});
 
 		expect(tested).toMatchObject({ reachable: true, tools: 1 });
-		expect(await setup.list(inPod())).toEqual([]);
+		expect(await setup.list(ofAgent())).toEqual([]);
 	});
 
 	it("refuses an address the network policy forbids, and stores nothing", async () => {
@@ -217,21 +215,21 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		await expect(
 			setup.create({
-				...inPod(),
+				...ofAgent(),
 				connection: { name: "Local", url: `${serverUrl}/mcp` },
 			}),
 		).rejects.toMatchObject({ _tag: "UrlNotAllowed" });
-		expect(await setup.list(inPod())).toEqual([]);
+		expect(await setup.list(ofAgent())).toEqual([]);
 	});
 
 	it("records a server it cannot reach in its own words, keeping the network's out", async () => {
 		const setup = await setupWith();
 		const made = await setup.create({
-			...inPod(),
+			...ofAgent(),
 			connection: { name: "Gone", url: "http://127.0.0.1:9/mcp" },
 		});
 
-		const tested = await setup.test({ ...inPod(), connectionId: made.id });
+		const tested = await setup.test({ ...ofAgent(), connectionId: made.id });
 
 		expect(tested).toMatchObject({
 			reachable: false,
@@ -254,7 +252,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		const before = requestsReceived;
 
 		const made = await setup.create({
-			...inPod(),
+			...ofAgent(),
 			connection: {
 				kind: "http",
 				name: "Alerts",
@@ -266,22 +264,22 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		expect(made).toMatchObject({ kind: "http", status: "connected", hasSecret: true });
 		expect(
-			(await setup.get({ ...inPod(), connectionId: made.id })).tools.map((tool) => tool.access),
+			(await setup.get({ ...ofAgent(), connectionId: made.id })).tools.map((tool) => tool.access),
 		).toEqual(["allow", "ask", "ask", "ask", "off"]);
 		expect(requestsReceived).toBe(before);
 	});
 
 	it("records an HTTP endpoint's address the network policy no longer allows", async () => {
 		const made = await (await setupWith()).create({
-			...inPod(),
+			...ofAgent(),
 			connection: { kind: "http", name: "Local", url: `${serverUrl}/v2` },
 		});
 		const setup = await setupWith({ allowPrivateNetwork: false });
 
-		const tested = await setup.test({ ...inPod(), connectionId: made.id });
+		const tested = await setup.test({ ...ofAgent(), connectionId: made.id });
 
 		expect(tested).toMatchObject({ reachable: false, error: expect.any(String) });
-		expect(await setup.get({ ...inPod(), connectionId: made.id })).toMatchObject({
+		expect(await setup.get({ ...ofAgent(), connectionId: made.id })).toMatchObject({
 			status: "error",
 		});
 	});
@@ -303,7 +301,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		await expect(
 			setup.connectFromCatalog({
-				...inPod(),
+				...ofAgent(),
 				server: { name: "GitHub", url: "https://api.githubcopilot.com/mcp/" },
 			}),
 		).rejects.toMatchObject({
@@ -311,7 +309,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 			userMessage:
 				"Sugabots can't use this server's sign-in, because the server doesn't let new apps register themselves. Connect it with an access token from the server instead.",
 		});
-		expect(await setup.list(inPod())).toEqual([]);
+		expect(await setup.list(ofAgent())).toEqual([]);
 	});
 
 	it("keeps no connection for a catalogued server that needed no sign-in", async () => {
@@ -321,25 +319,25 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		await expect(
 			setup.connectFromCatalog({
-				...inPod(),
+				...ofAgent(),
 				server: { name: "Open", url: `${serverUrl}/open` },
 			}),
 		).rejects.toMatchObject({ _tag: "ConnectionNeededNoSignIn" });
-		expect(await setup.list(inPod())).toEqual([]);
+		expect(await setup.list(ofAgent())).toEqual([]);
 	});
 
-	it("lets a member of the pod see its connections, and change none of them", async () => {
+	it("lets a member who reaches the bot see its connections, and change none of them", async () => {
 		const setup = await setupWith({ as: memberId });
 
-		expect(await setup.list(inPod())).toEqual([]);
+		expect(await setup.list(ofAgent())).toEqual([]);
 		await expect(
-			setup.create({ ...inPod(), connection: { name: "Wiki", url: `${serverUrl}/mcp` } }),
+			setup.create({ ...ofAgent(), connection: { name: "Wiki", url: `${serverUrl}/mcp` } }),
 		).rejects.toBeInstanceOf(ActionForbidden);
-		expect(await setup.list(inPod())).toEqual([]);
+		expect(await setup.list(ofAgent())).toEqual([]);
 	});
 
 	describe("finishing a sign-in", () => {
-		it("learns the connection's tools and names the pod", async () => {
+		it("learns the connection's tools and names the bot", async () => {
 			const setup = await setupWith();
 			const made = await waitingOnSignIn(`${serverUrl}/open`, "state-ok");
 
@@ -347,8 +345,8 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 				callback: { code: "the-code", state: "state-ok" },
 			});
 
-			expect(outcome).toEqual({ pod: { workspaceId, podId } });
-			expect(await setup.get({ ...inPod(), connectionId: made.id })).toMatchObject({
+			expect(outcome).toEqual({ agent: { workspaceId, agentId } });
+			expect(await setup.get({ ...ofAgent(), connectionId: made.id })).toMatchObject({
 				tools: [{ name: "lookup" }],
 			});
 		});
@@ -373,13 +371,13 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 			expect(
 				await setup.completeOAuth({ callback: { code: "the-code", state: "state-other" } }),
 			).toEqual({ failure: "not_allowed" });
-			expect(await setup.get({ ...inPod(), connectionId: made.id })).toMatchObject({
+			expect(await setup.get({ ...ofAgent(), connectionId: made.id })).toMatchObject({
 				signedIn: false,
 				tools: [],
 			});
 		});
 
-		it("does not finish for somebody who may not manage the pod's connections", async () => {
+		it("does not finish for somebody who may not manage the bot's connections", async () => {
 			const setup = await setupWith({ as: memberId });
 			await waitingOnSignIn(`${serverUrl}/open`, "state-member", memberId);
 
@@ -402,7 +400,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 						errorDescription: "Visit evil.example to continue",
 					},
 				}),
-			).toEqual({ failure: "refused", pod: { workspaceId, podId } });
+			).toEqual({ failure: "refused", agent: { workspaceId, agentId } });
 		});
 
 		it("gives a code when the code could not be exchanged for tokens", async () => {
@@ -423,7 +421,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 				await setup.completeOAuth({
 					callback: { code: "stale", state: "state-bad-code" },
 				}),
-			).toEqual({ failure: "not_completed", pod: { workspaceId, podId } });
+			).toEqual({ failure: "not_completed", agent: { workspaceId, agentId } });
 		});
 	});
 });

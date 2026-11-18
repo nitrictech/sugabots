@@ -76,14 +76,21 @@ export function Inbox({ children }: { children: ReactNode }) {
 		if (!next.delete(kind)) next.add(kind);
 		setKinds(next);
 	};
-	// A direct message between people is in no pod.
-	const placeOf = (item: ActivityItem): RowPlace | undefined => {
-		if (item.podId === null) return { kind: "direct" };
-		const pod = pods?.find((candidate) => candidate.id === item.podId);
-		return pod && { kind: "pod", pod };
-	};
 	const markRead = useMarkChatsRead();
 	const directMessages = useDirectMessages();
+	const directIds = new Set(directMessages.data?.items.map((item) => item.conversation.id));
+	// A direct message between people opens among them; the rest open here, in a channel or with a bot.
+	const placeOf = (item: ActivityItem): RowPlace | undefined => {
+		// Runs and collaborations are bots' work, never in a direct message.
+		if (item.kind === "routine" || item.kind === "collaboration") return { kind: "bot" };
+		if (item.podId !== null) {
+			const pod = pods?.find((candidate) => candidate.id === item.podId);
+			return pod && { kind: "pod", pod };
+		}
+		// Outside a channel, a message is in a task or a direct message: which, once the direct messages are known.
+		if (!directMessages.isSuccess) return undefined;
+		return directIds.has(item.conversationId) ? { kind: "direct" } : { kind: "bot" };
+	};
 	// Each item is read as its conversation is, so marking those reads them all;
 	// and every direct message with anything unread, which the app's badge counts
 	// however long ago it was written, past what the feed holds.
@@ -397,29 +404,28 @@ function itemIdOf(item: ActivityItem): string {
 	return item.kind === "routine" || item.kind === "collaboration" ? item.threadId : item.messageId;
 }
 
-/** Where a row's item is: in one of the pods, or in a direct message between people, in none. */
-type RowPlace = { kind: "pod"; pod: Pod } | { kind: "direct" };
+/** Where a row's item is: in a channel, with a bot, or in a direct message between people. */
+type RowPlace = { kind: "pod"; pod: Pod } | { kind: "bot" } | { kind: "direct" };
 
 /**
  * Where a row opens: a run or collaboration as a page of its own, and a
- * message in its conversation, jumped to. `pod` is the pod the item is in.
+ * message in its conversation, jumped to.
  */
-function activityItemLink(item: ActivityItem, pod: Pod) {
-	const place = { pod, conversationId: item.conversationId };
+function activityItemLink(item: ActivityItem) {
 	if (item.kind === "routine" || item.kind === "collaboration") {
-		return activityThreadLink(place, item.threadId);
+		return activityThreadLink(item.conversationId, item.threadId);
 	}
 	return linkOptions({
 		from: "/$workspace",
-		to: "./activity/$pod/$conversation",
-		params: { pod: pod.slug, conversation: item.conversationId },
+		to: "./activity/$conversation",
+		params: { conversation: item.conversationId },
 		search: { message: item.messageId },
 	});
 }
 
 /**
  * One thing that happened: a dot while it is unread, who or what it is about,
- * what happened and its pod's mark, and under them a line about it and when,
+ * what happened and its channel's mark, and under them a line about it and when,
  * shaded while it is open.
  */
 function InboxRow({
@@ -428,7 +434,7 @@ function InboxRow({
 	selected,
 }: {
 	item: ActivityItem;
-	/** Where the item is, once the pods are loaded; until then the row cannot open. */
+	/** Where the item is, once the channels are loaded; until then the row cannot open. */
 	place: RowPlace | undefined;
 	/** Whether it is the one open beside the list. */
 	selected: boolean;
@@ -483,8 +489,8 @@ function InboxRow({
 	if (!place) return <div className={layout}>{content}</div>;
 	return (
 		<Link
-			{...(place.kind === "pod"
-				? activityItemLink(item, place.pod)
+			{...(place.kind !== "direct"
+				? activityItemLink(item)
 				: directMessageLink(item.conversationId, { message: itemMessageId(item) }))}
 			aria-current={selected ? "page" : undefined}
 			className={cn(

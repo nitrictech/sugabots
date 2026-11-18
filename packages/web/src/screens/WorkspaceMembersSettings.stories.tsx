@@ -12,7 +12,6 @@ import {
 	leadResearcher,
 	linearHandler,
 	oncall,
-	personal,
 	revenue,
 } from "@/shell/story-fixtures.ts";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
@@ -74,7 +73,7 @@ function SettingsPreview({ children }: { children: ReactNode }) {
 		});
 		// What a member's page reads besides the roster: the pods, their bots and who is in each.
 		client.setQueryData(["workspaces"], [workspace]);
-		client.setQueryData(["pods", workspace.id], [revenue, engineering, personal]);
+		client.setQueryData(["pods", workspace.id], [revenue, engineering]);
 		client.setQueryData(
 			["agents", workspace.id],
 			[growthDesk, accountManager, leadResearcher, linearHandler, oncall],
@@ -151,7 +150,7 @@ export const Inviting = meta.story({
 
 		await expect(within(dialog).getByLabelText("Email addresses")).toBeInTheDocument();
 		await expect(
-			within(dialog).getByText("Builds agents in the pods they are added to."),
+			within(dialog).getByText("Makes bots and channels, and works with the public bots."),
 		).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Send" })).toBeDisabled();
 	},

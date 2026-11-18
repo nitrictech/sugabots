@@ -1,7 +1,20 @@
 import { execFileSync } from "node:child_process";
 import { Effect, Layer } from "effect";
 import { Ids } from "../ids/ids.ts";
+import { Egress } from "../providers/network/egress.ts";
+import { unimplemented } from "../testing.ts";
 import { workVolume } from "./implementations/opensandbox.ts";
+import { SandboxCredentials } from "./sandbox-credentials.ts";
+
+/**
+ * What a bot's computer is signed in with and reaches the internet through,
+ * for a test that never makes one, such as one that deletes a bot that has
+ * none: any use dies.
+ */
+export const noComputers = Layer.mergeAll(
+	unimplemented(SandboxCredentials.Service, {}),
+	unimplemented(Egress.Service, {}),
+);
 
 /**
  * Ids that remember every UUID v7 they hand out in `handedOut`. A pod's

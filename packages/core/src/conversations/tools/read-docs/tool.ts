@@ -21,7 +21,7 @@ export function readDocsTool(pages: readonly DocPage[]) {
 		].join("\n\n"),
 		inputSchema: Schema.Struct({
 			page: Schema.String.check(Schema.isMaxLength(200)).annotate({
-				description: "The page's name, as listed, like routines",
+				description: "The page's name, as listed, like automations",
 			}),
 			sections: Schema.optional(
 				Schema.Array(Schema.String.check(Schema.isMaxLength(200)))

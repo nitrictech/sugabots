@@ -32,7 +32,6 @@ describe("the thread feed", () => {
 	const threadId = crypto.randomUUID();
 	const turnId = crypto.randomUUID();
 	const agentId = crypto.randomUUID();
-	const podId = crypto.randomUUID();
 
 	beforeEach(() => {
 		published = [];
@@ -49,7 +48,6 @@ describe("the thread feed", () => {
 				ConversationEvent.TurnCompleted({
 					threadId,
 					workspaceId,
-					podId,
 					turnId,
 					agentId,
 					messageId: "m1",
@@ -94,7 +92,6 @@ describe("the thread feed", () => {
 					ConversationEvent.TurnFailed({
 						threadId,
 						workspaceId,
-						podId,
 						turnId,
 						agentId,
 						messageId: "m1",
@@ -132,7 +129,6 @@ describe("the thread feed", () => {
 				ConversationEvent.TurnCancelled({
 					threadId,
 					workspaceId,
-					podId,
 					turnId,
 					agentId,
 					messageId: "m1",
@@ -160,12 +156,11 @@ describe("the thread feed", () => {
 		]);
 	});
 
-	it("names the thread's pod on everything it tells the workspace, and on nothing else", () => {
+	it("names the thread on everything it tells the workspace, and on nothing else", () => {
 		const told = sent(
 			ConversationEvent.TurnCancelled({
 				threadId,
 				workspaceId,
-				podId,
 				turnId,
 				agentId,
 				messageId: "m1",
@@ -176,7 +171,7 @@ describe("the thread feed", () => {
 		expect(told.map(({ channel, event }) => [channel, Audience.read(event).audience])).toEqual([
 			[threadChannel(threadId), undefined],
 			[threadChannel(threadId), undefined],
-			[workspaceChannel(workspaceId), { kind: "pod", podId }],
+			[workspaceChannel(workspaceId), { kind: "thread", threadId }],
 		]);
 	});
 
@@ -220,7 +215,7 @@ describe("the thread feed", () => {
 		expect(
 			sent(
 				ConversationEvent.ToolCallStarted(change),
-				ConversationEvent.ToolCallDecided({ ...change, workspaceId, podId }),
+				ConversationEvent.ToolCallDecided({ ...change, workspaceId }),
 				ConversationEvent.ToolCallExecuting(change),
 				ConversationEvent.ToolCallFinished(change),
 			),
@@ -242,7 +237,6 @@ describe("the thread feed", () => {
 			ConversationEvent.MessagePosted({
 				threadId,
 				workspaceId,
-				podId,
 				message: {
 					id: "m1",
 					threadId,
@@ -268,9 +262,7 @@ describe("the thread feed", () => {
 		]);
 	});
 
-	it("shows an opened collaboration in the asking reply and the asked bot's channel, and lists its thread", () => {
-		const channelId = crypto.randomUUID();
-
+	it("shows an opened collaboration in the asking reply, and lists its task", () => {
 		expect(
 			sent(
 				ConversationEvent.CollaborationOpened({
@@ -278,9 +270,7 @@ describe("the thread feed", () => {
 					parentMessageId: "m1",
 					collaboration,
 					workspaceId,
-					podId,
 					collaboratorAgentId: "a1",
-					collaboratorChannelId: channelId,
 					briefMessageId: "m2",
 				}),
 			),
@@ -301,14 +291,6 @@ describe("the thread feed", () => {
 					threadId: collaboration.threadId,
 				}),
 			},
-			{
-				channel: workspaceChannel(workspaceId),
-				event: expect.objectContaining({
-					type: "conversation.thread_changed",
-					conversationId: channelId,
-					threadId: collaboration.threadId,
-				}),
-			},
 		]);
 	});
 
@@ -319,7 +301,6 @@ describe("the thread feed", () => {
 			sent(
 				ConversationEvent.RoutineWorkCancelled({
 					workspaceId,
-					podId,
 					threadIds: [threadId, childId],
 				}),
 			),

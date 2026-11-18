@@ -38,16 +38,18 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { user, workspace, workspaceInvite, workspaceMember } from "../../database/schema.ts";
+import { agent, user, workspace, workspaceInvite, workspaceMember } from "../../database/schema.ts";
 import { Email } from "../../email/email.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
+import { AgentSandboxes } from "../../sandboxes/agent-sandboxes.ts";
+import type { Sandboxes } from "../../sandboxes/sandboxes.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { AgentRepository } from "../agents/agent-repository.ts";
-import { PersonalPods } from "../pods/personal-pods.ts";
+import { PersonalAssistants } from "../agents/personal-assistants.ts";
 
 /**
  * The workspaces the current actor is in, and who else is. Every operation
@@ -95,16 +97,24 @@ export interface Interface {
 		input: InWorkspace & { memberId: string; role: AssignableWorkspaceRole },
 	) => Effect.Effect<void, AuthorizationDenied | OwnerStays, CurrentActor.Service>;
 	/**
-	 * Their Personal pod and pod memberships go with them. Only the owner
+	 * Their Personal Assistant, pins and channel memberships go with them. Only the owner
 	 * removes an administrator, and nobody removes the owner.
 	 */
 	readonly remove: (
 		input: InWorkspace & { memberId: string },
-	) => Effect.Effect<void, AuthorizationDenied | OwnerStays, CurrentActor.Service>;
+	) => Effect.Effect<
+		void,
+		AuthorizationDenied | OwnerStays | Sandboxes.Unavailable,
+		CurrentActor.Service
+	>;
 	/** The owner stays until they have transferred ownership. */
 	readonly leave: (
 		input: InWorkspace,
-	) => Effect.Effect<void, AuthorizationDenied | OwnerStays, CurrentActor.Service>;
+	) => Effect.Effect<
+		void,
+		AuthorizationDenied | OwnerStays | Sandboxes.Unavailable,
+		CurrentActor.Service
+	>;
 	/**
 	 * Makes the member the workspace's owner, and the owner an administrator,
 	 * together. Handing it to the owner changes nothing.
@@ -134,7 +144,7 @@ export interface Interface {
 		input: ForInvitation,
 	) => Effect.Effect<InvitationPreview, ResourceHidden | NotTheInvitee, CurrentActor.Service>;
 	/**
-	 * Lets the invitee in, with their Personal pod. Accepting again, as a
+	 * Lets the invitee in, with their Personal Assistant. Accepting again, as a
 	 * second tab or a reload does, answers with the workspace and changes
 	 * nothing.
 	 */
@@ -165,14 +175,38 @@ export const make = Effect.gen(function* () {
 	const email = yield* Email.Service;
 	const installation = yield* Installation.Service;
 	const sender = yield* Email.transactionalSender;
-	const personalPods = yield* PersonalPods.Service;
+	const personalAssistants = yield* PersonalAssistants.Service;
 	const agents = yield* AgentRepository.Service;
+	const agentSandboxes = yield* AgentSandboxes.Service;
+
+	/**
+	 * Takes the member out, which cascades to their Personal Assistant, pins
+	 * and channel memberships. Their assistant's computer is destroyed first:
+	 * its record is the only way to find the machine, so when the provider
+	 * can't be reached the member stays, to try again.
+	 */
+	const deleteMember = (member: { id: string; workspaceId: string; userId: string }) =>
+		Effect.gen(function* () {
+			const [assistant] = yield* query((db) =>
+				db
+					.select({ id: agent.id })
+					.from(agent)
+					.where(
+						and(eq(agent.workspaceId, member.workspaceId), eq(agent.assistantOf, member.userId)),
+					)
+					.limit(1),
+			);
+			if (assistant) {
+				yield* agentSandboxes.destroy({ workspaceId: member.workspaceId, agentId: assistant.id });
+			}
+			yield* query((db) => db.delete(workspaceMember).where(eq(workspaceMember.id, member.id)));
+		});
 	const searchProviders = yield* SearchProviderRepository.Service;
 	const modelProviders = yield* ModelProviderRepository.Service;
 	const ids = yield* Ids.Service;
 
 	/**
-	 * The Personal pod of somebody joining, its assistant on the workspace's
+	 * The Personal Assistant of somebody joining, on the workspace's
 	 * default model, or on another the workspace offers while it does not offer
 	 * that one.
 	 */
@@ -183,10 +217,12 @@ export const make = Effect.gen(function* () {
 			const model = models.some((offered) => offered.modelId === defaultModel)
 				? defaultModel
 				: models[0]?.modelId;
-			if (!model) return yield* personalPods.provision({ workspaceId, userId });
-			return yield* personalPods.provisionWithModel({ workspaceId, userId, model }).pipe(
+			if (!model) return yield* personalAssistants.provision({ workspaceId, userId });
+			return yield* personalAssistants.provisionWithModel({ workspaceId, userId, model }).pipe(
 				// Switched off since it was read: start on none, as while the workspace offers none.
-				Effect.catchTag("ModelNotEnabled", () => personalPods.provision({ workspaceId, userId })),
+				Effect.catchTag("ModelNotEnabled", () =>
+					personalAssistants.provision({ workspaceId, userId }),
+				),
 			);
 		});
 
@@ -262,7 +298,7 @@ export const make = Effect.gen(function* () {
 							yield* agents.ensureSystemAgents({ workspaceId: created.id, createdById: userId });
 							yield* searchProviders.provisionDefault(created.id, userId);
 							yield* modelProviders.seedPresets(created.id);
-							yield* personalPods.provision({ workspaceId: created.id, userId });
+							yield* personalAssistants.provision({ workspaceId: created.id, userId });
 							return workspaceView(created);
 						}),
 					);
@@ -371,7 +407,7 @@ export const make = Effect.gen(function* () {
 						if (target.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
-						yield* deleteMember(target.id);
+						yield* deleteMember({ ...target, workspaceId: standing.workspaceId });
 					}),
 				),
 			),
@@ -397,7 +433,7 @@ export const make = Effect.gen(function* () {
 						);
 						if (!own) return yield* new ResourceHidden({ resource: "workspace" });
 						if (own.role === "owner") return yield* new OwnerStays();
-						yield* deleteMember(own.id);
+						yield* deleteMember({ id: own.id, workspaceId: standing.workspaceId, userId });
 					}),
 				),
 			),
@@ -635,10 +671,11 @@ export const layerNoDeps = Layer.effect(Service, make);
 export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
-		PersonalPods.layer,
+		PersonalAssistants.layer,
 		AgentRepository.layer,
 		SearchProviderRepository.layer,
 		ModelProviderRepository.layer,
+		AgentSandboxes.layer,
 	]),
 );
 
@@ -749,7 +786,11 @@ function memberIn(workspaceId: string, memberId: string) {
 	return Effect.flatMap(
 		query((db) =>
 			db
-				.select({ id: workspaceMember.id, role: workspaceMember.role })
+				.select({
+					id: workspaceMember.id,
+					role: workspaceMember.role,
+					userId: workspaceMember.userId,
+				})
 				.from(workspaceMember)
 				.where(and(eq(workspaceMember.id, memberId), eq(workspaceMember.workspaceId, workspaceId))),
 		),
@@ -766,11 +807,6 @@ function requireWorkspacePermission(standing: WorkspaceStanding, permission: Wor
 	return mayInWorkspace(standing.actor, permission)
 		? Effect.void
 		: Effect.fail(new ActionForbidden({ permission }));
-}
-
-/** Cascades to the Personal pod and pod memberships. */
-function deleteMember(memberId: string) {
-	return query((db) => db.delete(workspaceMember).where(eq(workspaceMember.id, memberId)));
 }
 
 /**

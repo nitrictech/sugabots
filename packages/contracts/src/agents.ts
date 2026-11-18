@@ -3,10 +3,11 @@ import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
- * Agents: a configured model with a name, a face and a prompt.
+ * Bots: a configured model with a name, a face and a prompt.
  *
- * An agent belongs to exactly one pod. It is created from that pod and cannot
- * be detached or moved independently.
+ * A bot belongs to its workspace. It is public, for everyone in the
+ * workspace, or private, for the person who made it; a Personal Assistant is
+ * its person's alone. Public bots can be added to channels.
  */
 
 /**
@@ -131,10 +132,34 @@ export function handleFromName(name: string): string {
 export const systemAgentKeySchema = Schema.Literals(["summarise", "compact"]);
 export type SystemAgentKey = typeof systemAgentKeySchema.Type;
 
+/** Whether everyone in the workspace sees a bot, or only the person who made it. */
+export const agentVisibilitySchema = Schema.Literals(["public", "private"]);
+export type AgentVisibility = typeof agentVisibilitySchema.Type;
+
+/** What the person asking may do with a bot, resolved by the API so a client never reasons about roles. */
+export const agentPermissionsSchema = Schema.Struct({
+	/** Change its name, look, model, instructions, tools and visibility. */
+	update: Schema.Boolean,
+	delete: Schema.Boolean,
+	manageConnections: Schema.Boolean,
+	/** Change what its computer may reach, and allow its requests for more. */
+	manageSandbox: Schema.Boolean,
+	/** Click and type on its computer's desktop, rather than only watch it. */
+	useDesktop: Schema.Boolean,
+	/** Add, change and remove its automations, and rotate their webhook secrets. */
+	manageRoutines: Schema.Boolean,
+	runRoutines: Schema.Boolean,
+	/** Allow or refuse the tool calls it waits on. */
+	decideApprovals: Schema.Boolean,
+	/** Read and write in its tasks. False for a private bot an admin only sees listed. */
+	talk: Schema.Boolean,
+});
+
+export type AgentPermissions = typeof agentPermissionsSchema.Type;
+
 export const agentSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	podId: uuidSchema,
 	name: Schema.String,
 	handle: handleSchema,
 	/**
@@ -163,10 +188,10 @@ export const agentSchema = Schema.Struct({
 	 */
 	disabledTools: Schema.mutable(Schema.Array(Schema.String)),
 	/**
-	 * Whether it may run commands and edit files in its pod's sandbox, while
-	 * the workspace has a sandbox provider enabled. Off until somebody who may
-	 * manage the pod's sandbox turns it on, unlike the other built-in tools,
-	 * and only they may change it. Experimental.
+	 * Whether it may run commands and edit files on its computer, while
+	 * the workspace has a sandbox provider enabled. Off until its creator or an
+	 * admin, who manage its computer, turns it on, unlike the other built-in
+	 * tools, and only they may change it. Experimental.
 	 */
 	usesSandbox: Schema.Boolean,
 	/**
@@ -180,6 +205,12 @@ export const agentSchema = Schema.Struct({
 	 * as the first bot at setup, or once the person who added it is deleted.
 	 */
 	createdById: Schema.NullOr(uuidSchema),
+	visibility: agentVisibilitySchema,
+	/** Whether it is the person's own Personal Assistant, which only they see. */
+	assistant: Schema.Boolean,
+	/** Whether the person asking pinned it to their sidebar. */
+	pinned: Schema.Boolean,
+	permissions: agentPermissionsSchema,
 	createdAt: isoTimestampSchema,
 });
 
@@ -199,10 +230,10 @@ const toolKeysSchema = Schema.mutable(
 /** How long a prompt may be. The settings page counts against it as you type. */
 export const PROMPT_MAX_LENGTH = 20_000;
 
-/** How long a description may be: one or two lines, read by people and by the bot's pod mates. */
+/** How long a description may be: one or two lines, read by people and by other bots. */
 export const DESCRIPTION_MAX_LENGTH = 280;
 
-export const newAgentInPodSchema = Schema.Struct({
+export const newAgentSchema = Schema.Struct({
 	name: nameSchema,
 	/** Derived from the name when left out. */
 	handle: Schema.optional(handleSchema),
@@ -217,18 +248,14 @@ export const newAgentInPodSchema = Schema.Struct({
 	disabledTools: Schema.optional(toolKeysSchema),
 	usesSandbox: Schema.optional(Schema.Boolean),
 	naturalBrowsing: Schema.optional(Schema.Boolean),
+	/** Public when left out. */
+	visibility: Schema.optional(agentVisibilitySchema),
 });
 
-export const newAgentSchema = newAgentInPodSchema.mapFields(Struct.assign({ podId: uuidSchema }));
-
 export type NewAgent = typeof newAgentSchema.Type;
-export type NewAgentInPod = typeof newAgentInPodSchema.Type;
 
-/**
- * Everything an administrator may change. Pod ownership is immutable.
- */
+/** Everything its creator or an admin may change. */
 export const agentUpdateSchema = newAgentSchema
-	.mapFields(Struct.omit(["podId"]))
 	.mapFields(Struct.map(Schema.optional))
 	// A model may be cleared, which creation has no use for: an agent is made
 	// with one, and stops having one only when somebody takes it away.

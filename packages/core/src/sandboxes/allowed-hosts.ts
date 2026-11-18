@@ -2,9 +2,9 @@ import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Database, query } from "../database/database.ts";
 import {
+	sandboxAgentAllowedHost,
 	sandboxAllowedHost,
 	sandboxBlockedHost,
-	sandboxPodAllowedHost,
 } from "../database/schema.ts";
 import type { Sandboxes } from "./sandboxes.ts";
 
@@ -41,7 +41,7 @@ export const TRUSTED_HOSTS: readonly string[] = [
 	"cache.nixos.org",
 ];
 
-/** The hosts the workspace added for every pod beyond {@link TRUSTED_HOSTS}, oldest first. */
+/** The hosts the workspace added for every computer beyond {@link TRUSTED_HOSTS}, oldest first. */
 export const addedHostsOf = (workspaceId: string) =>
 	query((db) =>
 		db
@@ -51,19 +51,19 @@ export const addedHostsOf = (workspaceId: string) =>
 			.orderBy(asc(sandboxAllowedHost.createdAt), asc(sandboxAllowedHost.host)),
 	);
 
-/** The hosts the pod added for its own sandbox, oldest first. */
-export const podAddedHostsOf = (pod: { workspaceId: string; podId: string }) =>
+/** The hosts added for the bot's own computer, oldest first. */
+export const agentAddedHostsOf = (agent: { workspaceId: string; agentId: string }) =>
 	query((db) =>
 		db
 			.select()
-			.from(sandboxPodAllowedHost)
+			.from(sandboxAgentAllowedHost)
 			.where(
 				and(
-					eq(sandboxPodAllowedHost.workspaceId, pod.workspaceId),
-					eq(sandboxPodAllowedHost.podId, pod.podId),
+					eq(sandboxAgentAllowedHost.workspaceId, agent.workspaceId),
+					eq(sandboxAgentAllowedHost.agentId, agent.agentId),
 				),
 			)
-			.orderBy(asc(sandboxPodAllowedHost.createdAt), asc(sandboxPodAllowedHost.host)),
+			.orderBy(asc(sandboxAgentAllowedHost.createdAt), asc(sandboxAgentAllowedHost.host)),
 	);
 
 /** The hosts the workspace blocked, oldest first. */
@@ -77,42 +77,42 @@ export const blockedHostsOf = (workspaceId: string) =>
 	);
 
 /**
- * Every host the pod's sandbox may reach: {@link TRUSTED_HOSTS}, the
- * workspace's hosts and the pod's own, less what the workspace blocked.
+ * Every host the bot's computer may reach: {@link TRUSTED_HOSTS}, the
+ * workspace's hosts and the bot's own, less what the workspace blocked.
  */
-export const allowedHostsOf = (pod: { workspaceId: string; podId: string }) =>
+export const allowedHostsOf = (agent: { workspaceId: string; agentId: string }) =>
 	Effect.map(
 		Effect.all([
-			addedHostsOf(pod.workspaceId),
-			podAddedHostsOf(pod),
-			blockedHostsOf(pod.workspaceId),
+			addedHostsOf(agent.workspaceId),
+			agentAddedHostsOf(agent),
+			blockedHostsOf(agent.workspaceId),
 		]),
-		([workspaceAdded, podAdded, blocked]) => {
+		([workspaceAdded, agentAdded, blocked]) => {
 			const blocks = blocked.map((row) => row.host);
 			return [
 				...new Set([
 					...TRUSTED_HOSTS,
 					...workspaceAdded.map((row) => row.host),
-					...podAdded.map((row) => row.host),
+					...agentAdded.map((row) => row.host),
 				]),
 			].filter((host) => blockOn(host, blocks) === undefined);
 		},
 	);
 
 /**
- * What the pod's sandbox may reach at `provider`, by its network mode: on the
+ * What the bot's computer may reach at `provider`, by its network mode: on the
  * allowlist, {@link allowedHostsOf}; open, everything but what the workspace
  * blocked, if the provider can block hosts, and everything if not.
  */
 export const reachOf = (
-	pod: { workspaceId: string; podId: string },
+	agent: { workspaceId: string; agentId: string },
 	provider: Pick<Sandboxes.Provider, "networkMode" | "capabilities">,
 ): Effect.Effect<Sandboxes.Reach, never, Database> => {
 	if (provider.networkMode === "allowlist") {
-		return Effect.map(allowedHostsOf(pod), (hosts) => ({ kind: "allowlist", hosts }));
+		return Effect.map(allowedHostsOf(agent), (hosts) => ({ kind: "allowlist", hosts }));
 	}
 	if (!provider.capabilities.blocksHosts) return Effect.succeed({ kind: "open", blockedHosts: [] });
-	return Effect.map(blockedHostsOf(pod.workspaceId), (blocked) => ({
+	return Effect.map(blockedHostsOf(agent.workspaceId), (blocked) => ({
 		kind: "open",
 		blockedHosts: blocked.flatMap((row) => namesBlockedBy(row.host)),
 	}));

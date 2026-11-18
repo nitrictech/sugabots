@@ -23,7 +23,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { pod, user, workspace } from "../workspaces/sql.ts";
+import { agent, user, workspace } from "../workspaces/sql.ts";
 
 export interface EncryptedProviderHeader {
 	name: string;
@@ -143,15 +143,14 @@ export const searchProvider = pgTable(
 export type SearchProviderRow = typeof searchProvider.$inferSelect;
 
 /**
- * A service a pod owner has connected every agent in that pod to, by `kind`:
- * an MCP server at `url`; the pod's own GitHub App, whose tools are
- * Sugabots' own, on the repositories in its `settings`; or an HTTP endpoint,
- * whose requests stay under `url` and carry the header secret, if any.
- * A pod has at most one GitHub connection, since its sandbox can be signed in
- * to only one account there.
+ * A service a bot is connected to, by `kind`: an MCP server at `url`; the
+ * bot's own GitHub App, whose tools are Sugabots' own, on the repositories in
+ * its `settings`; or an HTTP endpoint, whose requests stay under `url` and
+ * carry the header secret, if any. A bot has at most one GitHub app, since
+ * its computer can be signed in to only one account there.
  *
  * `handle` prefixes the tool names for the model, so two connections with a
- * `search` tool do not collide; unique per workspace like an agent's.
+ * `search` tool do not collide; unique per bot.
  */
 export const connection = pgTable(
 	"connection",
@@ -160,7 +159,7 @@ export const connection = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		podId: uuid("pod_id").notNull(),
+		agentId: uuid("agent_id").notNull(),
 		name: text("name").notNull(),
 		handle: text("handle").notNull(),
 		kind: text("kind").$type<ConnectionKind>().notNull().default("mcp"),
@@ -186,7 +185,7 @@ export const connection = pgTable(
 		/** The tools the server listed when last asked, as it described them; for GitHub, Sugabots' own. */
 		tools: jsonb("tools").$type<ConnectionTool[]>().notNull().default([]),
 		/**
-		 * What somebody chose for the pod's bots to do with each tool, by the
+		 * What somebody chose for the bot to do with each tool, by the
 		 * server's name for it; see `connectionAccesses`. A tool with no choice
 		 * gets its default from how the server describes it now. A choice is kept
 		 * while the server stops listing its tool, so a tool turned off stays off
@@ -201,16 +200,17 @@ export const connection = pgTable(
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "connection_pod_workspace_fkey",
+			columns: [table.agentId, table.workspaceId],
+			foreignColumns: [agent.id, agent.workspaceId],
+			name: "connection_agent_workspace_fkey",
 		}).onDelete("cascade"),
-		uniqueIndex("connection_name_idx").on(table.podId, table.name),
-		uniqueIndex("connection_handle_idx").on(table.podId, table.handle),
+		uniqueIndex("connection_name_idx").on(table.agentId, table.name),
+		uniqueIndex("connection_handle_idx").on(table.agentId, table.handle),
+		uniqueIndex("connection_github_agent_idx")
+			.on(table.agentId)
+			.where(sql`${table.kind} = 'github'`),
 		uniqueIndex("connection_id_workspace_id_idx").on(table.id, table.workspaceId),
-		uniqueIndex("connection_id_pod_id_idx").on(table.id, table.podId),
 		uniqueIndex("connection_oauth_state_idx").on(table.oauthState),
-		uniqueIndex("connection_github_pod_idx").on(table.podId).where(sql`${table.kind} = 'github'`),
 		check("connection_kind_check", sql`${table.kind} in ('mcp', 'github', 'http')`),
 		check(
 			"connection_http_auth_check",
@@ -238,7 +238,7 @@ export interface GitHubAppOwner {
 
 /**
  * A GitHub connection's own GitHub App, which a person made from Sugabots'
- * manifest under the account its pod works on, and the app's installation
+ * manifest under the account its bot works on, and the app's installation
  * there: both null until the app is installed.
  */
 export interface GitHubConnectionSettings {
@@ -252,9 +252,9 @@ export interface GitHubConnectionSettings {
 	/** The login of the organization or user it is installed on. */
 	readonly account: string | null;
 	/**
-	 * The repositories its tools work on: they read them in the pod's
-	 * sandbox, push branches to them and open pull requests on them, and their
-	 * events may start the pod's routines.
+	 * The repositories its tools work on: they read them in the bot's
+	 * computer, push branches to them and open pull requests on them, and their
+	 * events may start the bot's automations.
 	 */
 	readonly repositories: readonly GitHubConnectionRepository[];
 }

@@ -17,6 +17,7 @@ import {
 	juno,
 	linear,
 	mount,
+	pendingAnswer,
 	sam,
 	workspace,
 } from "@/test-api.tsx";
@@ -113,7 +114,6 @@ function details(
 		},
 		capabilities: { approveToolCalls: true },
 		routineExecution: null,
-		startedFrom: null,
 		participants: people,
 		crew: [],
 		members: people,
@@ -210,7 +210,7 @@ describe("direct messages", () => {
 	it("counts what is unread in the sidebar until it is read", async () => {
 		windowFocused();
 		directMessageAnswers({ unread: 2 });
-		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		mount(`/suga/bots/${linear.handle}`);
 		const section = await directMessagesInSidebar();
 		const row = await within(section).findByRole("link", { name: /^Juno(?!,)/ });
 		expect(row.textContent).toContain("2 unread messages");
@@ -238,7 +238,7 @@ describe("direct messages", () => {
 		const updates = controlledEventStream();
 		client.events.workspace.mockReturnValue(updates.stream);
 		client.api.chats.directMessages.mockReturnValue(Effect.succeed({ items: [] }));
-		mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		mount(`/suga/bots/${linear.handle}`);
 		const section = await directMessagesInSidebar();
 		await within(section).findByRole("link", { name: "New message" });
 
@@ -262,7 +262,7 @@ describe("direct messages", () => {
 				? Effect.succeed(details(withJunoAndTheo, [], [junoParticipant, theo]))
 				: threadOf?.(request),
 		);
-		const router = mount(`/suga/pods/suga-team/agents/${linear.handle}`);
+		const router = mount(`/suga/bots/${linear.handle}`);
 		const section = await directMessagesInSidebar();
 		fireEvent.click(within(section).getByRole("link", { name: "New message" }));
 
@@ -502,6 +502,36 @@ describe("direct messages", () => {
 		const row = await screen.findByRole("link", {
 			name: new RegExp(`${juno.name} wrote.*in a direct message`),
 		});
+		expect(row.getAttribute("href")).toBe(`/suga/dm/${withJuno.id}?message=${fromJuno.id}`);
+	});
+
+	it("waits for the direct messages before opening a message from Inbox that is in none of the channels", async () => {
+		client.api.chats.activity.mockReturnValue(
+			Effect.succeed({
+				items: [
+					{
+						kind: "message",
+						messageId: fromJuno.id,
+						author: junoParticipant,
+						preview: fromJuno.content,
+						podId: null,
+						conversationId: withJuno.id,
+						at: fromJuno.createdAt,
+						unread: true,
+					},
+				],
+			}),
+		);
+		const directMessages = pendingAnswer();
+		client.api.chats.directMessages.mockReturnValue(directMessages.effect);
+		mount("/suga/activity");
+
+		await screen.findByText(fromJuno.content);
+		// Not yet a way into a task with a bot, which it may not be.
+		expect(screen.queryByRole("link", { name: new RegExp(`${juno.name} wrote`) })).toBeNull();
+		directMessages.answer(Effect.succeed({ items: [junoItem(1)] }));
+
+		const row = await screen.findByRole("link", { name: new RegExp(`${juno.name} wrote`) });
 		expect(row.getAttribute("href")).toBe(`/suga/dm/${withJuno.id}?message=${fromJuno.id}`);
 	});
 

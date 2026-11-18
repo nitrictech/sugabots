@@ -23,28 +23,28 @@ import { Egress, isPrivateAddress } from "../../network/egress.ts";
 import { ConnectionRepository } from "../connection-repository.ts";
 import { openAppCredential, sealAppCredential } from "./credential.ts";
 import * as GitHub from "./github.ts";
-import { NotGitHubConnection, PodHasGitHubConnection } from "./github-connections.ts";
+import { AgentHasGitHubConnection, NotGitHubConnection } from "./github-connections.ts";
 
 /**
- * Connecting a pod to GitHub: a person makes the pod its own private GitHub
+ * Connecting a bot to GitHub: a person makes the bot its own private GitHub
  * App, from a manifest Sugabots writes, owned by the account whose
- * repositories the pod works on, then installs it there; GitHub sends the
- * browser back to Sugabots after each step. The app is the pod's GitHub
+ * repositories the bot works on, then installs it there; GitHub sends the
+ * browser back to Sugabots after each step. The app is the bot's GitHub
  * connection, made once GitHub has made the app, and signed in once it is
  * installed. Each step takes `connection.manage`.
  */
 export interface Interface {
-	/** The form that makes the pod's GitHub App, owned by `organization` or by the person. */
+	/** The form that makes the bot's GitHub App, owned by `organization` or by the person. */
 	readonly start: (input: {
-		podId: string;
+		agentId: string;
 		organization: string | undefined;
 	}) => Effect.Effect<
 		GitHubAppForm,
-		AuthorizationDenied | PodHasGitHubConnection,
+		AuthorizationDenied | AgentHasGitHubConnection,
 		CurrentActor.Service
 	>;
 	/**
-	 * Makes the pod's GitHub connection to the app GitHub made from the
+	 * Makes the bot's GitHub connection to the app GitHub made from the
 	 * manifest, given the `code` it sent the browser back with, and says where
 	 * to install it.
 	 */
@@ -59,7 +59,7 @@ export interface Interface {
 	}) => Effect.Effect<SetupOutcome, never, CurrentActor.Service>;
 	/** Where to install the connection's app, or to change which repositories it reaches. */
 	readonly installUrl: (input: {
-		podId: string;
+		agentId: string;
 		connectionId: string;
 	}) => Effect.Effect<string, AuthorizationDenied | NotGitHubConnection, CurrentActor.Service>;
 }
@@ -77,16 +77,16 @@ export const make = Effect.gen(function* () {
 	const apiUrl = `${installation.publicUrl}${API_BASE_PATH}`;
 	const webhooksReachable = reachableFromInternet(installation.publicUrl);
 
-	const managed = (podId: string) =>
-		Effect.map(authorization.pod(podId, "connection.manage"), ({ pod }) => pod);
+	const managed = (agentId: string) =>
+		Effect.map(authorization.agent(agentId, "connection.manage"), ({ agent }) => agent);
 
-	const managedQuietly = (podId: string) =>
-		managed(podId).pipe(
+	const managedQuietly = (agentId: string) =>
+		managed(agentId).pipe(
 			Effect.as(true),
 			Effect.orElseSucceed(() => false),
 		);
 
-	const gitHubConnectionOf = (pod: { workspaceId: string; podId: string }) =>
+	const gitHubConnectionOf = (agent: { workspaceId: string; agentId: string }) =>
 		Effect.map(
 			query((db) =>
 				db
@@ -94,8 +94,8 @@ export const make = Effect.gen(function* () {
 					.from(connection)
 					.where(
 						and(
-							eq(connection.workspaceId, pod.workspaceId),
-							eq(connection.podId, pod.podId),
+							eq(connection.workspaceId, agent.workspaceId),
+							eq(connection.agentId, agent.agentId),
 							eq(connection.kind, "github"),
 						),
 					)
@@ -134,29 +134,29 @@ export const make = Effect.gen(function* () {
 
 	const failed = (setup: SetupStep | undefined, failure: GitHubSetupFailure): SetupOutcome => ({
 		kind: "failed",
-		pod: setup && { workspaceId: setup.workspaceId, podId: setup.podId },
+		agent: setup && { workspaceId: setup.workspaceId, agentId: setup.agentId },
 		failure,
 	});
 
 	return Service.of({
-		start: ({ podId, organization }) =>
+		start: ({ agentId, organization }) =>
 			operation(
 				"start",
 				Effect.gen(function* () {
-					const pod = yield* managed(podId);
-					if (yield* gitHubConnectionOf({ workspaceId: pod.workspaceId, podId: pod.id })) {
-						return yield* new PodHasGitHubConnection();
+					const agent = yield* managed(agentId);
+					if (yield* gitHubConnectionOf({ workspaceId: agent.workspaceId, agentId: agent.id })) {
+						return yield* new AgentHasGitHubConnection();
 					}
 					// The connection's id is in its webhook's address, so it is minted before GitHub makes the app.
 					const connectionId = yield* ids.next;
 					const state = yield* stateFor({
 						step: "make",
-						workspaceId: pod.workspaceId,
-						podId: pod.id,
+						workspaceId: agent.workspaceId,
+						agentId: agent.id,
 						connectionId,
 					});
 					const manifest = GitHub.appManifest({
-						name: appName(pod.name, connectionId),
+						name: appName(agent.name, connectionId),
 						homepageUrl: installation.webAppUrl,
 						redirectUrl: `${apiUrl}${GITHUB_APP_MADE_PATH}`,
 						setupUrl: `${apiUrl}${GITHUB_APP_INSTALLED_PATH}`,
@@ -182,7 +182,7 @@ export const make = Effect.gen(function* () {
 					const setup = yield* stepOf(state, "make");
 					if (!setup) return failed(undefined, "expired");
 					if (!code) return failed(setup, "cancelled");
-					if (!(yield* managedQuietly(setup.podId))) return failed(undefined, "expired");
+					if (!(yield* managedQuietly(setup.agentId))) return failed(undefined, "expired");
 					const made = yield* GitHub.madeApp(http, code).pipe(
 						Effect.tapError((failure) => Effect.logWarning("GitHub didn't make the app", failure)),
 						Effect.option,
@@ -191,7 +191,7 @@ export const make = Effect.gen(function* () {
 					const app = made.value;
 					const { userId } = yield* CurrentActor.Service;
 					const created = yield* connections
-						.createGitHub(setup.workspaceId, setup.podId, userId, {
+						.createGitHub(setup.workspaceId, setup.agentId, userId, {
 							id: setup.connectionId,
 							app: { appId: app.id, slug: app.slug, owner: app.owner },
 							appCredentialEncrypted: sealAppCredential(credentials, {
@@ -200,7 +200,7 @@ export const make = Effect.gen(function* () {
 							}),
 						})
 						.pipe(Effect.option);
-					// The pod was connected to GitHub another way meanwhile.
+					// The bot was connected to GitHub another way meanwhile.
 					if (Option.isNone(created)) return failed(setup, "github");
 					const next = yield* stateFor({ ...setup, step: "install" });
 					return { kind: "next", url: GitHub.installAppUrl(app.slug, next) };
@@ -218,7 +218,7 @@ export const make = Effect.gen(function* () {
 					const setup = yield* stepOf(state, "install");
 					if (!setup) return failed(undefined, "expired");
 					if (installationId === undefined) return failed(setup, "cancelled");
-					const row = (yield* managedQuietly(setup.podId))
+					const row = (yield* managedQuietly(setup.agentId))
 						? yield* gitHubConnectionOf(setup)
 						: undefined;
 					if (!row?.settings || !row.appCredentialEncrypted || row.id !== setup.connectionId) {
@@ -242,23 +242,26 @@ export const make = Effect.gen(function* () {
 					yield* connections.installed(setup.workspaceId, row.id, { installationId: id, account });
 					return {
 						kind: "done",
-						pod: { workspaceId: setup.workspaceId, podId: setup.podId },
+						agent: { workspaceId: setup.workspaceId, agentId: setup.agentId },
 						connectionId: row.id,
 					};
 				}),
 			),
 
-		installUrl: ({ podId, connectionId }) =>
+		installUrl: ({ agentId, connectionId }) =>
 			operation(
 				"installUrl",
 				Effect.gen(function* () {
-					const pod = yield* managed(podId);
-					const row = yield* gitHubConnectionOf({ workspaceId: pod.workspaceId, podId: pod.id });
+					const agent = yield* managed(agentId);
+					const row = yield* gitHubConnectionOf({
+						workspaceId: agent.workspaceId,
+						agentId: agent.id,
+					});
 					if (!row?.settings || row.id !== connectionId) return yield* new NotGitHubConnection();
 					const state = yield* stateFor({
 						step: "install",
-						workspaceId: pod.workspaceId,
-						podId: pod.id,
+						workspaceId: agent.workspaceId,
+						agentId: agent.id,
 						connectionId,
 					});
 					return GitHub.installAppUrl(row.settings.slug, state);
@@ -274,22 +277,22 @@ export const layer = layerNoDeps.pipe(
 );
 
 /**
- * Where a GitHub setup step goes next: on to GitHub, back to the pod's
- * connection, or back with why it stopped. A failure names the pod only when
+ * Where a GitHub setup step goes next: on to GitHub, back to the bot's
+ * connection, or back with why it stopped. A failure names the bot only when
  * the step was the caller's.
  */
 export type SetupOutcome =
 	| { readonly kind: "next"; readonly url: string }
-	| { readonly kind: "done"; readonly pod: SetupPod; readonly connectionId: string }
+	| { readonly kind: "done"; readonly agent: SetupAgent; readonly connectionId: string }
 	| {
 			readonly kind: "failed";
-			readonly pod: SetupPod | undefined;
+			readonly agent: SetupAgent | undefined;
 			readonly failure: GitHubSetupFailure;
 	  };
 
-export interface SetupPod {
+export interface SetupAgent {
 	readonly workspaceId: string;
-	readonly podId: string;
+	readonly agentId: string;
 }
 
 /** How long a person has to finish a step on GitHub's pages. */
@@ -297,8 +300,8 @@ const SETUP_STATE_LIFETIME_MILLISECONDS = 60 * 60 * 1000;
 
 const SETUP_STATE_PURPOSE = "github-app-setup";
 
-/** A step of setting up a pod's GitHub App, for the connection it is or will be. */
-interface SetupStep extends SetupPod {
+/** A step of setting up a bot's GitHub App, for the connection it is or will be. */
+interface SetupStep extends SetupAgent {
 	readonly step: "make" | "install";
 	readonly connectionId: string;
 }
@@ -311,7 +314,7 @@ const SetupStateJson = Schema.fromJsonString(
 	Schema.Struct({
 		step: Schema.Literals(["make", "install"]),
 		workspaceId: Schema.String,
-		podId: Schema.String,
+		agentId: Schema.String,
 		connectionId: Schema.String,
 		userId: Schema.String,
 		expiresAt: Schema.Finite,
@@ -322,13 +325,13 @@ const SetupStateJson = Schema.fromJsonString(
 const APP_NAME_SUFFIX_LENGTH = 4;
 
 /**
- * The name the pod's app is made with: "Sugabots" and the pod's name, ended
+ * The name the bot's app is made with: "Sugabots" and the bot's name, ended
  * with part of the connection's id, since an app's name is unique across
  * all of GitHub, and cut to the longest name GitHub takes.
  */
-function appName(podName: string, connectionId: string): string {
+function appName(agentName: string, connectionId: string): string {
 	const suffix = ` ${connectionId.slice(-APP_NAME_SUFFIX_LENGTH)}`;
-	const name = `Sugabots ${podName}`.slice(0, GitHub.MAX_APP_NAME_LENGTH - suffix.length).trim();
+	const name = `Sugabots ${agentName}`.slice(0, GitHub.MAX_APP_NAME_LENGTH - suffix.length).trim();
 	return `${name}${suffix}`;
 }
 

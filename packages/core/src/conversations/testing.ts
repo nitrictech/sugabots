@@ -4,6 +4,7 @@ import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { runOnPostgres } from "../database/testing.ts";
 import { Notifications } from "../notifications/notifications.ts";
+import { noComputers } from "../sandboxes/testing.ts";
 import { unimplemented } from "../testing.ts";
 import { Lanes } from "../workflows/lanes.ts";
 import { Conversations } from "./conversations.ts";
@@ -56,6 +57,8 @@ export const conversationsForTests = (
 		Layer.merge(EventOutbox.layer.pipe(Layer.provide(unimplemented(EventBus.Service, bus)))),
 		// Notifying is tested on its own; here it would only send pushes nobody receives.
 		Layer.merge(unimplemented(Notifications.Service, { handler: () => Effect.void })),
+		// Deleting a bot destroys its computer, which no case here has made.
+		Layer.merge(noComputers),
 	);
 	return runOnPostgres(
 		Effect.context<

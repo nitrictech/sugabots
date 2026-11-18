@@ -15,7 +15,6 @@ export interface Records {
 	 */
 	readonly save: (compaction: {
 		workspaceId: string;
-		podId: string;
 		threadId: string;
 		summary: string;
 		historyStartsAt: Date;
@@ -51,7 +50,6 @@ export const makeRecords = Effect.gen(function* () {
 						yield* emit([
 							ConversationEvent.ThreadCompacted({
 								workspaceId: compaction.workspaceId,
-								podId: compaction.podId,
 								threadId: compaction.threadId,
 							}),
 						]);

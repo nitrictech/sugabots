@@ -215,6 +215,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 							}
 							if (leaving.signal.aborted) break;
 							const heard = Audience.read(delivery.event);
+							if (heard.audience?.kind === "nobody") continue;
 							if (heard.audience && !(await runPromise(mayHear(heard.audience)))) {
 								continue;
 							}

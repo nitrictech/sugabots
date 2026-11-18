@@ -24,18 +24,18 @@ import * as GitHub from "./github.ts";
 import { activityOf, type RepositoryActivity } from "./github-events.ts";
 
 /**
- * A pod's GitHub connection, to the pod's own GitHub App (see
- * `github-app.ts`), installed on the account the pod works on: the
- * repositories its bots work on there, read in the pod's sandbox and changed
- * through the connection's tools, which are Sugabots' own, and what happens
- * there, which its app delivers. A pod has at most one, since its sandbox
- * can be signed in to only one account at GitHub. Seeing a connection's
- * repositories takes `pod.read`; choosing them takes `connection.manage`.
+ * A bot's GitHub app (see `github-app.ts`), installed on the account the bot
+ * works on: the repositories it works on there, read in its computer and
+ * changed through the connection's tools, which are Sugabots' own, and what
+ * happens there, which its app delivers. A bot has at most one, since its
+ * computer can be signed in to only one account at GitHub. Seeing a
+ * connection's repositories takes `agent.read`; choosing them takes
+ * `connection.manage`.
  */
 export interface Interface {
-	/** What the connection's app reaches, for the pod to choose from. */
+	/** What the connection's app reaches, for the bot to choose from. */
 	readonly reachableRepositories: (input: {
-		podId: string;
+		agentId: string;
 		connectionId: string;
 	}) => Effect.Effect<
 		readonly AccountRepository[],
@@ -43,7 +43,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	readonly repositories: (input: {
-		podId: string;
+		agentId: string;
 		connectionId: string;
 	}) => Effect.Effect<
 		ConnectionRepositories,
@@ -52,7 +52,7 @@ export interface Interface {
 	>;
 	/** Adds a repository the connection's app reaches. */
 	readonly addRepository: (input: {
-		podId: string;
+		agentId: string;
 		connectionId: string;
 		repository: string;
 	}) => Effect.Effect<
@@ -66,7 +66,7 @@ export interface Interface {
 	>;
 	/** Removing one the connection doesn't have changes nothing. */
 	readonly removeRepository: (input: {
-		podId: string;
+		agentId: string;
 		connectionId: string;
 		repository: string;
 	}) => Effect.Effect<
@@ -74,8 +74,8 @@ export interface Interface {
 		AuthorizationDenied | NotGitHubConnection,
 		CurrentActor.Service
 	>;
-	/** The pod's GitHub connection, for its turns and sandbox; undefined until its app is installed. */
-	readonly forPod: (pod: Pod) => Effect.Effect<Connected | undefined>;
+	/** The bot's GitHub app, for its turns and computer; undefined until its app is installed. */
+	readonly forAgent: (agent: Agent) => Effect.Effect<Connected | undefined>;
 	/**
 	 * What a delivery to the connection's webhook says happened at one of its
 	 * account's repositories, once its app proves it sent it; `activity` is
@@ -98,11 +98,11 @@ export const make = Effect.gen(function* () {
 	const egress = yield* Egress.Service;
 	const http = egress.providers.for({ baseUrl: GitHub.API_URL });
 
-	const managed = (podId: string) =>
-		Effect.map(authorization.pod(podId, "connection.manage"), podOf);
+	const managed = (agentId: string) =>
+		Effect.map(authorization.agent(agentId, "connection.manage"), agentOf);
 
-	/** The pod's GitHub connection `connectionId`, with its app's settings. */
-	const connectionOf = (pod: Pod, connectionId: string) =>
+	/** The bot's GitHub connection `connectionId`, with its app's settings. */
+	const connectionOf = (agent: Agent, connectionId: string) =>
 		Effect.gen(function* () {
 			const [row] = yield* query((db) =>
 				db
@@ -111,8 +111,8 @@ export const make = Effect.gen(function* () {
 					.where(
 						and(
 							eq(connection.id, connectionId),
-							eq(connection.workspaceId, pod.workspaceId),
-							eq(connection.podId, pod.podId),
+							eq(connection.workspaceId, agent.workspaceId),
+							eq(connection.agentId, agent.agentId),
 							eq(connection.kind, "github"),
 						),
 					)
@@ -123,9 +123,9 @@ export const make = Effect.gen(function* () {
 		});
 
 	/** The connection's app at the account it is installed on. */
-	const installedAppOf = (pod: Pod, connectionId: string) =>
+	const installedAppOf = (agent: Agent, connectionId: string) =>
 		Effect.gen(function* () {
-			const { row } = yield* connectionOf(pod, connectionId);
+			const { row } = yield* connectionOf(agent, connectionId);
 			const app = installedApp(credentials, row);
 			if (!app) return yield* new AppNotInstalled();
 			return app;
@@ -159,7 +159,7 @@ export const make = Effect.gen(function* () {
 
 	/** Changes the connection's repositories, answering them as people are shown them after. */
 	const changed = (
-		pod: Pod,
+		agent: Agent,
 		connectionId: string,
 		settings: GitHubConnectionSettings,
 		change: (
@@ -168,7 +168,7 @@ export const make = Effect.gen(function* () {
 	) =>
 		Effect.gen(function* () {
 			const repositories = yield* connections.changeGitHubRepositories(
-				pod.workspaceId,
+				agent.workspaceId,
 				connectionId,
 				change,
 			);
@@ -177,34 +177,34 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		reachableRepositories: ({ podId, connectionId }) =>
+		reachableRepositories: ({ agentId, connectionId }) =>
 			operation(
 				"reachableRepositories",
 				Effect.gen(function* () {
-					const pod = yield* managed(podId);
-					const app = yield* installedAppOf(pod, connectionId);
+					const agent = yield* managed(agentId);
+					const app = yield* installedAppOf(agent, connectionId);
 					const reached = yield* GitHub.repositories(http, app);
 					return reached.map((one) => ({ repository: one.fullName, private: one.private }));
 				}),
 			),
 
-		repositories: ({ podId, connectionId }) =>
+		repositories: ({ agentId, connectionId }) =>
 			operation(
 				"repositories",
 				Effect.gen(function* () {
-					const pod = podOf(yield* authorization.pod(podId, "pod.read"));
-					const { settings } = yield* connectionOf(pod, connectionId);
+					const agent = agentOf(yield* authorization.agent(agentId, "connection.read"));
+					const { settings } = yield* connectionOf(agent, connectionId);
 					return yield* shown(settings);
 				}),
 			),
 
-		addRepository: ({ podId, connectionId, repository }) =>
+		addRepository: ({ agentId, connectionId, repository }) =>
 			operation(
 				"addRepository",
 				Effect.gen(function* () {
-					const pod = yield* managed(podId);
-					const { settings } = yield* connectionOf(pod, connectionId);
-					const app = yield* installedAppOf(pod, connectionId);
+					const agent = yield* managed(agentId);
+					const { settings } = yield* connectionOf(agent, connectionId);
+					const app = yield* installedAppOf(agent, connectionId);
 					const reached = yield* GitHub.repositories(http, app);
 					// GitHub's paths ignore case.
 					const found = reached.find(
@@ -214,7 +214,7 @@ export const make = Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					const addedAt = DateTime.formatIso(yield* DateTime.now);
 					const pathOf = new Map(reached.map((one) => [one.id, one.fullName]));
-					return yield* changed(pod, connectionId, settings, (repositories) => [
+					return yield* changed(agent, connectionId, settings, (repositories) => [
 						// GitHub has just said what each is called now, so those renamed since are kept up.
 						...repositories.map((one) => ({ ...one, path: pathOf.get(one.id) ?? one.path })),
 						...(repositories.some((one) => one.id === found.id)
@@ -224,21 +224,21 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		removeRepository: ({ podId, connectionId, repository }) =>
+		removeRepository: ({ agentId, connectionId, repository }) =>
 			operation(
 				"removeRepository",
 				Effect.gen(function* () {
-					const pod = yield* managed(podId);
-					const { settings } = yield* connectionOf(pod, connectionId);
-					return yield* changed(pod, connectionId, settings, (repositories) =>
+					const agent = yield* managed(agentId);
+					const { settings } = yield* connectionOf(agent, connectionId);
+					return yield* changed(agent, connectionId, settings, (repositories) =>
 						repositories.filter((one) => one.path.toLowerCase() !== repository.toLowerCase()),
 					);
 				}),
 			),
 
-		forPod: (pod) =>
+		forAgent: (agent) =>
 			operation(
-				"forPod",
+				"forAgent",
 				Effect.gen(function* () {
 					const [row] = yield* query((db) =>
 						db
@@ -246,8 +246,8 @@ export const make = Effect.gen(function* () {
 							.from(connection)
 							.where(
 								and(
-									eq(connection.workspaceId, pod.workspaceId),
-									eq(connection.podId, pod.podId),
+									eq(connection.workspaceId, agent.workspaceId),
+									eq(connection.agentId, agent.agentId),
 									eq(connection.kind, "github"),
 								),
 							)
@@ -301,14 +301,14 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([Authorization.layer, ConnectionRepository.layer]),
 );
 
-export interface Pod {
+export interface Agent {
 	readonly workspaceId: string;
-	readonly podId: string;
+	readonly agentId: string;
 }
 
-const podOf = (standing: { pod: { id: string; workspaceId: string } }): Pod => ({
-	workspaceId: standing.pod.workspaceId,
-	podId: standing.pod.id,
+const agentOf = (standing: { agent: { id: string; workspaceId: string } }): Agent => ({
+	workspaceId: standing.agent.workspaceId,
+	agentId: standing.agent.id,
 });
 
 /** The connection's app at the account it is installed on; undefined until it is installed. */
@@ -349,25 +349,25 @@ export class NotGitHubConnection
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "No such GitHub connection in the pod";
+		return "No such GitHub connection on the bot";
 	}
 	get userMessage() {
-		return userText`This pod has no such GitHub connection. It may have been removed.`;
+		return userText`This bot has no such GitHub app. It may have been removed.`;
 	}
 }
 
-/** A second GitHub connection for a pod, whose sandbox can be signed in to only one account there. */
-export class PodHasGitHubConnection
-	extends Schema.TaggedError<PodHasGitHubConnection>()("PodHasGitHubConnection", {})
+/** A second GitHub app for a bot, whose computer can be signed in to only one account there. */
+export class AgentHasGitHubConnection
+	extends Schema.TaggedError<AgentHasGitHubConnection>()("AgentHasGitHubConnection", {})
 	implements DomainError
 {
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "The pod already has a GitHub connection";
+		return "The bot already has a GitHub app";
 	}
 	get userMessage() {
-		return userText`This pod is already connected to GitHub. Add repositories to that connection, or remove it first to connect another account.`;
+		return userText`This bot already has a GitHub app. Add repositories to it, or remove it first to connect another account.`;
 	}
 }
 

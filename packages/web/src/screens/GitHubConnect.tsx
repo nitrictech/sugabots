@@ -27,23 +27,23 @@ import {
 } from "@/ui/settings-page.tsx";
 
 /**
- * Connecting a pod to GitHub: the pod gets a private GitHub App of its own,
+ * Connecting a bot to GitHub: the bot gets a private GitHub App of its own,
  * made on GitHub from Sugabots' manifest, owned by the organization named or
  * by the person, then installed there; its repositories are chosen on its
- * page once it is. A pod connects to one account, since its sandbox can be
+ * page once it is. A bot connects to one account, since its computer can be
  * signed in to only one at GitHub.
  */
 export function GitHubConnectStep({
-	podId,
+	agentId,
 	onBack,
 	done,
 }: {
-	podId: string;
+	agentId: string;
 	onBack: () => void;
 	done: () => void;
 }) {
 	const id = useId();
-	const make = useMakeGitHubApp(podId);
+	const make = useMakeGitHubApp(agentId);
 	const [organization, setOrganization] = useState("");
 
 	function submit(event: FormEvent) {
@@ -58,11 +58,11 @@ export function GitHubConnectStep({
 				<div className="flex flex-col items-center gap-1.5 pb-1 text-center">
 					<ConnectionMark presetId="github" name="GitHub" />
 					<span className="text-xs text-muted-foreground">
-						The pod gets a private GitHub App of its own: you make it on GitHub, then install it on
+						The bot gets a private GitHub App of its own: you make it on GitHub, then install it on
 						the account it works on.
 					</span>
 				</div>
-				<SettingsGroup note="The organization whose repositories the pod works on. Leave it empty for your own account. Making an app for an organization takes an owner or app manager there.">
+				<SettingsGroup note="The organization whose repositories the bot works on. Leave it empty for your own account. Making an app for an organization takes an owner or app manager there.">
 					<SettingsControlRow label="Organization" htmlFor={id}>
 						<input
 							id={id}
@@ -90,24 +90,28 @@ export function GitHubConnectStep({
 
 /**
  * A GitHub connection's repositories, on its page: who added each, and, for
- * someone who manages the pod's connections, removing one or adding another
+ * someone who manages the bot's connections, removing one or adding another
  * the connection's app reaches. Nothing until the app is installed.
  */
 export function GitHubRepositoriesGroup({
-	podId,
+	agentId,
 	connectionId,
 	appSettingsUrl,
 	canManage,
 }: {
-	podId: string;
+	agentId: string;
 	connectionId: string;
 	/** Where the app's owner changes it on GitHub. */
 	appSettingsUrl: string;
 	canManage: boolean;
 }) {
-	const { repositories, add, remove } = useConnectionRepositories(podId, connectionId);
+	const { repositories, add, remove } = useConnectionRepositories(agentId, connectionId);
 	// Listing what the app reaches takes GitHub a while, so it starts before Add repository is chosen.
-	usePrefetchReachableRepositories(podId, connectionId, canManage && !!repositories.data?.account);
+	usePrefetchReachableRepositories(
+		agentId,
+		connectionId,
+		canManage && !!repositories.data?.account,
+	);
 	const [choosing, setChoosing] = useState(false);
 	if (repositories.isPending) return null;
 	if (repositories.isError) return <Alert>{failureMessage(repositories.error)}</Alert>;
@@ -119,15 +123,15 @@ export function GitHubRepositoriesGroup({
 				label="Repositories"
 				note={
 					<>
-						Bots in this pod read these from its sandbox, and work on them with the tools below.
-						They come from {account} on GitHub, through{" "}
+						The bot reads these from its computer, and works on them with the tools below. They come
+						from {account} on GitHub, through{" "}
 						<a
 							href={appSettingsUrl}
 							target="_blank"
 							rel="noreferrer"
 							className="focus-ring rounded-sm font-medium text-link"
 						>
-							the pod's app
+							the bot's app
 						</a>
 						.
 					</>
@@ -158,7 +162,7 @@ export function GitHubRepositoriesGroup({
 			<Dialog open={choosing} onOpenChange={setChoosing}>
 				{choosing && (
 					<AddRepositoryDialog
-						podId={podId}
+						agentId={agentId}
 						connectionId={connectionId}
 						account={account}
 						accountRepositories={listed.map((one) => one.repository.toLowerCase())}
@@ -173,14 +177,14 @@ export function GitHubRepositoriesGroup({
 
 /** Adding one of the repositories the connection's app reaches that the connection doesn't have yet. */
 function AddRepositoryDialog({
-	podId,
+	agentId,
 	connectionId,
 	account,
 	accountRepositories,
 	onAdd,
 	done,
 }: {
-	podId: string;
+	agentId: string;
 	connectionId: string;
 	account: string;
 	/** The connection's repositories, lowercased, which aren't offered again. */
@@ -188,7 +192,7 @@ function AddRepositoryDialog({
 	onAdd: (repository: string) => Promise<unknown>;
 	done: () => void;
 }) {
-	const reached = useReachableRepositories(podId, connectionId);
+	const reached = useReachableRepositories(agentId, connectionId);
 	const [query, setQuery] = useState("");
 	const [adding, setAdding] = useState<string>();
 	const [error, setError] = useState<unknown>();

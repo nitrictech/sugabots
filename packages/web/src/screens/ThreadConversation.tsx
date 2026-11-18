@@ -13,7 +13,7 @@ import {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, CornerUpLeft, MessageSquarePlus, Reply } from "lucide-react";
+import { ChevronRight, CornerUpLeft, Reply } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
@@ -85,7 +85,6 @@ export function ThreadConversation({
 	onOpenArtifact,
 	onOpenDesktop,
 	previews = true,
-	podId,
 	approvalCapabilities,
 	compact = false,
 	queued = NONE_QUEUED,
@@ -96,7 +95,6 @@ export function ThreadConversation({
 	threadActivityAt,
 	authorLinkOf,
 	onReply,
-	onStartThread,
 	threadLinesOf,
 	inRoutineThread = false,
 	onJumpToMessage,
@@ -106,15 +104,15 @@ export function ThreadConversation({
 	viewerWriting = false,
 }: {
 	messages: Message[];
-	/** The bot the thread is with; none in a pod's chat. */
+	/** The bot the task is with; none in a channel. */
 	host?: AgentParticipant;
 	isRunning: boolean;
 	/**
-	 * Everyone in the thread and the pod's bots and people: how a
+	 * Everyone in the thread and the channel's bots and people: how a
 	 * collaboration's other bot is found, and who a mention can name.
 	 */
 	participants: ThreadParticipant[];
-	/** The pod's people, whom a person's `@here` or `@channel` would notify. */
+	/** The channel's people, whom a person's `@here` or `@channel` would notify. */
 	members: readonly PersonParticipant[];
 	/** What kind of thread it is, which decides whether `@here` and `@channel` notify anyone. */
 	threadType: ThreadType;
@@ -140,8 +138,7 @@ export function ThreadConversation({
 	 * desktop live. Off while one is open large beside the conversation.
 	 */
 	previews?: boolean;
-	/** The pod the conversation is in; null in a direct message between people, which has no bots. */
-	podId: string | null;
+
 	/** What the person may decide of the approvals the thread raises. */
 	approvalCapabilities?: ApprovalCapabilities;
 	/** The sidebar's narrower thread: smaller faces and words. */
@@ -172,9 +169,7 @@ export function ThreadConversation({
 	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
 	/** Starts a reply quoting the message, from its hover toolbar. Without it, none is offered. */
 	onReply?: (message: Message) => void;
-	/** In a pod's chat or a bot's channel: starts a thread from the message. */
-	onStartThread?: (message: Message) => void;
-	/** In a pod's chat or a bot's channel: the lines of the threads started from the message, drawn under it. */
+	/** The lines of the tasks a bot's message started, drawn under it. */
 	threadLinesOf?: (message: Message) => ReactNode;
 	/**
 	 * In a routine's own thread, where each result already sits under its run,
@@ -203,7 +198,8 @@ export function ThreadConversation({
 	const replyPending = isRunning && lastMessage?.author.kind === "person";
 	const lastReplyTyping =
 		lastMessage !== undefined && lastMessage.author.kind === "agent" && isTyping(lastMessage);
-	const looks = useConnectionLooks(podId);
+	const speakers = useMemo(() => speakersIn(messages), [messages]);
+	const looks = useConnectionLooks(speakers);
 	const fileNames = useMemo(() => fileNamesIn(messages), [messages]);
 	const watchedWritten = useRepliesWatchedBeingWritten(messages);
 	return (
@@ -239,7 +235,6 @@ export function ThreadConversation({
 								threadType={threadType}
 								looks={looks}
 								fileNames={fileNames}
-								podId={podId}
 								approvalCapabilities={approvalCapabilities}
 								compact={compact}
 								arrivedLive={watchedWritten.has(message.id)}
@@ -250,7 +245,6 @@ export function ThreadConversation({
 								threadActivityAt={threadActivityAt}
 								authorLink={authorLinkOf?.(message.author)}
 								onReply={onReply}
-								onStartThread={onStartThread}
 								threadLines={threadLinesOf?.(message)}
 								inRoutineThread={inRoutineThread}
 								onJumpToMessage={onJumpToMessage}
@@ -366,7 +360,6 @@ function MessageRow({
 	threadType,
 	looks,
 	fileNames,
-	podId,
 	approvalCapabilities,
 	compact,
 	arrivedLive,
@@ -377,7 +370,6 @@ function MessageRow({
 	threadActivityAt,
 	authorLink,
 	onReply,
-	onStartThread,
 	threadLines,
 	inRoutineThread,
 	onJumpToMessage,
@@ -398,7 +390,6 @@ function MessageRow({
 	looks: ReturnType<typeof useConnectionLooks>;
 	/** The thread's files by id, for the tool line's calls that read them. */
 	fileNames: ReadonlyMap<string, string>;
-	podId: string | null;
 	approvalCapabilities: ApprovalCapabilities | undefined;
 	compact: boolean;
 	/** Finished while the thread was open, so it arrives rather than simply being there. */
@@ -415,7 +406,6 @@ function MessageRow({
 	/** Where its author's name leads. */
 	authorLink?: AuthorLink;
 	onReply?: (message: Message) => void;
-	onStartThread?: (message: Message) => void;
 	threadLines?: ReactNode;
 	inRoutineThread: boolean;
 	onJumpToMessage?: (messageId: string) => void;
@@ -457,7 +447,6 @@ function MessageRow({
 	if (showsNothingYet(message)) return null;
 	const finished = message.status === "complete" && !sending;
 	const replyable = onReply !== undefined && finished;
-	const threadable = onStartThread !== undefined && finished;
 	const reactable = reacting !== undefined && finished;
 	return (
 		// biome-ignore lint/a11y/useKeyWithClickEvents: a tap only puts on screen the time a screen reader already reads in the row, so a keyboard has nothing to reach.
@@ -546,15 +535,14 @@ function MessageRow({
 					}
 					if (segment.type === "tool_call") {
 						const call = segment.toolCall;
-						if (!agent || podId === null) return null;
+						if (!agent) return null;
 						return (
 							<div key={segment.key} className="w-full max-w-115 pt-1.5 pb-1">
 								<ToolApprovalCard
 									call={call}
 									agent={agent}
 									threadId={message.threadId}
-									podId={podId}
-									canApprove={mayAnswer(call, approvalCapabilities)}
+									canApprove={mayAnswer(call, agent.id, approvalCapabilities)}
 									look={looks.get(splitToolKey(call.tool).handle)}
 								/>
 							</div>
@@ -603,10 +591,9 @@ function MessageRow({
 							/>
 						</div>
 					)}
-				{agent && podId !== null && previews && onOpenArtifact && (
+				{agent && previews && onOpenArtifact && (
 					<ArtifactCards
 						parts={message.parts}
-						podId={podId}
 						botName={agent.name}
 						onOpen={onOpenArtifact}
 						className="pt-2"
@@ -630,7 +617,7 @@ function MessageRow({
 				)}
 				{queuedNote && <RowNote className="text-subtle-foreground">Queued</RowNote>}
 			</div>
-			{(words || replyable || threadable || reactable) && (
+			{(words || replyable || reactable) && (
 				<div
 					className={cn(
 						"absolute -top-3.5 right-5 z-10 flex rounded-md border border-border-strong bg-panel p-0.5 shadow-popover transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
@@ -653,16 +640,6 @@ function MessageRow({
 							className={TOOLBAR_BUTTON}
 						>
 							<Reply aria-hidden />
-						</IconButton>
-					)}
-					{threadable && (
-						<IconButton
-							label="Start a thread"
-							side="top"
-							onClick={() => onStartThread(message)}
-							className={TOOLBAR_BUTTON}
-						>
-							<MessageSquarePlus aria-hidden />
 						</IconButton>
 					)}
 					{words && (
@@ -875,4 +852,13 @@ function messageStatus(message: Message, { queued }: { queued: boolean }): strin
 		return "stopped";
 	}
 	return formatTime(message.createdAt);
+}
+
+/** The bots who wrote in the thread, whose connections its tool calls went through. */
+function speakersIn(messages: readonly Message[]): string[] {
+	return [
+		...new Set(
+			messages.flatMap((message) => (message.author.kind === "agent" ? [message.author.id] : [])),
+		),
+	];
 }

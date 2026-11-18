@@ -20,7 +20,6 @@ import {
 import { ConversationEvents } from "../../conversation-events.ts";
 import { type CollaborationChange, ConversationEvent } from "../../events.ts";
 import { toCollaborationPart } from "../../threads/collaboration-parts.ts";
-import { threadPodId } from "../../threads/rooms.ts";
 
 /**
  * The only writer of `collaboration`: one crew agent asking another for help.
@@ -100,7 +99,7 @@ export const makeRecords = Effect.gen(function* () {
 						).pipe(Effect.flatMap(writtenRow("collaboration")));
 						const [address] = yield* query((db) =>
 							db
-								.select({ workspaceId: thread.workspaceId, podId: thread.podId })
+								.select({ workspaceId: thread.workspaceId })
 								.from(thread)
 								.where(eq(thread.id, input.parentThreadId))
 								.limit(1),
@@ -108,27 +107,11 @@ export const makeRecords = Effect.gen(function* () {
 						if (!address) {
 							return yield* Effect.die(new Error("A collaboration's parent thread is gone"));
 						}
-						const podId = threadPodId(input.parentThreadId, address.podId);
-						const [collaboratorChannel] = yield* query((db) =>
-							db
-								.select({ id: thread.id })
-								.from(thread)
-								.where(
-									and(
-										eq(thread.type, "bot_channel"),
-										eq(thread.podId, podId),
-										eq(thread.hostAgentId, input.collaborator.id),
-									),
-								)
-								.limit(1),
-						);
 						yield* emit([
 							ConversationEvent.CollaborationOpened({
 								...collaborationChange(opened, input.collaborator.name),
 								workspaceId: address.workspaceId,
-								podId,
 								collaboratorAgentId: input.collaborator.id,
-								collaboratorChannelId: collaboratorChannel?.id ?? null,
 								briefMessageId: input.briefMessageId,
 							}),
 						]);

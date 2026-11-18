@@ -6,7 +6,7 @@ import {
 	textWithoutNarration,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
 	afterCommit,
@@ -18,16 +18,7 @@ import {
 } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import type * as schema from "../../database/schema.ts";
-import {
-	collaboration,
-	message,
-	pod,
-	routine,
-	routineExecution,
-	thread,
-	toolCall,
-	turn,
-} from "../../database/schema.ts";
+import { collaboration, message, routineExecution, toolCall, turn } from "../../database/schema.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { ThreadRepository } from "../threads/repository.ts";
@@ -41,15 +32,13 @@ import {
 	RoutineRepository,
 	RUN_STOPPED_UNEXPECTEDLY,
 } from "./repository.ts";
-import { resultGoesToPodChat } from "./routine.ts";
 import type { RoutineRun } from "./routine.workflow.ts";
 import { RoutineRuns } from "./runs.ts";
 
 /**
  * Settles routine runs: records how a run ended once nothing in its threads
- * is running, waiting or about to start. A completed run has its agent's
- * last reply posted in the routine's thread, and in the pod's chat too when
- * the routine's results go there. A routine that fails twice in a row pauses
+ * is running, waiting or about to start. A completed run has its bot's last
+ * reply posted in the automation's thread. A routine that fails twice in a row pauses
  * itself (see `RoutineRepository.settle`).
  *
  * `handler` reacts to the conversation events that can end a run. In the
@@ -90,11 +79,9 @@ export const make = Effect.gen(function* () {
 	const threads = yield* ThreadRepository.Service;
 
 	/**
-	 * Posts the agent's last reply in the run's own thread, with the artifacts
-	 * the run wrote there, into the routine's thread, and into the pod's chat as
-	 * well when `resultGoesToPodChat`: the chat chosen while it is not archived,
-	 * or else the pod's first. A run whose agent wrote nothing to show posts
-	 * nothing.
+	 * Posts the bot's last reply in the run's own thread, with the artifacts
+	 * the run wrote there, into the automation's thread. A run whose bot wrote
+	 * nothing to show posts nothing.
 	 */
 	const postResult = (run: schema.RoutineExecutionRow) =>
 		Effect.gen(function* () {
@@ -104,12 +91,6 @@ export const make = Effect.gen(function* () {
 			};
 			if (result.content === "" && result.artifacts.length === 0) return;
 			yield* threads.postRunResult({ run, result });
-			const placement = yield* placementOf(run.threadId);
-			if (!resultGoesToPodChat(run.results, placement.podKind)) return;
-			const chatId =
-				(yield* chosenChatOf(run.routineId)) ??
-				(yield* threads.openPodChat({ ...placement, initiatorUserId: null })).id;
-			yield* threads.postRunResultToChat({ chatId, run, result });
 		});
 
 	/**
@@ -149,7 +130,6 @@ export const make = Effect.gen(function* () {
 					yield* emit([
 						ConversationEvent.RoutineWorkCancelled({
 							workspaceId: run.workspaceId,
-							podId: (yield* placementOf(run.threadId)).podId,
 							threadIds: work,
 						}),
 					]);
@@ -297,35 +277,6 @@ const runningRun = (executionId: string) =>
 				.limit(1),
 		),
 		([row]) => row,
-	);
-
-/** The workspace and pod of the run's thread `threadId`, and what kind of pod it is. */
-const placementOf = (threadId: string) =>
-	Effect.flatMap(
-		query((db) =>
-			db
-				.select({ workspaceId: thread.workspaceId, podId: pod.id, podKind: pod.kind })
-				.from(thread)
-				.innerJoin(pod, eq(pod.id, thread.podId))
-				.where(eq(thread.id, threadId))
-				.limit(1),
-		),
-		([row]) =>
-			row ? Effect.succeed(row) : Effect.die(new Error("A routine run's thread is gone")),
-	);
-
-/** The chat the routine `routineId` posts its results to, while it is not archived. */
-const chosenChatOf = (routineId: string) =>
-	Effect.map(
-		query((db) =>
-			db
-				.select({ id: thread.id })
-				.from(routine)
-				.innerJoin(thread, eq(thread.id, routine.chatId))
-				.where(and(eq(routine.id, routineId), isNull(thread.archivedAt)))
-				.limit(1),
-		),
-		([row]) => row?.id,
 	);
 
 /**

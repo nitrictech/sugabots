@@ -93,11 +93,12 @@ export async function prepareRunnable(
 }
 
 /**
- * A shared pod with a connection, whose admin has asked its host agent
- * something in a chat, so the host's turn is asked for in the chat's thread.
+ * A bot with a connection, whose admin has asked it something in a task, so
+ * its turn is asked for in the task. A channel stands beside it, for cases
+ * that need one.
  */
 export async function aChatAwaitingReply(
-	chatsAs: (userId: string) => Pick<Promised<Chats.Interface>, "openBotChannel" | "post">,
+	chatsAs: (userId: string) => Pick<Promised<Chats.Interface>, "startTask">,
 ) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const [space] = await onDatabase((db) =>
@@ -115,7 +116,7 @@ export async function aChatAwaitingReply(
 	if (!space || !member) throw new Error("fixture");
 	const workspaceId = space.id;
 	const memberId = member.id;
-	// An admin, because granting a standing approval in a shared pod is
+	// An admin, because granting a standing approval for a bot is
 	// administration; the ordinary-approval path is covered by the route tests.
 	await onDatabase((db) =>
 		db.insert(workspaceMember).values({ workspaceId, userId: memberId, role: "admin" }),
@@ -125,7 +126,6 @@ export async function aChatAwaitingReply(
 			.insert(pod)
 			.values({
 				workspaceId,
-				kind: "shared",
 				name: "Room",
 				slug: `room-${suffix}`,
 				createdById: memberId,
@@ -139,7 +139,6 @@ export async function aChatAwaitingReply(
 			.insert(agent)
 			.values({
 				workspaceId,
-				podId,
 				name: `Host ${suffix}`,
 				handle: handleFromName(`Host ${suffix}`),
 				color: "rose",
@@ -149,12 +148,13 @@ export async function aChatAwaitingReply(
 			})
 			.returning({ id: agent.id }),
 	);
+	if (!host) throw new Error("fixture");
 	const [connected] = await onDatabase((db) =>
 		db
 			.insert(connection)
 			.values({
 				workspaceId,
-				podId,
+				agentId: host.id,
 				name: `Linear ${suffix}`,
 				handle: `linear-${suffix}`,
 				url: "https://linear.example.com/mcp",
@@ -163,18 +163,13 @@ export async function aChatAwaitingReply(
 			})
 			.returning({ id: connection.id }),
 	);
-	if (!host || !connected) throw new Error("fixture");
-	const chats = chatsAs(memberId);
-	const opened = await chats.openBotChannel({
-		workspace: workspaceId,
-		podId,
-		hostAgentId: host.id,
-	});
-	await chats.post({
-		conversationId: opened.id,
+	if (!connected) throw new Error("fixture");
+	const started = await chatsAs(memberId).startTask({
+		agentId: host.id,
 		messageId: crypto.randomUUID(),
 		content: "What does example.com say?",
 	});
+	const opened = started.conversation;
 	return {
 		workspaceId,
 		podId,

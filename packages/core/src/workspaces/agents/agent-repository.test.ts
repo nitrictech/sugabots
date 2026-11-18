@@ -1,12 +1,14 @@
 import type { NewAgent } from "@sugabots/contracts";
+import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { agent, pod, podMember, user, workspace, workspaceMember } from "../../database/schema.ts";
+import { agent, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { noComputers } from "../../sandboxes/testing.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
@@ -18,13 +20,12 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
-	let podId: string;
 
 	beforeAll(async () => {
 		repository = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
 		administrationAs = await servedOnPostgresAs(
 			AgentAdministration.Service,
-			AgentAdministration.layer,
+			AgentAdministration.layer.pipe(Layer.provide(noComputers)),
 		);
 	});
 
@@ -61,42 +62,46 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 				{ workspaceId, userId: memberId, role: "member" },
 			]),
 		);
-		const [room] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId,
-					kind: "shared",
-					name: "Support",
-					slug: "support",
-					createdById: adminId,
-				})
-				.returning(),
-		);
-		if (!room) throw new Error("pod setup failed");
-		podId = room.id;
-		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
 	});
 
-	it("creates an agent in exactly one pod and scopes member visibility to that pod", async () => {
-		const made = await create(adminId, {
-			podId,
-			name: "Triage",
-			model: "gpt-4o-mini",
-		});
-		expect(made.podId).toBe(podId);
+	it("makes a bot public unless told otherwise, so every member sees it", async () => {
+		const made = await create(adminId, { name: "Triage", model: "gpt-4o-mini" });
+
+		expect(made.visibility).toBe("public");
 		expect((await visibleTo(memberId)).map(({ id }) => id)).toEqual([made.id]);
 	});
 
+	it("lists a private bot to its creator and to admins, and to no other member", async () => {
+		const adminsOwn = await create(adminId, {
+			name: "Ledger",
+			model: "model",
+			visibility: "private",
+		});
+		const membersOwn = await create(memberId, {
+			name: "Diary",
+			model: "model",
+			visibility: "private",
+		});
+
+		expect((await visibleTo(memberId)).map(({ id }) => id)).toEqual([membersOwn.id]);
+		expect((await visibleTo(adminId)).map(({ id }) => id)).toEqual([membersOwn.id, adminsOwn.id]);
+	});
+
+	it("pins a bot for the person who made it, and for nobody else", async () => {
+		const made = await create(memberId, { name: "Triage", model: "model" });
+
+		expect((await visibleTo(memberId)).find(({ id }) => id === made.id)?.pinned).toBe(true);
+		expect((await visibleTo(adminId)).find(({ id }) => id === made.id)?.pinned).toBe(false);
+	});
+
 	it("starts a bot made without a prompt on the interview", async () => {
-		const made = await create(adminId, { podId, name: "Triage", model: "gpt-4o-mini" });
+		const made = await create(adminId, { name: "Triage", model: "gpt-4o-mini" });
 		expect(made.prompt).toBe(INTERVIEW_PROMPT);
 	});
 
 	it("makes a bot nobody gave a shape a circle, and keeps the shape it's given", async () => {
-		const plain = await create(adminId, { podId, name: "Plain", model: "model" });
+		const plain = await create(adminId, { name: "Plain", model: "model" });
 		const starred = await create(adminId, {
-			podId,
 			name: "Starred",
 			model: "model",
 			shape: "star",
@@ -112,70 +117,49 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		expect((await visibleTo(adminId)).find((one) => one.id === plain.id)?.shape).toBe("bear");
 	});
 
-	it("rejects a pod from another workspace", async () => {
-		const [other] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: "Other", slug: `other-${Date.now()}` })
-				.returning(),
-		);
-		if (!other) throw new Error("foreign workspace setup failed");
-		await onDatabase((db) =>
-			db.insert(workspaceMember).values({
-				workspaceId: other.id,
-				userId: adminId,
-				role: "admin",
-			}),
-		);
-		const [foreign] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId: other.id,
-					kind: "shared",
-					name: "Other",
-					slug: "other",
-				})
-				.returning(),
-		);
-		if (!foreign) throw new Error("foreign pod setup failed");
-		await expect(
-			create(adminId, { podId: foreign.id, name: "Nope", model: "model" }),
-		).rejects.toBeInstanceOf(AgentRepository.PodOutsideWorkspace);
-	});
-
-	it("refuses a name another agent in the pod has", async () => {
-		await create(adminId, { podId, name: "Triage", model: "model" });
-		await expect(create(adminId, { podId, name: "Triage", model: "model" })).rejects.toMatchObject({
+	it("refuses a name another bot in the workspace has", async () => {
+		await create(adminId, { name: "Triage", model: "model" });
+		await expect(create(adminId, { name: "Triage", model: "model" })).rejects.toMatchObject({
 			_tag: "AgentNameTaken",
 			field: "name",
 		});
 	});
 
-	it("refuses a handle another agent in the pod has, as a clash rather than a fault", async () => {
-		await create(adminId, { podId, name: "Triage", model: "model" });
+	it("refuses a handle another bot in the workspace has, as a clash rather than a fault", async () => {
+		await create(adminId, { name: "Triage", model: "model" });
 
 		await expect(
-			create(adminId, { podId, name: "Sorter", handle: "triage", model: "model" }),
+			create(adminId, { name: "Sorter", handle: "triage", model: "model" }),
 		).rejects.toMatchObject({ _tag: "AgentNameTaken", field: "handle" });
 	});
 
 	it("refuses @here and @channel as a handle, given or taken from the name", async () => {
 		await expect(
-			create(adminId, { podId, name: "Sorter", handle: "here", model: "model" }),
+			create(adminId, { name: "Sorter", handle: "here", model: "model" }),
 		).rejects.toMatchObject({ _tag: "AgentHandleReserved", handle: "here" });
-		await expect(create(adminId, { podId, name: "Channel", model: "model" })).rejects.toMatchObject(
-			{ _tag: "AgentHandleReserved", handle: "channel" },
-		);
-		const sorter = await create(adminId, { podId, name: "Sorter", model: "model" });
+		await expect(create(adminId, { name: "Channel", model: "model" })).rejects.toMatchObject({
+			_tag: "AgentHandleReserved",
+			handle: "channel",
+		});
+		const sorter = await create(adminId, { name: "Sorter", model: "model" });
 		await expect(
 			repository.update(workspaceId, sorter.id, { handle: "channel" }),
 		).rejects.toMatchObject({ _tag: "AgentHandleReserved", handle: "channel" });
 	});
 
+	it("keeps the Personal Assistant's handle for Personal Assistants, given or taken from the name", async () => {
+		await expect(
+			create(adminId, { name: "Personal Assistant", model: "model" }),
+		).rejects.toMatchObject({ _tag: "AgentHandleReserved", handle: "personal-assistant" });
+		const sorter = await create(adminId, { name: "Sorter", model: "model" });
+		await expect(
+			repository.update(workspaceId, sorter.id, { handle: "personal-assistant" }),
+		).rejects.toMatchObject({ _tag: "AgentHandleReserved", handle: "personal-assistant" });
+	});
+
 	it("says which name a renaming clashes on", async () => {
-		await create(adminId, { podId, name: "Triage", model: "model" });
-		const other = await create(adminId, { podId, name: "Sorter", model: "model" });
+		await create(adminId, { name: "Triage", model: "model" });
+		const other = await create(adminId, { name: "Sorter", model: "model" });
 
 		await expect(
 			repository.update(workspaceId, other.id, { name: "Triage" }),
@@ -188,7 +172,6 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 
 	it("lets a crew agent's model be cleared, which stops it rather than breaking it", async () => {
 		const made = await create(adminId, {
-			podId,
 			name: "Clearable",
 			model: "model",
 		});
@@ -196,9 +179,17 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		const cleared = await repository.update(workspaceId, made.id, { model: null });
 
 		expect(cleared.model).toBeNull();
-		// Still a crew agent in its pod, still listed: it simply cannot take a turn.
+		// Still listed: it simply cannot take a turn.
 		const visible = await visibleTo(adminId);
 		expect(visible.map((one) => one.name)).toContain("Clearable");
+	});
+
+	it("lets every person's Personal Assistant have the same name", async () => {
+		const admins = await repository.provisionPersonalAssistant({ workspaceId, userId: adminId });
+		const members = await repository.provisionPersonalAssistant({ workspaceId, userId: memberId });
+
+		expect(members.name).toBe(admins.name);
+		expect(members.id).not.toBe(admins.id);
 	});
 
 	it("does not individually delete a system agent", async () => {
@@ -215,22 +206,21 @@ describe.skipIf(!process.env.DATABASE_URL)("agents, against Postgres", () => {
 		).rejects.toBeInstanceOf(AgentRepository.SystemAgentImmutable);
 	});
 
-	it("leaves system agents out of the roster, since they are in no pod", async () => {
+	it("leaves system bots out of the list", async () => {
 		await placeScribe();
-		await create(adminId, { podId, name: "Crew", model: "model" });
+		await create(adminId, { name: "Crew", model: "model" });
 		const visible = await visibleTo(adminId);
 		expect(visible.map((one) => one.name)).not.toContain("Scribe");
 		expect(visible.map((one) => one.name)).toContain("Crew");
 	});
 
-	/** The workspace's Scribe: no pod, and no model until somebody chooses one. */
+	/** The workspace's Summariser, with no model until somebody chooses one. */
 	async function placeScribe() {
 		const [system] = await onDatabase((db) =>
 			db
 				.insert(agent)
 				.values({
 					workspaceId,
-					podId: null,
 					name: "Scribe",
 					handle: "scribe",
 					systemAgentKey: "summarise",

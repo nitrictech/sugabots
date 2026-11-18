@@ -81,7 +81,6 @@ const meta = preview.meta({
 		call: asking(),
 		agent: tripPlanner,
 		threadId: "0199a3a0-0000-7000-8000-0000000000b2",
-		podId: "0199a3a0-0000-7000-8000-0000000000b1",
 		canApprove: true,
 		look: calendar,
 	},

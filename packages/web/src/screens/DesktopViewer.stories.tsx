@@ -3,7 +3,7 @@ import { useState } from "react";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
-import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { growthDesk } from "@/shell/story-fixtures.ts";
 import { DesktopScreen, DesktopStage, LiveDesktopCard } from "./DesktopViewer.tsx";
 
 const meta = preview.meta({
@@ -87,7 +87,6 @@ export const Opened = meta.story({
 			<DesktopStage
 				threadId={threadId}
 				agent={{ ...growthDesk, usesSandbox: true }}
-				pod={revenue}
 				mayUse
 				onClose={fn()}
 			/>

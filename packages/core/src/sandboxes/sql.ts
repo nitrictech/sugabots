@@ -13,14 +13,14 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { pod, user, workspace } from "../workspaces/sql.ts";
+import { agent, user, workspace } from "../workspaces/sql.ts";
 import type { DiskUsage } from "./sandbox-disk.ts";
 import type { Sandboxes } from "./sandboxes.ts";
 
 /**
  * A sandbox provider a workspace has configured: an account at a service that
  * makes Linux machines. A workspace may have several, but at most one is
- * enabled, and that one makes its pods' sandboxes.
+ * enabled, and that one makes its bots' computers.
  */
 export const sandboxProvider = pgTable(
 	"sandbox_provider",
@@ -67,19 +67,19 @@ export type SandboxManagedResources = {
 };
 
 /**
- * A pod's sandbox: the machine its agents run commands on, at the provider
- * that made it. One per pod, made the first time an agent there needs it.
+ * A bot's computer: the machine it runs commands on, at the provider that
+ * made it. One per bot, made the first time the bot needs it.
  */
 export const sandbox = pgTable(
 	"sandbox",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id").notNull(),
-		podId: uuid("pod_id").notNull(),
+		agentId: uuid("agent_id").notNull(),
 		/**
-		 * The provider that made it. Removing a provider destroys its sandboxes
+		 * The provider that made it. Removing a provider destroys its computers
 		 * first; the row cascades only so that deleting a workspace, which
-		 * reaches it through both the provider and the pod, never fails.
+		 * reaches it through both the provider and the bot, never fails.
 		 */
 		sandboxProviderId: uuid("sandbox_provider_id").notNull(),
 		/** The provider's own id for it. */
@@ -101,16 +101,16 @@ export const sandbox = pgTable(
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "sandbox_pod_workspace_fkey",
+			columns: [table.agentId, table.workspaceId],
+			foreignColumns: [agent.id, agent.workspaceId],
+			name: "sandbox_agent_workspace_fkey",
 		}).onDelete("cascade"),
 		foreignKey({
 			columns: [table.sandboxProviderId, table.workspaceId],
 			foreignColumns: [sandboxProvider.id, sandboxProvider.workspaceId],
 			name: "sandbox_provider_workspace_fkey",
 		}).onDelete("cascade"),
-		uniqueIndex("sandbox_pod_id_idx").on(table.podId),
+		uniqueIndex("sandbox_agent_id_idx").on(table.agentId),
 		check(
 			"sandbox_disk_measured_check",
 			sql`(${table.diskUsage} is null) = (${table.diskMeasuredAt} is null)`,
@@ -147,9 +147,9 @@ export const sandboxLease = pgTable(
 export type SandboxLeaseHolderKind = "turn" | "viewer";
 
 /**
- * A host every pod's sandbox in a workspace may reach, beyond the trusted ones
- * every workspace's sandboxes reach. Added in settings by someone who manages
- * the workspace's sandboxes.
+ * A host every computer in a workspace may reach, beyond the trusted ones
+ * every workspace's computers reach. Added in settings by someone who manages
+ * the workspace's computers.
  */
 export const sandboxAllowedHost = pgTable(
 	"sandbox_allowed_host",
@@ -166,34 +166,33 @@ export const sandboxAllowedHost = pgTable(
 );
 
 /**
- * A host one pod's sandbox may reach, beyond what the workspace lets every
- * pod's reach. Added in the pod's settings, or by approving an agent's
- * request there.
+ * A host one bot's computer may reach, beyond what the workspace lets every
+ * computer reach. Added in the bot's settings, or by approving the bot's
+ * request for it.
  */
-export const sandboxPodAllowedHost = pgTable(
-	"sandbox_pod_allowed_host",
+export const sandboxAgentAllowedHost = pgTable(
+	"sandbox_agent_allowed_host",
 	{
 		workspaceId: uuid("workspace_id").notNull(),
-		podId: uuid("pod_id").notNull(),
+		agentId: uuid("agent_id").notNull(),
 		host: text("host").notNull(),
-		/** Who added it, or approved the request for it. */
 		addedById: uuid("added_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		compositePrimaryKey({ columns: [table.podId, table.host] }),
+		compositePrimaryKey({ columns: [table.agentId, table.host] }),
 		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "sandbox_pod_allowed_host_pod_workspace_fkey",
+			columns: [table.agentId, table.workspaceId],
+			foreignColumns: [agent.id, agent.workspaceId],
+			name: "sandbox_agent_allowed_host_agent_workspace_fkey",
 		}).onDelete("cascade"),
 	],
 );
 
 /**
- * A host no sandbox in the workspace may reach, whatever the workspace or a
- * pod allows: blocking it takes it, and any wildcard that covers it, out of
- * every pod's allowed hosts, and agents' requests for it are refused.
+ * A host no computer in the workspace may reach, whatever the workspace or a
+ * bot allows: blocking it takes it, and any wildcard that covers it, out of
+ * every bot's allowed hosts, and bots' requests for it are refused.
  */
 export const sandboxBlockedHost = pgTable(
 	"sandbox_blocked_host",

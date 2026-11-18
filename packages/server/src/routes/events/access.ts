@@ -6,7 +6,7 @@ import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Visibility } from "@sugabots/core/authorization/visibility";
 import { query, serviceOperations } from "@sugabots/core/database/database";
 import type { Audience } from "@sugabots/core/database/events/audience";
-import { pod, thread } from "@sugabots/core/database/schema";
+import { thread } from "@sugabots/core/database/schema";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 
@@ -30,8 +30,8 @@ export interface Interface {
 	me(): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
 	/**
 	 * Whether the current actor is in `audience`, by `Visibility`'s rules, and
-	 * so may hear what a workspace channel says of the threads it is for: they
-	 * reach its pod, or are in its direct message.
+	 * so may hear what a workspace channel says of the thread it is for: they
+	 * reach the thread.
 	 */
 	hears(audience: Audience.Group): Effect.Effect<boolean, never, CurrentActor.Service>;
 }
@@ -67,25 +67,13 @@ export const make = Effect.gen(function* () {
 			operation(
 				"hears",
 				Effect.gen(function* () {
-					if (audience.kind === "direct") {
-						const { threadId } = audience;
-						const reachesThread = yield* visibility.reachesThread;
-						const [reached] = yield* query((db) =>
-							db
-								.select({ id: thread.id })
-								.from(thread)
-								.where(and(eq(thread.id, threadId), reachesThread(thread)))
-								.limit(1),
-						);
-						return reached !== undefined;
-					}
-					const { podId } = audience;
-					const reaches = yield* visibility.reachesPod;
+					const { threadId } = audience;
+					const reachesThread = yield* visibility.reachesThread;
 					const [reached] = yield* query((db) =>
 						db
-							.select({ id: pod.id })
-							.from(pod)
-							.where(and(eq(pod.id, podId), reaches(pod.id)))
+							.select({ id: thread.id })
+							.from(thread)
+							.where(and(eq(thread.id, threadId), reachesThread(thread)))
 							.limit(1),
 					);
 					return reached !== undefined;

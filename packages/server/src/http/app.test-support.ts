@@ -23,7 +23,7 @@ import { GitHubApps } from "@sugabots/core/providers/connections/github/github-a
 import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
-import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
+import { AgentSandboxSetup } from "@sugabots/core/sandboxes/agent-sandbox-setup";
 import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
 import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
 import { unimplemented } from "@sugabots/core/testing";
@@ -121,7 +121,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(SandboxProviderSetup.Service),
 	unimplemented(SandboxNetwork.Service),
 	unimplemented(DesktopViewer.Service),
-	unimplemented(PodSandboxSetup.Service),
+	unimplemented(AgentSandboxSetup.Service),
 	unimplemented(GitHubApps.Service),
 	unimplemented(GitHubConnections.Service),
 	unimplemented(ConnectionSetup.Service),

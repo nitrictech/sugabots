@@ -16,7 +16,6 @@ import { routine, routineExecution, routineTrigger, thread } from "../../databas
 import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { threadPodId } from "../threads/rooms.ts";
 import type { Turns } from "../turns/turns.ts";
 import { inScope, type Scope } from "./routine.ts";
 import { RoutineRuns } from "./runs.ts";
@@ -99,7 +98,6 @@ export interface Interface {
 			| "trigger"
 			| "routineName"
 			| "instructions"
-			| "results"
 			| "acceptedAt"
 		>,
 	) => Effect.Effect<schema.RoutineExecutionRow>;
@@ -145,12 +143,12 @@ export const make = Effect.gen(function* () {
 	const { emit } = yield* ConversationEvents.Service;
 	const runs = yield* RoutineRuns.Service;
 
-	/** The routine's own thread, which lists the run, and its pod. */
+	/** The routine's own thread, which lists the run. */
 	const listingOf = (run: schema.RoutineExecutionRow) =>
 		Effect.gen(function* () {
 			const [root] = yield* query((db) =>
 				db
-					.select({ conversationId: thread.conversationId, podId: thread.podId })
+					.select({ conversationId: thread.conversationId })
 					.from(thread)
 					.where(eq(thread.id, run.threadId))
 					.limit(1),
@@ -158,7 +156,7 @@ export const make = Effect.gen(function* () {
 			if (!root?.conversationId) {
 				return yield* Effect.die(new Error("Routine thread is in no conversation"));
 			}
-			return { conversationId: root.conversationId, podId: threadPodId(run.threadId, root.podId) };
+			return { conversationId: root.conversationId };
 		});
 
 	/**
@@ -536,10 +534,7 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /** What a routine is: its name, what it tells the agent, where its result goes, and whether it runs. */
-export type Definition = Pick<
-	schema.RoutineRow,
-	"name" | "instructions" | "results" | "chatId" | "state"
->;
+export type Definition = Pick<schema.RoutineRow, "name" | "instructions" | "state">;
 
 /** What one of a routine's triggers is, and what it keeps beside that: a webhook's secret, a schedule's next time. */
 export type TriggerValues = Pick<

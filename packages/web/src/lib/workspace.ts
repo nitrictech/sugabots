@@ -331,6 +331,7 @@ export function useWorkspaceRole(): WorkspaceRole | undefined {
 
 const NOTHING_YET: WorkspacePermissions = {
 	createPods: false,
+	createAgents: false,
 	updateWorkspace: false,
 	manageProviders: false,
 	manageMembers: false,

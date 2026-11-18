@@ -59,7 +59,7 @@ export const makeConnectionEvents = Effect.gen(function* () {
 /**
  * The GitHub triggers of enabled routines run by `event` at `repository`,
  * through `connectionId`, while the connection still has the repository and
- * belongs to the routine's agent's pod.
+ * belongs to the automation's bot.
  */
 const listening = (on: {
 	workspaceId: string;
@@ -84,7 +84,7 @@ const listening = (on: {
 				connection,
 				and(
 					eq(connection.id, on.connectionId),
-					eq(connection.podId, agent.podId),
+					eq(connection.agentId, agent.id),
 					eq(connection.workspaceId, agent.workspaceId),
 					sql`${connection.id}::text = ${routineTrigger.settings}->>'connectionId'`,
 					// GitHub's paths ignore case.

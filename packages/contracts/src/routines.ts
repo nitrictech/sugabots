@@ -2,7 +2,6 @@ import { Effect, Schema } from "effect";
 import isISO8601 from "validator/lib/isISO8601.js";
 import { agentSchema } from "./agents.ts";
 import { repositoryEventSchema, repositoryPathSchema } from "./github.ts";
-import { podSlugSchema } from "./pods.ts";
 import { MAX_TIMEZONE_CHARACTERS } from "./time-zones.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -51,13 +50,6 @@ export type RoutineState = typeof routineStateSchema.Type;
 
 export const routineTriggerKindSchema = Schema.Literals(["cron", "webhook", "github"]);
 export type RoutineTriggerKind = typeof routineTriggerKindSchema.Type;
-
-/**
- * Where a run's result goes: kept in the run's own thread, or also posted in
- * the agent's chat as the agent's last reply, for people to read and answer.
- */
-export const routineResultsSchema = Schema.Literals(["keep_in_run", "post_to_chat"]);
-export type RoutineResults = typeof routineResultsSchema.Type;
 
 const webhookHeaderSchema = Schema.Trim.check(
 	Schema.isMinLength(1),
@@ -294,9 +286,6 @@ export const routineSchema = Schema.Struct({
 	/** What starts it, in the order they were added; with none, it runs only when someone runs it. */
 	triggers: Schema.Array(routineTriggerSchema),
 	state: routineStateSchema,
-	results: routineResultsSchema,
-	/** The pod's chat its results are posted to; the pod's first chat when null. */
-	chatId: Schema.NullOr(uuidSchema),
 	createdById: Schema.NullOr(uuidSchema),
 	/** The routine's own bot, when it made the routine at `createdById`'s request. */
 	createdByAgentId: Schema.NullOr(uuidSchema),
@@ -310,7 +299,6 @@ export type Routine = typeof routineSchema.Type;
 export const workspaceRoutineSchema = Schema.Struct({
 	routine: routineSchema,
 	agent: agentSchema,
-	pod: Schema.Struct({ id: uuidSchema, slug: podSlugSchema }),
 });
 
 export type WorkspaceRoutine = typeof workspaceRoutineSchema.Type;
@@ -369,8 +357,6 @@ export const newRoutineSchema = Schema.Struct({
 	name: routineNameSchema,
 	instructions: routineInstructionsSchema,
 	state: Schema.optional(routineStateSchema),
-	results: Schema.optional(routineResultsSchema),
-	chatId: Schema.optional(Schema.NullOr(uuidSchema)),
 	triggers: Schema.Array(routineTriggerInputSchema).check(Schema.isMaxLength(MAX_ROUTINE_TRIGGERS)),
 });
 
@@ -381,8 +367,6 @@ export const routineUpdateSchema = Schema.Struct({
 	name: Schema.optional(routineNameSchema),
 	instructions: Schema.optional(routineInstructionsSchema),
 	state: Schema.optional(routineStateSchema),
-	results: Schema.optional(routineResultsSchema),
-	chatId: Schema.optional(Schema.NullOr(uuidSchema)),
 });
 
 export type RoutineUpdate = typeof routineUpdateSchema.Type;

@@ -5,7 +5,6 @@ import {
 	agent,
 	modelProvider,
 	modelRequest,
-	pod,
 	user,
 	workspace,
 	workspaceMember,
@@ -25,7 +24,6 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
-	let revenueId: string;
 	let growthDeskId: string;
 	let accountManagerId: string;
 	let providerId: string;
@@ -62,27 +60,12 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				{ workspaceId, userId: memberId, role: "member" },
 			]),
 		);
-		const [revenue] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId,
-					kind: "shared",
-					name: "Revenue",
-					slug: `revenue-${suffix}`,
-					color: "green",
-				})
-				.returning(),
-		);
-		if (!revenue) throw new Error("fixture");
-		revenueId = revenue.id;
 		const [growthDesk, accountManager] = await onDatabase((db) =>
 			db
 				.insert(agent)
 				.values([
 					{
 						workspaceId,
-						podId: revenueId,
 						name: "Growth Desk",
 						handle: `growth-desk-${suffix}`,
 						color: "green",
@@ -90,7 +73,6 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 					},
 					{
 						workspaceId,
-						podId: revenueId,
 						name: "Account Manager",
 						handle: `account-manager-${suffix}`,
 						color: "sky",
@@ -128,7 +110,6 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				requests.map((request) => ({
 					workspaceId,
 					purpose: "agent-turn" as const,
-					podId: revenueId,
 					agentId: growthDeskId,
 					step: 0,
 					providerId,
@@ -143,7 +124,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 
 	const priced = (usd: number) => ({ costUsd: usd, costSource: "models.dev@test" });
 
-	it("adds up a month by bot, model and pod, with the system agents apart", async () => {
+	it("adds up a month by bot and model, with the system agents apart", async () => {
 		await recorded(
 			{ startedAt: new Date("2026-09-03T01:00:00Z"), ...priced(1.5) },
 			{ startedAt: new Date("2026-09-03T02:00:00Z"), ...priced(0.75) },
@@ -171,7 +152,6 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				color: "green",
 				face: "pill",
 				shape: "circle",
-				podName: "Revenue",
 				usd: 2.25,
 				unpricedRequests: 1,
 			},
@@ -181,7 +161,6 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				color: "sky",
 				face: "dot",
 				shape: "circle",
-				podName: "Revenue",
 				usd: 2,
 				unpricedRequests: 0,
 			},
@@ -195,22 +174,40 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				unpricedRequests: 1,
 			}),
 		]);
-		expect(usage.pods).toEqual([
-			{
-				podId: revenueId,
-				name: "Revenue",
-				color: "green",
-				botCount: 2,
-				usd: 4.25,
-				unpricedRequests: 1,
-			},
-		]);
 		expect(usage.systemAgents).toEqual({ usd: 0.25, unpricedRequests: 0 });
 		expect(usage.days).toHaveLength(30);
 		expect(usage.days.filter((day) => day.usd > 0)).toEqual([
 			{ date: "2026-09-03", usd: 2.25 },
 			{ date: "2026-09-10", usd: 2.25 },
 		]);
+	});
+
+	it("counts people's Personal Assistants together, naming none", async () => {
+		const [assistant] = await onDatabase((db) =>
+			db
+				.insert(agent)
+				.values({
+					workspaceId,
+					name: "Personal Assistant",
+					handle: "personal-assistant",
+					color: "sky",
+					face: "pill",
+					visibility: "private",
+					assistantOf: memberId,
+				})
+				.returning(),
+		);
+		if (!assistant) throw new Error("fixture");
+		await recorded(
+			{ startedAt: new Date("2026-09-03T01:00:00Z"), ...priced(1.5) },
+			{ startedAt: new Date("2026-09-04T01:00:00Z"), agentId: assistant.id, ...priced(0.5) },
+		);
+
+		const usage = await usageAs(adminId).month({ workspace: workspaceId, month: "2026-09" });
+
+		expect(usage).toMatchObject({ usd: 2, unpricedRequests: 0 });
+		expect(usage.bots.map((bot) => bot.agentId)).toEqual([growthDeskId]);
+		expect(usage.personalAssistants).toEqual({ usd: 0.5, unpricedRequests: 0 });
 	});
 
 	it("puts a request in the month and on the day of the workspace's time zone", async () => {

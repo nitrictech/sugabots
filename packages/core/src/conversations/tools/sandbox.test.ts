@@ -5,7 +5,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	agent,
 	message,
-	pod,
 	sandboxAllowedHost,
 	thread,
 	user,
@@ -14,7 +13,7 @@ import {
 } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { Egress } from "../../providers/network/egress.ts";
-import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
+import { AgentSandboxes } from "../../sandboxes/agent-sandboxes.ts";
 import { SandboxCredentials } from "../../sandboxes/sandbox-credentials.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import { Sandboxes } from "../../sandboxes/sandboxes.ts";
@@ -35,16 +34,16 @@ const SLOW = 180_000;
 
 describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", () => {
 	let sandboxTools: SandboxTools.Interface;
-	let podSandboxes: PodSandboxes.Interface;
-	let thePod: PodSandboxes.Pod;
+	let agentSandboxes: AgentSandboxes.Interface;
+	let workspaceId: string;
 	let ownerId: string;
 	const scope = Effect.runSync(Scope.make());
 	const idsHandedOut = new Set<string>();
 
 	beforeAll(async () => {
-		[sandboxTools, podSandboxes] = await runOnPostgres(
-			Effect.all([SandboxTools.Service, PodSandboxes.Service]).pipe(
-				Effect.provide(Layer.merge(SandboxTools.layer, PodSandboxes.layer)),
+		[sandboxTools, agentSandboxes] = await runOnPostgres(
+			Effect.all([SandboxTools.Service, AgentSandboxes.Service]).pipe(
+				Effect.provide(Layer.merge(SandboxTools.layer, AgentSandboxes.layer)),
 				Effect.provide(SandboxCredentials.none),
 				Effect.provide(recordingIds(idsHandedOut)),
 				// Registries are asked what an image's tag names, as in production.
@@ -69,21 +68,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId: space.id, userId: owner.id }),
 		);
-		const [shared] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId: space.id,
-					ownerId: owner.id,
-					kind: "shared",
-					name: "Builders",
-					slug: `builders-${suffix}`,
-					createdById: owner.id,
-				})
-				.returning(),
-		);
-		if (!shared) throw new Error("fixture");
-		thePod = { workspaceId: space.id, podId: shared.id };
+		workspaceId = space.id;
 		const providers = await runOnPostgres(
 			Effect.provide(SandboxProviderRepository.Service, SandboxProviderRepository.layer),
 		);
@@ -111,8 +96,8 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 		const providers = await runOnPostgres(
 			Effect.provide(SandboxProviderRepository.Service, SandboxProviderRepository.layer),
 		);
-		const provider = await runOnPostgres(providers.enabled(thePod.workspaceId));
-		if (provider) await runOnPostgres(podSandboxes.destroyAllMadeBy(thePod.workspaceId, provider));
+		const provider = await runOnPostgres(providers.enabled(workspaceId));
+		if (provider) await runOnPostgres(agentSandboxes.destroyAllMadeBy(workspaceId, provider));
 		await closeDatabase();
 		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
@@ -126,7 +111,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 		runOnPostgres(
 			Scope.provide(scope)(
 				sandboxTools.forTurn({
-					pod: thePod,
+					workspaceId,
 					usesSandbox: true,
 					turnId,
 					threadId,
@@ -187,8 +172,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 				db
 					.insert(agent)
 					.values({
-						workspaceId: thePod.workspaceId,
-						podId: thePod.podId,
+						workspaceId,
 						name: "Editor",
 						handle: `editor-${Date.now()}`,
 						color: "green",
@@ -202,8 +186,7 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 					db
 						.insert(thread)
 						.values({
-							workspaceId: thePod.workspaceId,
-							podId: thePod.podId,
+							workspaceId,
 							hostAgentId: host.id,
 							type: "collaboration",
 							title,
@@ -352,11 +335,9 @@ describe.skipIf(!configured)("sandbox tools, against Postgres and OpenSandbox", 
 			expect([await reaches("github.com"), await reaches("example.com")]).toEqual([true, false]);
 
 			await onDatabase((db) =>
-				db
-					.insert(sandboxAllowedHost)
-					.values({ workspaceId: thePod.workspaceId, host: "example.com" }),
+				db.insert(sandboxAllowedHost).values({ workspaceId, host: "example.com" }),
 			);
-			await runOnPostgres(podSandboxes.applyNetwork({ workspaceId: thePod.workspaceId }));
+			await runOnPostgres(agentSandboxes.applyNetwork({ workspaceId }));
 
 			expect(await reaches("example.com")).toBe(true);
 		},

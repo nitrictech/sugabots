@@ -10,7 +10,7 @@ export interface ConnectionTarget {
 	/** `oauth` calls carry no header of ours: the SDK adds the tokens it holds. */
 	auth: "header" | "oauth";
 	headers: Record<string, string>;
-	/** What somebody chose for the pod's bots to do with each tool; see `toolAccessOf`. */
+	/** What somebody chose for the bot to do with each tool; see `toolAccessOf`. */
 	toolAccess: ToolAccess;
 	/** So a test result is recorded against the configuration it tested. */
 	configurationUpdatedAt: Date;

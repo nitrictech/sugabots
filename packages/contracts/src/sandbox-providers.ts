@@ -4,12 +4,12 @@ import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
- * Sandbox providers: where a workspace's pods get the Linux machines their
- * agents run commands on. Experimental.
+ * Computer providers: where a workspace's bots get the Linux machines they
+ * run commands on. Experimental.
  *
  * A workspace may configure several, each from a preset with its own account
  * and key, but at most one is enabled at a time, and that one makes every
- * pod's sandbox. Agents are offered the sandbox tools only while one is.
+ * bot's computer. Bots are offered the computer tools only while one is.
  */
 
 /**
@@ -102,7 +102,7 @@ const nameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(5
 
 /**
  * How a provider's sandboxes reach the internet: `allowlist`, only the
- * trusted hosts and those the workspace and each pod add; or `open`, every
+ * trusted hosts and those the workspace and each bot add; or `open`, every
  * host but those the workspace blocks, as far as the provider can refuse
  * hosts by name. E2B can't, so its open sandboxes reach every host.
  */
@@ -234,9 +234,9 @@ export type SandboxProviderTestResult = typeof sandboxProviderTestResultSchema.T
 
 const byteCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-/** A folder of a pod's sandbox and how much of its disk it takes. */
+/** A folder of a bot's computer and how much of its disk it takes. */
 export const sandboxDiskFolderSchema = Schema.Union([
-	/** A bot's home, its own across every thread in the pod. */
+	/** The bot's home, kept across all its threads. */
 	Schema.Struct({ kind: Schema.Literal("home"), agentId: uuidSchema, bytes: byteCountSchema }),
 	/** Every thread's folder together, where the bots clone and build. */
 	Schema.Struct({ kind: Schema.Literal("threads"), bytes: byteCountSchema }),
@@ -247,7 +247,7 @@ export const sandboxDiskFolderSchema = Schema.Union([
 export type SandboxDiskFolder = typeof sandboxDiskFolderSchema.Type;
 
 /**
- * How full a pod's sandbox's disk was when last measured, which it is every
+ * How full a bot's computer's disk was when last measured, which it is every
  * few minutes while it runs. A paused sandbox's disk doesn't change, so its
  * last measurement still holds.
  */
@@ -299,8 +299,8 @@ export function formatDiskSize(bytes: number) {
 	return `${shown} ${BYTE_UNITS[exponent]}`;
 }
 
-/** A pod's sandbox as the pod's settings show it. */
-export const podSandboxStateSchema = Schema.Union([
+/** A bot's computer as the bot's settings show it. */
+export const agentSandboxStateSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("none") }),
 	Schema.Struct({
 		kind: Schema.Literal("present"),
@@ -320,22 +320,25 @@ export const podSandboxStateSchema = Schema.Union([
 	}),
 ]);
 
-export type PodSandboxState = typeof podSandboxStateSchema.Type;
+export type AgentSandboxState = typeof agentSandboxStateSchema.Type;
 
-export const podSandboxSchema = Schema.Struct({
-	sandbox: podSandboxStateSchema,
+export const agentSandboxSchema = Schema.Struct({
+	sandbox: agentSandboxStateSchema,
 	/** Whether the workspace has a sandbox provider enabled, without which nothing new is made. */
 	providerEnabled: Schema.Boolean,
 	/** Whether the person asking may reset or upgrade it. */
 	canManage: Schema.Boolean,
 });
 
-export type PodSandbox = typeof podSandboxSchema.Type;
+export type AgentSandbox = typeof agentSandboxSchema.Type;
 
-/** The disk of one pod's sandbox, for the workspace's overview of its pods' sandboxes. */
-export const podSandboxDiskSchema = Schema.Struct({ podId: uuidSchema, disk: sandboxDiskSchema });
+/** The disk of one bot's computer, for the workspace's overview of its bots' computers. */
+export const agentSandboxDiskSchema = Schema.Struct({
+	agentId: uuidSchema,
+	disk: sandboxDiskSchema,
+});
 
-export type PodSandboxDisk = typeof podSandboxDiskSchema.Type;
+export type AgentSandboxDisk = typeof agentSandboxDiskSchema.Type;
 
 /**
  * How a provider's template stands, for a provider that builds its sandboxes
@@ -369,7 +372,7 @@ export const sandboxHostSchema = Schema.String.check(
 	),
 );
 
-/** A host a workspace let every pod's sandbox reach, or a pod its own, beyond the trusted ones. */
+/** A host a workspace let every computer reach, or a bot its own, beyond the trusted ones. */
 export const sandboxAddedHostSchema = Schema.Struct({
 	host: sandboxHostSchema,
 	/** Who added it, or approved the agent's request for it; null once they've left. */
@@ -379,7 +382,7 @@ export const sandboxAddedHostSchema = Schema.Struct({
 
 export type SandboxAddedHost = typeof sandboxAddedHostSchema.Type;
 
-/** A host no sandbox in the workspace may reach, whatever a pod allows. */
+/** A host no computer in the workspace may reach, whatever a bot allows. */
 export const sandboxBlockedHostSchema = Schema.Struct({
 	host: sandboxHostSchema,
 	/** Who blocked it; null once they've left. */
@@ -390,8 +393,8 @@ export const sandboxBlockedHostSchema = Schema.Struct({
 export type SandboxBlockedHost = typeof sandboxBlockedHostSchema.Type;
 
 /**
- * What a workspace lets every pod's sandbox connect to, and what it keeps
- * them all from. Each pod adds its own hosts; everything else is refused, so
+ * What a workspace lets every computer connect to, and what it keeps them
+ * all from. Each bot adds its own hosts; everything else is refused, so
  * a command that reaches for another host fails as if it weren't there.
  */
 export const sandboxNetworkSettingsSchema = Schema.Struct({
@@ -406,7 +409,7 @@ export const sandboxNetworkSettingsSchema = Schema.Struct({
 	trustedHosts: Schema.Array(sandboxHostSchema),
 	addedHosts: Schema.Array(sandboxAddedHostSchema),
 	/**
-	 * Out of every pod's reach, with their subdomains. A block also keeps out
+	 * Out of every computer's reach, with their subdomains. A block also keeps out
 	 * any allowed wildcard that covers it, since a sandbox can't be let into a
 	 * wildcard with exceptions.
 	 */
@@ -415,21 +418,21 @@ export const sandboxNetworkSettingsSchema = Schema.Struct({
 
 export type SandboxNetworkSettings = typeof sandboxNetworkSettingsSchema.Type;
 
-/** The workspace's block that keeps a host out of the pod's reach anyway; null when none does. */
+/** The workspace's block that keeps a host out of the bot's reach anyway; null when none does. */
 const blockedBy = Schema.NullOr(sandboxHostSchema);
 
-/** Where one pod's sandbox may connect to: what the workspace allows every pod, and its own. */
-export const podSandboxNetworkSchema = Schema.Struct({
+/** Where one bot's computer may connect to: what the workspace allows every bot, and its own. */
+export const agentSandboxNetworkSchema = Schema.Struct({
 	/** The workspace's enabled provider's; open, the sandbox reaches every host the workspace didn't block. */
 	mode: sandboxNetworkModeSchema,
 	/** Whether the workspace's blocked hosts are kept out of the sandbox. */
 	blocking: Schema.Boolean,
-	/** The trusted hosts and the workspace's, which every pod's sandbox is allowed. */
+	/** The trusted hosts and the workspace's, which every computer is allowed. */
 	workspaceHosts: Schema.Array(Schema.Struct({ host: sandboxHostSchema, blockedBy })),
-	/** What the pod added for its own sandbox. */
+	/** What was added for the bot's own computer. */
 	addedHosts: Schema.Array(Schema.Struct({ ...sandboxAddedHostSchema.fields, blockedBy })),
 });
 
-export type PodSandboxNetwork = typeof podSandboxNetworkSchema.Type;
+export type AgentSandboxNetwork = typeof agentSandboxNetworkSchema.Type;
 
 export const newSandboxHostSchema = Schema.Struct({ host: sandboxHostSchema });

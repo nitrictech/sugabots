@@ -17,8 +17,7 @@ import { Schema } from "effect";
 import { useId, useState } from "react";
 import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentSettingsLink, podSettingsPageLink } from "@/lib/links.ts";
-import { usePods } from "@/lib/pods.ts";
+import { agentSettingsLink, agentSettingsPageLink } from "@/lib/links.ts";
 import {
 	usePrepareSandboxTemplate,
 	useSandboxDisks,
@@ -47,9 +46,9 @@ import { TextEntryRow } from "./text-entry-row.tsx";
 
 /*
  * The workspace's computers, experimental: a switch for whether bots get a
- * Linux computer per pod to run commands on, which provider makes those
+ * Linux computer per bot to run commands on, which provider makes those
  * computers, that provider's account, what the computers may reach, the bots
- * using one, and how full each pod's computer's disk is. A workspace may keep
+ * using one, and how full each bot's computer's disk is. A workspace may keep
  * a provider configured for each preset; the switch enables the chosen one,
  * which disables any other. Code calls a computer a sandbox; people read
  * "computer".
@@ -123,7 +122,7 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 			<SettingsGroup
 				note={
 					ready && enabled && enabled.preset !== chosen
-						? `Turning this on moves computers from ${enabled.name} to ${preset.name}. Each pod gets a new one, without the old one's files.`
+						? `Turning this on moves computers from ${enabled.name} to ${preset.name}. Each bot gets a new one, without the old one's files.`
 						: undefined
 				}
 			>
@@ -131,7 +130,7 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 					label={<span className="font-medium">Bots can use a computer</span>}
 					sub={
 						ready
-							? "Each pod gets its own private computer"
+							? "Each bot gets its own private computer"
 							: `${preset.name} needs an API key first. Add it below.`
 					}
 					trailing={
@@ -197,7 +196,7 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
 				}
 			/>
 			<BotsUsingAComputer />
-			<PodDisks />
+			<BotDisks />
 		</>
 	);
 }
@@ -209,13 +208,10 @@ function SandboxGroups({ providers }: { providers: readonly SandboxProvider[] })
  */
 function BotsUsingAComputer() {
 	const { agents } = useAgents();
-	const { data: pods } = usePods();
-	const podById = new Map(pods?.map((pod) => [pod.id, pod]));
-	const using = (agents ?? []).flatMap((agent) => {
-		const pod = podById.get(agent.podId);
-		return agent.usesSandbox && agent.systemAgentKey === null && pod ? [{ agent, pod }] : [];
-	});
-	if (!agents || !pods) return null;
+	const using = (agents ?? []).filter(
+		(agent) => agent.usesSandbox && agent.systemAgentKey === null,
+	);
+	if (!agents) return null;
 	return (
 		<SettingsGroup
 			label="Bots using a computer"
@@ -224,14 +220,13 @@ function BotsUsingAComputer() {
 			{using.length === 0 && (
 				<SettingsRow label={<span className="text-muted-foreground">None yet</span>} />
 			)}
-			{using.map(({ agent, pod }) => (
+			{using.map((agent) => (
 				<SettingsRow
 					key={agent.id}
 					icon={<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={24} />}
 					label={agent.name}
-					sub={pod.name}
 					chevron
-					render={<Link {...agentSettingsLink({ pod, agent })} />}
+					render={<Link {...agentSettingsLink(agent)} />}
 				/>
 			))}
 		</SettingsGroup>
@@ -239,39 +234,39 @@ function BotsUsingAComputer() {
 }
 
 /**
- * How full each pod's computer's disk was when last measured, fullest first,
- * each opening the pod's Computer page, which shows what fills it. Hidden
+ * How full each bot's computer's disk was when last measured, fullest first,
+ * each opening the bot's Computer page, which shows what fills it. Hidden
  * until one has been measured.
  */
-function PodDisks() {
+function BotDisks() {
 	const { data: disks } = useSandboxDisks();
-	const { data: pods } = usePods();
-	const podById = new Map(pods?.map((pod) => [pod.id, pod]));
+	const { agents } = useAgents();
+	const agentById = new Map(agents?.map((agent) => [agent.id, agent]));
 	const measured = (disks ?? [])
-		.flatMap(({ podId, disk }) => {
-			const pod = podById.get(podId);
-			return pod ? [{ pod, disk }] : [];
+		.flatMap(({ agentId, disk }) => {
+			const agent = agentById.get(agentId);
+			return agent ? [{ agent, disk }] : [];
 		})
 		.toSorted((a, b) => sandboxDiskShare(b.disk) - sandboxDiskShare(a.disk));
 	if (measured.length === 0) return null;
 	return (
 		<SettingsGroup
-			label="Disk use by pod"
-			note="Measured every few minutes while each computer is on. Once a pod's disk fills, its bots' commands fail."
+			label="Disk use by bot"
+			note="Measured every few minutes while each computer is on. Once a bot's disk fills, its commands fail."
 		>
-			{measured.map(({ pod, disk }) => (
+			{measured.map(({ agent, disk }) => (
 				<SettingsRow
-					key={pod.id}
-					label={pod.name}
+					key={agent.id}
+					label={agent.name}
 					sub={
 						<>
-							<DiskMeter disk={disk} label={`${pod.name} disk used`} />
+							<DiskMeter disk={disk} label={`${agent.name} disk used`} />
 							{diskSummary(disk)}
 						</>
 					}
 					trailing={<DiskPercent disk={disk} />}
 					chevron
-					render={<Link {...podSettingsPageLink(pod, "computer")} />}
+					render={<Link {...agentSettingsPageLink(agent, "computer")} />}
 				/>
 			))}
 		</SettingsGroup>
@@ -483,7 +478,7 @@ function ProviderSettings({
 				title={`Remove ${preset.name}?`}
 				description={
 					removeError ??
-					"Every pod's computer at this provider is destroyed, with its files, including work that wasn't pushed."
+					"Every bot's computer at this provider is destroyed, with its files, including work that wasn't pushed."
 				}
 				confirmLabel="Remove"
 				pending={pending}
@@ -525,7 +520,7 @@ function TemplateRow({ providerId }: { providerId: string }) {
 					: template.error
 						? failureMessage(template.error)
 						: state === "ready"
-							? "Ready. Rebuilding takes Sugabots' latest image, which pods' computers move to when upgraded."
+							? "Ready. Rebuilding takes Sugabots' latest image, which bots' computers move to when upgraded."
 							: state === "building"
 								? "Building in your E2B account. This takes a few minutes."
 								: state === "failed"
@@ -554,8 +549,8 @@ function networkSummary(settings: SandboxProviderSettings): string {
 
 function hint(preset: SandboxProviderPresetId): string {
 	return preset === "opensandbox"
-		? "The server's own API key, from its configuration. Leave the image empty to use the default. A new size takes effect when a pod's computer is reset; on Kubernetes, one too big for any node never starts."
-		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a pod's computer is reset.";
+		? "The server's own API key, from its configuration. Leave the image empty to use the default. A new size takes effect when a bot's computer is reset; on Kubernetes, one too big for any node never starts."
+		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a bot's computer is reset.";
 }
 
 /** A number typed into a row, or undefined when the row was emptied. */

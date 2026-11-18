@@ -13,7 +13,7 @@ import {
 	mount,
 	onWideScreen,
 	pendingAnswer,
-	pods,
+	personalAssistant,
 	serveConnections,
 	triager,
 } from "@/test-api.tsx";
@@ -21,8 +21,7 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const page = `/suga/settings/pods/suga-team/agents/${linear.handle}`;
-const suga = pods[0] as (typeof pods)[number];
+const page = `/suga/settings/bots/${linear.handle}`;
 const webhookRoutine = {
 	id: "0199a3a0-0000-7000-8000-0000000000a1",
 	workspaceId: linear.workspaceId,
@@ -34,8 +33,6 @@ const webhookRoutine = {
 		auth: { kind: "bearer" },
 	}),
 	state: "enabled",
-	results: "keep_in_run",
-	chatId: null,
 	createdById: null,
 	createdByAgentId: null,
 	createdAt: "2026-09-18T00:00:00.000Z",
@@ -78,7 +75,7 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 	return {
 		id: "0199a3a0-0000-7000-8000-0000000000f1",
 		workspaceId: linear.workspaceId,
-		podId: linear.podId,
+		agentId: "0199a3a0-0000-7000-8000-00000000b071",
 		name: "Linear",
 		handle: "linear",
 		url: "https://mcp.linear.app/mcp",
@@ -146,21 +143,20 @@ describe("what everybody sees", () => {
 		expect(within(tools).getByRole("switch", { name: "Turn off Web search" })).toBeDefined();
 	});
 
-	it("shows the tools it inherits from its pod, to be changed only on the pod", async () => {
+	it("shows the bot's connections, to be changed on its Connections page", async () => {
 		serveConnections(
 			linearConnection(),
 			linearConnection({ id: "0199a3a0-0000-7000-8000-0000000000f9", name: "Wiki", tools: [] }),
 		);
 		mount(page);
 
-		const inherited = await screen.findByRole("region", { name: `Inherited from ${suga.name}` });
-		expect(await within(inherited).findByText("Linear")).toBeDefined();
-		expect(within(inherited).getByText("Inherited")).toBeDefined();
+		const connections = await screen.findByRole("region", { name: "Connections" });
+		expect(await within(connections).findByText("Linear")).toBeDefined();
 		// A connection that gives the bot no tools gives it nothing to list.
-		expect(within(inherited).queryByText("Wiki")).toBeNull();
-		expect(within(inherited).queryByRole("switch")).toBeNull();
-		const edit = within(inherited).getByRole("link", { name: `Edit in ${suga.name}` });
-		expect(edit.getAttribute("href")).toBe(`/suga/settings/pods/${suga.slug}/connections`);
+		expect(within(connections).queryByText("Wiki")).toBeNull();
+		expect(within(connections).queryByRole("switch")).toBeNull();
+		const manage = within(connections).getByRole("link", { name: "Manage" });
+		expect(manage.getAttribute("href")).toBe(`${page}/connections`);
 	});
 });
 
@@ -178,22 +174,38 @@ describe("a member", () => {
 		expect(within(tools).queryByRole("link", { name: /^Web search/ })).toBeNull();
 	});
 
-	it("edits the model and the instructions, which a member of the pod may do", async () => {
+	it("may not change a bot somebody else made", async () => {
 		mount(page);
 
-		await openSlide("Model");
-		expect(await screen.findByRole("button", { name: MODELS[1] })).toBeDefined();
-		fireEvent.click(within(screen.getByRole("main")).getByRole("button", { name: linear.name }));
-		await openSlide("Instructions");
-		expect((await screen.findByLabelText("Instructions")).hasAttribute("readonly")).toBe(false);
+		await screen.findByRole("heading", { name: linear.name });
+		expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Change look" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Delete bot" })).toBeNull();
 	});
+});
 
-	it("may edit it but not delete it", async () => {
-		mount(page);
+describe("your Personal Assistant", () => {
+	it("offers only its look and its connections to change", async () => {
+		mount(`/suga/settings/bots/${personalAssistant.handle}`);
 
 		expect(await screen.findByRole("textbox", { name: "Name" })).toBeDefined();
 		expect(screen.getByRole("button", { name: "Change look" })).toBeDefined();
+		expect(screen.getByRole("region", { name: "Connections" })).toBeDefined();
+		expect(screen.queryByRole("button", { name: /^Model/ })).toBeNull();
+		expect(screen.queryByRole("button", { name: /^Instructions/ })).toBeNull();
+		expect(screen.queryByRole("region", { name: "Built-in tools" })).toBeNull();
+		expect(screen.queryByRole("link", { name: /^Automations/ })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Delete bot" })).toBeNull();
+	});
+
+	it("keeps its computer to us", async () => {
+		const router = mount(`/suga/settings/bots/${personalAssistant.handle}/computer`);
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				`/suga/settings/bots/${personalAssistant.handle}`,
+			),
+		);
 	});
 });
 
@@ -224,15 +236,15 @@ describe("a viewer", () => {
 });
 
 describe("an admin", () => {
-	it("leads to its Routines page to set them up, saying how many it has", async () => {
+	it("leads to its Automations page to set them up, saying how many it has", async () => {
 		onWideScreen();
 		client.api.routines.list.mockReturnValue(Effect.succeed([scheduledRoutine, webhookRoutine]));
 		mount(page);
 
-		const row = await screen.findByRole("link", { name: /^Routines/ });
+		const row = await screen.findByRole("link", { name: /^Automations/ });
 		await waitFor(() => expect(within(row).getByText("2")).toBeDefined());
-		expect(row.getAttribute("href")).toBe(`/suga/pods/${suga.slug}/routines?bot=${linear.handle}`);
-		expect(screen.queryByRole("button", { name: "New routine" })).toBeNull();
+		expect(row.getAttribute("href")).toBe(`/suga/bots/${linear.handle}/automations`);
+		expect(screen.queryByRole("button", { name: "New automation" })).toBeNull();
 	});
 
 	it("discards the previous bot's draft instructions when another bot is opened", async () => {
@@ -243,8 +255,8 @@ describe("an admin", () => {
 		});
 
 		await router.navigate({
-			to: "/$workspace/settings/pods/$pod/agents/$agent",
-			params: { workspace: "suga", pod: suga.slug, agent: triager.handle },
+			to: "/$workspace/settings/bots/$bot",
+			params: { workspace: "suga", bot: triager.handle },
 		});
 
 		await waitFor(() => expect(screen.queryByLabelText("Instructions")).toBeNull());
@@ -494,12 +506,12 @@ describe("an admin", () => {
 		).toBe("false");
 		const tools = screen.getByRole("region", { name: "Built-in tools" });
 		expect(within(tools).queryByRole("link", { name: /^Web search/ })).toBeNull();
-		const routines = screen.getByRole("switch", { name: "Turn off Manage its routines" });
+		const routines = screen.getByRole("switch", { name: "Turn off Manage its automations" });
 		expect(routines.getAttribute("aria-checked")).toBe("true");
 		expect(routines.hasAttribute("disabled")).toBe(false);
 	});
 
-	it("deletes the bot after asking, and returns to its pod's bots", async () => {
+	it("deletes the bot after asking, and returns to the workspace's bots", async () => {
 		client.api.agents.remove.mockReturnValue(Effect.void);
 		const router = mount(page);
 
@@ -512,14 +524,12 @@ describe("an admin", () => {
 				params: { agentId: linear.id },
 			}),
 		);
-		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(`/suga/settings/pods/${suga.slug}/bots`),
-		);
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/bots"));
 	});
 
 	it("goes back to the bots it was opened from when deleted, rather than opening them again", async () => {
 		client.api.agents.remove.mockReturnValue(Effect.void);
-		const bots = `/suga/settings/pods/${suga.slug}/bots`;
+		const bots = "/suga/settings/bots";
 		const router = mount(bots);
 		await screen.findAllByRole("heading", { name: "Bots" });
 		await router.navigate({ href: page });

@@ -1,10 +1,14 @@
-import { MAX_THREAD_SUMMARY_CHARACTERS, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
+import {
+	MAX_BOT_SUMMARY_CHARACTERS,
+	MAX_THREAD_SUMMARY_CHARACTERS,
+	MAX_THREAD_TITLE_CHARACTERS,
+} from "@sugabots/contracts";
 import { Duration, Effect, Layer, Schema } from "effect";
 import type { Database } from "../../database/database.ts";
 import { Models } from "../../providers/models/models.ts";
 import { Turns } from "../turns/turns.ts";
-import { threadSummaryPrompt } from "./prompt.ts";
-import { type PreparedSummary, Summaries } from "./summaries.ts";
+import { botSummaryPrompt, threadSummaryPrompt } from "./prompt.ts";
+import { type PreparedBotSummary, type PreparedSummary, Summaries } from "./summaries.ts";
 import { type SummaryRequest, SummarySteps } from "./summary.workflow.ts";
 
 const SUMMARY_TIMEOUT = Duration.minutes(2);
@@ -58,10 +62,52 @@ export const summarise = (
 				Effect.gen(function* () {
 					const [result, contextTokens] = yield* generate(prepared, turnId, model);
 					yield* summaries.complete(prepared, result);
+					yield* summariseBot(prepared, turnId, model);
 					return { value: undefined, contextTokens };
 				}),
 		);
 	});
+
+/**
+ * Rewrites what the thread's bot has been doing lately, from its threads'
+ * summaries, the one just written among them. A bot's summary that can't be
+ * written is logged and left as it was: the thread's summary stands, and the
+ * bot's next summarised thread writes it again.
+ */
+const summariseBot = (prepared: PreparedSummary, turnId: string, model: Models.Interface) =>
+	Effect.gen(function* () {
+		const summaries = yield* Summaries.Service;
+		const bot = yield* summaries.prepareBotSummary(prepared.threadId);
+		if (!bot) return;
+		const content = yield* generateBotSummary(bot, prepared.threadId, turnId, model);
+		yield* summaries.completeBotSummary(bot, content);
+	}).pipe(
+		Effect.catch((failure) =>
+			Effect.logWarning("Could not write the bot's summary", { reason: failure.message }),
+		),
+	);
+
+const generateBotSummary = (
+	bot: PreparedBotSummary,
+	threadId: string,
+	turnId: string,
+	model: Models.Interface,
+) =>
+	Effect.gen(function* () {
+		const answer = yield* model.answer({
+			...botSummaryPrompt(bot),
+			activity: { purpose: "summary", threadId, turnId },
+			maxCharacters: MAX_BOT_SUMMARY_CHARACTERS,
+			timeout: SUMMARY_TIMEOUT,
+		});
+		const content = answer.text.trim();
+		if (!content || content.length > MAX_BOT_SUMMARY_CHARACTERS) {
+			return yield* new Models.UnusableAnswer({
+				reason: "Bot summary model returned no usable text",
+			});
+		}
+		return content;
+	}).pipe(Models.retryUnusable);
 
 /** The model's text, parsed into a summary (and a title, the first time), within the time limit. */
 const generate = (
@@ -78,7 +124,6 @@ const generate = (
 			...threadSummaryPrompt(prepared),
 			activity: {
 				purpose: "summary",
-				podId: prepared.podId,
 				threadId: prepared.threadId,
 				turnId,
 			},

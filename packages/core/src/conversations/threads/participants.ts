@@ -9,10 +9,10 @@ import type {
 } from "@sugabots/contracts";
 import { handleFromName, messageStatusSchema, quotedPreview } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { eq, type SQLWrapper, sql } from "drizzle-orm";
+import { and, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
-import { agent, message, user } from "../../database/schema.ts";
+import { agent, message, podAgent, user } from "../../database/schema.ts";
 import { toCollaborationPart } from "./collaboration-parts.ts";
 import { type AttachedFileRow, fileColumns, toFilePart } from "./file-parts.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
@@ -334,9 +334,15 @@ export const recentParticipantsOf = (threadId: SQLWrapper) => sql<ParticipantRow
 	) as recent
 )`;
 
+/** The condition on `agent` that selects the bots added to the channel `podId`. */
+export const inChannel = (podId: SQLWrapper | string) =>
+	inArray(
+		agent.id,
+		sql`(select ${podAgent.agentId} from ${podAgent} where ${podAgent.podId} = ${podId})`,
+	);
+
 /**
- * crewOf is the condition on `agent` that selects the crew of the pod `podId`:
- * every agent placed in it. `agent_placement_check` keeps system agents, such
- * as the Scribe, out of pods, so they are never selected.
+ * The condition on `agent` that selects bots people make: not a system bot,
+ * such as the Summariser, and not anybody's Personal Assistant.
  */
-export const crewOf = (podId: SQLWrapper | string) => eq(agent.podId, podId);
+export const crewAgent = and(isNull(agent.systemAgentKey), isNull(agent.assistantOf)) as SQL;

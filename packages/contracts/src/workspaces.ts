@@ -6,14 +6,14 @@ import { Schema } from "effect";
  * - `owner` is the one person who holds the workspace: an administrator who
  *   also decides who else administers it, and who alone can hand it on.
  *   Every workspace has exactly one, from the moment its creator makes it.
- * - `admin` administers the workspace, its people, its providers and every
- *   shared pod.
- * - `member` uses the shared pods they have been added to.
- * - `viewer` reads and takes part in the shared pods they have been added to,
- *   and configures nothing in them.
+ * - `admin` administers the workspace, its people, its providers, every
+ *   channel and every bot.
+ * - `member` makes bots and channels, and uses the public bots and the
+ *   channels they are in.
+ * - `viewer` reads and takes part in the channels they are in and with the
+ *   public bots, and configures nothing.
  *
- * Every role owns their own Personal pod outright; a role describes what
- * somebody may do in shared space.
+ * Everybody has their own Personal Assistant whatever their role.
  *
  * These are the whole set: the database refuses any other value.
  *
@@ -35,7 +35,7 @@ export const assignableWorkspaceRoleSchema = Schema.Literals(ASSIGNABLE_WORKSPAC
 export type AssignableWorkspaceRole = typeof assignableWorkspaceRoleSchema.Type;
 
 /**
- * The roles that administer the workspace. Each is in every shared pod, put
+ * The roles that administer the workspace. Each is in every channel, put
  * there by database triggers, and can neither leave one nor be taken out.
  */
 export const ADMINISTERING_WORKSPACE_ROLES = [
@@ -75,14 +75,14 @@ const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
  * the sentences that become lies, and they should be one edit away from them.
  *
  * Deliberately say what the role does rather than everything it cannot: a
- * Member does not create pods, and a Viewer may still take part in a
- * conversation.
+ * Member does not change other people's bots, and a Viewer may still take
+ * part in a conversation.
  */
 const WORKSPACE_ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
 	owner: "Administers the workspace, decides who else does, and can hand it on.",
-	admin: "Administers the workspace, its providers and every shared pod.",
-	member: "Builds agents in the pods they are added to.",
-	viewer: "Reads and takes part in the pods they are added to.",
+	admin: "Administers the workspace, its providers, every channel and every bot.",
+	member: "Makes bots and channels, and works with the public bots.",
+	viewer: "Reads and takes part in channels and with public bots.",
 };
 
 /**
@@ -101,12 +101,14 @@ export function workspaceRoleDescription(role: WorkspaceRole): string {
 /**
  * What the caller may do in the workspace itself, already decided by the API.
  *
- * Pod-scoped answers travel with each pod (`podPermissionsSchema`); these are
- * the ones that belong to no pod. As there, the client draws from these and
+ * Answers about one channel travel with it (`podPermissionsSchema`), and
+ * about one bot with it (`agentPermissionsSchema`); these are the ones that
+ * belong to neither. As there, the client draws from these and
  * the API still decides.
  */
 export const workspacePermissionsSchema = Schema.Struct({
 	createPods: Schema.Boolean,
+	createAgents: Schema.Boolean,
 	/** Rename the workspace, change its address, and move it to another time zone. */
 	updateWorkspace: Schema.Boolean,
 	/** Configure the model and search providers the workspace runs on. */

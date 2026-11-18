@@ -42,7 +42,6 @@ export function ToolApprovalCard({
 	call,
 	agent,
 	threadId,
-	podId,
 	canApprove,
 	look,
 }: {
@@ -50,12 +49,11 @@ export function ToolApprovalCard({
 	/** The bot whose reply is waiting on this. */
 	agent: Asker;
 	threadId: string;
-	podId: string;
 	/** Whether the reader may answer it. */
 	canApprove: boolean;
 	look?: ConnectionLook;
 }) {
-	const review = useReviewToolCall(threadId, podId);
+	const review = useReviewToolCall(threadId);
 	const [reviewing, setReviewing] = useState(false);
 	const { handle, name } = splitToolKey(call.tool);
 	const where = handle ? connectionLabel(handle, look?.name) : "";

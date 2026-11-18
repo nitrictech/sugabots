@@ -1,4 +1,4 @@
-import { PERSONAL_POD_SLUG, sharedPodSlugSchema, slugify } from "@sugabots/contracts";
+import { sharedPodSlugSchema, slugify } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { userText } from "@sugabots/errors";
@@ -10,7 +10,7 @@ import { asHttpError, refusals } from "../../http/errors.ts";
 
 const slugIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
-/** Pods, and who is in them. `PodAdministration` decides who may do what. */
+/** Channels, and who and which bots are in them. `PodAdministration` decides who may do what. */
 export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 	Effect.gen(function* () {
 		const pods = yield* PodAdministration.Service;
@@ -21,16 +21,12 @@ export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 			.handle("create", ({ params, payload }) =>
 				Effect.gen(function* () {
 					// Derived before anything is written, so an unsluggable name such as
-					// "!!!", or one only a Personal pod may have, is a bad request about
-					// the name rather than a slug conflict.
+					// "!!!" is a bad request about the name rather than a slug conflict.
 					const proposedSlug = payload.slug ?? slugify(payload.name);
 					const slug = Schema.decodeResult(sharedPodSlugSchema)(proposedSlug);
 					if (Result.isFailure(slug)) {
 						return yield* new BadRequest({
-							message:
-								proposedSlug === PERSONAL_POD_SLUG
-									? userText`"${PERSONAL_POD_SLUG}" is reserved for your Personal pod. Choose another name.`
-									: userText`That name cannot be a pod's address`,
+							message: userText`That name cannot be a channel's address`,
 							details: slugIssues(slug.failure.issue).issues,
 						});
 					}
@@ -40,14 +36,11 @@ export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 							name: payload.name,
 							slug: slug.success,
 							color: payload.color,
+							description: payload.description,
+							visibility: payload.visibility,
 						})
 						.pipe(asSessionUser, asHttpError(podErrors));
 				}),
-			)
-			.handle("ensurePersonal", ({ params, payload }) =>
-				pods
-					.ensurePersonal({ workspace: params.workspace, model: payload.model })
-					.pipe(asSessionUser, asHttpError(podErrors)),
 			)
 			.handle("update", ({ params, payload }) =>
 				pods
@@ -72,20 +65,34 @@ export const podRoutes = HttpApiBuilder.group(ServerApi, "pods", (handlers) =>
 			)
 			.handle("leave", ({ params }) =>
 				pods.leave({ podId: params.podId }).pipe(asSessionUser, asHttpError(podErrors)),
+			)
+			.handle("join", ({ params }) =>
+				pods.join({ podId: params.podId }).pipe(asSessionUser, asHttpError(podErrors)),
+			)
+			.handle("listBots", ({ params }) =>
+				pods.bots({ podId: params.podId }).pipe(asSessionUser, asHttpError(podErrors)),
+			)
+			.handle("addBot", ({ params, payload }) =>
+				pods
+					.addBot({ podId: params.podId, agentId: payload.agentId })
+					.pipe(asSessionUser, asHttpError(podErrors)),
+			)
+			.handle("removeBot", ({ params }) =>
+				pods
+					.removeBot({ podId: params.podId, agentId: params.agentId })
+					.pipe(asSessionUser, asHttpError(podErrors)),
 			);
 	}),
 );
 
-/** What each way a pod write can fail means over HTTP. */
+/** What each way a channel write can fail means over HTTP. */
 const podErrors = {
 	...refusals,
 	PodSlugTaken: Conflict,
-	PersonalPodFixed: BadRequest,
-	ModelNotEnabled: BadRequest,
 	EmptyPodUpdate: BadRequest,
 	PodGone: NotFound,
-	PersonalPodMembershipFixed: BadRequest,
-	AdministratorInEverySharedPod: BadRequest,
+	AdministratorInEveryChannel: BadRequest,
 	NotInWorkspace: BadRequest,
 	NotInPod: NotFound,
+	BotNotPublic: BadRequest,
 };

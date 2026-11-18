@@ -10,8 +10,6 @@ import {
 	formatHistoryTime,
 	SEARCH_HISTORY_TOOL,
 } from "../threads/message-text.ts";
-import { isChannel } from "../threads/rooms.ts";
-import { LIST_THREADS_TOOL, READ_THREAD_TOOL } from "../tools/pod-threads/tool.ts";
 import { ROUTINES_KEY, spokenTimeZone } from "../tools/routines/tool.ts";
 import { START_THREAD_TOOL } from "../tools/start-thread/tool.ts";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
@@ -56,7 +54,8 @@ export function modelPrompt(
 	resultFiles: ReadonlyMap<string, string> = new Map(),
 ): ModelPrompt {
 	const system = [
-		`You are ${context.agent.name} (@${context.agent.handle}), an agent in pod ${context.podName} of workspace ${context.workspaceName}.`,
+		`You are ${context.agent.name} (@${context.agent.handle}), a bot in workspace ${context.workspaceName}.`,
+		whoReachesYou(context),
 		"Answer people unless they address someone else. Mention someone as @handle only when you mean to address them; a mention alone does not give another agent a turn.",
 		'Skip openers ("I\'ll…", "Let me…", "You\'re right", "Great question!", "I apologize") and sign-offs ("Let me know if you need anything else"). Don\'t recap what they watched. If they push back, check first: concede in one line and fix it if you were wrong, or say what you still think if you weren\'t.',
 		context.thread.type === "collaboration"
@@ -174,7 +173,7 @@ const PLATFORM_EVENT_LOG =
 /** The agent whose prompt the history is written for. */
 interface Reader {
 	agentId: string;
-	/** Whether it works in the pod's sandbox, which it can copy the thread's files into. */
+	/** Whether it has a computer, which it can copy the thread's files onto. */
 	usesSandbox: boolean;
 }
 
@@ -294,10 +293,9 @@ function turnInstruction(context: TurnContext, environment: TurnEnvironment): st
 	);
 	return [
 		`[Turn] ${whereYouAre(context)} In it now: ${participants}. ${whyYou(context)}`,
-		`You can read the rest of this pod: its other threads, its bots' channels and its pod chats. Find them with ${LIST_THREADS_TOOL} and read them with ${READ_THREAD_TOOL}, rather than asking another agent what was said there or saying you can't see it.`,
 		context.crew.length > 0
 			? [
-					"Other agents in this pod, and what each one knows:",
+					"Other bots in this workspace, and what each one knows:",
 					...crew,
 					"Use the collaborate tool when you need another agent's answer to finish your reply: they work in a child thread and you get the answer back.",
 					'Do this without being told to; a person should not have to say "ask them". Do not collaborate on what you can answer yourself, and never reach for yourself.',
@@ -416,18 +414,24 @@ const BROWSE_NATURALLY = [
 	"This is slower, and that's fine.",
 ].join("\n");
 
-/** Which room the turn is in, and what that means for who replies there. */
-function whereYouAre(context: TurnContext): string {
-	if (!isChannel(context.thread)) {
-		return context.thread.type === "conversation" && context.thread.hostAgentId === null
-			? "You are in a thread between people, where a bot replies when someone names it or replies to its message."
-			: "You are in a thread.";
+/** Who can talk to the bot and read its instructions. */
+function whoReachesYou(context: TurnContext): string {
+	if (context.agent.assistantOf !== null) {
+		return "You are a Personal Assistant: only your person talks to you or reads this conversation.";
 	}
-	const channel =
-		context.thread.type === "pod_chat"
-			? `You are in the pod's channel "${context.thread.title}", where its people talk to each other and to the bots they name.`
-			: "You are in your channel, where people come to talk to you.";
-	return `${channel} It is a channel, not a thread: replying here never starts a thread. When someone asks to take something to a thread, call ${START_THREAD_TOOL}.`;
+	return context.agent.visibility === "private"
+		? "You are private: only the person who made you can talk to you or read your instructions."
+		: "You are public: anyone in the workspace can talk to you, add you to their channels, and read your instructions.";
+}
+
+/** Which conversation the turn is in, and what that means for who replies there. */
+function whereYouAre(context: TurnContext): string {
+	if (context.channel) {
+		return `You are in "${context.thread.title}" in the channel ${context.channel.name}, where its people talk to each other and to the bots they name. When someone asks to take something on as a task of your own, call ${START_THREAD_TOOL}.`;
+	}
+	return context.thread.type === "conversation"
+		? "You are in one of your tasks: a conversation with you about one piece of work."
+		: "You are in a thread.";
 }
 
 function whyYou(context: TurnContext): string {

@@ -1,10 +1,10 @@
 import {
+	type Agent,
 	type Connection,
 	type ConnectionPreset,
 	connectionCatalog,
 	connectionMarkFor,
 	connectionPresetFor,
-	type Pod,
 	type UnsavedConnection,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -36,7 +36,7 @@ import { GitHubConnectStep } from "./GitHubConnect.tsx";
 import { accessSummaryText } from "./tool-access.tsx";
 
 /*
- * The apps a pod's bots can reach, as one group on the pod's page: each with
+ * The apps a bot can reach, as one group on the bot's Connections page: each with
  * what its tools are set to, Allow, Ask or Off for all of them at once, and
  * whatever it needs (a sign-in, a reconnect) on its line. A row opens the
  * connection's own page: its address, each of its tools, and removing it.
@@ -45,13 +45,13 @@ import { accessSummaryText } from "./tool-access.tsx";
  */
 
 export function ConnectionsSettings({
-	pod,
+	agent,
 	canManage,
 	signInError,
 	adding,
 	onAddingChange,
 }: {
-	pod: Pod;
+	agent: Agent;
 	canManage: boolean;
 	/** Why the OAuth sign-in that just returned here did not finish, in our own words. */
 	signInError?: string;
@@ -59,7 +59,7 @@ export function ConnectionsSettings({
 	adding: boolean;
 	onAddingChange: (adding: boolean) => void;
 }) {
-	const connections = useConnections(pod.id);
+	const connections = useConnections(agent.id);
 	if (connections.isPending) return null;
 	if (connections.isError) return <Alert>{failureMessage(connections.error)}</Alert>;
 	const listed = connections.data;
@@ -71,20 +71,18 @@ export function ConnectionsSettings({
 			{signInError && <Alert>Signing in did not finish: {signInError}</Alert>}
 			<SettingsGroup note="Bots act as whoever connected each one. Open one to choose for each tool.">
 				{listed.map((one) => (
-					<ConnectionRow key={one.id} connection={one} pod={pod} canManage={canManage} />
+					<ConnectionRow key={one.id} connection={one} agent={agent} canManage={canManage} />
 				))}
 				{listed.length === 0 && (
-					<SettingsRow
-						label={<span className="text-muted-foreground">No connections in this pod yet</span>}
-					/>
+					<SettingsRow label={<span className="text-muted-foreground">No connections yet</span>} />
 				)}
 			</SettingsGroup>
 			{canManage && (
 				<Dialog open={adding} onOpenChange={setAdding}>
 					{adding && (
 						<AddConnectionDialog
-							podId={pod.id}
-							podName={pod.name}
+							agentId={agent.id}
+							botName={agent.name}
 							available={connectionCatalog.filter((preset) => !taken.has(preset.id))}
 							offersGitHub={!listed.some((one) => one.kind === "github")}
 							done={() => setAdding(false)}
@@ -107,17 +105,17 @@ function lineFor(connection: Connection): string {
 
 function ConnectionRow({
 	connection,
-	pod,
+	agent,
 	canManage,
 }: {
 	connection: Connection;
-	pod: Pod;
+	agent: Agent;
 	canManage: boolean;
 }) {
-	const actions = useConnectionActions(pod.id);
+	const actions = useConnectionActions(agent.id);
 	const navigate = useNavigate();
-	const backToPod = useBackToHere("Connections");
-	const page = { ...connectionSettingsLink(pod, connection), state: backToPod };
+	const backToList = useBackToHere("Connections");
+	const page = { ...connectionSettingsLink(agent, connection), state: backToList };
 	const needsSignIn = !connection.signedIn;
 	const failing =
 		connection.signInExpired || (connection.signedIn && connection.status === "error");
@@ -188,16 +186,16 @@ type Choice = ConnectionPreset | "custom" | "http" | "github";
 
 /** Adding a connection: which app, then its sign-in, or any other server by its address. */
 function AddConnectionDialog({
-	podId,
-	podName,
+	agentId,
+	botName,
 	available,
 	offersGitHub,
 	done,
 }: {
-	podId: string;
-	podName: string;
+	agentId: string;
+	botName: string;
 	available: readonly ConnectionPreset[];
-	/** Whether the pod may connect to GitHub, which it may only once. */
+	/** Whether the bot may connect to GitHub, which it may only once. */
 	offersGitHub: boolean;
 	done: () => void;
 }) {
@@ -205,19 +203,19 @@ function AddConnectionDialog({
 	return (
 		<DialogFormFrame>
 			{choice === "github" ? (
-				<GitHubConnectStep podId={podId} onBack={() => setChoice(undefined)} done={done} />
+				<GitHubConnectStep agentId={agentId} onBack={() => setChoice(undefined)} done={done} />
 			) : choice === "custom" || choice === "http" ? (
 				<ByUrlStep
-					podId={podId}
+					agentId={agentId}
 					kind={choice === "http" ? "http" : "mcp"}
 					onBack={() => setChoice(undefined)}
 					done={done}
 				/>
 			) : choice ? (
-				<AppStep podId={podId} preset={choice} onBack={() => setChoice(undefined)} />
+				<AppStep agentId={agentId} preset={choice} onBack={() => setChoice(undefined)} />
 			) : (
 				<AppList
-					podName={podName}
+					botName={botName}
 					available={available}
 					offersGitHub={offersGitHub}
 					onChoose={setChoice}
@@ -228,20 +226,20 @@ function AddConnectionDialog({
 	);
 }
 
-/** GitHub as the app list shows it, beside the catalog's MCP apps; it connects through an app of the pod's own. */
+/** GitHub as the app list shows it, beside the catalog's MCP apps; it connects through an app of the bot's own. */
 const GITHUB_CHOICE = {
 	name: "GitHub",
 	description: "Repositories, issues and pull requests",
 };
 
 function AppList({
-	podName,
+	botName,
 	available,
 	offersGitHub,
 	onChoose,
 	done,
 }: {
-	podName: string;
+	botName: string;
 	available: readonly ConnectionPreset[];
 	offersGitHub: boolean;
 	onChoose: (choice: Choice) => void;
@@ -257,7 +255,7 @@ function AppList({
 	const gitHubShown = offersGitHub && matches(GITHUB_CHOICE);
 	return (
 		<DialogFormStep onSubmit={(event) => event.preventDefault()}>
-			<DialogFormHeader title={`Add to ${podName}`} />
+			<DialogFormHeader title={`Add to ${botName}`} />
 			<DialogFormBody>
 				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
 					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
@@ -332,18 +330,18 @@ function AppList({
 
 /**
  * A catalog app: what it is. Connecting makes it and leaves for its sign-in,
- * which brings the browser back to this pod.
+ * which brings the browser back to this bot.
  */
 function AppStep({
-	podId,
+	agentId,
 	preset,
 	onBack,
 }: {
-	podId: string;
+	agentId: string;
 	preset: ConnectionPreset;
 	onBack: () => void;
 }) {
-	const actions = useConnectionActions(podId);
+	const actions = useConnectionActions(agentId);
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
@@ -399,18 +397,18 @@ const signInMethodOptions: { value: SignInMethod; label: string }[] = [
  * test before it is added: its check sends no request.
  */
 function ByUrlStep({
-	podId,
+	agentId,
 	kind,
 	onBack,
 	done,
 }: {
-	podId: string;
+	agentId: string;
 	kind: "mcp" | "http";
 	onBack: () => void;
 	done: () => void;
 }) {
 	const isEndpoint = kind === "http";
-	const actions = useConnectionActions(podId);
+	const actions = useConnectionActions(agentId);
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
 	const [method, setMethod] = useState<SignInMethod>("token");

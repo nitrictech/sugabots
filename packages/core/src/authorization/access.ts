@@ -1,6 +1,7 @@
 import type { ToolApprovalDeciders, WorkspaceRole } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, asc, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Data, Effect } from "effect";
 import type { Executor } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
@@ -17,7 +18,10 @@ import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
 import {
 	type Actor,
+	type AgentFacts,
+	type AgentPermission,
 	mayInPod,
+	mayOnAgent,
 	type PodFacts,
 	type PodPermission,
 	rolesGrantedInPod,
@@ -26,17 +30,23 @@ import {
 
 /**
  * The facts every decision about who may do what is made from: the caller's
- * workspace role, the pod a resource belongs to, and whether a `pod_member`
- * row exists. `Authorization` and `Visibility` load them here and decide with
- * the pure grants in `permissions.ts`; nothing else loads them or turns them
- * into a decision. Standings are only built in this module, so a caller cannot
- * pair a pod with somebody else's membership.
+ * workspace role, and either the channel a resource is in and whether a
+ * `pod_member` row puts them in it, or the bot it belongs to.
+ * `Authorization` and `Visibility` load them here and decide with the pure
+ * grants in `permissions.ts`; nothing else loads them or turns them into a
+ * decision. Standings are only built in this module, so a caller cannot pair
+ * a channel with somebody else's membership.
  *
- * **Reach** is a stored `pod_member` row in a shared pod, or ownership of a
- * Personal pod. No role reaches a shared pod without a row: administrators are
- * put in every one instead, by the triggers described on `podMember`. A
- * direct message between people is in no pod: a `direct_member` row reaches
- * it while its person is in the workspace, whatever their role.
+ * **Reach** is a stored `pod_member` row for a channel; administrators are put
+ * in every one by the triggers described on `podMember`. A bot is reached by
+ * everyone in the workspace when it is public, by its creator alone when it is
+ * private, and by its person alone when it is a Personal Assistant. A task,
+ * an automation's feed or one of its runs is reached through the bot it is
+ * with. A collaboration is reached as the conversation it was opened from,
+ * whichever bot was asked, so asking a private bot shows its answer to the
+ * people of that conversation and nobody else. A direct message between people
+ * is reached through a `direct_member` row while its person is in the
+ * workspace, whatever their role. A system bot's thread is reached by nobody.
  *
  * **Hidden** and **forbidden** are different refusals. A resource the caller
  * cannot reach is hidden, so an id cannot be probed for; a resource they can
@@ -49,28 +59,37 @@ export interface WorkspaceStanding {
 	actor: Actor & { workspaceRole: WorkspaceRole };
 }
 
-/** The caller's standing towards a pod. */
+/** The caller's standing towards a channel. */
 export interface PodStanding {
 	pod: schema.PodRow;
 	actor: Actor;
 	/** What the decision was made from, including whether a `pod_member` row exists. */
 	facts: PodFacts;
-	/** Whether the caller may also take `permission` on this same pod. */
+	/** Whether the caller may also take `permission` on this same channel. */
 	may(permission: PodPermission): boolean;
 }
 
-/** The caller's standing towards an agent, which is their standing in its pod. */
-export interface AgentStanding extends PodStanding {
+/** The caller's standing towards a bot. */
+export interface AgentStanding {
 	agent: schema.AgentRow;
+	actor: Actor;
+	facts: AgentFacts;
+	/** Whether the caller may take `permission` on this bot. */
+	may(permission: AgentPermission): boolean;
 }
 
 /**
- * The caller's standing towards a thread they reach: in a pod, their standing
- * there, which decides what else they may do in it; a direct message is in no
- * pod, and being in it permits only reading it and writing in it.
+ * The caller's standing towards a thread they reach: a channel's
+ * conversation by their standing in the channel, any other bot's thread by
+ * their standing towards the bot, and a direct message, being in which
+ * permits only reading it and writing in it. A collaboration's standing is
+ * the one towards the conversation it was opened from: `pod` when that is a
+ * channel's, else `agent` with the standing towards that conversation's bot,
+ * not the bot that was asked.
  */
 export type ThreadStanding =
 	| { kind: "pod"; thread: schema.ThreadRow; standing: PodStanding }
+	| { kind: "agent"; thread: schema.ThreadRow; standing: AgentStanding }
 	| { kind: "direct"; thread: schema.ThreadRow };
 
 /**
@@ -103,7 +122,7 @@ export class ResourceHidden
 /** The caller can see the resource and may not take this action on it. */
 export class ActionForbidden
 	extends Data.TaggedError("ActionForbidden")<{
-		readonly permission: WorkspacePermission | PodPermission;
+		readonly permission: WorkspacePermission | PodPermission | AgentPermission;
 	}>
 	implements UserFacing
 {
@@ -118,38 +137,47 @@ export class ActionForbidden
 export type AuthorizationDenied = ResourceHidden | ActionForbidden;
 
 /**
- * The standing, when there is one and its caller reaches the pod; otherwise
- * `resource` is hidden, so a refusal never confirms an id. Every read of
- * something in a pod, and every action on one, is refused this way first.
+ * The standing, when there is one and its caller reaches the channel or bot;
+ * otherwise `resource` is hidden, so a refusal never confirms an id.
  */
-export function requireReach<Standing extends PodStanding>(
+export function requireReach<Standing extends PodStanding | AgentStanding>(
 	standing: Standing | undefined,
 	resource: ResourceHidden["resource"],
 ): Effect.Effect<Standing, ResourceHidden> {
-	return standing?.may("pod.read")
-		? Effect.succeed(standing)
-		: Effect.fail(new ResourceHidden({ resource }));
+	const reached =
+		standing !== undefined &&
+		("pod" in standing ? standing.may("pod.read") : standing.may("agent.read"));
+	return reached ? Effect.succeed(standing) : Effect.fail(new ResourceHidden({ resource }));
 }
 
 /**
- * The standing of `actor` towards `row`, a pod they have just created: they
- * own it if it is a Personal pod, and are its member if it is shared, because
- * creating a shared pod adds its creator to it.
+ * The standing of `actor` towards `row`, a channel they have just been put
+ * in, by creating it or joining it: they are its member.
  */
-export function creatorStanding(row: schema.PodRow, actor: Actor): PodStanding {
+export function joinedStanding(row: schema.PodRow, actor: Actor): PodStanding {
 	return podStanding(row, actor, true);
 }
 
-/** One person's standing towards one pod, from facts already in hand. */
+/** One person's standing towards one channel, from facts already in hand. */
 function podStanding(row: schema.PodRow, actor: Actor, isMember: boolean): PodStanding {
-	const facts: PodFacts = { kind: row.kind, ownerId: row.ownerId, isMember };
+	const facts: PodFacts = { isMember };
 	return { pod: row, actor, facts, may: (permission) => mayInPod(actor, permission, facts) };
 }
 
+/** One person's standing towards one bot, from facts already in hand. */
+export function agentStanding(row: schema.AgentRow, actor: Actor): AgentStanding {
+	const facts: AgentFacts = {
+		visibility: row.visibility,
+		createdById: row.createdById,
+		assistantOf: row.assistantOf,
+	};
+	return { agent: row, actor, facts, may: (permission) => mayOnAgent(actor, permission, facts) };
+}
+
 /**
- * What a standing is built from, for a query that has `pod`: the columns to
- * select, and the two joins onto the caller's membership of the pod's
- * workspace and of the pod itself. Left joins, so a pod the caller has no
+ * What a channel standing is built from, for a query that has `pod`: the
+ * columns to select, and the two joins onto the caller's membership of the
+ * workspace and of the channel. Left joins, so a channel the caller has no
  * part in is still found, with a standing that permits nothing.
  */
 const standingColumns = {
@@ -205,12 +233,11 @@ export const workspaceStandingFor = Effect.fn("Access.workspaceStandingFor")(fun
 });
 
 /**
- * Everything a decision about one pod needs, in one query: the pod, the
- * caller's workspace role and whether a `pod_member` row puts them in it.
+ * Everything a decision about one channel needs, in one query: the channel,
+ * the caller's workspace role and whether a `pod_member` row puts them in it.
  *
- * `undefined` only when there is no such pod. Somebody outside the workspace
- * gets a standing that permits nothing, because "there is no such pod" and
- * "you are in no position here" are answered differently.
+ * `undefined` only when there is no such channel. Somebody outside the
+ * workspace gets a standing that permits nothing.
  */
 export const podStandingFor = Effect.fn("Access.podStandingFor")(function* (
 	db: Executor,
@@ -229,8 +256,8 @@ export const podStandingFor = Effect.fn("Access.podStandingFor")(function* (
 });
 
 /**
- * An agent and `userId`'s standing in its pod, in one query. `undefined` when
- * there is no such agent or it is in no pod, as a system agent is.
+ * A bot and `userId`'s standing towards it, in one query. `undefined` when
+ * there is no such bot, or it is a system bot, which nobody addresses.
  */
 export const agentStandingFor = Effect.fn("Access.agentStandingFor")(function* (
 	db: Executor,
@@ -239,14 +266,17 @@ export const agentStandingFor = Effect.fn("Access.agentStandingFor")(function* (
 ) {
 	if (!isUuid(agentId)) return undefined;
 	const [row] = yield* db
-		.select({ agent, ...standingColumns })
+		.select({ agent, role: workspaceMember.role })
 		.from(agent)
-		.innerJoin(pod, eq(pod.id, agent.podId))
-		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(podMember, podMembershipOf(userId))
-		.where(eq(agent.id, agentId))
+		.leftJoin(
+			workspaceMember,
+			and(eq(workspaceMember.workspaceId, agent.workspaceId), eq(workspaceMember.userId, userId)),
+		)
+		.where(and(eq(agent.id, agentId), isNull(agent.systemAgentKey)))
 		.limit(1);
-	return row ? { ...standingFromRow(row, userId), agent: row.agent } : undefined;
+	return row
+		? agentStanding(row.agent, { userId, workspaceRole: row.role ?? undefined })
+		: undefined;
 });
 
 /**
@@ -260,35 +290,61 @@ export const threadStandingFor = Effect.fn("Access.threadStandingFor")(function*
 	userId: string,
 ) {
 	if (!isUuid(threadId)) return undefined;
+	// A collaboration is reached through the conversation it was opened from,
+	// so its channel and bot are that conversation's.
+	const reachedThrough = alias(thread, "reached_through");
+	const reachPodId = sql<string | null>`coalesce(${reachedThrough.podId}, ${thread.podId})`;
+	const reachHostId = sql<
+		string | null
+	>`case when ${reachedThrough.id} is null then ${thread.hostAgentId} else ${reachedThrough.hostAgentId} end`;
 	const [row] = yield* db
 		.select({
 			thread,
 			pod,
+			host: agent,
 			role: workspaceMember.role,
 			membershipId: podMember.id,
 			inDirect: reachesDirectFor(thread, userId),
 		})
 		.from(thread)
-		.leftJoin(pod, eq(pod.id, thread.podId))
-		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
+		.leftJoin(
+			reachedThrough,
+			and(eq(thread.type, "collaboration"), eq(reachedThrough.id, thread.conversationId)),
+		)
+		.leftJoin(pod, eq(pod.id, reachPodId))
+		.leftJoin(agent, and(eq(agent.id, reachHostId), isNull(agent.systemAgentKey)))
+		.leftJoin(
+			workspaceMember,
+			and(eq(workspaceMember.workspaceId, thread.workspaceId), eq(workspaceMember.userId, userId)),
+		)
 		.leftJoin(podMember, podMembershipOf(userId))
 		.where(eq(thread.id, threadId))
 		.limit(1);
 	if (!row) return undefined;
-	if (!row.pod) {
-		const direct: ThreadStanding = { kind: "direct", thread: row.thread };
-		return row.inDirect ? direct : undefined;
+	const actor: Actor = { userId, workspaceRole: row.role ?? undefined };
+	if (row.pod) {
+		const inPod: ThreadStanding = {
+			kind: "pod",
+			thread: row.thread,
+			standing: podStanding(row.pod, actor, row.membershipId !== null),
+		};
+		return inPod.standing.may("pod.read") ? inPod : undefined;
 	}
-	const inPod: ThreadStanding = {
-		kind: "pod",
-		thread: row.thread,
-		standing: standingFromRow({ ...row, pod: row.pod }, userId),
-	};
-	return inPod.standing.may("pod.read") ? inPod : undefined;
+	if (row.host) {
+		const withAgent: ThreadStanding = {
+			kind: "agent",
+			thread: row.thread,
+			standing: agentStanding(row.host, actor),
+		};
+		return withAgent.standing.may("agent.read") ? withAgent : undefined;
+	}
+	if (row.thread.type !== "direct") return undefined;
+	const direct: ThreadStanding = { kind: "direct", thread: row.thread };
+	return row.inDirect ? direct : undefined;
 });
 
 /**
- * The pods in a workspace that `userId` reaches, by name, each with their
+ * The channels in a workspace that `userId` is in, by name, each with their
  * standing in it, in one query.
  */
 export const reachedPodStandingsFor = Effect.fn("Access.reachedPodStandingsFor")(function* (
@@ -307,29 +363,99 @@ export const reachedPodStandingsFor = Effect.fn("Access.reachedPodStandingsFor")
 });
 
 /**
- * Whether `standing` may decide a tool call's approval that `deciders` decide.
- * For `pod`: `approval.decide`, and `approval.routine.decide` as well for one
- * raised while a routine runs. For `sandbox-managers`: deciding what the
- * pod's sandbox may reach and has installed, wherever it was raised.
+ * The channels of a workspace `userId` is in or could join, by name, each with
+ * their standing in it, in one query: the public ones, and the private ones
+ * they are in.
+ */
+export const listedPodStandingsFor = Effect.fn("Access.listedPodStandingsFor")(function* (
+	db: Executor,
+	workspaceId: string,
+	userId: string,
+) {
+	const rows = yield* db
+		.select(standingColumns)
+		.from(pod)
+		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
+		.leftJoin(podMember, podMembershipOf(userId))
+		.where(
+			and(
+				eq(pod.workspaceId, workspaceId),
+				sql`(${pod.visibility} = 'public' or ${podMember.id} is not null)`,
+			),
+		)
+		.orderBy(asc(pod.name));
+	return rows.map((row) => standingFromRow(row, userId));
+});
+
+/**
+ * The bots in a workspace `userId` is in, each with their standing towards
+ * it, in one query: those they reach, and the private ones they don't, which
+ * an administrator still manages. System bots are nobody's.
+ */
+export const agentStandingsFor = Effect.fn("Access.agentStandingsFor")(function* (
+	db: Executor,
+	workspaceId: string,
+	userId: string,
+) {
+	const rows = yield* db
+		.select({ agent, role: workspaceMember.role })
+		.from(agent)
+		.innerJoin(
+			workspaceMember,
+			and(eq(workspaceMember.workspaceId, agent.workspaceId), eq(workspaceMember.userId, userId)),
+		)
+		.where(and(eq(agent.workspaceId, workspaceId), isNull(agent.systemAgentKey)));
+	return rows.map((row) => agentStanding(row.agent, { userId, workspaceRole: row.role }));
+});
+
+/**
+ * Whether a standing may decide a tool call's approval that `deciders`
+ * decide. For `pod`: `approval.decide`, and `approval.routine.decide` as
+ * well for one raised while an automation runs. For `sandbox-managers`:
+ * `sandbox.request.decide`, wherever it was raised.
  */
 export function mayDecideApprovals(
-	standing: Pick<PodStanding, "may">,
+	standing: {
+		may(
+			permission: "approval.decide" | "approval.routine.decide" | "sandbox.request.decide",
+		): boolean;
+	},
 	inRoutine: boolean,
 	deciders: ToolApprovalDeciders,
 ): boolean {
-	if (deciders === "sandbox-managers") return standing.may("sandbox.manage");
-	const needed: readonly PodPermission[] = inRoutine
-		? ["approval.decide", "approval.routine.decide"]
-		: ["approval.decide"];
+	if (deciders === "sandbox-managers") return standing.may("sandbox.request.decide");
+	const needed = inRoutine
+		? (["approval.decide", "approval.routine.decide"] as const)
+		: (["approval.decide"] as const);
 	return needed.every((permission) => standing.may(permission));
 }
 
 /**
- * SQL for "`userId` reaches the pod `podId` names", `userId` being an id or
+ * Whether the caller, who reaches the thread a tool call was raised in, may
+ * decide it. A request to change a bot's computer is decided by the bot's
+ * managers, or a Personal Assistant's person, wherever it was raised: `askingAgent` is the caller's standing
+ * towards the bot that raised the call, if they have one. Any other call is
+ * decided by the thread's people: in a channel's conversation by those holding
+ * `approval.decide` there, and otherwise by those whose standing towards the
+ * thread's bot lets them, which for a collaboration is the bot of the
+ * conversation it was opened from, whichever bot asked.
+ */
+export function mayDecideToolCall(
+	reached: ThreadStanding,
+	askingAgent: AgentStanding | undefined,
+	inRoutine: boolean,
+	deciders: ToolApprovalDeciders,
+): boolean {
+	if (deciders === "sandbox-managers") return askingAgent?.may("sandbox.request.decide") ?? false;
+	if (reached.kind === "pod") return reached.standing.may("approval.decide");
+	if (reached.kind === "agent") return mayDecideApprovals(reached.standing, inRoutine, deciders);
+	return false;
+}
+
+/**
+ * SQL for "`userId` is in the channel `podId` names", `userId` being an id or
  * the column holding one: what `mayInPod(actor, "pod.read", …)` decides for
- * one pod, written again as a `where` clause. A
- * Personal pod is reached by its owner and by nobody else, and a shared pod by
- * a membership row held by a role granted `pod.read`. The roles come from
+ * one channel, written again as a `where` clause. The roles come from
  * `rolesGrantedInPod`, but the shape of the rule is repeated here, so a change
  * to `mayInPod`'s shape must be made here too.
  *
@@ -343,31 +469,64 @@ export function reachesPodFor(podId: SQLWrapper, userId: string | SQLWrapper): S
 		inner join ${workspaceMember} as reach_workspace_member
 			on reach_workspace_member.workspace_id = reach_pod.workspace_id
 			and reach_workspace_member.user_id = ${userId}
-		left join ${podMember} as reach_pod_member
+		inner join ${podMember} as reach_pod_member
 			on reach_pod_member.pod_id = reach_pod.id
 			and reach_pod_member.user_id = ${userId}
 		where reach_pod.id = ${podId}
-			and (
-				(reach_pod.kind = 'personal' and reach_pod.owner_id = ${userId})
-				or (
-					reach_pod.kind = 'shared'
-					and reach_pod_member.id is not null
-					and ${roleIsOneOf(ROLES_READING_SHARED_PODS)}
-				)
-			)
+			and ${roleIsOneOf(ROLES_READING_PODS)}
 	)`;
 }
 
 /**
- * SQL for "`userId` reaches the thread `row`": the pod rule for a thread in a
- * pod, and membership of the direct message for one in none. Written as SQL
- * for lists, as `threadStandingFor` decides it for one thread.
+ * SQL for "`userId` reaches the bot `agentId` names": what `reachesAgent`
+ * decides for one bot, written again as a `where` clause, so a change to it
+ * must be made here too. System bots are reached by nobody.
+ */
+export function reachesAgentFor(agentId: SQLWrapper, userId: string | SQLWrapper): SQL<boolean> {
+	return sql`exists (
+		select 1
+		from ${agent} as reach_agent
+		inner join ${workspaceMember} as reach_agent_workspace_member
+			on reach_agent_workspace_member.workspace_id = reach_agent.workspace_id
+			and reach_agent_workspace_member.user_id = ${userId}
+		where reach_agent.id = ${agentId}
+			and reach_agent.system_agent_key is null
+			and case
+				when reach_agent.assistant_of is not null then reach_agent.assistant_of = ${userId}
+				when reach_agent.visibility = 'private' then reach_agent.created_by_id = ${userId}
+				else true
+			end
+	)`;
+}
+
+/** The columns of a thread, or an alias of it, that whether somebody reaches it is decided from. */
+export interface ThreadReachColumns {
+	id: SQLWrapper;
+	workspaceId: SQLWrapper;
+	type: SQLWrapper;
+	conversationId: SQLWrapper;
+	podId: SQLWrapper;
+	hostAgentId: SQLWrapper;
+}
+
+/**
+ * SQL for "`userId` reaches the thread `row`": the channel rule for a
+ * channel's conversation, the bot rule for a bot's thread, the rule of the
+ * conversation it was opened from for a collaboration, and membership of the
+ * direct message for one between people. Written as SQL for lists, as
+ * `threadStandingFor` decides it for one thread.
  */
 export function reachesThreadFor(
-	row: { id: SQLWrapper; workspaceId: SQLWrapper; podId: SQLWrapper },
+	row: ThreadReachColumns,
 	userId: string | SQLWrapper,
 ): SQL<boolean> {
-	return sql`(${reachesPodFor(row.podId, userId)} or ${reachesDirectFor(row, userId)})`;
+	return sql`(case when ${row.type} = 'collaboration' then exists (
+		select 1
+		from ${thread} as reach_opened_from
+		where reach_opened_from.id = ${row.conversationId}
+			and (${reachesPodFor(sql`reach_opened_from.pod_id`, userId)}
+				or ${reachesAgentFor(sql`reach_opened_from.host_agent_id`, userId)})
+	) else (${reachesPodFor(row.podId, userId)} or ${reachesAgentFor(row.hostAgentId, userId)} or ${reachesDirectFor(row, userId)}) end)`;
 }
 
 /**
@@ -389,8 +548,8 @@ function reachesDirectFor(
 	)`;
 }
 
-/** Roles that reach a shared pod once they have been added to it. */
-const ROLES_READING_SHARED_PODS = rolesGrantedInPod("pod.read");
+/** Roles that reach a channel once they have been added to it. */
+const ROLES_READING_PODS = rolesGrantedInPod("pod.read");
 
 /** `false` rather than an empty `in ()`, which is not valid SQL. */
 function roleIsOneOf(roles: readonly WorkspaceRole[]): SQL {

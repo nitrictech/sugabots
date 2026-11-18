@@ -7,7 +7,7 @@ import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
-import { agent, pod, podMember, workspace } from "../../database/schema.ts";
+import { agent, workspace } from "../../database/schema.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import type { UserFacing } from "../../user-message.ts";
@@ -20,9 +20,8 @@ import { AgentRepository } from "../agents/agent-repository.ts";
  */
 export interface Interface {
 	/**
-	 * Finishes setting up `workspaceId`, once `podId` and `agentId` are a pod the
-	 * actor is in and its crew agent, and that agent runs on a model the
-	 * workspace offers. Finishing settles the first agent and the model the
+	 * Finishes setting up `workspaceId`, once `agentId` is a bot the actor
+	 * made there, and that bot runs on a model the workspace offers. Finishing settles the first agent and the model the
 	 * workspace runs it on, so it takes `workspace.providers.manage`.
 	 *
 	 * That model also becomes the workspace's default and every system agent's:
@@ -33,7 +32,6 @@ export interface Interface {
 	 */
 	readonly complete: (input: {
 		workspaceId: string;
-		podId: string;
 		agentId: string;
 	}) => Effect.Effect<
 		void,
@@ -51,7 +49,7 @@ export const make = Effect.gen(function* () {
 	const agents = yield* AgentRepository.Service;
 
 	return Service.of({
-		complete: ({ workspaceId, podId, agentId }) =>
+		complete: ({ workspaceId, agentId }) =>
 			operation(
 				"complete",
 				transaction(
@@ -63,21 +61,15 @@ export const make = Effect.gen(function* () {
 						const [eligible] = yield* query((db) =>
 							db
 								.select({ model: agent.model })
-								.from(pod)
-								.innerJoin(
-									podMember,
-									and(eq(podMember.podId, pod.id), eq(podMember.userId, actor.userId)),
-								)
-								.innerJoin(
-									agent,
+								.from(agent)
+								.where(
 									and(
 										eq(agent.id, agentId),
-										eq(agent.podId, pod.id),
-										eq(agent.workspaceId, pod.workspaceId),
+										eq(agent.workspaceId, resolved),
+										eq(agent.createdById, actor.userId),
 										isNull(agent.systemAgentKey),
 									),
 								)
-								.where(and(eq(pod.id, podId), eq(pod.workspaceId, resolved)))
 								.limit(1)
 								.for("update"),
 						);
@@ -109,10 +101,10 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([Authorization.layer, ModelProviderRepository.layer, AgentRepository.layer]),
 );
 
-/** The pod and agent named are not ones this person may finish onboarding with. */
+/** The bot named is not one this person may finish onboarding with. */
 export class NotReadyToFinish extends Data.TaggedError("NotReadyToFinish") implements UserFacing {
 	get userMessage() {
-		return userText`Finish creating your pod and agent first`;
+		return userText`Finish creating your bot first`;
 	}
 }
 

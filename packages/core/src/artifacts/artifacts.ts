@@ -7,12 +7,19 @@ import {
 	type ArtifactSummary,
 	type ArtifactVersionSummary,
 	MAX_ARTIFACT_CONTENT_CHARACTERS,
+	type ThreadType,
 } from "@sugabots/contracts";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, Effect, Layer, Stream } from "effect";
-import { type AuthorizationDenied, ResourceHidden } from "../authorization/access.ts";
+import {
+	ActionForbidden,
+	type AuthorizationDenied,
+	ResourceHidden,
+} from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
+import { Visibility } from "../authorization/visibility.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { query, serviceOperations, transaction, writtenRow } from "../database/database.ts";
 import {
@@ -23,18 +30,30 @@ import {
 	artifact,
 	artifactVersion,
 	blobDeletion,
+	thread,
 } from "../database/schema.ts";
 import { Ids, isUuid } from "../ids/ids.ts";
 
 /**
- * Reading a pod's artifacts, for people. Seeing them takes `pod.read`, the
- * same reach that shows the pod's conversations; deleting one takes
- * `pod.update`, held by those who manage the pod.
+ * Reading the files bots made, for people. A file is reached through the
+ * conversation it was made in: a channel's by the people in the channel, a
+ * bot's by whoever reaches the bot. One made in a collaboration or an
+ * automation's run belongs to the conversation that was opened from. Deleting
+ * one takes changing the channel or the bot.
  */
 export interface Interface {
-	readonly list: (
-		at: InPod,
-	) => Effect.Effect<ArtifactSummary[], AuthorizationDenied, CurrentActor.Service>;
+	/** The files bots made in the channel's conversations, and what was opened from them, newest change first. */
+	readonly listInPod: (input: {
+		podId: string;
+	}) => Effect.Effect<ArtifactSummary[], AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * The files made in the bot's own tasks and automation feeds, and what was
+	 * opened from them, newest change first: not those it made in a channel or
+	 * when another bot asked it.
+	 */
+	readonly listForAgent: (input: {
+		agentId: string;
+	}) => Effect.Effect<ArtifactSummary[], AuthorizationDenied, CurrentActor.Service>;
 	/** The artifact at its current version. */
 	readonly get: (
 		at: InArtifact,
@@ -59,20 +78,24 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Artifacts") {}
 
 /**
- * Making and changing artifacts, for an agent's tools. An agent reaches the
- * artifacts of its own pod and no other. Every change names the version it
- * was based on and is refused with `Stale` if another landed first,
- * so one writer never silently overwrites another.
+ * Making and changing files, for a bot's tools. A bot reaches the files made
+ * in the conversation it is working in, and what was opened from it; in a
+ * channel's conversation, every file made in the channel; and in its own task
+ * or automation feed, every file made in its own tasks and feeds, which
+ * whoever reaches the bot sees. Never the files it made elsewhere, which the
+ * people of the conversation it is working in may not see. Every change names
+ * the version it was based on and is refused with `Stale` if another landed
+ * first, so one writer never silently overwrites another.
  */
 export interface AuthoringInterface {
-	readonly list: (by: AgentInPod) => Effect.Effect<ArtifactSummary[]>;
-	readonly read: (by: AgentInPod, artifactId: string) => Effect.Effect<Artifact, NotFound>;
+	readonly list: (by: AgentInThread) => Effect.Effect<ArtifactSummary[]>;
+	readonly read: (by: AgentInThread, artifactId: string) => Effect.Effect<Artifact, NotFound>;
 	readonly create: (
 		by: AgentInThread,
 		input: { kind: ArtifactKind; title: string; content: string },
 	) => Effect.Effect<Artifact, TooLarge>;
 	readonly replace: (
-		by: AgentInPod,
+		by: AgentInThread,
 		input: {
 			artifactId: string;
 			baseVersion: number;
@@ -89,7 +112,7 @@ export interface AuthoringInterface {
 	 * `newText`, as a new version, so a small change needn't resend the rest.
 	 */
 	readonly edit: (
-		by: AgentInPod,
+		by: AgentInThread,
 		input: {
 			artifactId: string;
 			baseVersion: number;
@@ -108,64 +131,86 @@ export class Authoring extends Context.Service<Authoring, AuthoringInterface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Artifacts");
 	const authorization = yield* Authorization.Service;
+	const visibility = yield* Visibility.Service;
 	const blobs = yield* BlobStore.Service;
 	const atVersion = atVersionIn(blobs);
 
-	const inReachedPod = (podId: string, artifactId: string) =>
+	/** The file, once the actor reaches the conversation it was made in, with their standing there. */
+	const inReachedThread = (artifactId: string) =>
 		Effect.gen(function* () {
-			yield* authorization.pod(podId, "pod.read");
-			const found = yield* artifactIn(podId, artifactId);
+			const found = yield* artifactWithId(artifactId);
 			if (!found) return yield* new ResourceHidden({ resource: "artifact" });
-			return found;
+			const standing = yield* visibility
+				.thread(found.artifact.createdInThreadId)
+				.pipe(Effect.mapError(() => new ResourceHidden({ resource: "artifact" })));
+			return { found, standing };
 		});
 
 	return Service.of({
-		list: ({ podId }) =>
+		listInPod: ({ podId }) =>
 			operation(
-				"list",
-				Effect.flatMap(authorization.pod(podId, "pod.read"), () => summariesIn(podId)),
+				"listInPod",
+				Effect.flatMap(authorization.pod(podId, "pod.read"), () =>
+					summariesWhere(eq(madeInConversation.podId, podId)),
+				),
 			),
 
-		get: ({ podId, artifactId }) =>
+		listForAgent: ({ agentId }) =>
+			operation(
+				"listForAgent",
+				Effect.flatMap(authorization.agent(agentId, "agent.read"), () =>
+					summariesWhere(madeInOwnConversationOf(agentId)),
+				),
+			),
+
+		get: ({ artifactId }) =>
 			operation(
 				"get",
 				Effect.gen(function* () {
-					const found = yield* inReachedPod(podId, artifactId);
+					const { found } = yield* inReachedThread(artifactId);
 					return yield* shownOrHidden(atVersion(found, found.artifact.currentVersion));
 				}),
 			),
 
-		summary: ({ podId, artifactId }) =>
+		summary: ({ artifactId }) =>
 			operation(
 				"summary",
-				Effect.map(inReachedPod(podId, artifactId), (found) =>
+				Effect.map(inReachedThread(artifactId), ({ found }) =>
 					toSummary(found.artifact, found.creator),
 				),
 			),
 
-		versions: ({ podId, artifactId }) =>
+		versions: ({ artifactId }) =>
 			operation(
 				"versions",
-				Effect.flatMap(inReachedPod(podId, artifactId), ({ artifact: row }) => versionsOf(row.id)),
+				Effect.flatMap(inReachedThread(artifactId), ({ found }) => versionsOf(found.artifact.id)),
 			),
 
-		getVersion: ({ podId, artifactId, version }) =>
+		getVersion: ({ artifactId, version }) =>
 			operation(
 				"getVersion",
 				Effect.gen(function* () {
-					const found = yield* inReachedPod(podId, artifactId);
+					const { found } = yield* inReachedThread(artifactId);
 					return yield* shownOrHidden(atVersion(found, version));
 				}),
 			),
 
-		remove: ({ podId, artifactId }) =>
+		remove: ({ artifactId }) =>
 			operation(
 				"remove",
 				Effect.gen(function* () {
-					const { artifact: row } = yield* inReachedPod(podId, artifactId);
-					yield* authorization.pod(podId, "pod.update");
+					const { found, standing } = yield* inReachedThread(artifactId);
+					const mayRemove =
+						standing.kind === "pod"
+							? standing.standing.may("pod.update")
+							: standing.kind === "agent" && standing.standing.may("agent.update");
+					if (!mayRemove) {
+						return yield* new ActionForbidden({
+							permission: standing.kind === "pod" ? "pod.update" : "agent.update",
+						});
+					}
 					// The versions go with it, and the `artifact_blob_deletion` trigger queues its blobs.
-					yield* query((db) => db.delete(artifact).where(eq(artifact.id, row.id)));
+					yield* query((db) => db.delete(artifact).where(eq(artifact.id, found.artifact.id)));
 				}),
 			),
 	});
@@ -207,8 +252,8 @@ export const makeAuthoring = Effect.gen(function* () {
 			);
 		});
 
-	const requireArtifact = (by: AgentInPod, artifactId: string, { lock = true } = {}) =>
-		artifactIn(by.podId, artifactId, { lock }).pipe(
+	const requireArtifact = (by: AgentInThread, artifactId: string, { lock = true } = {}) =>
+		artifactReachedBy(by, artifactId, { lock }).pipe(
 			Effect.filterOrFail(
 				(found) => found !== undefined,
 				() => new NotFound({ artifactId }),
@@ -221,7 +266,7 @@ export const makeAuthoring = Effect.gen(function* () {
 	 * number; its old content's blob is queued for deletion.
 	 */
 	const writeVersion = (
-		by: AgentInPod,
+		by: AgentInThread,
 		found: FoundArtifact,
 		baseVersion: number,
 		changes: { stored: StoredContent; title?: string; inPlace?: boolean },
@@ -250,13 +295,19 @@ export const makeAuthoring = Effect.gen(function* () {
 		});
 
 	return Authoring.of({
-		list: (by) => operation("list", summariesIn(by.podId)),
+		list: (by) =>
+			operation(
+				"list",
+				Effect.flatMap(conversationOf(by.threadId), (working) =>
+					summariesWhere(reachedByAgent(by.agentId, working)),
+				),
+			),
 
 		read: (by, artifactId) =>
 			operation(
 				"read",
 				Effect.gen(function* () {
-					const found = yield* artifactIn(by.podId, artifactId);
+					const found = yield* artifactReachedBy(by, artifactId);
 					const shown = found && (yield* atVersion(found, found.artifact.currentVersion));
 					if (!shown) return yield* new NotFound({ artifactId });
 					return shown;
@@ -276,7 +327,6 @@ export const makeAuthoring = Effect.gen(function* () {
 										.values({
 											id: artifactId,
 											workspaceId: by.workspaceId,
-											podId: by.podId,
 											kind: input.kind,
 											title: input.title,
 											createdByAgentId: by.agentId,
@@ -358,20 +408,19 @@ export const makeAuthoring = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide(Authorization.layer));
+export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
 
 export const authoringLayer = Layer.effect(Authoring, makeAuthoring);
 
 /**
- * Version `version` of an artifact in `podId`, read without asking who wants
- * it: only for a caller that has already authorized the read, as a sealed
- * page address has (see `pages.ts`). `undefined` when there is no such
- * artifact or version.
+ * Version `version` of a file, read without asking who wants it: only for a
+ * caller that has already authorized the read, as a sealed page address has
+ * (see `pages.ts`). `undefined` when there is no such file or version.
  */
 export const readVersionUnchecked =
-	(blobs: BlobStore.Interface) => (podId: string, artifactId: string, version: number) =>
+	(blobs: BlobStore.Interface) => (artifactId: string, version: number) =>
 		Effect.gen(function* () {
-			const found = yield* artifactIn(podId, artifactId);
+			const found = yield* artifactWithId(artifactId);
 			if (!found) return undefined;
 			return yield* atVersionIn(blobs)(found, version);
 		});
@@ -397,23 +446,14 @@ function versionKey(artifactId: string, versionId: string): BlobStore.Key {
 	return BlobStore.key("artifacts", artifactId, "versions", versionId);
 }
 
-export interface InPod {
-	podId: string;
-}
-
-export interface InArtifact extends InPod {
+export interface InArtifact {
 	artifactId: string;
 }
 
-/** The agent a tool acts for, and the pod whose artifacts it reaches. */
-export interface AgentInPod {
+/** The bot a tool acts for, in the thread it is working in, which a new file records it was made in. */
+export interface AgentInThread {
 	workspaceId: string;
-	podId: string;
 	agentId: string;
-}
-
-/** An agent in the thread it is working in, which a new artifact records it was made in. */
-export interface AgentInThread extends AgentInPod {
 	threadId: string;
 }
 
@@ -449,29 +489,112 @@ interface FoundArtifact {
 const authorOf = (row: Pick<AgentRow, "id" | "name"> | null): ArtifactAuthor =>
 	row ? { agentId: row.id, name: row.name } : null;
 
-const artifactIn = (podId: string, artifactId: string, options: { lock?: boolean } = {}) =>
+/** The file `artifactId` where `scope` holds of it and the conversation it was made in. */
+const artifactWhere = (
+	artifactId: string,
+	scope: SQL | undefined,
+	options: { lock?: boolean } = {},
+) =>
 	Effect.gen(function* () {
 		if (!isUuid(artifactId)) return undefined;
 		const [row] = yield* query((db) => {
 			const select = db
 				.select({ artifact, creator: { id: agent.id, name: agent.name } })
 				.from(artifact)
+				.innerJoin(thread, eq(thread.id, artifact.createdInThreadId))
+				.innerJoin(madeInConversation, conversationOfMadeIn)
 				.leftJoin(agent, eq(agent.id, artifact.createdByAgentId))
-				.where(and(eq(artifact.id, artifactId), eq(artifact.podId, podId)))
+				.where(and(eq(artifact.id, artifactId), scope))
 				.limit(1);
 			return options.lock ? select.for("update", { of: artifact }) : select;
 		});
 		return row ? { artifact: row.artifact, creator: authorOf(row.creator) } : undefined;
 	});
 
-const summariesIn = (podId: string) =>
+const artifactWithId = (artifactId: string) => artifactWhere(artifactId, undefined);
+
+/**
+ * The conversation a file was made in, joined beside `thread`, the thread it
+ * was made in: that thread itself, or for a collaboration or an automation's
+ * run, the conversation it was opened from.
+ */
+const madeInConversation = alias(thread, "made_in_conversation");
+const conversationOfMadeIn = eq(
+	madeInConversation.id,
+	sql`coalesce(${thread.conversationId}, ${thread.id})`,
+);
+
+/** A bot's own conversations: its tasks and automation feeds, which whoever reaches it sees. */
+const OWN_CONVERSATION_TYPES = ["conversation", "routine_feed"] as const satisfies ThreadType[];
+
+/** Files made in `agentId`'s own tasks and automation feeds, and what was opened from them. */
+const madeInOwnConversationOf = (agentId: string) =>
+	and(
+		eq(madeInConversation.hostAgentId, agentId),
+		inArray(madeInConversation.type, [...OWN_CONVERSATION_TYPES]),
+	);
+
+/** The conversation a bot is working in, by the thread its turn is in. */
+interface WorkingConversation {
+	id: string;
+	type: ThreadType;
+	podId: string | null;
+	hostAgentId: string | null;
+}
+
+/** The files a bot working in `working` reaches: see `AuthoringInterface`. */
+const reachedByAgent = (agentId: string, working: WorkingConversation | undefined): SQL => {
+	if (!working) return sql`false`;
+	const isOwn =
+		working.hostAgentId === agentId &&
+		(OWN_CONVERSATION_TYPES as readonly ThreadType[]).includes(working.type);
+	return (
+		or(
+			eq(madeInConversation.id, working.id),
+			working.podId === null ? undefined : eq(madeInConversation.podId, working.podId),
+			isOwn ? madeInOwnConversationOf(agentId) : undefined,
+		) ?? sql`false`
+	);
+};
+
+/** The conversation the thread `threadId` belongs to: itself, or the one it was opened from. */
+const conversationOf = (threadId: string) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select({
+					id: madeInConversation.id,
+					type: madeInConversation.type,
+					podId: madeInConversation.podId,
+					hostAgentId: madeInConversation.hostAgentId,
+				})
+				.from(thread)
+				.innerJoin(madeInConversation, conversationOfMadeIn)
+				.where(eq(thread.id, threadId))
+				.limit(1),
+		),
+		([row]): WorkingConversation | undefined => row,
+	);
+
+const artifactReachedBy = (
+	by: AgentInThread,
+	artifactId: string,
+	options: { lock?: boolean } = {},
+) =>
+	Effect.flatMap(conversationOf(by.threadId), (working) =>
+		artifactWhere(artifactId, reachedByAgent(by.agentId, working), options),
+	);
+
+const summariesWhere = (scope: SQL | undefined) =>
 	Effect.map(
 		query((db) =>
 			db
 				.select({ artifact, creator: { id: agent.id, name: agent.name } })
 				.from(artifact)
+				.innerJoin(thread, eq(thread.id, artifact.createdInThreadId))
+				.innerJoin(madeInConversation, conversationOfMadeIn)
 				.leftJoin(agent, eq(agent.id, artifact.createdByAgentId))
-				.where(eq(artifact.podId, podId))
+				.where(scope)
 				.orderBy(desc(artifact.updatedAt)),
 		),
 		(rows) => rows.map((row) => toSummary(row.artifact, authorOf(row.creator))),
@@ -564,7 +687,7 @@ const agentNamed = (agentId: string) =>
 
 const toSummary = (row: ArtifactRow, creator: ArtifactAuthor): ArtifactSummary => ({
 	id: row.id,
-	podId: row.podId,
+	threadId: row.createdInThreadId,
 	kind: row.kind,
 	title: row.title,
 	version: row.currentVersion,

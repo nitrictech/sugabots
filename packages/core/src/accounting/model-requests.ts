@@ -32,7 +32,6 @@ export const make = Effect.gen(function* () {
 						.values({
 							workspaceId: request.workspaceId,
 							purpose: request.activity.purpose,
-							podId: "podId" in request.activity ? request.activity.podId : null,
 							agentId: "agentId" in request.activity ? request.activity.agentId : null,
 							threadId: "threadId" in request.activity ? request.activity.threadId : null,
 							turnId: "turnId" in request.activity ? request.activity.turnId : null,
@@ -80,15 +79,13 @@ export const make = Effect.gen(function* () {
 export type Activity =
 	| {
 			readonly purpose: "agent-turn";
-			readonly podId: string;
 			readonly agentId: string;
 			readonly threadId: string;
 			readonly turnId: string;
 	  }
-	| { readonly purpose: "facilitation"; readonly podId: string; readonly threadId: string }
+	| { readonly purpose: "facilitation"; readonly threadId: string }
 	| {
 			readonly purpose: "summary" | "compaction";
-			readonly podId: string;
 			readonly threadId: string;
 			/** The system agent's own turn, in its child thread. */
 			readonly turnId: string;

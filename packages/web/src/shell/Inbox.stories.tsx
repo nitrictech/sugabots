@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { accountManager, growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyChannelFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyTaskFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * Inbox, opened from the sidebar: what is new across the workspace's chats,
@@ -28,8 +28,8 @@ const feed: ActivityFeed = {
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
 			preview: "@rowan-ellis can you sign off the Acme quote before 5?",
 			at: minutesAgo(4),
-			podId: revenue.id,
-			conversationId: storyChannelFor(growthDesk).id,
+			podId: null,
+			conversationId: storyTaskFor(growthDesk).id,
 		},
 		{
 			kind: "message",
@@ -46,8 +46,8 @@ const feed: ActivityFeed = {
 			},
 			preview: "Renewal notes for Halcyon are ready.",
 			at: minutesAgo(40),
-			podId: revenue.id,
-			conversationId: storyChannelFor(accountManager).id,
+			podId: null,
+			conversationId: storyTaskFor(accountManager).id,
 		},
 		{
 			kind: "routine",
@@ -69,8 +69,7 @@ const feed: ActivityFeed = {
 			},
 			at: minutesAgo(90),
 			unread: true,
-			podId: revenue.id,
-			conversationId: storyChannelFor(growthDesk).id,
+			conversationId: storyTaskFor(growthDesk).id,
 		},
 		{
 			kind: "collaboration",
@@ -97,8 +96,7 @@ const feed: ActivityFeed = {
 			brief: "Check whether Acme can have 25% off the annual tier.",
 			at: minutesAgo(120),
 			unread: false,
-			podId: revenue.id,
-			conversationId: storyChannelFor(growthDesk).id,
+			conversationId: storyTaskFor(growthDesk).id,
 		},
 		{
 			kind: "mention",
@@ -107,8 +105,8 @@ const feed: ActivityFeed = {
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Priya Kaur" }),
 			preview: "Thanks @rowan-ellis, that fixed it.",
 			at: minutesAgo(26 * 60),
-			podId: revenue.id,
-			conversationId: storyChannelFor(growthDesk).id,
+			podId: null,
+			conversationId: storyTaskFor(growthDesk).id,
 		},
 	],
 };
@@ -225,7 +223,7 @@ const longChat: Message[] = Array.from({ length: 30 }, (_, index) => {
 			: `Update ${index + 1} on the Northwind accounts.`;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(index).padStart(2, "0")}`,
-		threadId: storyChannelFor(growthDesk).id,
+		threadId: storyTaskFor(growthDesk).id,
 		author:
 			index === 4
 				? testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" })
@@ -268,7 +266,7 @@ export const Opened = meta.story({
 	},
 	render: () => (
 		<StoryApp
-			path={`/${storyWorkspace.slug}/activity/${revenue.slug}/${storyChannelFor(growthDesk).id}?message=${mentionInLongChat}`}
+			path={`/${storyWorkspace.slug}/activity/${revenue.slug}/${storyTaskFor(growthDesk).id}?message=${mentionInLongChat}`}
 		/>
 	),
 	play: async ({ canvas }) => {

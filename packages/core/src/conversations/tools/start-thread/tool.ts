@@ -27,7 +27,7 @@ export function startThreadTool({
 }) {
 	return tool({
 		description:
-			"Start a new thread in this pod for a separate piece of work, with you or another bot in the pod, when the person asks to take something to its own thread. The person is added to it, and its bot starts at once on your brief, its first message. Its bot sees only the brief, not this thread, so include the task and everything it needs from here. Then tell the person you started it, by its title.",
+			"Start a new task for a separate piece of work, with you or another bot, when the person asks to take something to a task of its own. The person is added to it, and its bot starts at once on your brief, its first message. Its bot sees only the brief, not this conversation, so include the work and everything it needs from here. Then tell the person you started it, by its title.",
 		inputSchema: Schema.Struct({
 			title: Schema.Trim.check(
 				Schema.isMinLength(1),
@@ -38,12 +38,12 @@ export function startThreadTool({
 				Schema.isMaxLength(MAX_BRIEF_CHARACTERS),
 			).annotate({
 				description:
-					"What the thread's bot is to do, with the facts from this thread it needs. It is the thread's first message, from you.",
+					"What the task's bot is to do, with the facts from this conversation it needs. It is the task's first message, from you.",
 			}),
 			with: Schema.optional(
 				Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
 					description:
-						"The handle of the pod's bot to start it with, like @support. Leave it out to do the work yourself.",
+						"The handle of the bot to start it with, like @support. Leave it out to do the work yourself.",
 				}),
 			),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),

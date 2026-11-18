@@ -1,6 +1,6 @@
 import type {
 	Agent,
-	BotChannel,
+	ChatListItem,
 	ChatMessageItem,
 	ConversationThread,
 	DirectMessageListItem,
@@ -29,7 +29,7 @@ import { useEffect, useState } from "react";
 import { chatItemCreatedAt } from "@/lib/chats.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
-import { podsWithBots } from "@/shell/story-fixtures.ts";
+import { podsWithBots, storyAgents } from "@/shell/story-fixtures.ts";
 
 /*
  * The whole app, for a story: the real routes at an address, answered by
@@ -60,41 +60,49 @@ export const storyWorkspace = {
 	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 
-/** Every pod, with the viewer as the Personal pod's owner, and every bot. */
-export const storyPods: Pod[] = podsWithBots.map(({ pod }) =>
-	pod.kind === "personal" ? { ...pod, ownerId: storyUser.id } : pod,
-);
-export const storyBots: Agent[] = podsWithBots.flatMap(({ bots }) => bots);
+/** Every channel, and every bot. */
+export const storyPods: Pod[] = podsWithBots.map(({ pod }) => pod);
+export const storyBots: Agent[] = [...storyAgents];
 
-/** One thread per bot, by the bot's id. */
-export function storyChannelFor(agent: Agent): BotChannel {
+/** The bots added to each channel, by the channel's id. */
+const botsInPod = new Map(podsWithBots.map(({ pod, bots }) => [pod.id, bots]));
+
+/** One task per bot, by the bot's id. */
+export function storyTaskFor(agent: Agent): ConversationThread {
 	const suffix = agent.id.slice(-4);
 	return {
-		kind: "bot_channel",
+		kind: "thread",
 		id: `0199a3a0-0000-7000-8000-00000000c${suffix.slice(1)}`,
 		workspaceId: agent.workspaceId,
-		podId: agent.podId,
 		hostAgentId: agent.id,
-		title: agent.name,
+		title: `Working with ${agent.name}`,
+		doneAt: null,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
 	};
 }
 
-/** A thread with `agent`, apart from its channel. */
+/** Another task with `agent`, apart from its first. */
 export function storyConversationFor(agent: Agent): ConversationThread {
 	const suffix = agent.id.slice(-4);
 	return {
-		kind: "thread",
+		...storyTaskFor(agent),
 		id: `0199a3a0-0000-7000-8000-00000000d${suffix.slice(1)}`,
-		workspaceId: agent.workspaceId,
-		podId: agent.podId,
-		hostAgentId: agent.id,
 		title: `Conversation with ${agent.name}`,
-		startedInChatId: null,
-		doneAt: null,
-		createdAt: "2026-09-18T06:00:00.000Z",
-		updatedAt: "2026-09-18T06:10:00.000Z",
+	};
+}
+
+/** `agent`'s first task as its list shows it. */
+export function storyTaskItem(agent: Agent): ChatListItem {
+	return {
+		agent,
+		conversation: storyTaskFor(agent),
+		lastMessage: null,
+		participants: [],
+		waitingOn: null,
+		unreadMessages: 0,
+		needsApproval: false,
+		mentionsYou: false,
 	};
 }
 
@@ -120,6 +128,7 @@ const systemAgents: SystemAgent[] = (["summarise", "compact"] as const).map((key
 
 const NO_PERMISSIONS: WorkspacePermissions = {
 	createPods: false,
+	createAgents: false,
 	updateWorkspace: false,
 	manageProviders: false,
 	manageMembers: false,
@@ -134,6 +143,7 @@ const NO_PERMISSIONS: WorkspacePermissions = {
 const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 	owner: {
 		createPods: true,
+		createAgents: true,
 		updateWorkspace: true,
 		manageProviders: true,
 		manageMembers: true,
@@ -145,6 +155,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 	},
 	admin: {
 		createPods: true,
+		createAgents: true,
 		updateWorkspace: true,
 		manageProviders: true,
 		manageMembers: true,
@@ -158,9 +169,9 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 	viewer: NO_PERMISSIONS,
 };
 
-/** What a chat's thread holds: its messages, and who is in it. */
+/** What a bot's first task holds: its messages, and who is in it. */
 export function storyChatDetails(agent: Agent, messages: Message[] = []): ThreadDetails {
-	const chat = storyChannelFor(agent);
+	const chat = storyTaskFor(agent);
 	const bot = {
 		kind: "agent" as const,
 		id: agent.id,
@@ -175,10 +186,10 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 		thread: {
 			id: chat.id,
 			workspaceId: agent.workspaceId,
-			podId: agent.podId,
+			podId: null,
 			hostAgentId: agent.id,
 			conversationId: chat.id,
-			type: "bot_channel",
+			type: "conversation",
 			title: chat.title,
 			status: "done",
 			parentThreadId: null,
@@ -189,7 +200,6 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 		},
 		capabilities: { approveToolCalls: true },
 		routineExecution: null,
-		startedFrom: null,
 		participants: [person, bot],
 		crew: [bot],
 		members: [],
@@ -200,7 +210,7 @@ export function storyChatDetails(agent: Agent, messages: Message[] = []): Thread
 	};
 }
 
-/** A shared pod's chat, by the pod's id. */
+/** A channel's main chat, by the channel's id. */
 export function storyPodChatFor(pod: Pod): PodChat {
 	return {
 		kind: "pod_chat",
@@ -215,7 +225,7 @@ export function storyPodChatFor(pod: Pod): PodChat {
 	};
 }
 
-/** What a pod's chat holds: its messages, and the pod's people and bots to mention. */
+/** What a channel's main chat holds: its messages, and the channel's people and bots to mention. */
 export function storyPodChatDetails(
 	pod: Pod,
 	bots: Agent[],
@@ -241,10 +251,9 @@ export function storyPodChatDetails(
 		},
 		capabilities: { approveToolCalls: true },
 		routineExecution: null,
-		startedFrom: null,
 		participants: [person],
 		crew: bots
-			.filter((bot) => bot.podId === pod.id)
+			.filter((bot) => botsInPod.get(pod.id)?.some((one) => one.id === bot.id))
 			.map((bot) => ({
 				kind: "agent" as const,
 				id: bot.id,
@@ -264,7 +273,7 @@ export function storyPodChatDetails(
 
 /** What a chat's sidebar shows: a summary, and who has written lately. */
 export function storyChatActivity(agent: Agent, messages: Message[] = []): ThreadActivity {
-	const chat = storyChannelFor(agent);
+	const chat = storyTaskFor(agent);
 	const details = storyChatDetails(agent, messages);
 	return {
 		summary: {
@@ -288,12 +297,10 @@ export interface StoryAppData {
 	role?: WorkspaceRole;
 	pods?: Pod[];
 	bots?: Agent[];
-	/** Messages in each bot's chat, by the bot's id. */
+	/** Messages in each bot's first task, by the bot's id. */
 	messages?: Record<string, Message[]>;
-	/** Messages in each shared pod's chat, by the pod's id. */
+	/** Messages in each channel's main chat, by the channel's id. */
 	podChatMessages?: Record<string, Message[]>;
-	/** Threads started from each shared pod's chat, by the pod's id, as the chat links to them. */
-	podChatThreads?: Record<string, Extract<ChatMessageItem, { kind: "thread" }>[]>;
 	providers?: ModelProvider[];
 	models?: (typeof storyModel)[];
 	/** The viewer's referral link, where the installation signs people up by referral. */
@@ -329,10 +336,8 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 	const bots = data.bots ?? storyBots;
 	const messages = data.messages ?? {};
 	const botById = (id: string) => bots.find((bot) => bot.id === id);
-	const botForThread = (threadId: string) =>
-		bots.find((bot) => storyChannelFor(bot).id === threadId);
-	const podForChat = (threadId: string) =>
-		pods.find((pod) => pod.kind === "shared" && storyPodChatFor(pod).id === threadId);
+	const botForThread = (threadId: string) => bots.find((bot) => storyTaskFor(bot).id === threadId);
+	const podForChat = (threadId: string) => pods.find((pod) => storyPodChatFor(pod).id === threadId);
 	const directMessages = data.directMessages ?? [];
 	// A copy, so what a story sends stays in that story.
 	const directMessageMessages = { ...data.directMessageMessages };
@@ -400,7 +405,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			HttpResponse.json({ waiting: [], answered: [] }),
 		),
 		http.get(api("/workspaces/:workspace/chats/pod-markers"), () =>
-			HttpResponse.json({ pods: {} }),
+			HttpResponse.json({ pods: {}, agents: {} }),
 		),
 		http.post(
 			api("/conversations/:conversationId/read"),
@@ -408,26 +413,16 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		),
 		http.post(api("/threads/:threadId/read"), () => new HttpResponse(null, { status: 204 })),
 		http.get(api("/workspaces/:workspace/chats"), ({ request }) => {
-			// By the pod's id or its slug, as the API takes it.
+			// By the channel's id or its slug, as the API takes it.
 			const named = new URL(request.url).searchParams.get("pod");
 			const pod = pods.find((one) => one.id === named || one.slug === named);
-			// A channel with each of the pod's bots.
-			const channels = bots
-				.filter((bot) => bot.podId === pod?.id)
-				.map((bot) => ({
-					agent: bot,
-					conversation: storyChannelFor(bot),
-					unreadMessages: 0,
-					needsApproval: false,
-					mentionsYou: false,
-				}));
 			return HttpResponse.json({
-				routines: [],
-				chats:
-					pod?.kind === "shared" ? [{ conversation: storyPodChatFor(pod), unreadMessages: 0 }] : [],
-				channels,
-				threads: [],
+				chats: pod ? [{ conversation: storyPodChatFor(pod), unreadMessages: 0 }] : [],
 			});
+		}),
+		http.get(api("/agents/:agentId/tasks"), ({ params }) => {
+			const bot = botById(String(params.agentId));
+			return HttpResponse.json({ tasks: bot ? [storyTaskItem(bot)] : [], routines: [] });
 		}),
 		http.post(api("/workspaces/:workspace/pods/:podId/chat"), ({ params }) => {
 			const pod = pods.find((one) => one.id === params.podId);
@@ -435,52 +430,16 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				? HttpResponse.json(storyPodChatFor(pod))
 				: new HttpResponse(null, { status: 404 });
 		}),
-		http.post(api("/workspaces/:workspace/bot-channels"), async ({ request }) => {
-			const body = (await request.json()) as { hostAgentId: string };
-			const bot = botById(body.hostAgentId);
-			return bot
-				? HttpResponse.json(storyChannelFor(bot))
-				: new HttpResponse(null, { status: 404 });
-		}),
 		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
 			const bot = botForThread(String(params.conversationId));
 			const pod = podForChat(String(params.conversationId));
 			const said = bot ? messages[bot.id] : pod ? data.podChatMessages?.[pod.id] : undefined;
-			const links = pod ? (data.podChatThreads?.[pod.id] ?? []) : [];
 			return HttpResponse.json({
-				items: [
-					...(said ?? []).map((message): ChatMessageItem => ({ kind: "message", message })),
-					...links,
-				].sort((left, right) => chatItemCreatedAt(left).localeCompare(chatItemCreatedAt(right))),
+				items: (said ?? [])
+					.map((message): ChatMessageItem => ({ kind: "message", message }))
+					.sort((left, right) => chatItemCreatedAt(left).localeCompare(chatItemCreatedAt(right))),
 				nextCursor: null,
 			});
-		}),
-		http.post(api("/conversations/:conversationId/threads"), async ({ params, request }) => {
-			const pod = podForChat(String(params.conversationId));
-			const body = (await request.json()) as { id: string; message: string; hostAgentId?: string };
-			if (!pod) return new HttpResponse(null, { status: 404 });
-			const conversation = {
-				...storyPodChatFor(pod),
-				id: "0199a3a0-0000-7000-8000-00000000c990",
-				hostAgentId: body.hostAgentId ?? null,
-				title: body.message.slice(0, 44),
-			};
-			return HttpResponse.json(
-				{
-					conversation,
-					message: {
-						id: body.id,
-						threadId: storyPodChatFor(pod).id,
-						author: testPerson({ id: storyUser.id, name: storyUser.name }),
-						kind: "text",
-						status: "complete",
-						parts: [{ type: "text", text: body.message }],
-						content: body.message,
-						createdAt: new Date().toISOString(),
-					},
-				},
-				{ status: 201 },
-			);
 		}),
 		http.get(api("/conversations/:conversationId/history"), () =>
 			HttpResponse.json({ items: [], nextCursor: null }),
@@ -503,9 +462,9 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				? HttpResponse.json(storyChatDetails(bot, messages[bot.id]))
 				: new HttpResponse(null, { status: 404 });
 		}),
-		http.get(api("/pods/:podId/connections"), () => HttpResponse.json([])),
-		// No sandboxes in the example workspace, so the pod's Sandbox section stays hidden.
-		http.get(api("/pods/:podId/sandbox"), () =>
+		http.get(api("/agents/:agentId/connections"), () => HttpResponse.json([])),
+		// No computers in the example workspace, so the bot's Computer section stays hidden.
+		http.get(api("/agents/:agentId/sandbox"), () =>
 			HttpResponse.json({ sandbox: { kind: "none" }, providerEnabled: false, canManage: false }),
 		),
 		http.get(api("/pods/:podId/members"), () =>
@@ -622,7 +581,6 @@ export function storyDirectMessageDetails(
 		},
 		capabilities: { approveToolCalls: true },
 		routineExecution: null,
-		startedFrom: null,
 		participants: people,
 		crew: [],
 		members: people,
@@ -634,17 +592,17 @@ export function storyDirectMessageDetails(
 }
 
 /**
- * Answers a pod's connection reads from `connections` in full: the list with
+ * Answers a bot's connection reads from `connections` in full: the list with
  * counts, and one connection with its tools. Put them before `appHandlers`,
  * whose own answer is no connections.
  */
 export function connectionHandlers(connections: readonly TestConnection[]): RequestHandler[] {
 	const byId = (connectionId: unknown) => connections.find((one) => one.id === connectionId);
 	return [
-		http.get(api("/pods/:podId/connections"), () =>
+		http.get(api("/agents/:agentId/connections"), () =>
 			HttpResponse.json(connections.map(listedConnection)),
 		),
-		http.get(api("/pods/:podId/connections/:connectionId"), ({ params }) => {
+		http.get(api("/agents/:agentId/connections/:connectionId"), ({ params }) => {
 			const found = byId(params.connectionId);
 			return found
 				? HttpResponse.json(connectionWithTools(found))
@@ -673,8 +631,7 @@ export function StoryApp({ path, user = storyUser }: { path: string; user?: Sess
 	);
 }
 
-/** Where a bot's chat is, under its pod. */
+/** Where a bot's first task is. */
 export function chatPath(bot: Agent): string {
-	const pod = storyPods.find((one) => one.id === bot.podId);
-	return `/${storyWorkspace.slug}/pods/${pod?.slug}/agents/${bot.handle}`;
+	return `/${storyWorkspace.slug}/bots/${bot.handle}/tasks/${storyTaskFor(bot).id}`;
 }

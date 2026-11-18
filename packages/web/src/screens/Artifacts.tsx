@@ -1,4 +1,5 @@
 import type {
+	Agent,
 	Artifact,
 	ArtifactAuthor,
 	ArtifactSummary,
@@ -37,26 +38,71 @@ import { ARTIFACT_KINDS } from "./artifact-kinds.tsx";
 
 type Loading = "loading" | "failed";
 
+/** Whose files they are: a channel's, made in its conversations, or a bot's, made in its tasks. */
+export type ArtifactOwner = { pod: Pod } | { agent: Agent };
+
+/** The file `artifactId` of `owner`, as a link, at `version` when one is given. */
+function ArtifactLink({
+	owner,
+	artifactId,
+	...props
+}: {
+	owner: ArtifactOwner;
+	artifactId: string;
+	"aria-current"?: "page";
+	className?: string;
+	children: ReactNode;
+}) {
+	return "pod" in owner ? (
+		<Link {...artifactLink(owner, artifactId)} {...props} />
+	) : (
+		<Link {...artifactLink(owner, artifactId)} {...props} />
+	);
+}
+
+/** Where `owner`'s files, or one of them at `version`, are, as an address. */
+function useArtifactHref() {
+	const router = useRouter();
+	return (owner: ArtifactOwner, artifactId?: string, version?: number) =>
+		"pod" in owner
+			? router.buildLocation(
+					artifactId ? artifactLink(owner, artifactId, { version }) : artifactsLink(owner),
+				).href
+			: router.buildLocation(
+					artifactId ? artifactLink(owner, artifactId, { version }) : artifactsLink(owner),
+				).href;
+}
+
+/** What `owner` is called, for saying whose files these are. */
+function ownerName(owner: ArtifactOwner): string {
+	return "pod" in owner ? owner.pod.name : owner.agent.name;
+}
+
 /**
- * The documents and pages a pod's bots have made, newest first, with the one
- * chosen open beside them, at its current version or the one `version` names.
+ * The documents and pages bots made in a channel, or one bot made, newest
+ * first, with the one chosen open beside them, at its current version or the
+ * one `version` names.
  */
 export function ArtifactsPage({
-	pod,
+	owner,
 	selectedId,
 	version,
 }: {
-	pod: Pod;
+	owner: ArtifactOwner;
 	selectedId?: string;
 	version?: number;
 }) {
-	const { data, isError } = useArtifacts(pod.id);
+	const { data, isError } = useArtifacts(
+		"pod" in owner
+			? { kind: "pod", podId: owner.pod.id }
+			: { kind: "agent", agentId: owner.agent.id },
+	);
 	const navigate = useNavigate();
-	const router = useRouter();
+	const hrefOf = useArtifactHref();
 	const { leaveForPage } = useLeave();
 	return (
 		<ArtifactListView
-			pod={pod}
+			owner={owner}
 			artifacts={data ?? (isError ? "failed" : "loading")}
 			selectedId={selectedId}
 			now={new Date()}
@@ -64,15 +110,13 @@ export function ArtifactsPage({
 			{selectedId && (
 				<ArtifactStage
 					key={selectedId}
-					pod={pod}
+					owner={owner}
 					artifactId={selectedId}
 					version={version}
-					onVersionChange={(version) => void navigate(artifactLink(pod, selectedId, { version }))}
+					onVersionChange={(version) => void navigate({ href: hrefOf(owner, selectedId, version) })}
 					// Leaving in its place, as a deleted one is left, goes back to the list when that is behind.
 					onClose={(how) =>
-						how?.replace
-							? leaveForPage(router.buildLocation(artifactsLink(pod)).href)
-							: void navigate(artifactsLink(pod))
+						how?.replace ? leaveForPage(hrefOf(owner)) : void navigate({ href: hrefOf(owner) })
 					}
 				/>
 			)}
@@ -81,13 +125,13 @@ export function ArtifactsPage({
 }
 
 export function ArtifactListView({
-	pod,
+	owner,
 	artifacts,
 	selectedId,
 	now,
 	children,
 }: {
-	pod: Pod;
+	owner: ArtifactOwner;
 	artifacts: readonly ArtifactSummary[] | Loading;
 	/** The artifact open beside the list, which its row marks. */
 	selectedId?: string;
@@ -100,22 +144,27 @@ export function ArtifactListView({
 	const pane = useRef<HTMLDivElement>(null);
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
-			<Page title="Artifacts" place={{ kind: "pod", pod }}>
+			<Page
+				title="Files"
+				place={
+					"pod" in owner ? { kind: "pod", pod: owner.pod } : { kind: "bot", agent: owner.agent }
+				}
+			>
 				{artifacts !== "loading" && artifacts !== "failed" && artifacts.length === 0 ? (
 					// As tall as the page leaves above the tabs, so there is nothing to scroll.
 					<div className="flex h-above-tab-bar pb-20">
 						<EmptyState
-							title={`No artifacts in ${pod.name} yet`}
+							title={`No files from ${ownerName(owner)} yet`}
 							icon={<FileText strokeWidth={1.75} />}
 						>
-							When a bot writes you a doc, report or page, it's saved here so the whole pod can find
-							it later.
+							When a bot writes you a doc, report or page, it's saved here so everyone can find it
+							later.
 						</EmptyState>
 					</div>
 				) : (
 					<div className="flex flex-col gap-5 px-4 pt-4 pb-12">
 						{artifacts === "failed" ? (
-							<EmptyState title="Could not load the artifacts">
+							<EmptyState title="Could not load the files">
 								The API did not answer. Reload, or check that it is running.
 							</EmptyState>
 						) : artifacts === "loading" ? null : (
@@ -132,7 +181,7 @@ export function ArtifactListView({
 										{group.artifacts.map((artifact) => (
 											<li key={artifact.id}>
 												<ArtifactRow
-													pod={pod}
+													owner={owner}
 													artifact={artifact}
 													selected={artifact.id === selectedId}
 													now={now}
@@ -169,22 +218,23 @@ export function ArtifactListView({
 	);
 }
 
-/** An artifact in the list: what kind it is, its title, which version, who made it, and when it last changed. */
+/** A file in the list: what kind it is, its title, which version, who made it, and when it last changed. */
 function ArtifactRow({
-	pod,
+	owner,
 	artifact,
 	selected,
 	now,
 }: {
-	pod: Pod;
+	owner: ArtifactOwner;
 	artifact: ArtifactSummary;
 	selected: boolean;
 	now: Date;
 }) {
 	const kind = ARTIFACT_KINDS[artifact.kind];
 	return (
-		<Link
-			{...artifactLink(pod, artifact.id)}
+		<ArtifactLink
+			owner={owner}
+			artifactId={artifact.id}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				"focus-ring flex items-center gap-3 rounded-lg p-2 transition-colors",
@@ -203,31 +253,33 @@ function ArtifactRow({
 			<time dateTime={artifact.updatedAt} className="shrink-0 text-subtle-foreground text-xs">
 				{formatListTime(new Date(artifact.updatedAt), now)}
 			</time>
-		</Link>
+		</ArtifactLink>
 	);
 }
 
 /**
- * An artifact opened large, at its current version or the one `version`
- * names. Those who may delete it can, which closes it.
+ * A file opened large, at its current version or the one `version` names.
+ * Those who may delete it can, which closes it.
  */
 export function ArtifactStage({
-	pod,
+	owner,
 	artifactId,
 	version,
 	onVersionChange,
 	onClose,
 }: {
-	pod: Pod;
+	owner: ArtifactOwner;
 	artifactId: string;
 	version: number | undefined;
 	/** `undefined` for the current version. */
 	onVersionChange: (version: number | undefined) => void;
 	onClose: CloseStage;
 }) {
-	const shown = useArtifact(pod.id, artifactId, version);
-	const versions = useArtifactVersions(pod.id, artifactId);
-	const remove = useDeleteArtifact(pod.id);
+	const shown = useArtifact(artifactId, version);
+	const versions = useArtifactVersions(artifactId);
+	const remove = useDeleteArtifact();
+	const mayDelete =
+		"pod" in owner ? owner.pod.permissions.deleteArtifacts : owner.agent.permissions.update;
 	async function deleteArtifact() {
 		try {
 			await remove.mutateAsync(artifactId);
@@ -239,14 +291,14 @@ export function ArtifactStage({
 	}
 	return (
 		<ArtifactStageView
-			pod={pod}
+			owner={owner}
 			artifact={shown.data ?? (shown.isError ? "failed" : "loading")}
 			versions={versions.data ?? []}
 			now={new Date()}
 			onVersionChange={onVersionChange}
 			onClose={onClose}
 			deletion={
-				pod.permissions.deleteArtifacts
+				mayDelete
 					? {
 							pending: remove.isPending,
 							error: remove.error ? failureMessage(remove.error) : undefined,
@@ -259,7 +311,7 @@ export function ArtifactStage({
 }
 
 const DELETE_DESCRIPTION =
-	"Every version goes with it, for everyone in the pod. Replies that showed it keep only its name. This can't be undone.";
+	"Every version goes with it, for everyone. Replies that showed it keep only its name. This can't be undone.";
 
 /** Deleting what is shown, for those who may. */
 interface Deletion {
@@ -269,7 +321,7 @@ interface Deletion {
 }
 
 export function ArtifactStageView({
-	pod,
+	owner,
 	artifact,
 	versions,
 	now,
@@ -277,7 +329,7 @@ export function ArtifactStageView({
 	onClose,
 	deletion,
 }: {
-	pod: Pod;
+	owner: ArtifactOwner;
 	artifact: Artifact | Loading;
 	/** Newest first. */
 	versions: readonly ArtifactVersionSummary[];
@@ -288,13 +340,13 @@ export function ArtifactStageView({
 	deletion?: Deletion;
 }) {
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
-	const router = useRouter();
+	const hrefOf = useArtifactHref();
 	const copying = useCopy("Copy link");
 	if (typeof artifact !== "object") {
 		return (
-			<Stage label="Artifact" icon={null} title="" onClose={onClose}>
+			<Stage label="File" icon={null} title="" onClose={onClose}>
 				{artifact === "failed" && (
-					<EmptyState title="No such artifact here">
+					<EmptyState title="No such file here">
 						It may have been removed, or the API did not answer.
 					</EmptyState>
 				)}
@@ -305,7 +357,7 @@ export function ArtifactStageView({
 	const shown = artifact.shownVersion;
 	function copyLink() {
 		if (typeof artifact !== "object") return;
-		const href = router.buildLocation(artifactLink(pod, artifact.id)).href;
+		const href = hrefOf(owner, artifact.id);
 		void copying.copy(new URL(href, window.location.origin).href);
 	}
 	return (
@@ -355,7 +407,7 @@ export function ArtifactStageView({
 			<kind.Full
 				title={artifact.title}
 				content={artifact.content}
-				at={{ podId: artifact.podId, artifactId: artifact.id, version: shown.number }}
+				at={{ artifactId: artifact.id, version: shown.number }}
 			/>
 			{deletion && (
 				<DeleteDialog

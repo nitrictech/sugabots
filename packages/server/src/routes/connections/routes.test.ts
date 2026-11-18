@@ -18,10 +18,10 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000002";
 const CONNECTION_ID = "0199a3a0-0000-7000-8000-000000000003";
-const POD_ID = "0199a3a0-0000-7000-8000-000000000004";
-const root = `/pods/${POD_ID}/connections`;
+const AGENT_ID = "0199a3a0-0000-7000-8000-000000000004";
+const root = `/agents/${AGENT_ID}/connections`;
 const headers = { authorization: "Bearer good-token", "content-type": "application/json" };
-const inPod = { workspaceId: WORKSPACE_ID, podId: POD_ID };
+const ofAgent = { workspaceId: WORKSPACE_ID, agentId: AGENT_ID };
 
 const resolveUser: UserResolver = async (requestHeaders) =>
 	requestHeaders.get("authorization") === "Bearer good-token"
@@ -37,7 +37,7 @@ const asked = <Input>(calls: Array<{ input: Input; userId: string }>, input: Inp
 const wiki: Connection = {
 	id: CONNECTION_ID,
 	workspaceId: WORKSPACE_ID,
-	podId: POD_ID,
+	agentId: AGENT_ID,
 	name: "Wiki",
 	handle: "wiki",
 	url: "https://wiki.example.com/mcp",
@@ -61,8 +61,8 @@ const app = (connections: Partial<ConnectionSetup.Interface>) =>
 		Layer.merge(identifiedBy(resolveUser), unimplemented(ConnectionSetup.Service, connections)),
 	);
 
-describe("a pod's connections", () => {
-	it("adds a server as the person asking, in the pod it is posted to", async () => {
+describe("a bot's connections", () => {
+	it("adds a server as the person asking, for the bot it is posted to", async () => {
 		const calls: Array<{ input: unknown; userId: string }> = [];
 		const response = await app({
 			create: (input) => Effect.as(asked(calls, input), wiki),
@@ -76,7 +76,7 @@ describe("a pod's connections", () => {
 		expect(calls).toEqual([
 			{
 				input: {
-					podId: POD_ID,
+					agentId: AGENT_ID,
 					connection: { name: "Wiki", url: "https://wiki.example.com/mcp" },
 				},
 				userId: USER_ID,
@@ -96,7 +96,9 @@ describe("a pod's connections", () => {
 		}).request(root, { method: "POST", headers, body: JSON.stringify(endpoint) });
 
 		expect(response.status).toBe(201);
-		expect(calls).toEqual([{ input: { podId: POD_ID, connection: endpoint }, userId: USER_ID }]);
+		expect(calls).toEqual([
+			{ input: { agentId: AGENT_ID, connection: endpoint }, userId: USER_ID },
+		]);
 	});
 
 	it("answers a change the caller may not make as forbidden", async () => {
@@ -151,15 +153,15 @@ describe("signing a connection in", () => {
 		});
 	});
 
-	it("finishes at the callback and sends the browser back to the pod", async () => {
+	it("finishes at the callback and sends the browser back to the bot", async () => {
 		const calls: Array<{ input: unknown; userId: string }> = [];
 		const back = await app({
-			completeOAuth: (input) => Effect.as(asked(calls, input), { pod: inPod }),
+			completeOAuth: (input) => Effect.as(asked(calls, input), { agent: ofAgent }),
 		}).request("/connections/oauth/callback?code=the-code&state=s-1", { headers });
 
 		expect(back.status).toBe(302);
 		expect(back.headers.get("location")).toBe(
-			`http://localhost:5173/connections/oauth/return?workspace=${WORKSPACE_ID}&pod=${POD_ID}`,
+			`http://localhost:5173/connections/oauth/return?workspace=${WORKSPACE_ID}&agent=${AGENT_ID}`,
 		);
 		expect(calls).toEqual([
 			{ input: { callback: { code: "the-code", state: "s-1" } }, userId: USER_ID },
@@ -168,7 +170,7 @@ describe("signing a connection in", () => {
 
 	it("sends a failed sign-in back with a code, and nothing the authorization server wrote", async () => {
 		const back = await app({
-			completeOAuth: () => Effect.succeed({ failure: "refused", pod: inPod }),
+			completeOAuth: () => Effect.succeed({ failure: "refused", agent: ofAgent }),
 		}).request(
 			"/connections/oauth/callback?error=access_denied&error_description=Visit+evil.example&state=s-1",
 			{ headers },

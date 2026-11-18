@@ -59,7 +59,7 @@ export function saveInstructionsTool({
 				Schema.isMaxLength(DESCRIPTION_MAX_LENGTH),
 			).annotate({
 				description:
-					"One or two sentences telling the other bots in your pod what to come to you for.",
+					"One or two sentences telling the other bots in the workspace what to come to you for.",
 			}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 		execute: async ({ instructions, description }): Promise<SaveInstructionsResult> => {

@@ -3,7 +3,14 @@ import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { podMember, routine, user, workspace, workspaceMember } from "../../database/schema.ts";
+import {
+	agent,
+	podMember,
+	routine,
+	user,
+	workspace,
+	workspaceMember,
+} from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
@@ -28,7 +35,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a bot's own routines, against Postgr
 		name: "Morning standup",
 		instructions: "Ask the team what they are working on today.",
 		schedule: "0 9 * * 1-5",
-		results: "post_to_chat",
 	} as const;
 
 	afterAll(async () => {
@@ -77,11 +83,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a bot's own routines, against Postgr
 				},
 			],
 			paused: false,
-			results: "post_to_chat",
-			settingsUrl: expect.stringMatching(
-				/^http:\/\/sugabots\.test\/routine-[^/]+\/settings\/routines\/[0-9a-f-]+$/,
-			),
 		});
+		const [bot] = await onDatabase((db) =>
+			db.select({ handle: agent.handle }).from(agent).where(eq(agent.id, agentId)),
+		);
+		expect(made.settingsUrl).toMatch(
+			new RegExp(
+				`^http://sugabots\\.test/routine-[^/]+/bots/${bot?.handle}/automations/${made.id}$`,
+			),
+		);
 		const [stored] = await onDatabase((db) =>
 			db.select().from(routine).where(eq(routine.id, made.id)),
 		);
@@ -105,7 +115,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a bot's own routines, against Postgr
 				},
 			],
 			paused: true,
-			results: "post_to_chat",
 		});
 		expect(await bots.list({ agentId, askedBy: userId })).toEqual([changed]);
 	});
@@ -121,9 +130,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a bot's own routines, against Postgr
 		await expect(bots.update(bot, hook.routine.id, { schedule: "0 9 * * *" })).rejects.toThrow(
 			BotRoutines.TriggerSetInSettings,
 		);
-		expect(await bots.update(bot, hook.routine.id, { results: "post_to_chat" })).toMatchObject({
+		expect(await bots.update(bot, hook.routine.id, { name: "Sentry triage" })).toMatchObject({
+			name: "Sentry triage",
 			when: [{ kind: "webhook" }],
-			results: "post_to_chat",
 		});
 	});
 

@@ -1,5 +1,5 @@
 import type { Models } from "../../providers/models/models.ts";
-import type { PreparedSummary } from "./summaries.ts";
+import type { PreparedBotSummary, PreparedSummary } from "./summaries.ts";
 
 /** What the prompt reads. Narrower than a `PreparedSummary` so a model trial can build one. */
 export type SummaryPromptInput = Pick<
@@ -32,5 +32,30 @@ export function threadSummaryPrompt(prepared: SummaryPromptInput): Models.Prompt
 			previous,
 		].join("\n\n"),
 		messages: [{ role: "user", content: transcript }],
+	};
+}
+
+/** The prompt that writes what a bot has been doing lately, from its threads' summaries. */
+export function botSummaryPrompt(prepared: PreparedBotSummary): Models.Prompt {
+	const threads = prepared.threads
+		.map(
+			(entry) =>
+				`${entry.title} (${entry.doneAt ? "done" : "open"}, last changed ${entry.updatedAt.toISOString()}): ${entry.summary}`,
+		)
+		.join("\n\n");
+	return {
+		workspaceId: prepared.workspaceId,
+		model: prepared.model,
+		system: [
+			`Write what the bot ${prepared.botName} has been doing lately, for a person glancing at it to know what it is up to.`,
+			"Say what work is going on, what finished recently, and what is waiting on someone, newest first. Use only what the summaries below say; do not invent details.",
+			"Return plain prose only: no heading, no bullets, at most 80 words.",
+			prepared.previousContent
+				? `What you wrote last time, which the summaries below replace where they differ:\n${prepared.previousContent}`
+				: "",
+		]
+			.filter(Boolean)
+			.join("\n\n"),
+		messages: [{ role: "user", content: threads }],
 	};
 }

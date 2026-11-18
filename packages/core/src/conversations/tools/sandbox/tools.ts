@@ -14,7 +14,7 @@ import { contentType as mediaTypeForName } from "mime-types";
 import type { BlobStore } from "../../../blob-store/blob-store.ts";
 import type { RunEffect } from "../../../database/database.ts";
 import type { Ids } from "../../../ids/ids.ts";
-import type { PodSandboxes } from "../../../sandboxes/pod-sandboxes.ts";
+import type { AgentSandboxes } from "../../../sandboxes/agent-sandboxes.ts";
 import { AGENT_CACHES } from "../../../sandboxes/sandbox-disk-clearing.ts";
 import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import type { UserFacing } from "../../../user-message.ts";
@@ -55,17 +55,17 @@ const MAX_READ_BYTES = MAX_READ_CHARACTERS * 4;
 const MAX_WRITE_CHARACTERS = 1_000_000;
 
 /**
- * Where a turn works in the pod's sandbox. Both are under the workspace, so
- * they last as long as the sandbox does and come across when it moves to a
+ * Where a turn works in its bot's computer. Both are under `/workspace`, so
+ * they last as long as the computer does and come across when it moves to a
  * new image.
  */
 export interface Place {
 	/**
 	 * The thread's folder: where commands start and relative paths resolve.
-	 * Shared by the agents in the thread, and kept between its turns.
+	 * Kept between the bot's turns in the thread.
 	 */
 	readonly folder: string;
-	/** The agent's home, its `HOME`: its own across every thread in the pod. */
+	/** The bot's home, its `HOME`: kept across all its threads. */
 	readonly home: string;
 }
 
@@ -77,12 +77,12 @@ export function placeOf(turn: { threadId: string; agentId: string }): Place {
 }
 
 /**
- * Opens the pod's sandbox on the first call that needs it, and reuses it for
+ * Opens the bot's computer on the first call that needs it, and reuses it for
  * the rest of the turn, so a turn that never runs anything never starts one.
  */
-export type OpenSandbox = () => Promise<PodSandboxes.Opened>;
+export type OpenSandbox = () => Promise<AgentSandboxes.Opened>;
 
-/** The pod's sandbox as a turn's tools reach it. */
+/** The bot's computer as a turn's tools reach it. */
 export interface TurnSandbox {
 	readonly open: OpenSandbox;
 	/** Runs work in the sandbox with the turn's services, such as its tracing and logging. */
@@ -90,11 +90,11 @@ export interface TurnSandbox {
 }
 
 /**
- * The pod's sandbox, opened once per turn. A failed opening is not kept, so
+ * The bot's computer, opened once per turn. A failed opening is not kept, so
  * the next call tries again.
  */
-export function openOncePerTurn(open: () => Promise<PodSandboxes.Opened>): OpenSandbox {
-	let opening: Promise<PodSandboxes.Opened> | undefined;
+export function openOncePerTurn(open: () => Promise<AgentSandboxes.Opened>): OpenSandbox {
+	let opening: Promise<AgentSandboxes.Opened> | undefined;
 	let told = false;
 	return async () => {
 		opening ??= open().catch((cause: unknown) => {
@@ -116,7 +116,7 @@ interface Failed {
 }
 
 /**
- * Runs `work` in the pod's sandbox, turning a refusal it can act on into a
+ * Runs `work` in the bot's computer, turning a refusal it can act on into a
  * result. The work is interrupted when `abortSignal`, the tool call's, aborts,
  * as it does when the turn is cancelled.
  */
@@ -127,7 +127,7 @@ export async function inSandbox<A>(
 		sandbox: Sandboxes.Sandbox,
 	) => Effect.Effect<A, Sandboxes.Unavailable | Sandboxes.FileFailed>,
 ): Promise<(A & { note?: UserText }) | Failed> {
-	let opened: PodSandboxes.Opened;
+	let opened: AgentSandboxes.Opened;
 	try {
 		opened = await sandbox.open();
 	} catch (cause) {
@@ -154,12 +154,12 @@ export async function inSandbox<A>(
 }
 
 /** What the agent needs to know about how its sandbox came back, if anything. */
-function arrivalNote(arrival: PodSandboxes.Opened["arrival"]): UserText | undefined {
+function arrivalNote(arrival: AgentSandboxes.Opened["arrival"]): UserText | undefined {
 	switch (arrival) {
 		case "rebooted":
-			return userText`The sandbox was paused since it was last used. Its files are kept, but programs that were running have stopped.`;
+			return userText`Your computer was paused since it was last used. Its files are kept, but programs that were running have stopped.`;
 		case "replaced":
-			return userText`This is a new sandbox: the pod's earlier one is gone, and its files with it, including any work that wasn't pushed.`;
+			return userText`This is a new computer: your earlier one is gone, and its files with it, including any work that wasn't pushed.`;
 		case "made":
 		case "running":
 		case "resumed":
@@ -178,12 +178,12 @@ function shown(output: Sandboxes.CapturedOutput) {
 
 const pathIn = (place: Place) =>
 	Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
-		description: `A path in the sandbox, relative to ${place.folder} unless it starts with /`,
+		description: `A path on your computer, relative to ${place.folder} unless it starts with /`,
 	});
 
 export function runCommandTool(sandbox: TurnSandbox, place: Place) {
 	return tool({
-		description: `Run a bash command in the pod's sandbox, a Linux machine shared by the agents in this pod. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between the thread's turns and shared with the other agents in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is your own and kept across every thread in the pod: keep notes, settings and tools you want everywhere there. When the sandbox's disk runs short, the folders of finished threads, such as ended routine runs and conversations marked done, are cleared, and so are the caches in your home (${AGENT_CACHES.map((cache) => `~/${cache}`).join(", ")}): push anything that must outlast its thread, or keep it elsewhere in your home. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. Your turn waits on every command, and no one hears from you until it ends, so keep waits short: sleep or poll for a few seconds while something starts up, never minutes for a person or another system to respond. When something will only be ready later, say what you're waiting for and end your turn. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the sandbox has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The sandbox, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
+		description: `Run a bash command on your computer, a Linux machine of your own. Commands start in this thread's folder, ${place.folder}: a scratchpad kept between your turns in the thread, so clone and build here. Your home, ${place.home} (also $HOME), is kept across all your threads: keep notes, settings and tools you want everywhere there. When the computer's disk runs short, the folders of finished threads, such as ended routine runs and conversations marked done, are cleared, and so are the caches in your home (${AGENT_CACHES.map((cache) => `~/${cache}`).join(", ")}): push anything that must outlast its thread, or keep it elsewhere in your home. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. Your turn waits on every command, and no one hears from you until it ends, so keep waits short: sleep or poll for a few seconds while something starts up, never minutes for a person or another system to respond. When something will only be ready later, say what you're waiting for and end your turn. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the computer has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The computer, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
 		inputSchema: Schema.Struct({
 			command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
 				description: "The bash command to run",
@@ -225,8 +225,8 @@ const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 export function readFileTool(sandbox: TurnSandbox, place: Place, acceptsImages: boolean) {
 	return tool({
 		description: acceptsImages
-			? `Read a file in the pod's sandbox: a text file as text, or an image (${SHOWN_IMAGE_FORMATS}) to look at, such as a screenshot. Long text files are cut off; use run_command with head, tail or grep for parts of them.`
-			: `Read a text file in the pod's sandbox. Long files are cut off; use run_command with head, tail or grep for parts of them.`,
+			? `Read a file on your computer: a text file as text, or an image (${SHOWN_IMAGE_FORMATS}) to look at, such as a screenshot. Long text files are cut off; use run_command with head, tail or grep for parts of them.`
+			: `Read a text file on your computer. Long files are cut off; use run_command with head, tail or grep for parts of them.`,
 		inputSchema: Schema.Struct({ path: pathIn(place) }).pipe(
 			Schema.toStandardSchemaV1,
 			Schema.toStandardJSONSchemaV1,
@@ -289,7 +289,7 @@ export function copyFileToSandboxTool({
 	ids: Ids.Interface;
 }) {
 	return tool({
-		description: `Copy a file in this thread, such as one a person attached, into the thread's folder in the pod's sandbox, to work on it with commands. Give the file's id, from the line that names it. Returns the copy's path, relative to the thread's folder. A file already copied is left as it is, with any changes made to it, and \`alreadyCopied\` says so; to start again from the file in the thread, remove the copy and copy the file again.`,
+		description: `Copy a file in this thread, such as one a person attached, into the thread's folder on your computer, to work on it with commands. Give the file's id, from the line that names it. Returns the copy's path, relative to the thread's folder. A file already copied is left as it is, with any changes made to it, and \`alreadyCopied\` says so; to start again from the file in the thread, remove the copy and copy the file again.`,
 		inputSchema: Schema.Struct({
 			file: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)).annotate({
 				description: "The file's id, from the line that names it",
@@ -345,7 +345,7 @@ function refusedRead(failure: ThreadFiles.FileNotFound | BlobStore.Failure) {
 export function shareFileTool(sandbox: TurnSandbox, place: Place, attach: AttachToReply) {
 	const oneAtATime = Semaphore.makeUnsafe(1);
 	return tool({
-		description: `Share a file from the pod's sandbox with the people in this chat, such as a chart, picture or spreadsheet you made: it is attached to your reply as soon as you call this, an image shown as a picture and anything else offered to download. Never paste a file's contents, base64 or a link to it into your reply instead. Files up to ${MAX_SHARED_FILE_MEGABYTES} MB, at most ${MAX_ATTACHMENTS_PER_MESSAGE} on one reply.`,
+		description: `Share a file from your computer with the people in this chat, such as a chart, picture or spreadsheet you made: it is attached to your reply as soon as you call this, an image shown as a picture and anything else offered to download. Never paste a file's contents, base64 or a link to it into your reply instead. Files up to ${MAX_SHARED_FILE_MEGABYTES} MB, at most ${MAX_ATTACHMENTS_PER_MESSAGE} on one reply.`,
 		inputSchema: Schema.Struct({
 			path: pathIn(place),
 			name: Schema.optional(
@@ -416,7 +416,7 @@ function notKept(failure: BlobStore.Failure, error: UserText) {
 
 export function writeFileTool(sandbox: TurnSandbox, place: Place) {
 	return tool({
-		description: `Write a text file in the pod's sandbox, replacing it if it exists and making its directories.`,
+		description: `Write a text file on your computer, replacing it if it exists and making its directories.`,
 		inputSchema: Schema.Struct({
 			path: pathIn(place),
 			content: Schema.String.check(Schema.isMaxLength(MAX_WRITE_CHARACTERS)).annotate({
@@ -437,9 +437,9 @@ export function writeFileTool(sandbox: TurnSandbox, place: Place) {
  * when last measured, so the agent frees space before it runs out, and stops
  * when a command fails for lack of it, rather than trying again.
  */
-export function diskNote(disk: PodSandboxes.MeasuredDisk | undefined): string | undefined {
+export function diskNote(disk: AgentSandboxes.MeasuredDisk | undefined): string | undefined {
 	if (!disk || sandboxDiskLevel(disk) === "normal") return undefined;
-	return `The pod's sandbox's disk was ${sandboxDiskPercent(disk)}% full when last measured: ${formatDiskSize(disk.usedBytes)} of ${formatDiskSize(disk.totalBytes)}. Every agent in the pod shares it, and once it fills, commands that write fail with "No space left on device". Before installing, cloning or building, remove what you no longer need, such as package caches in your home and clones and builds you've finished with. If a command fails for lack of space, don't try it again: tell the people in the thread that the sandbox's disk is full.`;
+	return `Your computer's disk was ${sandboxDiskPercent(disk)}% full when last measured: ${formatDiskSize(disk.usedBytes)} of ${formatDiskSize(disk.totalBytes)}. Once it fills, commands that write fail with "No space left on device". Before installing, cloning or building, remove what you no longer need, such as package caches in your home and clones and builds you've finished with. If a command fails for lack of space, don't try it again: tell the people in the thread that your computer's disk is full.`;
 }
 
 /**
@@ -451,10 +451,10 @@ export function networkNote(reach: Sandboxes.Reach): string {
 	const unreachable =
 		"fails as if it weren't there: a name that doesn't resolve, a TLS error or an empty reply";
 	if (reach.kind === "allowlist") {
-		return `The pod's sandbox, its browser included, connects only to these hosts (*. covers a domain's subdomains): ${reach.hosts.join(", ")}. A connection to any other host ${unreachable}. To reach one the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
+		return `Your computer, its browser included, connects only to these hosts (*. covers a domain's subdomains): ${reach.hosts.join(", ")}. A connection to any other host ${unreachable}. To reach one the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
 	}
 	if (reach.blockedHosts.length === 0) {
-		return "The pod's sandbox, its browser included, connects to any host on the internet.";
+		return "Your computer, its browser included, connects to any host on the internet.";
 	}
-	return `The pod's sandbox, its browser included, connects to any host on the internet except these, which the workspace blocked (*. covers a domain's subdomains): ${reach.blockedHosts.join(", ")}. A connection to one ${unreachable}.`;
+	return `Your computer, its browser included, connects to any host on the internet except these, which the workspace blocked (*. covers a domain's subdomains): ${reach.blockedHosts.join(", ")}. A connection to one ${unreachable}.`;
 }

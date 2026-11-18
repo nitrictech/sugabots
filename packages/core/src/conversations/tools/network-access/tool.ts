@@ -29,7 +29,7 @@ export function requestNetworkAccess({
 	return {
 		tool: tool({
 			description:
-				"Ask for the sandbox to be allowed to connect to a host it can't reach. An admin of this pod decides, and your reply waits until they have; once allowed, the pod's sandbox reaches the host. Ask only for a host the task needs, by its name, and use a wildcard such as *.example.com only when the task needs many of a domain's subdomains. A host the workspace has blocked is refused at once.",
+				"Ask for your computer to be allowed to connect to a host it can't reach. Your creator or an admin decides, and your reply waits until they have; once allowed, your computer reaches the host. Ask only for a host the task needs, by its name, and use a wildcard such as *.example.com only when the task needs many of a domain's subdomains. A host the workspace has blocked is refused at once.",
 			inputSchema: Schema.Struct({
 				host: sandboxHostSchema.annotate({
 					description:
@@ -40,7 +40,7 @@ export function requestNetworkAccess({
 				const grant = await run(network.grantRequest({ turnId, sdkToolCallId: toolCallId, host }));
 				switch (grant.kind) {
 					case "added":
-						return { status: "allowed", host, note: "The pod's sandbox can connect to it now." };
+						return { status: "allowed", host, note: "Your computer can connect to it now." };
 					case "blocked":
 						return { status: "failed", error: blockedMessage(host, grant.by) };
 					case "not-allowed":

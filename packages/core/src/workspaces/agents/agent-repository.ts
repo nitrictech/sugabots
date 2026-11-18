@@ -3,14 +3,13 @@ export * as AgentRepository from "./agent-repository.ts";
 import {
 	type AgentUpdate,
 	colorFromText,
-	type GroupMentionHandle,
 	handleFromName,
 	isGroupMentionHandle,
 	type NewAgent,
 	type SystemAgentKey,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, eq, isNotNull, isNull, type SQL } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import {
 	type QueryFailure,
@@ -20,7 +19,7 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { violatedUniqueConstraint } from "../../database/errors.ts";
-import { agent, pod } from "../../database/schema.ts";
+import { agent, pinnedAgent, podAgent } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { type CrewAgentRow, crewAgentRow } from "./agent.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
@@ -31,19 +30,19 @@ import {
 } from "./system-agents.ts";
 
 /**
- * The only writer of `agent`: crew agents, each in one pod, the Personal
- * Assistant in each Personal pod, and the workspace's system agents, which sit
- * in no pod and of which only the model ever changes.
+ * The only writer of `agent` and `pinned_agent`: the bots people make, each
+ * person's Personal Assistant, and the workspace's system bots, of which only
+ * the model ever changes.
  */
 export interface Interface {
 	/**
-	 * Creates a crew agent in `agent.podId`, which must be in the workspace.
-	 * Without a prompt it starts with `INTERVIEW_PROMPT`.
+	 * Creates a bot, pinned for its creator. Without a prompt it starts with
+	 * `INTERVIEW_PROMPT`.
 	 */
 	readonly create: (
 		workspaceId: string,
 		input: { createdById: string; agent: NewAgent },
-	) => Effect.Effect<CrewAgentRow, AgentNameTaken | AgentHandleReserved | PodOutsideWorkspace>;
+	) => Effect.Effect<CrewAgentRow, AgentNameTaken | AgentHandleReserved>;
 	readonly update: (
 		workspaceId: string,
 		agentId: string,
@@ -57,16 +56,23 @@ export interface Interface {
 		agentId: string,
 	) => Effect.Effect<void, SystemAgentImmutable>;
 	/**
-	 * The Personal pod's Personal Assistant, placed there on `model`, or with
-	 * no model, if it is missing. It starts with `INTERVIEW_PROMPT`. One already there is returned exactly as its
-	 * owner left it.
+	 * `userId`'s Personal Assistant, made on `model`, or with no model, if they
+	 * have none. One they have is returned exactly as they left it.
 	 */
 	readonly provisionPersonalAssistant: (input: {
 		workspaceId: string;
-		podId: string;
 		userId: string;
 		model?: string;
 	}) => Effect.Effect<CrewAgentRow>;
+	/** Pins or unpins the bot for `userId`. Pinning one already pinned changes nothing. */
+	readonly setPinned: (input: {
+		workspaceId: string;
+		userId: string;
+		agentId: string;
+		pinned: boolean;
+	}) => Effect.Effect<void>;
+	/** Whether `userId` pinned the bot. */
+	readonly isPinned: (userId: string, agentId: string) => Effect.Effect<boolean>;
 	/**
 	 * Creates any system agent the workspace does not have yet, with no model.
 	 * An existing one is left exactly as it is, so repeating this never unsets
@@ -139,7 +145,6 @@ export const make = Effect.gen(function* () {
 				.insert(agent)
 				.values({
 					workspaceId,
-					podId: null,
 					createdById,
 					name: definition.name,
 					handle: handleFromName(definition.name),
@@ -160,26 +165,14 @@ export const make = Effect.gen(function* () {
 				"create",
 				transaction(
 					Effect.gen(function* () {
-						const [owningPod] = yield* query((db) =>
-							db
-								.select({ id: pod.id })
-								.from(pod)
-								.where(and(eq(pod.workspaceId, workspaceId), eq(pod.id, input.podId)))
-								.limit(1),
-						);
-						if (!owningPod) {
-							return yield* new PodOutsideWorkspace();
-						}
-
 						const handle = input.handle ?? handleFromName(input.name);
-						if (isGroupMentionHandle(handle)) return yield* new AgentHandleReserved({ handle });
+						if (isReservedHandle(handle)) return yield* new AgentHandleReserved({ handle });
 						const [row] = yield* queryCatching(
 							(db) =>
 								db
 									.insert(agent)
 									.values({
 										workspaceId,
-										podId: input.podId,
 										createdById,
 										name: input.name,
 										handle,
@@ -192,6 +185,7 @@ export const make = Effect.gen(function* () {
 										disabledTools: input.disabledTools ?? [],
 										usesSandbox: input.usesSandbox ?? false,
 										naturalBrowsing: input.naturalBrowsing ?? false,
+										visibility: input.visibility ?? "public",
 									})
 									.returning(),
 							(failure) => nameTaken(failure, { name: input.name, handle }),
@@ -200,6 +194,9 @@ export const make = Effect.gen(function* () {
 						if (!crew) {
 							return yield* Effect.die(new Error("Agent insert returned no crew row"));
 						}
+						yield* query((db) =>
+							db.insert(pinnedAgent).values({ workspaceId, userId: createdById, agentId: crew.id }),
+						);
 						return crew;
 					}),
 				),
@@ -208,30 +205,36 @@ export const make = Effect.gen(function* () {
 		update: (workspaceId, agentId, changes) =>
 			operation(
 				"update",
-				Effect.gen(function* () {
-					// A system agent's one changeable setting, its model, belongs to the
-					// workspace and is set through `setSystemAgentModel`.
-					if (yield* isSystemAgent(workspaceId, agentId)) {
-						return yield* new SystemAgentImmutable();
-					}
-					if (changes.handle !== undefined && isGroupMentionHandle(changes.handle)) {
-						return yield* new AgentHandleReserved({ handle: changes.handle });
-					}
-					const [row] = yield* queryCatching(
-						(db) =>
-							db
-								.update(agent)
-								.set(changes)
-								.where(and(eq(agent.id, agentId), eq(agent.workspaceId, workspaceId)))
-								.returning(),
-						(failure) => nameTaken(failure, changes),
-					);
-					const crew = row && crewAgentRow(row);
-					if (!crew) {
-						return yield* new AgentGone({ agentId });
-					}
-					return crew;
-				}),
+				transaction(
+					Effect.gen(function* () {
+						// A system agent's one changeable setting, its model, belongs to the
+						// workspace and is set through `setSystemAgentModel`.
+						if (yield* isSystemAgent(workspaceId, agentId)) {
+							return yield* new SystemAgentImmutable();
+						}
+						if (changes.handle !== undefined && isReservedHandle(changes.handle)) {
+							return yield* new AgentHandleReserved({ handle: changes.handle });
+						}
+						const [row] = yield* queryCatching(
+							(db) =>
+								db
+									.update(agent)
+									.set(changes)
+									.where(and(eq(agent.id, agentId), eq(agent.workspaceId, workspaceId)))
+									.returning(),
+							(failure) => nameTaken(failure, changes),
+						);
+						const crew = row && crewAgentRow(row);
+						if (!crew) {
+							return yield* new AgentGone({ agentId });
+						}
+						// Only public bots are in channels.
+						if (crew.visibility === "private") {
+							yield* query((db) => db.delete(podAgent).where(eq(podAgent.agentId, crew.id)));
+						}
+						return crew;
+					}),
+				),
 			),
 
 		remove: (workspaceId, agentId) =>
@@ -247,7 +250,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		provisionPersonalAssistant: ({ workspaceId, podId, userId, model }) =>
+		provisionPersonalAssistant: ({ workspaceId, userId, model }) =>
 			operation(
 				"provisionPersonalAssistant",
 				Effect.gen(function* () {
@@ -256,19 +259,22 @@ export const make = Effect.gen(function* () {
 							.insert(agent)
 							.values({
 								workspaceId,
-								podId,
 								createdById: userId,
+								assistantOf: userId,
+								visibility: "private",
 								name: "Personal Assistant",
-								handle: PERSONAL_ASSISTANT_KEY,
-								provisionedKey: PERSONAL_ASSISTANT_KEY,
-								description: "Your private assistant.",
+								handle: PERSONAL_ASSISTANT_HANDLE,
+								description: "Your guide to the workspace.",
 								color: "sky",
 								face: "pill",
 								shape: "circle",
 								model: model ?? null,
-								prompt: INTERVIEW_PROMPT,
+								prompt: "",
 							})
-							.onConflictDoNothing({ target: [agent.podId, agent.provisionedKey] })
+							.onConflictDoNothing({
+								target: [agent.workspaceId, agent.assistantOf],
+								where: sql`${agent.assistantOf} is not null`,
+							})
 							.returning(),
 					);
 					const [assistant] = created
@@ -277,9 +283,7 @@ export const make = Effect.gen(function* () {
 								db
 									.select()
 									.from(agent)
-									.where(
-										and(eq(agent.podId, podId), eq(agent.provisionedKey, PERSONAL_ASSISTANT_KEY)),
-									)
+									.where(and(eq(agent.workspaceId, workspaceId), eq(agent.assistantOf, userId)))
 									.limit(1),
 							);
 					const crew = assistant && crewAgentRow(assistant);
@@ -288,6 +292,30 @@ export const make = Effect.gen(function* () {
 					}
 					return crew;
 				}),
+			),
+
+		setPinned: ({ workspaceId, userId, agentId, pinned }) =>
+			operation(
+				"setPinned",
+				query((db) =>
+					pinned
+						? db.insert(pinnedAgent).values({ workspaceId, userId, agentId }).onConflictDoNothing()
+						: db
+								.delete(pinnedAgent)
+								.where(and(eq(pinnedAgent.userId, userId), eq(pinnedAgent.agentId, agentId))),
+				).pipe(Effect.asVoid),
+			),
+
+		isPinned: (userId, agentId) =>
+			operation(
+				"isPinned",
+				query((db) =>
+					db
+						.select({ agentId: pinnedAgent.agentId })
+						.from(pinnedAgent)
+						.where(and(eq(pinnedAgent.userId, userId), eq(pinnedAgent.agentId, agentId)))
+						.limit(1),
+				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
 		ensureSystemAgents: ({ workspaceId, createdById }) =>
@@ -354,7 +382,7 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** Another agent in the pod already has this name or handle. */
+/** Another bot in the workspace already has this name or handle. */
 export class AgentNameTaken
 	extends Data.TaggedError("AgentNameTaken")<{
 		readonly field: "name" | "handle";
@@ -363,25 +391,27 @@ export class AgentNameTaken
 	implements UserFacing
 {
 	override get message() {
-		return `An agent with the ${this.field} "${this.value}" already exists in this pod`;
+		return `An agent with the ${this.field} "${this.value}" already exists in this workspace`;
 	}
 	get userMessage() {
 		return this.field === "name"
-			? userText`Another agent in this pod already has that name`
-			: userText`Another agent in this pod already has that handle`;
+			? userText`Another bot in this workspace already has that name`
+			: userText`Another bot in this workspace already has that handle`;
 	}
 }
 
-/** `@here` and `@channel` mention everyone, so no agent may take either as its handle. */
+/** A handle no bot people make may take: see `isReservedHandle`. */
 export class AgentHandleReserved
-	extends Data.TaggedError("AgentHandleReserved")<{ readonly handle: GroupMentionHandle }>
+	extends Data.TaggedError("AgentHandleReserved")<{ readonly handle: string }>
 	implements UserFacing
 {
 	override get message() {
-		return `"${this.handle}" is reserved for mentioning everyone`;
+		return `"${this.handle}" is a reserved handle`;
 	}
 	get userMessage() {
-		return userText`@${this.handle} mentions everyone, so it can't be an agent's handle`;
+		return isGroupMentionHandle(this.handle)
+			? userText`@${this.handle} mentions everyone, so it can't be a bot's handle`
+			: userText`@personal-assistant is every Personal Assistant's handle, so it can't be another bot's`;
 	}
 }
 
@@ -398,19 +428,9 @@ export class AgentGone
 	}
 }
 
-/** A placement names a pod in another workspace. */
-export class PodOutsideWorkspace
-	extends Data.TaggedError("PodOutsideWorkspace")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`That is not a pod in this workspace`;
-	}
-}
-
 /**
- * System agents are shipped by the product and belong to the workspace, not to
- * a pod. The one thing about one that changes, its model, is set through
+ * System bots are shipped by the product and belong to the workspace. The one
+ * thing about one that changes, its model, is set through
  * `setSystemAgentModel`.
  */
 export class SystemAgentImmutable
@@ -418,7 +438,7 @@ export class SystemAgentImmutable
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`A system agent is configured for the workspace, not in a pod`;
+		return userText`A system bot is configured for the workspace`;
 	}
 }
 
@@ -436,8 +456,21 @@ export class SystemAgentMissing
 	}
 }
 
-/** The Personal Assistant's handle, and the key it is provisioned under once per Personal pod. */
-const PERSONAL_ASSISTANT_KEY = "personal-assistant";
+/**
+ * Every Personal Assistant's handle; only its person ever talks to it, so it
+ * needn't be unique, but no other bot may take it, so it names one bot for
+ * each person.
+ */
+const PERSONAL_ASSISTANT_HANDLE = "personal-assistant";
+
+/**
+ * Whether no bot people make may take `handle`: `@here` and `@channel`
+ * mention everyone, and `personal-assistant` is each person's Personal
+ * Assistant.
+ */
+function isReservedHandle(handle: string): boolean {
+	return isGroupMentionHandle(handle) || handle === PERSONAL_ASSISTANT_HANDLE;
+}
 
 /**
  * The clash a write's unique violation means, for the values it wrote. Any

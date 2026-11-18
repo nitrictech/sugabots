@@ -79,8 +79,6 @@ export async function aRoutineOwner() {
 			.insert(pod)
 			.values({
 				workspaceId,
-				ownerId: userId,
-				kind: "shared",
 				name: "Routine pod",
 				slug: `routine-${suffix}`,
 				createdById: userId,
@@ -94,7 +92,6 @@ export async function aRoutineOwner() {
 			.insert(agent)
 			.values({
 				workspaceId,
-				podId,
 				name: "Routine Agent",
 				handle: handleFromName(`Routine Agent ${suffix}`),
 				color: "green",

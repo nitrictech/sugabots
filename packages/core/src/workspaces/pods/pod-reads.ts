@@ -2,9 +2,9 @@ import { ADMINISTERING_WORKSPACE_ROLES, type PodMember } from "@sugabots/contrac
 import { and, asc, eq, inArray, not, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
-import { pod, podMember, user, workspaceMember } from "../../database/schema.ts";
+import { podMember, user, workspaceMember } from "../../database/schema.ts";
 
-/** The people with a membership row in the pod, by name. */
+/** The people in the channel, by name. Administrators, who are in every one, can't be taken out. */
 export const podMembers = (podId: string) =>
 	query((db) =>
 		db
@@ -14,11 +14,10 @@ export const podMembers = (podId: string) =>
 				email: user.email,
 				image: user.image,
 				addedAt: podMember.createdAt,
-				removable: sql<boolean>`${pod.kind} = 'shared' and ${not(inArray(workspaceMember.role, [...ADMINISTERING_WORKSPACE_ROLES]))}`,
+				removable: sql<boolean>`${not(inArray(workspaceMember.role, [...ADMINISTERING_WORKSPACE_ROLES]))}`,
 			})
 			.from(podMember)
 			.innerJoin(user, eq(user.id, podMember.userId))
-			.innerJoin(pod, eq(pod.id, podMember.podId))
 			.innerJoin(
 				workspaceMember,
 				and(

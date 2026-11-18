@@ -1,4 +1,4 @@
-import type { Pod } from "@sugabots/contracts";
+import type { Agent, Pod } from "@sugabots/contracts";
 import {
 	type HistoryState,
 	Link,
@@ -19,26 +19,32 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useAgents, usePodAgent } from "@/lib/agents.ts";
+import { findBot, useAgents } from "@/lib/agents.ts";
 import { useConnections } from "@/lib/connections.ts";
-import { podSettingsLink, podSettingsPageLink } from "@/lib/links.ts";
+import {
+	agentSettingsLink,
+	agentSettingsPageLink,
+	podSettingsLink,
+	podSettingsPageLink,
+} from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
-import { findPod, usePodMembers, usePods } from "@/lib/pods.ts";
-import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
+import { findPod, usePodBots, usePodMembers, usePods } from "@/lib/pods.ts";
 import { useSession } from "@/lib/session.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
 import {
+	agentSettingsPage,
+	agentSettingsPages,
 	podSettingsPage,
 	podSettingsPages,
-	podSettingsPagesOf,
 	type SettingSection,
 	workspaceSettingSection,
 	workspaceSettingSections,
 	yourSettingSections,
 } from "@/lib/workspace-settings.ts";
+import { AgentAvatar } from "@/shell/Agent.tsx";
 import { NewPodDialog } from "@/shell/NewPod.tsx";
 import { PodInitial } from "@/shell/SidebarPod.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -56,7 +62,7 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * Settings, as a page of the app beside the sidebar: the workspace's sections
- * and each pod's pages down the left, the open page beside them under a trail
+ * each channel's pages and each bot down the left, the open page beside them under a trail
  * of where it sits. Below a laptop's width there is no room for both, so
  * settings drill down as a phone's do: the sections as one list, and each
  * opening with a way back to it.
@@ -76,7 +82,6 @@ export function SettingsLayout({
 }) {
 	const pathname = useSettingsPath();
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
-	const { data: pods } = usePods();
 	// A phone lists settings in its You tab.
 	if (index && phone) return <Navigate from="/$workspace" to="./you" replace />;
 	return (
@@ -96,9 +101,7 @@ export function SettingsLayout({
 					className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background scrollbar-gutter-stable max-md:scrollbar-gutter-auto"
 				>
 					{!index && (
-						<CompactPageBackBar
-							parent={phone ? phoneParentPage(pathname, pods) : parentPage(pathname)}
-						/>
+						<CompactPageBackBar parent={phone ? phoneParentPage(pathname) : parentPage(pathname)} />
 					)}
 					{/*
 					 * Nothing rather than a skeleton: the navigation has already answered
@@ -130,21 +133,24 @@ const settingsList: BackTarget = {
 
 /** The page `pathname` sits under, for its Back when nothing says where you came from. */
 function parentPage(pathname: string): BackTarget {
-	const [, sectionId, item, page, detail] = pathname.split("/").filter(Boolean);
-	if (sectionId === "pods" && item !== undefined && detail !== undefined) {
-		const podPage = page === "agents" ? "bots" : "connections";
+	const [, sectionId, item, page] = pathname.split("/").filter(Boolean);
+	// One of a bot's own pages, or one of its connections, goes back to the bot.
+	if (sectionId === "bots" && item !== undefined && page !== undefined) {
 		return {
-			label: podPage === "bots" ? "Bots" : "Connections",
+			label: "Bot",
+			render: <Link from="/$workspace" to="./settings/bots/$bot" params={{ bot: item }} />,
+		};
+	}
+	if (sectionId === "channels" && item !== undefined && page !== undefined) {
+		return {
+			label: "Channel",
 			render: (
-				<Link
-					from="/$workspace"
-					to="./settings/pods/$pod/$page"
-					params={{ pod: item, page: podPage }}
-				/>
+				<Link from="/$workspace" to="./settings/channels/$channel" params={{ channel: item }} />
 			),
 		};
 	}
-	if (sectionId !== undefined && sectionId !== "pods" && item !== undefined) {
+	// A channel's own page is one of the navigation's, so it sits under the list itself.
+	if (sectionId !== undefined && sectionId !== "channels" && item !== undefined) {
 		const section = workspaceSettingSection(sectionId);
 		if (section) {
 			return {
@@ -160,17 +166,11 @@ function parentPage(pathname: string): BackTarget {
 
 /**
  * The page `pathname` sits under on a phone, whose settings are listed in its
- * You tab: a pod's own pages sit under the pod's page there, Notifications
- * under your profile, and what would sit under the list of settings under the tab.
+ * You tab: Notifications under your profile, and what would sit under the
+ * list of settings under the tab.
  */
-function phoneParentPage(pathname: string, pods: readonly Pod[] | undefined): BackTarget {
-	const [, sectionId, item, , detail] = pathname.split("/").filter(Boolean);
-	if (sectionId === "pods" && item !== undefined && detail === undefined) {
-		return {
-			label: findPod(pods, item)?.name ?? "Pod",
-			render: <Link from="/$workspace" to="./you/pods/$pod" params={{ pod: item }} />,
-		};
-	}
+function phoneParentPage(pathname: string): BackTarget {
+	const [, sectionId] = pathname.split("/").filter(Boolean);
 	// Opened from a row on your profile.
 	if (sectionId === "notifications") {
 		return {
@@ -199,12 +199,13 @@ function useWorkspaceSections() {
 	return { sections, counts };
 }
 
-/** The pods you are in, shared ones first and yours apart, as the navigation lists them. */
-function useListedPods() {
+/** The channels you are in and the bots you reach, as the navigation lists them. */
+function useListed() {
 	const { data: pods } = usePods();
+	const { agents } = useAgents();
 	return {
-		shared: pods?.filter((pod) => pod.kind === "shared") ?? [],
-		personal: pods?.filter((pod) => pod.kind === "personal") ?? [],
+		channels: pods?.filter((pod) => pod.isMember) ?? [],
+		bots: agents?.filter((agent) => agent.systemAgentKey === null) ?? [],
 	};
 }
 
@@ -213,7 +214,7 @@ const NAVIGATION_MAX_WIDTH = "33vw";
 
 function SettingsNavigation() {
 	const { sections, counts } = useWorkspaceSections();
-	const { shared, personal } = useListedPods();
+	const { channels, bots } = useListed();
 	const may = useWorkspacePermissions();
 	const session = useSession();
 	const pathname = useSettingsPath();
@@ -261,17 +262,17 @@ function SettingsNavigation() {
 						/>
 					))}
 				</NavigationGroup>
-				{(shared.length > 0 || may.createPods) && (
-					<NavigationGroup label="Pods" action={may.createPods && <NewPodButton />}>
-						{shared.map((pod) => (
+				{(channels.length > 0 || may.createPods) && (
+					<NavigationGroup label="Channels" action={may.createPods && <NewPodButton />}>
+						{channels.map((pod) => (
 							<PodNavigation key={pod.id} pod={pod} pathname={pathname} />
 						))}
 					</NavigationGroup>
 				)}
-				{personal.length > 0 && (
-					<NavigationGroup label="Personal pods">
-						{personal.map((pod) => (
-							<PodNavigation key={pod.id} pod={pod} pathname={pathname} />
+				{bots.length > 0 && (
+					<NavigationGroup label="Bots">
+						{bots.map((agent) => (
+							<BotNavigation key={agent.id} agent={agent} pathname={pathname} />
 						))}
 					</NavigationGroup>
 				)}
@@ -307,7 +308,7 @@ function NavigationGroup({
 }
 
 /**
- * What sits at a line's right: a count, a pod's chevron, the + beside Pods.
+ * What sits at a line's right: a count, a channel's chevron, the + beside Channels.
  * One width for all, centred in it, so they line up down the navigation.
  */
 const TRAILING_SLOT = "grid w-5.5 shrink-0 place-items-center";
@@ -338,9 +339,25 @@ function NavigationItemContent({ label, count }: { label: string; count?: number
 	);
 }
 
+/** A bot in the navigation, picked out while one of its pages is open. */
+function BotNavigation({ agent, pathname }: { agent: Agent; pathname: string }) {
+	const [, section, handle] = pathname.split("/").filter(Boolean);
+	const selected = section === "bots" && handle === agent.handle;
+	return (
+		<Link
+			{...agentSettingsLink(agent)}
+			aria-current={selected ? "page" : undefined}
+			className={cn(NAVIGATION_ITEM, "gap-2.5", navigationItemState(selected))}
+		>
+			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={16} />
+			<NavigationItemContent label={agent.name} />
+		</Link>
+	);
+}
+
 /**
- * A pod in the navigation, opening onto its pages. The pod you are in stays
- * open; the others open and close as you choose.
+ * A channel in the navigation, opening onto its pages. The channel you are
+ * on stays open; the others open and close as you choose.
  */
 function PodNavigation({ pod, pathname }: { pod: Pod; pathname: string }) {
 	const openPage = podPageAt(pathname, pod);
@@ -348,7 +365,6 @@ function PodNavigation({ pod, pathname }: { pod: Pod; pathname: string }) {
 	// Opened or closed as last chosen on this device; until then, open while you are on one of its pages.
 	const open = chosenOpen ?? openPage !== undefined;
 	const counts = usePodCounts(pod, open);
-	const computers = useSandboxAccess().data?.enabled === true;
 	const listId = `settings-pod-${pod.id}`;
 	return (
 		<div className="flex flex-col gap-px">
@@ -377,7 +393,7 @@ function PodNavigation({ pod, pathname }: { pod: Pod; pathname: string }) {
 					id={listId}
 					className="mb-1 ml-4 flex flex-col gap-px border-border-strong border-l pl-2"
 				>
-					{podSettingsPagesOf(pod, computers).map((page) => {
+					{podSettingsPages.map((page) => {
 						const selected = openPage === page.id;
 						const className = cn(NAVIGATION_ITEM, navigationItemState(selected));
 						const count = counts[page.id];
@@ -435,30 +451,26 @@ function storedOpenPods(): Record<string, boolean> {
 	}
 }
 
-/** What each of a pod's pages holds, counted once the pod is open in the navigation. */
+/** What each of a channel's pages holds, counted once the channel is open in the navigation. */
 export function usePodCounts(pod: Pod, open: boolean): Partial<Record<string, number>> {
-	const { agents } = useAgents();
-	const connections = useConnections(open ? pod.id : undefined);
-	// Only you are ever in a personal pod, so there is nobody to count.
-	const members = usePodMembers(open && pod.kind === "shared" ? pod.id : undefined);
-	const bots = agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null);
+	const members = usePodMembers(open ? pod.id : undefined);
+	const bots = usePodBots(open ? pod.id : undefined);
 	return {
-		connections: connections.data?.length || undefined,
 		people: members.data?.length || undefined,
-		bots: bots?.length || undefined,
+		bots: bots.data?.length || undefined,
 	};
 }
 
-/** Makes a pod and opens its settings: the + beside Pods in the navigation. */
+/** Makes a channel and opens its settings: the + beside Channels in the navigation. */
 function NewPodButton() {
 	const navigate = useNavigate();
 	const [creating, setCreating] = useState(false);
 	return (
 		<>
-			<Tooltip label="New pod">
+			<Tooltip label="New channel">
 				<button
 					type="button"
-					aria-label="New pod"
+					aria-label="New channel"
 					onClick={() => setCreating(true)}
 					className={cn(
 						TRAILING_SLOT,
@@ -498,20 +510,17 @@ function CompactSettingsList() {
 }
 
 /**
- * The groups of the list of settings: you, the workspace's sections, and its
- * pods. A phone's You tab lists them too, with `linkState` saying where each
- * page's Back returns, its pods opening `podLink` rather than their General,
- * and `you` in place of your own rows.
+ * The groups of the list of settings: you, the workspace's sections, its
+ * channels and its bots. A phone's You tab lists them too, with `linkState`
+ * saying where each page's Back returns.
  */
 export function SettingsListGroups({
 	linkState,
-	podLink = (pod) => <Link {...podSettingsLink(pod)} />,
 }: {
 	linkState?: (state: HistoryState) => HistoryState;
-	podLink?: (pod: Pod) => ReactElement;
 }) {
 	const { sections, counts } = useWorkspaceSections();
-	const { shared, personal } = useListedPods();
+	const { channels, bots } = useListed();
 	const { user } = useSession();
 	return (
 		<>
@@ -559,24 +568,33 @@ export function SettingsListGroups({
 					/>
 				))}
 			</SettingsGroup>
-			{[
-				{ label: "Pods", pods: shared },
-				{ label: "Personal pods", pods: personal },
-			].map(
-				(group) =>
-					group.pods.length > 0 && (
-						<SettingsGroup key={group.label} label={group.label} headingLevel={2}>
-							{group.pods.map((pod) => (
-								<SettingsRow
-									key={pod.id}
-									icon={<PodInitial pod={pod} size="sm" />}
-									label={pod.name}
-									chevron
-									render={podLink(pod)}
-								/>
-							))}
-						</SettingsGroup>
-					),
+			{channels.length > 0 && (
+				<SettingsGroup label="Channels" headingLevel={2}>
+					{channels.map((pod) => (
+						<SettingsRow
+							key={pod.id}
+							icon={<PodInitial pod={pod} size="sm" />}
+							label={pod.name}
+							chevron
+							render={<Link {...podSettingsLink(pod)} state={linkState} />}
+						/>
+					))}
+				</SettingsGroup>
+			)}
+			{bots.length > 0 && (
+				<SettingsGroup label="Bots" headingLevel={2}>
+					{bots.map((agent) => (
+						<SettingsRow
+							key={agent.id}
+							icon={
+								<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={20} />
+							}
+							label={agent.name}
+							chevron
+							render={<Link {...agentSettingsLink(agent)} state={linkState} />}
+						/>
+					))}
+				</SettingsGroup>
 			)}
 		</>
 	);
@@ -660,6 +678,7 @@ function sectionCrumb(id: SettingSection["id"]): Crumb {
 function useSettingsCrumbs(): Crumb[] {
 	const pathname = useSettingsPath();
 	const { data: pods } = usePods();
+	const { agents } = useAgents();
 	const [, sectionId, item, page, detail] = pathname.split("/").filter(Boolean);
 	if (sectionId === undefined || sectionId === "general") {
 		return [workspaceCrumb, { label: "General" }];
@@ -668,9 +687,13 @@ function useSettingsCrumbs(): Crumb[] {
 	if (yours) {
 		return [{ label: "Your settings" }, { label: yours.label }];
 	}
-	if (sectionId === "pods" && item !== undefined) {
+	if (sectionId === "channels" && item !== undefined) {
 		const pod = findPod(pods, item);
-		return pod ? podCrumbs(pod, page, detail) : [];
+		return pod ? podCrumbs(pod, page) : [];
+	}
+	if (sectionId === "bots" && item !== undefined) {
+		const agent = findBot(agents, item);
+		return agent ? botCrumbs(agent, page, detail) : [];
 	}
 	if (item === undefined) {
 		return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
@@ -684,33 +707,40 @@ function useSettingsCrumbs(): Crumb[] {
 	return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
 }
 
-/** A pod's part of the trail: its settings, then the page, then what is open on it. */
-function podCrumbs(pod: Pod, page: string | undefined, detail: string | undefined): Crumb[] {
+/** A channel's part of the trail: its settings, then the page. */
+function podCrumbs(pod: Pod, page: string | undefined): Crumb[] {
 	const podCrumb = { label: `${pod.name} settings`, link: <Link {...podSettingsLink(pod)} /> };
-	if (page === "agents" && detail !== undefined) {
-		return [
-			podCrumb,
-			{ label: "Bots", link: <Link {...podSettingsPageLink(pod, "bots")} /> },
-			{ label: <BotName podSlug={pod.slug} handle={detail} /> },
-		];
-	}
-	if (page === "connections" && detail !== undefined) {
-		return [
-			podCrumb,
-			{ label: "Connections", link: <Link {...podSettingsPageLink(pod, "connections")} /> },
-			{ label: <ConnectionName podId={pod.id} connectionId={detail} /> },
-		];
-	}
 	const label = podSettingsPages.find((one) => one.id === (page ?? "general"))?.label;
 	return [podCrumb, { label: label ?? page }];
 }
 
-function BotName({ podSlug, handle }: { podSlug: string; handle: string }) {
-	return usePodAgent(podSlug, handle).found?.agent.name ?? null;
+/** A bot's part of the trail: its settings, then the page, down to one of its connections. */
+function botCrumbs(
+	agent: Agent,
+	page: string | undefined,
+	connection: string | undefined,
+): Crumb[] {
+	const trail: Crumb[] = [
+		workspaceCrumb,
+		sectionCrumb("bots"),
+		{
+			label: agent.name,
+			link: page === undefined ? undefined : <Link {...agentSettingsLink(agent)} />,
+		},
+	];
+	const shown = agentSettingsPage(page ?? "");
+	if (!shown || shown === "general") return trail;
+	const pageLabel = agentSettingsPages.find((one) => one.id === shown)?.label ?? shown;
+	if (connection === undefined) return [...trail, { label: pageLabel }];
+	return [
+		...trail,
+		{ label: pageLabel, link: <Link {...agentSettingsPageLink(agent, shown)} /> },
+		{ label: <ConnectionName agentId={agent.id} connectionId={connection} /> },
+	];
 }
 
-function ConnectionName({ podId, connectionId }: { podId: string; connectionId: string }) {
-	return useConnections(podId).data?.find((one) => one.id === connectionId)?.name ?? null;
+function ConnectionName({ agentId, connectionId }: { agentId: string; connectionId: string }) {
+	return useConnections(agentId).data?.find((one) => one.id === connectionId)?.name ?? null;
 }
 
 function MemberName({ membershipId }: { membershipId: string }) {
@@ -733,12 +763,11 @@ function useSettingsPath(): string {
 	return useLocation({ select: (location) => location.pathname.slice(workspacePath.length) });
 }
 
-/** Which of `pod`'s pages the address is on, counting what opens inside one as that page. */
+/** Which of `pod`'s pages the address is on. */
 function podPageAt(pathname: string, pod: Pod) {
 	const [, section, slug, page] = pathname.split("/").filter(Boolean);
-	if (section !== "pods" || slug !== pod.slug) return undefined;
+	if (section !== "channels" || slug !== pod.slug) return undefined;
 	if (page === undefined) return "general";
-	if (page === "agents") return "bots";
 	return podSettingsPage(page);
 }
 

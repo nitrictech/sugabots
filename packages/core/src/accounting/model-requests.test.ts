@@ -29,7 +29,6 @@ describe.skipIf(!process.env.DATABASE_URL)("model requests, against Postgres", (
 		workspaceId: randomUUID(),
 		activity: {
 			purpose: "summary",
-			podId: randomUUID(),
 			threadId: randomUUID(),
 			turnId: randomUUID(),
 		},
@@ -54,7 +53,6 @@ describe.skipIf(!process.env.DATABASE_URL)("model requests, against Postgres", (
 		expect(await rowOf(id)).toMatchObject({
 			workspaceId: request.workspaceId,
 			purpose: "summary",
-			podId: "podId" in request.activity ? request.activity.podId : undefined,
 			agentId: null,
 			outcome: "started",
 			endedAt: null,

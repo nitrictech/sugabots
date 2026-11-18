@@ -12,13 +12,14 @@ import { NotReadyError } from "@/lib/failure.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 /**
- * The pods this person reaches: the shared pods they are in, which for an
- * administrator is every one, and their own Personal pod. Each one carries
- * what they may do in it, as the API resolves it.
+ * The channels this person sees: those they are in, which for an
+ * administrator is every one, and the public ones they could join
+ * (`isMember` tells them apart). Each one carries what they may do in it, as
+ * the API resolves it.
  *
- * The sidebar and the routes share this one query rather than fetching twice:
- * the sidebar lists them and a route resolves its `:pod` slug out of the
- * same cached list, which is also why there is no by-slug endpoint.
+ * The sidebar, the directory and the routes share this one query rather than
+ * fetching twice: a route resolves its `:channel` slug out of the same cached
+ * list, which is also why there is no by-slug endpoint.
  */
 export function usePods() {
 	const workspace = useWorkspace();
@@ -31,7 +32,7 @@ export function usePods() {
 	};
 }
 
-/** The pods of one workspace, which need not be the one being looked at. */
+/** The channels of one workspace, which need not be the one being looked at. */
 export function podsQuery(workspaceId: string | undefined) {
 	return queryOptions({
 		queryKey: ["pods", workspaceId],
@@ -48,17 +49,12 @@ export function findPod(pods: readonly Pod[] | undefined, slug: string): Pod | u
 	return pods?.find((pod) => pod.slug === slug);
 }
 
-/** The pod a workspace opens on: the first shared pod, or Personal for somebody in none. */
-export function defaultPod(pods: readonly Pod[] | undefined): Pod | undefined {
-	return pods?.find((pod) => pod.kind === "shared") ?? pods?.find((pod) => pod.kind === "personal");
-}
-
 /**
- * Makes a pod, and puts it in the pod menu.
+ * Makes a channel, and puts it in the sidebar.
  *
  * The API adds the creator as a member in the same transaction, so the new
- * pod is visible to whoever made it — which is why invalidating the list is
- * enough and there is nothing to reconcile by hand.
+ * channel is visible to whoever made it — which is why invalidating the list
+ * is enough and there is nothing to reconcile by hand.
  */
 export function useCreatePod() {
 	const queries = useQueryClient();
@@ -74,24 +70,6 @@ export function useCreatePod() {
 			);
 		},
 		onSuccess: () => queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
-	});
-}
-
-export function useEnsurePersonalPod() {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	return useMutation({
-		mutationFn: (model: string) => {
-			if (!workspaceId) throw new NotReadyError();
-			return Effect.runPromise(
-				client.api.pods.ensurePersonal({ params: { workspace: workspaceId }, payload: { model } }),
-			);
-		},
-		onSuccess: () =>
-			Promise.all([
-				queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
-				queries.invalidateQueries({ queryKey: ["agents", workspaceId] }),
-			]),
 	});
 }
 
@@ -116,7 +94,7 @@ export function useDeletePod() {
 	});
 }
 
-/** Who is in the pod; nothing is asked while `podId` is undefined. */
+/** Who is in the channel; nothing is asked while `podId` is undefined. */
 export function usePodMembers(podId: string | undefined) {
 	return useQuery({
 		queryKey: ["pod-members", podId],
@@ -128,7 +106,7 @@ export function usePodMembers(podId: string | undefined) {
 }
 
 /**
- * Adds a workspace member to a pod, or takes them out. One mutation for both
+ * Adds a workspace member to a channel, or takes them out. One mutation for both
  * directions because the caller is one list with an add and a remove on it.
  */
 export function usePlacePodMember(podId: string) {
@@ -145,7 +123,7 @@ export function usePlacePodMember(podId: string) {
 	});
 }
 
-/** Takes you out of a pod, and so out of the pod menu. */
+/** Takes you out of a channel, and so out of the sidebar. */
 export function useLeavePod(podId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
@@ -157,5 +135,46 @@ export function useLeavePod(podId: string) {
 				queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
 				queries.invalidateQueries({ queryKey: ["pod-members", podId] }),
 			]),
+	});
+}
+
+/** Puts you in a public channel, and so in the sidebar. */
+export function useJoinPod() {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+
+	return useMutation({
+		mutationFn: (podId: string) => Effect.runPromise(client.api.pods.join({ params: { podId } })),
+		onSuccess: (_joined, podId) =>
+			Promise.all([
+				queries.invalidateQueries({ queryKey: ["pods", workspaceId] }),
+				queries.invalidateQueries({ queryKey: ["pod-members", podId] }),
+			]),
+	});
+}
+
+/** The bots added to the channel; nothing is asked while `podId` is undefined. */
+export function usePodBots(podId: string | undefined) {
+	return useQuery({
+		queryKey: ["pod-bots", podId],
+		queryFn: podId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.pods.listBots({ params: { podId } }), { signal })
+			: skipToken,
+	});
+}
+
+/** Adds a public bot to the channel, or takes one out. */
+export function usePlacePodBot(podId: string) {
+	const queries = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ agentId, added }: { agentId: string; added: boolean }) =>
+			Effect.runPromise(
+				added
+					? client.api.pods.addBot({ params: { podId }, payload: { agentId } })
+					: client.api.pods.removeBot({ params: { podId, agentId } }),
+			),
+		onSuccess: () => queries.invalidateQueries({ queryKey: ["pod-bots", podId] }),
 	});
 }

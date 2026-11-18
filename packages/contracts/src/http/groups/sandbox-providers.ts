@@ -1,9 +1,9 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
+	agentSandboxDiskSchema,
 	newSandboxHostSchema,
 	newSandboxProviderSchema,
-	podSandboxDiskSchema,
 	sandboxAccessSchema,
 	sandboxHostSchema,
 	sandboxNetworkSettingsSchema,
@@ -66,10 +66,10 @@ export class SandboxProvidersApi extends HttpApiGroup.make("sandboxProviders")
 			success: sandboxProviderTestResultSchema,
 			error: refused,
 		}),
-		/** How full the disks of the pods' sandboxes the person can see are, of those measured. */
+		/** How full the disks of the computers of the bots the person can see are, of those measured. */
 		HttpApiEndpoint.get("disks", disks, {
 			params: workspace,
-			success: Schema.Array(podSandboxDiskSchema),
+			success: Schema.Array(agentSandboxDiskSchema),
 			error: refused,
 		}),
 		HttpApiEndpoint.get("network", network, {

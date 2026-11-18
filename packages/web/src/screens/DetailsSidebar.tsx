@@ -3,7 +3,6 @@ import type {
 	Agent,
 	Connection,
 	FilePart,
-	Pod,
 	SessionUser,
 	ThreadParticipant,
 	ThreadSummary,
@@ -52,7 +51,6 @@ const SUMMARY_FOLDED_OVER = 240;
  */
 export function DetailsSidebar({
 	agent,
-	pod,
 	threadId,
 	user,
 	contents,
@@ -60,7 +58,6 @@ export function DetailsSidebar({
 	onClose,
 }: {
 	agent: Agent;
-	pod: Pod;
 	threadId: string;
 	user: SessionUser;
 	/** Who is in the thread, and the files shared in it. */
@@ -96,21 +93,21 @@ export function DetailsSidebar({
 					<IconButton
 						label="Bot settings"
 						variant="bar"
-						render={<Link {...agentSettingsLink({ pod, agent })} state={backToChat} />}
+						render={<Link {...agentSettingsLink(agent)} state={backToChat} />}
 						className="border border-border-strong max-md:hidden"
 					>
 						<SettingsIcon size={15} />
 					</IconButton>
 					<div className="flex justify-center gap-7 pt-2 md:hidden">
 						<RoundAction
-							render={<Link {...agentSettingsLink({ pod, agent })} state={backToChat} />}
+							render={<Link {...agentSettingsLink(agent)} state={backToChat} />}
 							icon={<SettingsIcon size={20} />}
 							label="Settings"
 						/>
 						<RoundAction
 							render={<button type="button" onClick={() => onOpenRoutines()} />}
 							icon={<RefreshCcw size={20} strokeWidth={1.75} />}
-							label="Routines"
+							label="Automations"
 						/>
 					</div>
 				</div>
@@ -127,8 +124,8 @@ export function DetailsSidebar({
 						<ContextMeter context={activity.context} />
 					</SidebarSection>
 				)}
-				<Routines pod={pod} agent={agent} onOpen={onOpenRoutines} />
-				<Tools pod={pod} agent={agent} />
+				<Routines agent={agent} onOpen={onOpenRoutines} />
+				<Tools agent={agent} />
 				<InThisThread participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
@@ -282,13 +279,13 @@ function InThisThread({
 	if (participants.length === 0) return null;
 	return (
 		<SidebarSection
-			title="In this thread"
+			title="In this conversation"
 			end={
 				!phone && (
 					<button
 						type="button"
 						aria-expanded={open}
-						aria-label={`${participants.length} in this thread`}
+						aria-label={`${participants.length} in this conversation`}
 						onClick={() => setOpened(!opened)}
 						className="focus-ring -mr-1 flex items-center gap-2 rounded-md py-0.5 pr-1 pl-2 hover:bg-row-hover"
 					>
@@ -435,11 +432,9 @@ function ParticipantRow({
  * them all beside the chat.
  */
 function Routines({
-	pod,
 	agent,
 	onOpen,
 }: {
-	pod: Pod;
 	agent: Agent;
 	/** Opens the bot's routines beside the chat: all of them, or the one `routineId` names. */
 	onOpen: (routineId?: string) => void;
@@ -450,7 +445,7 @@ function Routines({
 	if (list.length === 0) return null;
 	return (
 		<SidebarSection
-			title="Routines"
+			title="Automations"
 			end={
 				<button
 					type="button"
@@ -482,7 +477,7 @@ function Routines({
 							label={`${routine.name} on`}
 							checked={routine.state === "enabled"}
 							disabled={
-								!pod.permissions.manageRoutines ||
+								!agent.permissions.manageRoutines ||
 								(actions.update.isPending && actions.update.variables?.routineId === routine.id)
 							}
 							onChange={(on) =>
@@ -501,13 +496,13 @@ function Routines({
 }
 
 /**
- * The apps the bot can reach, which are its pod's connections, with how many
- * of their tools it may use, each opening the bot's settings. One whose
+ * The apps the bot can reach, which are its connections, with how many of
+ * their tools it may use, each opening the bot's settings. One whose
  * sign-in expired says so instead, with a sign-in for someone who may.
  */
-export function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
+export function Tools({ agent }: { agent: Agent }) {
 	const backToChat = useBackToHere("Chat");
-	const connections = useConnections(pod.id);
+	const connections = useConnections(agent.id);
 	const list =
 		connections.data?.filter(
 			(connection) => connection.signInExpired || usableToolCount(connection) > 0,
@@ -519,10 +514,10 @@ export function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
 				{list.map((connection) => (
 					<li key={connection.id}>
 						{connection.signInExpired ? (
-							<ExpiredTool pod={pod} connection={connection} />
+							<ExpiredTool agent={agent} connection={connection} />
 						) : (
 							<Link
-								{...agentSettingsLink({ pod, agent })}
+								{...agentSettingsLink(agent)}
 								state={backToChat}
 								className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
 							>
@@ -547,8 +542,8 @@ export function Tools({ pod, agent }: { pod: Pod; agent: Agent }) {
 }
 
 /** A connection whose sign-in expired: its name, why the bot can't use it, and a sign-in for someone who may. */
-function ExpiredTool({ pod, connection }: { pod: Pod; connection: Connection }) {
-	const actions = useConnectionActions(pod.id);
+function ExpiredTool({ agent, connection }: { agent: Agent; connection: Connection }) {
+	const actions = useConnectionActions(agent.id);
 	return (
 		<div className="-mx-1.5 flex items-center gap-2.5 px-1.5 py-1 max-md:gap-3">
 			<ConnectionMark presetId={connectionMarkFor(connection)} name={connection.name} size="md" />
@@ -556,7 +551,7 @@ function ExpiredTool({ pod, connection }: { pod: Pod; connection: Connection }) 
 				<span className="truncate text-foreground text-xs max-md:text-sm">{connection.name}</span>
 				<WarningText className="text-warning text-xs">Sign-in expired</WarningText>
 			</div>
-			{pod.permissions.manageConnections && (
+			{agent.permissions.manageConnections && (
 				<Button
 					variant="secondary"
 					size="sm"

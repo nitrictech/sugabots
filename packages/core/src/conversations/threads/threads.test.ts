@@ -12,10 +12,12 @@ import {
 	message,
 	modelProvider,
 	pod,
+	podAgent,
 	podMember,
 	providerModel,
 	thread,
 	threadFile,
+	threadSummary,
 	turn,
 	user,
 	workspace,
@@ -32,7 +34,6 @@ import { Models } from "../../providers/models/models.ts";
 import { lane } from "../../workflows/sql.ts";
 import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
 import { SYSTEM_AGENTS } from "../../workspaces/agents/system-agents.ts";
-import { PodRepository } from "../../workspaces/pods/pod-repository.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { compactionLane } from "../compaction/compaction.workflow.ts";
@@ -74,6 +75,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 	const summaries = onPostgres({
 		prepare: Context.get(conversations, Summaries.Service).prepare,
 		complete: Context.get(conversations, Summaries.Service).complete,
+		prepareBotSummary: Context.get(conversations, Summaries.Service).prepareBotSummary,
+		completeBotSummary: Context.get(conversations, Summaries.Service).completeBotSummary,
 	});
 	const compactions = onPostgres({
 		prepare: Context.get(conversations, Compactions.Service).prepare,
@@ -86,41 +89,31 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 	let outsiderId: string;
 	let outsiderEmail: string;
 
-	async function createThread(input: {
-		workspaceId: string;
-		podId: string;
+	/** A task the person starts with the bot by sending it `message`, which the bot is asked to answer. */
+	async function startTask(input: {
 		hostAgentId: string;
 		initiatorUserId: string;
 		message: string;
 	}) {
-		const chats = chatsAs(input.initiatorUserId);
-		const opened = await chats.openBotChannel({
-			workspace: input.workspaceId,
-			podId: input.podId,
-			hostAgentId: input.hostAgentId,
-		});
-		await chats.post({
-			conversationId: opened.id,
-			messageId: crypto.randomUUID(),
-			content: input.message,
-		});
-		return viewAs(input.initiatorUserId).get(opened.id);
-	}
-
-	/** A thread with the bot, started from a message in its channel. */
-	async function startThreadWithBot(input: Parameters<typeof createThread>[0]) {
-		const chats = chatsAs(input.initiatorUserId);
-		const channel = await chats.openBotChannel({
-			workspace: input.workspaceId,
-			podId: input.podId,
-			hostAgentId: input.hostAgentId,
-		});
-		const started = await chats.startThread({
-			conversationId: channel.id,
+		const started = await chatsAs(input.initiatorUserId).startTask({
+			agentId: input.hostAgentId,
 			messageId: crypto.randomUUID(),
 			content: input.message,
 		});
 		return started.conversation;
+	}
+
+	/** A task as `startTask` starts it, with its participants and messages. */
+	async function createThread(input: Parameters<typeof startTask>[0]) {
+		const started = await startTask(input);
+		return viewAs(input.initiatorUserId).get(started.id);
+	}
+
+	/** Makes the bot private, so only its creator, the member, reaches it. */
+	async function makeBotPrivate() {
+		await onDatabase((db) =>
+			db.update(agent).set({ visibility: "private" }).where(eq(agent.id, agentId)),
+		);
 	}
 
 	/** The agent's turn running in the thread, as its workflow runs it. */
@@ -191,8 +184,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				.insert(pod)
 				.values({
 					workspaceId,
-					ownerId: memberId,
-					kind: "shared",
 					name: "Suga-Team",
 					slug: `suga-${suffix}`,
 					createdById: memberId,
@@ -204,7 +195,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				.insert(agent)
 				.values({
 					workspaceId,
-					podId: podRow?.id ?? "",
 					name: `Release agent ${suffix}`,
 					handle: handleFromName(`Release agent ${suffix}`),
 					color: "green",
@@ -228,7 +218,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				.values(
 					SYSTEM_AGENTS.map((definition) => ({
 						workspaceId,
-						podId: null,
 						createdById: memberId,
 						name: definition.name,
 						handle: handleFromName(definition.name),
@@ -247,17 +236,15 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		}
 	});
 
-	it("prepares a turn for crew who are not the thread's host", async () => {
-		// A shared thread gives the floor to whichever crew agent the router or a
-		// mention picks. Only the host could take a turn, so every routed turn was
-		// discarded as "the thread or its host agent no longer exists" and the
-		// person saw a reply that never arrived.
+	it("prepares a turn for a channel bot other than the one that spoke first", async () => {
+		// Every bot mentioned in a channel's main chat takes a turn, not only the
+		// first: preparing one for any bot but the first must not discard it as
+		// "the thread or its host agent no longer exists".
 		const [otherRow] = await onDatabase((db) =>
 			db
 				.insert(agent)
 				.values({
 					workspaceId,
-					podId,
 					name: `Second agent ${Date.now()}`,
 					handle: handleFromName(`Second agent ${Date.now()}`),
 					color: "teal",
@@ -268,79 +255,36 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				.returning({ id: agent.id }),
 		);
 		if (!otherRow) throw new Error("Could not create the second agent");
-
-		const details = await createThread({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Who should answer this?",
+		await onDatabase((db) =>
+			db.insert(podAgent).values([
+				{ workspaceId, podId, agentId },
+				{ workspaceId, podId, agentId: otherRow.id },
+			]),
+		);
+		const chats = chatsAs(memberId);
+		const mainChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		const posted = await chats.post({
+			conversationId: mainChat.id,
+			messageId: crypto.randomUUID(),
+			content: "Who should answer this?",
 		});
 		await runOnPostgres(
 			queueTurnForTests({
-				threadId: details.thread.id,
+				threadId: mainChat.id,
 				agentId: otherRow.id,
-				triggerMessageId: details.messages[0]?.id ?? "",
+				triggerMessageId: posted.id,
 				reason: "mention",
 			}),
 		);
-		const prepared = await prepareRunnable(
-			turns,
-			await runningTurn(details.thread.id, otherRow.id),
-		);
+		const prepared = await prepareRunnable(turns, await runningTurn(mainChat.id, otherRow.id));
 
 		expect(prepared.context.agent.id).toBe(otherRow.id);
-	});
-
-	it("summarises a thread after a reply from crew who are not its host", async () => {
-		// The summary is about the thread, not about whoever spoke last. Tying it
-		// to the host meant a shared thread stopped being summarised as soon as
-		// anyone else replied.
-		const [otherRow] = await onDatabase((db) =>
-			db
-				.insert(agent)
-				.values({
-					workspaceId,
-					podId,
-					name: `Third agent ${Date.now()}`,
-					handle: handleFromName(`Third agent ${Date.now()}`),
-					color: "orange",
-					face: "dot",
-					model: "claude-opus-4-1-20250805",
-					createdById: memberId,
-				})
-				.returning({ id: agent.id }),
-		);
-		if (!otherRow) throw new Error("Could not create the third agent");
-
-		const started = await startThreadWithBot({
-			workspaceId,
-			podId,
-			hostAgentId: agentId,
-			initiatorUserId: memberId,
-			message: "Anything to summarise?",
-		});
-		const sourceMessageId = crypto.randomUUID();
-		await chatsAs(memberId).post({
-			conversationId: started.id,
-			messageId: sourceMessageId,
-			content: "And this?",
-		});
-		const prepared = await summaries.prepare({
-			threadId: started.id,
-			agentId: otherRow.id,
-			sourceMessageId,
-		});
-
-		expect(prepared).toMatchObject({ _tag: "Prepared", threadId: started.id });
 	});
 
 	it("refuses an agent's turn by name once its model has been cleared", async () => {
 		// Cleared after the message is queued: a chat refuses the message itself
 		// when the model is already gone, so this is the turn that slips through.
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Anyone there?",
@@ -358,8 +302,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 	it("shows a thread as running while its turn lane is busy", async () => {
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Run as a workflow",
@@ -374,15 +316,14 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 	it("loads a conversation with its participants and first message", async () => {
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Check the release\nPay attention to migrations.",
 		});
 
-		expect(details.thread.title).toMatch(/^Release agent /);
-		expect(details.participants.map(({ kind }) => kind)).toEqual(["agent", "person"]);
+		// A task is titled from its first message.
+		expect(details.thread.title).toBe("Check the release Pay attention to migration…");
+		expect(details.participants.map(({ kind }) => kind).sort()).toEqual(["agent", "person"]);
 		expect(details.messages).toMatchObject([
 			{
 				author: { kind: "person", id: memberId },
@@ -403,8 +344,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 	it("pages a large history without gaps at equal-timestamp boundaries", async () => {
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Message 000",
@@ -476,8 +415,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 	it("replays a committed message after reconnect", async () => {
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "First",
@@ -507,7 +444,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		});
 	});
 
-	it("rejects thread pods and hosts from another workspace at the database boundary", async () => {
+	it("rejects channels and bots from another workspace at the database boundary", async () => {
 		const [otherWorkspace] = await onDatabase((db) =>
 			db
 				.insert(workspace)
@@ -525,8 +462,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				.insert(pod)
 				.values({
 					workspaceId: otherWorkspace.id,
-					ownerId: memberId,
-					kind: "shared",
 					name: "Foreign",
 					slug: "foreign",
 				})
@@ -537,7 +472,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				.insert(agent)
 				.values({
 					workspaceId: otherWorkspace.id,
-					podId: foreignPod?.id ?? "",
 					name: "Foreign agent",
 					handle: "foreign-agent",
 					color: "rose",
@@ -555,9 +489,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 				db.insert(thread).values({
 					workspaceId,
 					podId: foreignPod.id,
-					hostAgentId: agentId,
-					type: "conversation",
-					title: "Foreign pod",
+					type: "pod_chat",
+					title: "Foreign channel",
 					initiatorUserId: memberId,
 				}),
 			),
@@ -566,7 +499,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			onDatabase((db) =>
 				db.insert(thread).values({
 					workspaceId,
-					podId,
 					hostAgentId: foreignAgent.id,
 					type: "conversation",
 					title: "Foreign host",
@@ -578,29 +510,20 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 	it("deletes hosted thread history with its host agent", async () => {
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Keep this history",
 		});
 
 		const agents = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
-		const pods = await servedOnPostgres(PodRepository.Service, PodRepository.layer);
 		await agents.remove(workspaceId, agentId);
 		expect(
 			await onDatabase((db) => db.select().from(thread).where(eq(thread.id, details.thread.id))),
 		).toHaveLength(0);
-		await expect(pods.remove(workspaceId, podId)).resolves.toBeUndefined();
 	});
 
 	it("adds each human sender to the participant stack", async () => {
-		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId, podId, userId: outsiderId }),
-		);
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "First",
@@ -622,8 +545,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 	it("counts a quiet thread's latest messages as recent, and a busy thread's last week", async () => {
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Latest",
@@ -660,9 +581,7 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 	});
 
 	it("queues and persists a fresh summary after a completed exchange", async () => {
-		const started = await startThreadWithBot({
-			workspaceId,
-			podId,
+		const started = await startTask({
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Summarize this thread",
@@ -782,49 +701,95 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		await summaries.complete(nextSummary, { content: "Only approval remains." });
 		// Only the first summary titles the thread.
 		expect((await viewAs(memberId).get(started.id))?.thread.title).toBe("Verify the release");
+
+		// The bot's own summary is written from its tasks' summaries, the newest first.
+		const bot = await summaries.prepareBotSummary(started.id);
+		expect(bot).toMatchObject({
+			agentId,
+			previousContent: undefined,
+			threads: [{ title: "Verify the release", summary: "Only approval remains.", doneAt: null }],
+		});
+		if (!bot) throw new Error("The bot's summary was not prepared");
+		await summaries.completeBotSummary(bot, "Verifying the release; only approval remains.");
+		expect(await summaries.prepareBotSummary(started.id)).toMatchObject({
+			previousContent: "Verifying the release; only approval remains.",
+		});
+
+		// A collaboration the bot was asked in belongs to the conversation that asked it.
+		const [asked] = await onDatabase((db) =>
+			db
+				.insert(thread)
+				.values({
+					workspaceId,
+					hostAgentId: agentId,
+					conversationId: started.id,
+					parentThreadId: started.id,
+					type: "collaboration",
+					title: "A private plan",
+				})
+				.returning(),
+		);
+		if (!asked) throw new Error("The collaboration was not opened");
+		const [answer] = await onDatabase((db) =>
+			db
+				.insert(message)
+				.values({
+					threadId: asked.id,
+					authorAgentId: agentId,
+					kind: "text",
+					status: "complete",
+					parts: [{ type: "text", text: "Planned." }],
+					content: "Planned.",
+				})
+				.returning(),
+		);
+		if (!answer) throw new Error("The collaboration has no answer");
+		await onDatabase((db) =>
+			db.insert(threadSummary).values({
+				threadId: asked.id,
+				content: "Planning something private.",
+				sourceMessageId: answer.id,
+			}),
+		);
+		expect(await summaries.prepareBotSummary(asked.id)).toBeUndefined();
+		expect((await summaries.prepareBotSummary(started.id))?.threads).toEqual([
+			expect.objectContaining({ title: "Verify the release" }),
+		]);
 	});
 
-	it("does not summarise a channel the bot replies in", async () => {
+	it("does not summarise a channel's main chat the bot replies in", async () => {
 		const [host] = await onDatabase((db) =>
 			db.select({ handle: agent.handle }).from(agent).where(eq(agent.id, agentId)),
 		);
 		if (!host) throw new Error("The bot is gone");
+		await onDatabase((db) => db.insert(podAgent).values({ workspaceId, podId, agentId }));
 		const chats = chatsAs(memberId);
-		const botChannel = await chats.openBotChannel({
-			workspace: workspaceId,
-			podId,
-			hostAgentId: agentId,
+		const mainChat = await chats.openPodChat({ workspace: workspaceId, podId });
+		await chats.post({
+			conversationId: mainChat.id,
+			messageId: crypto.randomUUID(),
+			content: `@${host.handle} what changed?`,
 		});
-		const podChat = await chats.openPodChat({ workspace: workspaceId, podId });
-		for (const channel of [botChannel, podChat]) {
-			await chats.post({
-				conversationId: channel.id,
-				messageId: crypto.randomUUID(),
-				content: `@${host.handle} what changed?`,
-			});
-			const run = await runningTurn(channel.id);
-			const reply = await prepareRunnable(turns, run);
-			await turnRecords.complete(
-				replyTurnOf(reply),
-				{ content: "Nothing yet.", collaborations: [], toolCalls: [] },
-				{ contextCapacity: 200_000, readKeptFrom: null },
-			);
-			await runOnPostgres(releaseTurn(run));
+		const run = await runningTurn(mainChat.id);
+		const reply = await prepareRunnable(turns, run);
+		await turnRecords.complete(
+			replyTurnOf(reply),
+			{ content: "Nothing yet.", collaborations: [], toolCalls: [] },
+			{ contextCapacity: 200_000, readKeptFrom: null },
+		);
+		await runOnPostgres(releaseTurn(run));
 
-			expect(
-				await summaries.prepare({
-					threadId: channel.id,
-					agentId,
-					sourceMessageId: reply.responseMessage.id,
-				}),
-			).toMatchObject({ _tag: "Skipped" });
-		}
+		expect(
+			await summaries.prepare({
+				threadId: mainChat.id,
+				agentId,
+				sourceMessageId: reply.responseMessage.id,
+			}),
+		).toMatchObject({ _tag: "Skipped" });
 	});
 
 	it("records a summary the model could not write as the Scribe's failed turn", async () => {
-		const started = await startThreadWithBot({
-			workspaceId,
-			podId,
+		const started = await startTask({
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Summarize this thread",
@@ -864,9 +829,8 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 	});
 
 	it("requests cancellation only once while an authorized turn remains active", async () => {
+		await makeBotPrivate();
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Wait for review",
@@ -886,13 +850,12 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		expect(announced.filter(({ payload }) => payload.turnId === prepared.turnId)).toHaveLength(1);
 	});
 
-	it("does not expose a thread to another workspace member outside its pod", async () => {
+	it("does not expose a private bot's task to another workspace member", async () => {
+		await makeBotPrivate();
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
-			message: "Private to the pod",
+			message: "Private to its creator",
 		});
 
 		await expect(viewAs(outsiderId).get(details.thread.id)).rejects.toThrow(ResourceHidden);
@@ -901,8 +864,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 	it("compacts a long thread into a summary and the newest messages, and searches what came before", async () => {
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Plan the trip",
@@ -1066,8 +1027,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 		"asks for a compaction only once a reply's prompt reaches the compaction line ($contextTokens tokens)",
 		async ({ contextTokens, asked }) => {
 			const details = await createThread({
-				workspaceId,
-				podId,
 				hostAgentId: agentId,
 				initiatorUserId: memberId,
 				message: "Plan the trip",
@@ -1105,8 +1064,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 	it("searches history in any language: stemmed, as written, and as substrings", async () => {
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Plan the trip",
@@ -1160,8 +1117,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 
 	it("finds the files a message carried, even one with nothing else in it", async () => {
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Contracts",
@@ -1268,8 +1223,6 @@ describe.skipIf(!process.env.DATABASE_URL)("threads, against Postgres", async ()
 			]),
 		);
 		const details = await createThread({
-			workspaceId,
-			podId,
 			hostAgentId: agentId,
 			initiatorUserId: memberId,
 			message: "Plan the trip",

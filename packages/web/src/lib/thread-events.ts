@@ -1,5 +1,4 @@
 import {
-	type ChatMessagesPage,
 	isAttached,
 	type Message,
 	type MessagePart,
@@ -13,12 +12,7 @@ import {
 	threadUpdateEventSchema,
 	workspaceUpdateEventSchema,
 } from "@sugabots/contracts";
-import {
-	type InfiniteData,
-	type QueryClient,
-	useQuery,
-	useQueryClient,
-} from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
@@ -335,11 +329,6 @@ async function applyWorkspaceEvent(
 			await Promise.all([
 				queries.invalidateQueries({ queryKey: ["chat-messages", update.conversationId] }),
 				queries.invalidateQueries({ queryKey: ["chat-history", update.conversationId] }),
-				// A pod's chat links the threads started from it, with how many replies each has.
-				queries.invalidateQueries({
-					queryKey: ["chat-messages"],
-					predicate: (query) => linksThread(query.state.data, update.conversationId),
-				}),
 				// A new message moves its conversation up the list, changes its preview, and may leave it unread.
 				refreshAfterThreadChange(queries, workspaceId),
 			]);
@@ -347,11 +336,6 @@ async function applyWorkspaceEvent(
 		case "thread.changed":
 			await Promise.all([
 				queries.invalidateQueries({ queryKey: ["chat-history"] }),
-				// A reply, or its bot starting or stopping, changes how the thread's line in a chat reads.
-				queries.invalidateQueries({
-					queryKey: ["chat-messages"],
-					predicate: (query) => linksThread(query.state.data, update.threadId),
-				}),
 				// A message, a reply, or an approval asked for may change how a chat stands in the lists.
 				refreshAfterThreadChange(queries, workspaceId),
 			]);
@@ -367,21 +351,6 @@ async function applyWorkspaceEvent(
 		default:
 			update satisfies never;
 	}
-}
-
-/**
- * Whether a cached page of a chat's messages links the thread `conversationId`:
- * a thread started from the chat, or a collaboration asked of its bot.
- */
-function linksThread(data: unknown, conversationId: string): boolean {
-	const pages = (data as InfiniteData<ChatMessagesPage | undefined> | undefined)?.pages ?? [];
-	return pages.some((page) =>
-		page?.items.some(
-			(item) =>
-				(item.kind === "thread" || item.kind === "collaboration") &&
-				item.threadId === conversationId,
-		),
-	);
 }
 
 function updateThreadMessage(

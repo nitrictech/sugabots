@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { agent, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
@@ -7,6 +8,7 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { noComputers } from "../../sandboxes/testing.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { AgentAdministration } from "./agent-administration.ts";
 import { AgentRepository } from "./agent-repository.ts";
@@ -24,7 +26,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 		agents = await servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
 		administrationAs = await servedOnPostgresAs(
 			AgentAdministration.Service,
-			AgentAdministration.layer,
+			AgentAdministration.layer.pipe(Layer.provide(noComputers)),
 		);
 	});
 
@@ -66,18 +68,18 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 	const placed = () =>
 		onDatabase((db) =>
 			db
-				.select({ key: agent.systemAgentKey, podId: agent.podId, model: agent.model })
+				.select({ key: agent.systemAgentKey, model: agent.model })
 				.from(agent)
 				.where(eq(agent.workspaceId, workspaceId))
 				.orderBy(agent.name),
 		);
 
-	it("gives a workspace one of each, in no pod and with no model", async () => {
+	it("gives a workspace one of each, with no model", async () => {
 		await agents.ensureSystemAgents({ workspaceId, createdById: creatorId });
 
 		expect(await placed()).toEqual([
-			{ key: "compact", podId: null, model: null },
-			{ key: "summarise", podId: null, model: null },
+			{ key: "compact", model: null },
+			{ key: "summarise", model: null },
 		]);
 	});
 
@@ -131,7 +133,6 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system agents", () =
 			onDatabase((db) =>
 				db.insert(agent).values({
 					workspaceId,
-					podId: null,
 					name: "Second Scribe",
 					handle: "second-scribe",
 					systemAgentKey: "summarise",

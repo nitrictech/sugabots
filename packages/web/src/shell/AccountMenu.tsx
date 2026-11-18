@@ -86,7 +86,7 @@ export function AccountMenu({
 									key={workspace.id}
 									render={
 										<Link
-											to="/$workspace/agents"
+											to="/$workspace"
 											params={{ workspace: workspace.slug }}
 											onClick={() => chooseWorkspace(workspace.id)}
 										/>

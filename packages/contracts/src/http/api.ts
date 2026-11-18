@@ -1,4 +1,5 @@
 import { HttpApi } from "effect/unstable/httpapi";
+import { AgentSandboxApi } from "./groups/agent-sandbox.ts";
 import { AgentsApi } from "./groups/agents.ts";
 import { ArtifactsApi } from "./groups/artifacts.ts";
 import { ChatsApi } from "./groups/chats.ts";
@@ -9,7 +10,6 @@ import { ModelProvidersApi } from "./groups/model-providers.ts";
 import { ModelTrialsApi } from "./groups/model-trials.ts";
 import { NotificationsApi } from "./groups/notifications.ts";
 import { OnboardingApi } from "./groups/onboarding.ts";
-import { PodSandboxApi } from "./groups/pod-sandbox.ts";
 import { PodsApi } from "./groups/pods.ts";
 import { ReferralsApi } from "./groups/referrals.ts";
 import { RoutinesApi } from "./groups/routines.ts";
@@ -44,7 +44,7 @@ export class Api extends HttpApi.make("sugabots")
 	.add(ModelProvidersApi)
 	.add(SearchProvidersApi)
 	.add(SandboxProvidersApi)
-	.add(PodSandboxApi)
+	.add(AgentSandboxApi)
 	.add(GitHubConnectionsApi)
 	.add(GitHubWebhooksApi)
 	.add(ConnectionsApi)

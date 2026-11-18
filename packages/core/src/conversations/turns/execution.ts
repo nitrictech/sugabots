@@ -1,8 +1,14 @@
 export * as TurnExecution from "./execution.ts";
 
-import type { AgentColor, Message, ThreadParticipant, ThreadType } from "@sugabots/contracts";
+import type {
+	AgentColor,
+	AgentVisibility,
+	Message,
+	ThreadParticipant,
+	ThreadType,
+} from "@sugabots/contracts";
 import { UserText, userText } from "@sugabots/errors";
-import { inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
 	type Database,
@@ -12,8 +18,14 @@ import {
 	type Transaction,
 	transaction,
 } from "../../database/database.ts";
-import { routineExecution, type TurnReason, threadCompaction } from "../../database/schema.ts";
+import {
+	agent,
+	routineExecution,
+	type TurnReason,
+	threadCompaction,
+} from "../../database/schema.ts";
 import { modelAcceptsImages } from "../../providers/model-providers/model-provider-reads.ts";
+import { ASSISTANT_PROMPT } from "../../workspaces/agents/assistant-prompt.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { messageTextWithPlacedParts } from "../threads/message-text.ts";
@@ -113,26 +125,22 @@ export const make = Effect.gen(function* () {
 						const request = run.request;
 						const loaded = yield* query((db) => loadTurnContext(db, request.threadId));
 						if (!loaded) return yield* refuseRun(run, "The thread is gone", CANCELLED);
-						// A direct message between people is in no pod, so no bot is crew in it.
-						const { pod } = loaded;
-						if (!pod) {
-							return yield* refuseRun(run, "The thread is in no pod, so no bot answers in it", {
-								status: "failed",
-								userMessage: NOT_IN_POD,
-							});
-						}
-						// The agent has to be crew placed in the thread's pod, not the
-						// thread's host. A shared thread gives the floor to whoever a
-						// mention picks, and that is rarely the host.
-						// Pod membership is still a real check: it is what stops a turn
-						// request naming an agent from another pod or another workspace.
-						const speaker = pod.agents.find(({ id }) => id === request.agentId);
+						// In a channel the bot has to be one of the channel's, whoever a
+						// mention picks; in a bot's own thread, it has to be that bot. A
+						// direct message between people has no bot at all. This is what
+						// stops a turn request naming a bot from elsewhere.
+						const speaker = loaded.pod
+							? loaded.pod.agents.find(({ id }) => id === request.agentId)
+							: loaded.hostAgent?.id === request.agentId
+								? loaded.hostAgent
+								: undefined;
 						if (!speaker) {
-							return yield* refuseRun(run, "The agent is not a crew agent in the thread's pod", {
+							return yield* refuseRun(run, "The bot does not answer in this thread", {
 								status: "failed",
-								userMessage: NOT_IN_POD,
+								userMessage: NOT_HERE,
 							});
 						}
+						const crew = yield* query((db) => collaboratorsOf(db, loaded.workspaceId, speaker.id));
 						// An agent whose model has been cleared does not fall back to
 						// another one: it stops, and says so, until somebody chooses.
 						// Read out here so what opens the turn is handed a model rather
@@ -172,9 +180,7 @@ export const make = Effect.gen(function* () {
 						const inThread = loaded.messages
 							.reverse()
 							.map((stored) => messageFromRelations(stored));
-						// A thread started from a message in a pod's chat begins with that message, which stays there.
-						const startedFrom = loaded.origin ? messageFromRelations(loaded.origin) : undefined;
-						const messages = startedFrom ? [startedFrom, ...inThread] : inThread;
+						const messages = inThread;
 						const trigger = messages.find(({ id }) => id === request.triggerMessageId);
 						// Loaded before the history is trimmed, so what they add counts towards its limit.
 						const routineInstructions = yield* query((db) => loadRoutineInstructions(db, messages));
@@ -209,30 +215,27 @@ export const make = Effect.gen(function* () {
 									handle: speaker.handle,
 									model,
 									acceptsImages,
-									prompt: speaker.prompt,
+									prompt: speaker.assistantOf === null ? speaker.prompt : ASSISTANT_PROMPT,
+									assistantOf: speaker.assistantOf,
+									visibility: speaker.visibility,
 									disabledTools: speaker.disabledTools,
 									usesSandbox: speaker.usesSandbox,
 									naturalBrowsing: speaker.naturalBrowsing,
 									color: speaker.color,
-									podId: pod.id,
 								},
 								reason: request.reason,
-								podName: pod.name,
-								podSlug: pod.slug,
+								channel: loaded.pod ? { name: loaded.pod.name, slug: loaded.pod.slug } : null,
 								workspaceName: loaded.workspace.name,
 								workspaceSlug: loaded.workspace.slug,
 								workspaceTimeZone: loaded.workspace.timeZone,
 								askedBy: trigger?.author.kind === "person" ? trigger.author.id : null,
 								startedFor: request.reason === "brief" ? loaded.initiatorUserId : null,
-								crew: pod.agents
-									.filter(({ id }) => id !== speaker.id)
-									.map(({ id, name, handle, description }) => ({ id, name, handle, description })),
+								crew,
 								participants: loaded.participants.map(({ user, agent }) =>
 									toParticipant(authorRow(user, agent)),
 								),
 								windowTokens,
 								compaction: loaded.compaction ?? undefined,
-								startedFrom,
 								messages: history,
 								routineInstructions,
 							},
@@ -284,7 +287,6 @@ export function replyTurnOf(prepared: PreparedTurn): ReplyTurn {
 		turnId: prepared.turnId,
 		threadId: prepared.context.thread.id,
 		workspaceId: prepared.context.thread.workspaceId,
-		podId: prepared.context.agent.podId,
 		agentId: prepared.context.agent.id,
 		reason: prepared.run.request.reason,
 		messageId: prepared.responseMessage.id,
@@ -298,7 +300,7 @@ export interface TurnContext {
 		workspaceId: string;
 		title: string;
 		type: ThreadType;
-		/** The bot whose thread or channel it is; none in a pod's chat or between people. */
+		/** The bot whose thread it is; none in a channel's conversation or between people. */
 		hostAgentId: string | null;
 		/** Set when another agent opened this thread by delegating to this one. */
 		parentThreadId: string | null;
@@ -310,22 +312,25 @@ export interface TurnContext {
 		model: string;
 		/** Whether its model takes images, which tools can then show it. */
 		acceptsImages: boolean;
+		/** What it is told to be: its own instructions, or for a Personal Assistant, Sugabots'. */
 		prompt: string;
+		/** On a Personal Assistant: the one person it works for. */
+		assistantOf: string | null;
+		/** Whether everyone in the workspace reaches it, or only its creator. */
+		visibility: AgentVisibility;
 		/** Built-in tools an admin switched off for this agent, by key. */
 		disabledTools: string[];
-		/** Whether an admin let this agent use its pod's sandbox. */
+		/** Whether somebody let this bot use a computer. */
 		usesSandbox: boolean;
 		/** Whether it browses so people watching its desktop can follow. */
 		naturalBrowsing: boolean;
 		/** Its colour, which its desktop in the sandbox is drawn in. */
 		color: AgentColor;
-		podId: string;
 	};
 	/** Why this agent has the turn, when the trigger recorded it. */
 	reason: TurnReason | undefined;
-	podName: string;
-	/** Where the pod and its workspace are in the web app's addresses. */
-	podSlug: string;
+	/** The channel the conversation is in, by name and address; none in a bot's own thread. */
+	channel: { name: string; slug: string } | null;
 	workspaceName: string;
 	workspaceSlug: string;
 	/** The workspace's timezone, which the schedules the agent sets up run in. */
@@ -343,18 +348,13 @@ export interface TurnContext {
 	 * do, such as starting another thread or changing instructions.
 	 */
 	startedFor: string | null;
-	/** The other crew agents in the pod, who this agent may collaborate with. */
+	/** The workspace's other bots, which this one may ask for help. */
 	crew: Array<{ id: string; name: string; handle: string; description: string | null }>;
 	participants: ThreadParticipant[];
 	/** The context window the agent's model is treated as having, which every limit is a share of. */
 	windowTokens: number;
 	/** What the Compaction agent left in place of older history, once the thread has been compacted. */
 	compaction: TurnCompaction | undefined;
-	/**
-	 * On a thread started from a pod's chat: the message in the chat it hangs
-	 * off, which `messages` begins with while it fits.
-	 */
-	startedFrom: Message | undefined;
 	/**
 	 * The newest completed messages, oldest first: those since the compaction
 	 * kept them word for word, as many as fit the agent's history limit.
@@ -421,7 +421,30 @@ const MAX_HISTORY_MESSAGES = 1_000;
 const CANCELLED = { status: "cancelled", userMessage: TURN_CANCELLED } as const;
 
 /** What people are told when an agent asked to reply in a thread is not in its pod. */
-const NOT_IN_POD = userText`The agent asked to reply is not in this pod, so it cannot reply.`;
+const NOT_HERE = userText`The bot asked to reply doesn't answer here, so it cannot reply.`;
+
+/**
+ * The bots `agentId` may ask for help: every other bot of the workspace that
+ * people talk to, but not a Personal Assistant, which is its person's alone.
+ */
+const collaboratorsOf = (db: Executor, workspaceId: string, agentId: string) =>
+	db
+		.select({
+			id: agent.id,
+			name: agent.name,
+			handle: agent.handle,
+			description: agent.description,
+		})
+		.from(agent)
+		.where(
+			and(
+				eq(agent.workspaceId, workspaceId),
+				ne(agent.id, agentId),
+				isNull(agent.systemAgentKey),
+				isNull(agent.assistantOf),
+			),
+		)
+		.orderBy(asc(agent.name));
 
 function notRunnable(reason: string, ended?: Ended): NotRunnable {
 	return { _tag: "NotRunnable", reason, ended };
@@ -429,11 +452,28 @@ function notRunnable(reason: string, ended?: Ended): NotRunnable {
 
 /**
  * Everything the model is told about the thread, in one statement: the
- * thread with its workspace, its pod and the crew placed there, the people and
- * agents in it, its compaction, the message in a pod's chat it was started
- * from, and its newest completed messages since the compaction kept them, with
- * the parts placed in them.
+ * thread with its workspace, its channel and the bots in it or the bot it is
+ * with, the people and bots in it, its compaction, and its newest completed
+ * messages since the compaction kept them, with the parts placed in them.
  */
+/** What a bot that speaks in a thread is read with. */
+const SPEAKER_COLUMNS = {
+	id: true,
+	name: true,
+	handle: true,
+	color: true,
+	face: true,
+	shape: true,
+	description: true,
+	model: true,
+	prompt: true,
+	disabledTools: true,
+	usesSandbox: true,
+	naturalBrowsing: true,
+	assistantOf: true,
+	visibility: true,
+} as const;
+
 const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 	db: Executor,
 	threadId: string,
@@ -454,34 +494,15 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 			workspace: { columns: { name: true, slug: true, timeZone: true } },
 			pod: {
 				columns: { id: true, name: true, slug: true },
-				with: {
-					// Every agent placed in a pod is crew: system agents are placed in none.
-					agents: {
-						columns: {
-							id: true,
-							name: true,
-							handle: true,
-							color: true,
-							face: true,
-							shape: true,
-							description: true,
-							model: true,
-							prompt: true,
-							disabledTools: true,
-							usesSandbox: true,
-							naturalBrowsing: true,
-						},
-						orderBy: { name: "asc" },
-					},
-				},
+				with: { agents: { columns: SPEAKER_COLUMNS, orderBy: { name: "asc" } } },
 			},
+			hostAgent: { columns: SPEAKER_COLUMNS },
 			participants: {
 				columns: {},
 				orderBy: { createdAt: "asc", id: "asc" },
 				with: { user: personColumns, agent: agentColumns },
 			},
 			compaction: { columns: { summary: true, historyStartsAt: true, keptFrom: true } },
-			origin: { with: messageRelations },
 			// The reply being written is `streaming`, so this leaves it out.
 			messages: {
 				where: {

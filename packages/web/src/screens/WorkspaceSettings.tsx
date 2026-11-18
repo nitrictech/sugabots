@@ -1,7 +1,6 @@
 import { type Liveliness, livelinessLevels } from "@sugabots/avatars";
 import {
 	type Agent,
-	type Pod,
 	USER_NAME_MAX_LENGTH,
 	WORKSPACE_NAME_MAX_LENGTH,
 	type WorkspaceRole,
@@ -27,7 +26,11 @@ import {
 	useWorkspaceRole,
 	useWorkspaceTimeZone,
 } from "@/lib/workspace.ts";
-import type { PodSettingsPage, WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
+import type {
+	AgentSettingsPage as AgentSettingsPageId,
+	PodSettingsPage,
+	WorkspaceSettingSection,
+} from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -42,6 +45,11 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
+import {
+	AgentComputerSettings,
+	AgentConnection,
+	AgentConnectionsSettings,
+} from "./AgentResourcesSettings.tsx";
 import { AgentSettingsPage } from "./AgentSettingsPage.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { NotificationsSettings } from "./NotificationsSettings.tsx";
@@ -51,13 +59,14 @@ import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
-import { WorkspacePodsSettings } from "./WorkspacePodsSettings.tsx";
+import { WorkspaceBotsSettings, WorkspacePodsSettings } from "./WorkspacePodsSettings.tsx";
 
 export function WorkspaceSettings({
 	section,
 	selectedAgent,
 	selectedPodId,
 	podPage,
+	agentPage,
 	selectedConnectionId,
 	connectionSignInError,
 	selectedProviderId,
@@ -65,12 +74,14 @@ export function WorkspaceSettings({
 	selectedMemberId,
 }: {
 	section: WorkspaceSettingSection;
-	/** A bot open on its own page, in place of its pod's. */
-	selectedAgent?: { agent: Agent; pod: Pod };
+	/** A bot open on its own page. */
+	selectedAgent?: Agent;
 	selectedPodId?: string;
-	/** Which of the selected pod's pages is open. */
+	/** Which of the selected channel's pages is open. */
 	podPage?: PodSettingsPage;
-	/** The connection of the selected pod open on its own page. */
+	/** Which of the selected bot's pages is open. */
+	agentPage?: AgentSettingsPageId;
+	/** The connection of the selected bot open on its own page. */
 	selectedConnectionId?: string;
 	connectionSignInError?: string;
 	/** The provider open on the Models page. */
@@ -100,20 +111,30 @@ export function WorkspaceSettings({
 				) : (
 					<ModelsSettings />
 				)
-			) : selectedAgent ? (
-				<AgentSettingsPage
-					key={selectedAgent.agent.id}
-					agent={selectedAgent.agent}
-					pod={selectedAgent.pod}
+			) : selectedAgent && selectedConnectionId ? (
+				<AgentConnection
+					key={selectedConnectionId}
+					agent={selectedAgent}
+					connectionId={selectedConnectionId}
 				/>
-			) : section === "pods" ? (
+			) : selectedAgent && agentPage === "connections" ? (
+				<AgentConnectionsSettings
+					key={selectedAgent.id}
+					agent={selectedAgent}
+					signInError={connectionSignInError}
+				/>
+			) : selectedAgent && agentPage === "computer" ? (
+				<AgentComputerSettings key={selectedAgent.id} agent={selectedAgent} />
+			) : selectedAgent ? (
+				<AgentSettingsPage key={selectedAgent.id} agent={selectedAgent} />
+			) : section === "channels" ? (
 				<WorkspacePodsSettings
 					selectedPodId={selectedPodId}
 					podPage={podPage}
-					selectedConnectionId={selectedConnectionId}
-					connectionSignInError={connectionSignInError}
 					canCreatePods={may.createPods}
 				/>
+			) : section === "bots" ? (
+				<WorkspaceBotsSettings canCreate={may.createAgents} />
 			) : (
 				<>
 					{section === "general" && (
@@ -185,7 +206,7 @@ function workspaceSummary(
 ): string | undefined {
 	if (people === undefined || pods === undefined) return undefined;
 	const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
-	return `Workspace with ${plural(people, "member")} and ${plural(pods, "pod")}`;
+	return `Workspace with ${plural(people, "member")} and ${plural(pods, "channel")}`;
 }
 
 function GeneralSettings({
@@ -257,7 +278,7 @@ function GeneralSettings({
 				<>
 					<SettingsDanger
 						label="Delete workspace"
-						description={`Removes every pod, bot and thread in ${workspace.name}.`}
+						description={`Removes every channel, bot and conversation in ${workspace.name}.`}
 						action="Delete"
 						onClick={() => setConfirmingDelete(true)}
 					/>
@@ -265,7 +286,7 @@ function GeneralSettings({
 						open={confirmingDelete}
 						onOpenChange={setConfirmingDelete}
 						title={`Delete ${workspace.name}?`}
-						description="Its pods, bots, conversations and connections are deleted, and everyone in it loses it. This can't be undone."
+						description="Its channels, bots, conversations and connections are deleted, and everyone in it loses it. This can't be undone."
 						pending={deleteWorkspace.isPending}
 						error={deleteWorkspace.error ? failureMessage(deleteWorkspace.error) : undefined}
 						onDelete={() => confirmDelete(workspace.id)}

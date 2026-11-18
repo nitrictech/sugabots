@@ -63,7 +63,7 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 		}),
 		HttpApiEndpoint.delete("removeMember", "/workspaces/:workspace/members/:memberId", {
 			params: { ...workspace, memberId: uuidSchema },
-			error: [BadRequest, ...refused],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.put("transferOwnership", "/workspaces/:workspace/owner", {
 			params: workspace,
@@ -72,7 +72,7 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 		}),
 		HttpApiEndpoint.post("leave", "/workspaces/:workspace/leave", {
 			params: workspace,
-			error: [BadRequest, ...refused],
+			error: [BadRequest, Conflict, ...refused],
 		}),
 		HttpApiEndpoint.get("invitations", "/workspaces/:workspace/invitations", {
 			params: workspace,

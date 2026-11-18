@@ -5,12 +5,12 @@ import { Check, ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useApprovalApp } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
-import { conversationLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePods } from "@/lib/pods.ts";
 import { useReviewToolCall } from "@/lib/threads.ts";
 import { toolTitle, wordsFromKey } from "@/lib/tool-names.ts";
+import { ConversationLink } from "@/shell/ConversationLink.tsx";
 import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE, usePhoneBack } from "@/ui/back-button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
@@ -53,7 +53,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 	const { call, agent } = request;
 	const { data: pods } = usePods();
 	const { look, appName, action } = useApprovalApp(request);
-	const review = useReviewToolCall(request.threadId, request.podId);
+	const review = useReviewToolCall(request.threadId);
 	const pod = pods?.find((candidate) => candidate.id === request.podId);
 	const askedIn = [
 		pod && `in ${pod.name}`,
@@ -129,16 +129,18 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 						</p>
 					)}
 					<span className="flex-1 max-md:hidden" />
-					{pod && request.conversationId && (
-						<Link
-							{...conversationLink(
-								{ pod, conversationId: request.conversationId },
-								request.threadId === request.conversationId ? {} : { thread: request.threadId },
-							)}
+					{request.conversationId && (
+						<ConversationLink
+							pod={pod}
+							agent={request.agent}
+							conversationId={request.conversationId}
+							search={
+								request.threadId === request.conversationId ? {} : { thread: request.threadId }
+							}
 							className="focus-ring rounded-sm font-medium text-xs text-link max-md:self-center max-md:py-2 max-md:text-sm"
 						>
 							Open conversation
-						</Link>
+						</ConversationLink>
 					)}
 				</div>
 			</article>

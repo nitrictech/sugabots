@@ -5,7 +5,6 @@ import { ActionForbidden } from "../../authorization/access.ts";
 import {
 	agent,
 	modelProvider,
-	pod,
 	providerModel,
 	user,
 	workspace,
@@ -21,7 +20,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
-	let podId: string;
 	let customAgentId: string;
 	let systemAgentId: string;
 
@@ -38,7 +36,7 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 			complete: onboarding.complete,
 		});
 	const complete = (userId: string, agentId: string) =>
-		as(userId).complete({ workspaceId, podId, agentId });
+		as(userId).complete({ workspaceId, agentId });
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -69,21 +67,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 				{ workspaceId, userId: memberId, role: "member" },
 			]),
 		);
-		const [madePod] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId,
-					ownerId: adminId,
-					kind: "shared",
-					name: "Product",
-					slug: "product",
-					createdById: adminId,
-				})
-				.returning(),
-		);
-		if (!madePod) throw new Error("could not create onboarding pod");
-		podId = madePod.id;
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)
@@ -114,7 +97,6 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 				.values([
 					{
 						workspaceId,
-						podId,
 						name: "Coordinator",
 						handle: "coordinator",
 						color: "green",
@@ -124,9 +106,8 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 					},
 					{
 						workspaceId,
-						// The workspace's Scribe, in no pod and with no model until the
-						// workspace settles on one.
-						podId: null,
+						// The workspace's Scribe, with no model until the workspace
+						// settles on one.
 						name: "Scribe",
 						handle: "scribe",
 						systemAgentKey: "summarise",
@@ -198,5 +179,15 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 			Onboarding.NotReadyToFinish,
 		);
 		await expect(complete(memberId, customAgentId)).rejects.toBeInstanceOf(ActionForbidden);
+	});
+
+	it("does not accept a bot somebody else created", async () => {
+		await onDatabase((db) =>
+			db.update(agent).set({ createdById: memberId }).where(eq(agent.id, customAgentId)),
+		);
+
+		await expect(complete(adminId, customAgentId)).rejects.toBeInstanceOf(
+			Onboarding.NotReadyToFinish,
+		);
 	});
 });

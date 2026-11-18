@@ -6,8 +6,8 @@ import type { Tool, ToolSet } from "ai";
 import { Context, Effect, Layer, type Scope } from "effect";
 import { effectRunner, type RunEffect, serviceOperations } from "../../database/database.ts";
 import { Ids } from "../../ids/ids.ts";
+import { AgentSandboxes } from "../../sandboxes/agent-sandboxes.ts";
 import { blockedHostsOf, reachOf } from "../../sandboxes/allowed-hosts.ts";
-import { PodSandboxes } from "../../sandboxes/pod-sandboxes.ts";
 import { SandboxNetwork } from "../../sandboxes/sandbox-network.ts";
 import { SandboxProviderRepository } from "../../sandboxes/sandbox-provider-repository.ts";
 import { Sandboxes } from "../../sandboxes/sandboxes.ts";
@@ -36,7 +36,7 @@ import {
 } from "./sandbox/tools.ts";
 
 /**
- * The tools that work in a pod's sandbox: `run_command`, `read_file`,
+ * The tools that work in a bot's computer: `run_command`, `read_file`,
  * `write_file`, `copy_file_to_sandbox` and `share_file`, and the `browser_`
  * tools of a browser the agent drives there (see `browser/browser.ts`), and
  * `request_network_access`, whose calls wait for a person, to reach a host
@@ -47,7 +47,7 @@ import {
  */
 export interface Interface {
 	/**
-	 * The tools for a turn in its agent's pod. While they are usable, the
+	 * The tools for a turn, in its bot's computer. While they are usable, the
 	 * turn's lease on the sandbox is renewed while the scope is open and
 	 * released when it closes, which is when the turn's run ends, or it stops
 	 * to wait for an approval.
@@ -83,7 +83,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.gen(function* () {
 	const providers = yield* SandboxProviderRepository.Service;
-	const podSandboxes = yield* PodSandboxes.Service;
+	const agentSandboxes = yield* AgentSandboxes.Service;
 	const sandboxes = yield* Sandboxes.Service;
 	const network = yield* SandboxNetwork.Service;
 	const files = yield* ThreadFiles.Service;
@@ -125,9 +125,10 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		forTurn: (turn) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
-				const { pod, turnId, threadId, agentId, acceptsImages, usesSandbox, attach } = turn;
+				const { workspaceId, turnId, threadId, agentId, acceptsImages, usesSandbox, attach } = turn;
+				const agent = { workspaceId, agentId };
 				const place = placeOf({ threadId, agentId });
-				const provider = usesSandbox ? yield* providers.enabled(pod.workspaceId) : undefined;
+				const provider = usesSandbox ? yield* providers.enabled(workspaceId) : undefined;
 				if (!provider) {
 					return {
 						...offeredIn({
@@ -151,15 +152,17 @@ export const make = Effect.gen(function* () {
 				const [reach, blocked, disk] = yield* operation(
 					"forTurn",
 					Effect.all([
-						reachOf(pod, sandboxes.forConnection(provider.connection)),
-						blockedHostsOf(pod.workspaceId),
-						podSandboxes.diskOf(pod),
+						reachOf(agent, sandboxes.forConnection(provider.connection)),
+						blockedHostsOf(workspaceId),
+						agentSandboxes.diskOf(agent),
 					]),
 				);
-				const holder: PodSandboxes.Holder = { kind: "turn", id: turnId };
-				yield* Effect.addFinalizer(() => podSandboxes.release(holder));
+				const holder: AgentSandboxes.Holder = { kind: "turn", id: turnId };
+				yield* Effect.addFinalizer(() => agentSandboxes.release(holder));
 				yield* Effect.forkScoped(
-					podSandboxes.renew(holder).pipe(Effect.delay(PodSandboxes.LEASE_RENEWAL), Effect.forever),
+					agentSandboxes
+						.renew(holder)
+						.pipe(Effect.delay(AgentSandboxes.LEASE_RENEWAL), Effect.forever),
 				);
 				// The tools run as promises, with the turn's services.
 				const run = effectRunner<never>({
@@ -168,7 +171,7 @@ export const make = Effect.gen(function* () {
 				// Opening the sandbox serves every call in the turn, so it stops when
 				// the turn ends rather than with the call that started it.
 				const turnEnded = yield* Effect.abortSignal;
-				const prepared = podSandboxes.open(pod, provider, holder).pipe(
+				const prepared = agentSandboxes.open(agent, provider, holder).pipe(
 					// The folders are made on first use, so any sandbox gains them.
 					Effect.tap(({ sandbox }) =>
 						sandbox.exec(`mkdir -p '${place.folder}' '${place.home}'`, {
@@ -208,7 +211,7 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
 	Layer.provide([
-		PodSandboxes.layer,
+		AgentSandboxes.layer,
 		Sandboxes.layer,
 		SandboxNetwork.layer,
 		SandboxProviderRepository.layer,
@@ -239,11 +242,11 @@ const NEVER_RUN: RunEffect<never> = () =>
 	Promise.reject(new Error("The sandbox tools aren't usable"));
 
 const NO_SANDBOX_NOTE =
-	"You have no sandbox in this turn, so calls to the sandbox tools are refused. If the task needs one, say so: a workspace admin can enable a sandbox provider and let you use it.";
+	"You have no computer in this turn, so calls to the computer tools are refused. If the task needs one, say so: a workspace admin can enable a computer provider and let you use one.";
 
-/** A turn that may use its pod's sandbox. */
+/** A turn that may use its bot's computer. */
 export interface Turn {
-	readonly pod: PodSandboxes.Pod;
+	readonly workspaceId: string;
 	/** Whether an admin let the turn's agent use the sandbox. */
 	readonly usesSandbox: boolean;
 	/** Holds the sandbox's lease while the turn runs. */

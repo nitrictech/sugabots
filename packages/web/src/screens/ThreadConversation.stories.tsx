@@ -88,7 +88,6 @@ const meta = preview.meta({
 		participants: [host, person],
 		members: [person, jay],
 		threadType: "conversation",
-		podId: POD,
 		onOpenThread: fn(),
 		fileUrlOf,
 	},
@@ -236,7 +235,7 @@ export const RoutineResult = meta.story({
 
 const tractionReport: Artifact = {
 	id: "0199a3a0-0000-7000-8000-000000000a15",
-	podId: POD,
+	threadId: POD,
 	kind: "document",
 	title: "Weekly traction",
 	version: 4,

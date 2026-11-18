@@ -1,4 +1,4 @@
-import type { Pod } from "@sugabots/contracts";
+import type { Agent, Pod } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { ReactNode } from "react";
 import { formatAge } from "@/lib/list-time.ts";
@@ -6,10 +6,10 @@ import { HeaderBack } from "@/screens/ChatHeader.tsx";
 
 /**
  * Where a page sits on a phone: one of its tabs, titled large with no Back,
- * or a page in a pod, such as its Artifacts, which covers the pod's Home and
- * leads back to it.
+ * or a page of a channel's or a bot's, such as its Files, which leads back
+ * to the channel or the bot.
  */
-export type PagePlace = { kind: "tab" } | { kind: "pod"; pod: Pod };
+export type PagePlace = { kind: "tab" } | { kind: "pod"; pod: Pod } | { kind: "bot"; agent: Agent };
 
 /**
  * A page beside the sidebar, such as Inbox: its `PageHeader`, and what it
@@ -39,8 +39,8 @@ export function Page({
 /**
  * The title across the top of a page or of a list beside the sidebar, with
  * `actions` at the right: the same in each, so the titles line up. On a
- * phone, a tab's page is titled large, as the tabs' are, and a pod's page
- * has Back to the pod's Home.
+ * phone, a tab's page is titled large, as the tabs' are, and a channel's or
+ * bot's page has Back to it.
  */
 export function PageHeader({
 	title,
@@ -61,6 +61,7 @@ export function PageHeader({
 			)}
 		>
 			{place.kind === "pod" && <HeaderBack back={{ to: "pod", pod: place.pod }} />}
+			{place.kind === "bot" && <HeaderBack back={{ to: "bot", agent: place.agent }} />}
 			<h1
 				className={cn(
 					"m-0 min-w-0 flex-1 truncate font-medium text-sm text-foreground",

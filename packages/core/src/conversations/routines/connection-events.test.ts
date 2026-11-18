@@ -4,7 +4,7 @@ import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { agent, connection, pod, routineExecution } from "../../database/schema.ts";
+import { agent, connection, routineExecution } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
 import type { RepositoryActivity } from "../../providers/connections/github/github-events.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
@@ -23,7 +23,7 @@ const opened: RepositoryActivity = {
 	branch: "fix-login",
 };
 
-/** Connection routines, run by what happens at their pod's GitHub connection's repositories, against Postgres. */
+/** Automations run by what happens at their bot's GitHub app's repositories, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)("connection routines, against Postgres", async () => {
 	const conversations = await conversationsForTests(
 		EventBus.inProcess({ store: EventStore.inMemory() }),
@@ -38,7 +38,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connection routines, against Postgre
 	beforeEach(async () => {
 		owner = await aRoutineOwner();
 		routines = onPostgresAs(owner.userId)(Context.get(conversations, Routines.Service));
-		connectionId = await gitHubConnectionWith(owner.workspaceId, owner.podId, "acme/web");
+		connectionId = await gitHubConnectionWith(owner.workspaceId, owner.agentId, "acme/web");
 	});
 
 	const repositoryRoutine = (
@@ -58,9 +58,9 @@ describe.skipIf(!process.env.DATABASE_URL)("connection routines, against Postgre
 	const deliver = (deliveryId: string, activity = opened) =>
 		events.accept({ workspaceId: owner.workspaceId, connectionId, deliveryId, activity });
 
-	it("takes only a repository its bot's pod's connection has, written as the connection has it", async () => {
+	it("takes only a repository its bot's GitHub app has, written as the connection has it", async () => {
 		await expect(repositoryRoutine("acme/infra", ["push"])).rejects.toMatchObject({
-			_tag: "RoutineRepositoryNotInPod",
+			_tag: "RoutineRepositoryNotConnected",
 		});
 
 		const made = await repositoryRoutine("ACME/Web", ["pull_request_opened"]);
@@ -101,11 +101,11 @@ describe.skipIf(!process.env.DATABASE_URL)("connection routines, against Postgre
 		expect(await deliver(crypto.randomUUID())).toEqual([]);
 	});
 
-	it("runs only the routines of the pod whose connection the delivery came to", async () => {
-		const other = await anotherPodOf(owner);
+	it("runs only the automations of the bot whose GitHub app the delivery came to", async () => {
+		const other = await anotherBotOf(owner);
 		const otherConnectionId = await gitHubConnectionWith(
 			owner.workspaceId,
-			other.podId,
+			other.agentId,
 			"acme/web",
 		);
 		const ours = await repositoryRoutine("acme/web", ["pull_request_opened"]);
@@ -131,14 +131,14 @@ describe.skipIf(!process.env.DATABASE_URL)("connection routines, against Postgre
 	});
 });
 
-/** A GitHub connection in the pod, with `repository`, as one whose app is installed on its account. */
-async function gitHubConnectionWith(workspaceId: string, podId: string, repository: string) {
+/** The bot's GitHub app, with `repository`, as one installed on its account. */
+async function gitHubConnectionWith(workspaceId: string, agentId: string, repository: string) {
 	const [connected] = await onDatabase((db) =>
 		db
 			.insert(connection)
 			.values({
 				workspaceId,
-				podId,
+				agentId,
 				kind: "github",
 				name: "GitHub",
 				handle: "github",
@@ -162,29 +162,14 @@ async function gitHubConnectionWith(workspaceId: string, podId: string, reposito
 	return connected.id;
 }
 
-/** A second shared pod in the owner's workspace, with an agent of its own. */
-async function anotherPodOf(owner: { workspaceId: string; userId: string }) {
+/** A second bot in the owner's workspace. */
+async function anotherBotOf(owner: { workspaceId: string; userId: string }) {
 	const suffix = crypto.randomUUID();
-	const [room] = await onDatabase((db) =>
-		db
-			.insert(pod)
-			.values({
-				workspaceId: owner.workspaceId,
-				ownerId: owner.userId,
-				kind: "shared",
-				name: "Other pod",
-				slug: `other-${suffix}`,
-				createdById: owner.userId,
-			})
-			.returning(),
-	);
-	if (!room) throw new Error("fixture");
 	const [crew] = await onDatabase((db) =>
 		db
 			.insert(agent)
 			.values({
 				workspaceId: owner.workspaceId,
-				podId: room.id,
 				name: "Other Agent",
 				handle: handleFromName(`Other Agent ${suffix}`),
 				color: "green",
@@ -195,5 +180,5 @@ async function anotherPodOf(owner: { workspaceId: string; userId: string }) {
 			.returning(),
 	);
 	if (!crew) throw new Error("fixture");
-	return { podId: room.id, agentId: crew.id };
+	return { agentId: crew.id };
 }

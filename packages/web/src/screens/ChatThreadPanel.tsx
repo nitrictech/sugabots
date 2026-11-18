@@ -2,10 +2,10 @@ import type { ChatHistoryEntry, RoutineExecution, ThreadParticipant } from "@sug
 import { Link } from "@tanstack/react-router";
 import { Braces, ChevronLeft, ExternalLink } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
+import { useAgent } from "@/lib/agents.ts";
 import { useAuthorLinks } from "@/lib/author-links.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import { routineThreadLink } from "@/lib/links.ts";
-import { usePods } from "@/lib/pods.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useThreadEvents, useThreadNotices } from "@/lib/thread-events.ts";
 import { useThread } from "@/lib/threads.ts";
@@ -56,7 +56,7 @@ export function ChatThreadPanel({
 	onOpenArtifact?: (artifactId: string) => void;
 }) {
 	const query = useThread(threadId);
-	const authorLinkOf = useAuthorLinks(query.data?.thread.podId ?? undefined);
+	const authorLinkOf = useAuthorLinks();
 	useThreadEvents(threadId);
 	const notices = useThreadNotices(threadId);
 	const heading = useRef<HTMLHeadingElement>(null);
@@ -119,9 +119,8 @@ export function ChatThreadPanel({
 					: title,
 		subheading: type === "collaboration" ? other && `${mine?.name} and ${other.name}` : undefined,
 		headingRef: heading,
-		// A routine's run is always in its bot's pod.
-		actions: type === "routine" && routineExecution && details.thread.podId && (
-			<RoutineHeaderActions execution={routineExecution} podId={details.thread.podId} />
+		actions: type === "routine" && routineExecution && (
+			<RoutineHeaderActions execution={routineExecution} />
 		),
 	};
 	const body = query.isPending ? (
@@ -190,7 +189,6 @@ export function ChatThreadPanel({
 					threadType={details.thread.type}
 					onOpenThread={onOpenThread}
 					onOpenArtifact={onOpenArtifact}
-					podId={details.thread.podId}
 					approvalCapabilities={details.capabilities}
 					compact
 					authorLinkOf={authorLinkOf}
@@ -270,16 +268,9 @@ function ThreadPage({
 	);
 }
 
-function RoutineHeaderActions({
-	execution,
-	podId,
-}: {
-	execution: RoutineExecution;
-	/** The pod the run happened in, whose Routines page the routine is changed on. */
-	podId: string;
-}) {
+function RoutineHeaderActions({ execution }: { execution: RoutineExecution }) {
 	const backToChat = useBackToHere("Chat");
-	const pod = usePods().data?.find((one) => one.id === podId);
+	const agent = useAgent(execution.agentId);
 	return (
 		<>
 			{execution.trigger.kind === "webhook" && (
@@ -317,11 +308,11 @@ function RoutineHeaderActions({
 					<ExternalLink aria-hidden size={15} strokeWidth={2.4} />
 				</IconButton>
 			)}
-			{pod && (
+			{agent && (
 				<IconButton
-					label="Routine settings"
+					label="Automation settings"
 					variant="bar"
-					render={<Link {...routineThreadLink(pod, execution.routineId)} state={backToChat} />}
+					render={<Link {...routineThreadLink(agent, execution.routineId)} state={backToChat} />}
 				>
 					<SettingsIcon />
 				</IconButton>

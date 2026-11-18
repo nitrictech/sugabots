@@ -1,4 +1,5 @@
 import {
+	type AgentPermissions as AgentPermissionsView,
 	type PodPermissions as PodPermissionsView,
 	WORKSPACE_ROLES,
 	type WorkspacePermissions as WorkspacePermissionsView,
@@ -13,19 +14,18 @@ import {
  * and in what is displayed — nowhere else. Adding a role later means adding a
  * grant table; it does not mean revisiting every handler.
  *
- * Two kinds of action, kept apart by their types so a pod action cannot be
- * asked without the pod's facts:
+ * Three kinds of action, kept apart by their types so one cannot be asked
+ * without the facts it needs:
  *
  * - **Workspace actions** concern the workspace itself, and are answered from
  *   the caller's role alone.
- * - **Pod actions** concern a pod and everything inside it — agents, their
- *   Routines, the pod's connections, its conversations and the approvals they
- *   need. They are answered from the caller's role *and* the pod.
+ * - **Channel actions** concern a channel and its conversations, answered from
+ *   the caller's role and whether they are in it.
+ * - **Bot actions** concern a bot and what it owns: its tasks, connections,
+ *   automations and computer. They are answered from the caller's role and
+ *   the bot's visibility, creator and person, if it is a Personal Assistant.
  *
- * Every permission here is asked for somewhere. An action that no role holds
- * without also holding `pod.read` is not a permission: conversations are read,
- * joined and cancelled by whoever reaches the pod, which is what `pod.read`
- * already says.
+ * Every permission here is asked for somewhere.
  *
  * Grants are additive and default to nothing: an unknown role, or a permission
  * no grant table mentions, allows nothing. There is no wildcard, so a
@@ -37,7 +37,7 @@ import {
 
 /** An action addressed at a workspace. */
 export type WorkspacePermission =
-	/** Belong to the workspace: see its roster, its enabled models, its own personal pod. */
+	/** Belong to the workspace: see its people, its public bots and channels, and its enabled models. */
 	| "workspace.read"
 	/** Rename the workspace, change its address, and move it to another time zone. */
 	| "workspace.update"
@@ -54,50 +54,62 @@ export type WorkspacePermission =
 	| "workspace.ownership.transfer"
 	/** Delete the workspace and everything in it. */
 	| "workspace.delete"
-	/** Choose the models the Scribe and Compaction run on. */
+	/** Choose the models the system bots run on. */
 	| "workspace.builtInAgents.configure"
-	/** See what the workspace's models cost, every pod's and bot's included, and limit it. */
+	/** See what the workspace's models cost, every bot's included, and limit it. */
 	| "workspace.usage.manage"
-	/** Create a shared pod. */
-	| "pod.create";
+	/** Make a channel. */
+	| "pod.create"
+	/** Make a bot. */
+	| "agent.create";
 
 /**
- * An action addressed at a pod, or at something inside one.
- *
- * `pod.read` is reach: holding it is being able to see the pod, its agents and
- * its conversations, and to take part in them.
+ * An action addressed at a channel. `pod.read` is reach: holding it is being
+ * in the channel, seeing its conversations and taking part in them.
  */
 export type PodPermission =
 	| "pod.read"
 	| "pod.update"
 	| "pod.delete"
+	/** Invite and remove people. */
 	| "pod.members.manage"
-	/** Take yourself out of a shared pod. Administrators stay in every one. */
+	/** Add and remove bots. */
+	| "pod.bots.manage"
+	/** Take yourself out. Administrators stay in every channel. */
 	| "pod.leave"
+	/** Decide a tool call a bot raised in the channel. */
+	| "approval.decide";
+
+/**
+ * An action addressed at a bot, or at something it owns: its tasks,
+ * connections, automations and computer. `agent.read` is reach: seeing the
+ * bot's tasks, files and automations' runs, and taking part in them. Its
+ * configuration is read by whoever reaches it or manages it, so an
+ * administrator can manage a private bot without seeing what it was asked.
+ */
+export type AgentPermission =
 	| "agent.read"
-	| "agent.create"
+	/** See the bot's settings and the state of its computer. */
+	| "agent.settings.read"
 	| "agent.update"
 	| "agent.delete"
 	| "connection.read"
 	| "connection.manage"
+	/** See the bot's automations as defined, without what their runs said. */
 	| "routine.read"
 	| "routine.manage"
 	| "routine.run"
+	/** See what the bot's automations' runs did and said. */
 	| "routine.history.read"
-	/** Decide a tool call an agent raised in ordinary conversation. */
+	/** Decide a tool call the bot raised in one of its tasks. */
 	| "approval.decide"
-	/** Decide a tool call an agent raised while a Routine was running. */
+	/** Decide a tool call the bot raised while an automation ran. */
 	| "approval.routine.decide"
-	/**
-	 * Decide what the pod's sandbox may reach, within what the workspace
-	 * blocks, and what software it has: change its hosts and software, and
-	 * allow its agents' requests for more.
-	 */
+	/** Decide what the bot's computer may reach, and allow its requests for more. */
 	| "sandbox.manage"
-	/**
-	 * Click and type on an agent's desktop in the pod's sandbox, with its
-	 * browser's sessions and the desktop's terminal, rather than only watch it.
-	 */
+	/** Allow or refuse the bot's own request to reach more from its computer. */
+	| "sandbox.request.decide"
+	/** Click and type on the bot's desktop, rather than only watch it. */
 	| "sandbox.desktop.use";
 
 /**
@@ -112,13 +124,18 @@ export interface Actor {
 	workspaceRole: WorkspaceRole | undefined;
 }
 
-/** What a decision about a pod needs to know about it. */
+/** What a decision about a channel needs to know about it. */
 export interface PodFacts {
-	kind: "personal" | "shared";
-	/** Whose Personal pod this is. `null` for a shared pod. */
-	ownerId: string | null;
-	/** Whether a `pod_member` row puts the caller in this pod. */
+	/** Whether a `pod_member` row puts the caller in this channel. */
 	isMember: boolean;
+}
+
+/** What a decision about a bot needs to know about it. */
+export interface AgentFacts {
+	visibility: "public" | "private";
+	createdById: string | null;
+	/** The person whose Personal Assistant it is; null for any other bot. */
+	assistantOf: string | null;
 }
 
 const ADMINISTRATOR_WORKSPACE_GRANTS: readonly WorkspacePermission[] = [
@@ -129,6 +146,7 @@ const ADMINISTRATOR_WORKSPACE_GRANTS: readonly WorkspacePermission[] = [
 	"workspace.builtInAgents.configure",
 	"workspace.usage.manage",
 	"pod.create",
+	"agent.create",
 ];
 
 const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> = {
@@ -139,15 +157,15 @@ const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
 		"workspace.delete",
 	]),
 	admin: new Set<WorkspacePermission>(ADMINISTRATOR_WORKSPACE_GRANTS),
-	member: new Set<WorkspacePermission>(["workspace.read"]),
+	member: new Set<WorkspacePermission>(["workspace.read", "pod.create", "agent.create"]),
 	viewer: new Set<WorkspacePermission>(["workspace.read"]),
 };
 
 /**
- * The pod permissions each role holds in the shared pods it is a member of.
+ * The channel permissions each role holds in the channels it is a member of.
  *
- * Nobody reaches a shared pod without a `pod_member` row. Administrators are
- * no exception: database triggers make them members of every shared pod, as
+ * Nobody reaches a channel without a `pod_member` row. Administrators are no
+ * exception: database triggers make them members of every channel, as
  * `podMember` in `packages/core/src/workspaces/sql.ts` describes.
  */
 const ADMINISTRATOR_POD_GRANTS = new Set<PodPermission>([
@@ -155,84 +173,135 @@ const ADMINISTRATOR_POD_GRANTS = new Set<PodPermission>([
 	"pod.update",
 	"pod.delete",
 	"pod.members.manage",
-	"agent.read",
-	"agent.create",
-	"agent.update",
-	"agent.delete",
-	"connection.read",
-	"connection.manage",
-	"routine.read",
-	"routine.manage",
-	"routine.run",
-	"routine.history.read",
+	"pod.bots.manage",
 	"approval.decide",
-	"approval.routine.decide",
-	"sandbox.manage",
-	"sandbox.desktop.use",
 ]);
 
 const POD_GRANTS: Record<WorkspaceRole, ReadonlySet<PodPermission>> = {
-	// The owner administers pods exactly as an administrator does; what sets
-	// them apart is in the workspace grants.
 	owner: ADMINISTRATOR_POD_GRANTS,
 	admin: ADMINISTRATOR_POD_GRANTS,
 	member: new Set<PodPermission>([
 		"pod.read",
 		"pod.leave",
-		"agent.read",
-		"agent.create",
-		"agent.update",
-		"connection.read",
-		"routine.read",
-		"routine.history.read",
+		"pod.members.manage",
+		"pod.bots.manage",
 		"approval.decide",
-		"sandbox.desktop.use",
 	]),
-	// A viewer reads and takes part — which `pod.read` grants — and configures
-	// nothing beyond that.
-	viewer: new Set<PodPermission>([
-		"pod.read",
-		"pod.leave",
-		"agent.read",
-		"connection.read",
-		"routine.read",
-		"routine.history.read",
-	]),
+	// A viewer reads and takes part, which `pod.read` grants, and changes nothing.
+	viewer: new Set<PodPermission>(["pod.read", "pod.leave"]),
 };
 
+/** What anyone who reaches a bot may do with it. */
+const AGENT_USER_GRANTS = new Set<AgentPermission>([
+	"agent.read",
+	"agent.settings.read",
+	"connection.read",
+	"routine.read",
+	"routine.history.read",
+	"routine.run",
+	"approval.decide",
+	"sandbox.desktop.use",
+]);
+
+/** What a viewer who reaches a bot may do with it: read, and take part in its tasks. */
+const AGENT_VIEWER_GRANTS = new Set<AgentPermission>([
+	"agent.read",
+	"agent.settings.read",
+	"connection.read",
+	"routine.read",
+	"routine.history.read",
+]);
+
+const agentUserGrants = (role: WorkspaceRole) =>
+	role === "viewer" ? AGENT_VIEWER_GRANTS : AGENT_USER_GRANTS;
+
 /**
- * A Personal pod belongs to one person and nobody else, administrator
- * included. Its owner holds every pod permission in it; separate domain rules
- * still refuse to rename it, delete it or give it other members.
+ * What a bot's creator, or an administrator, may do with it besides use it:
+ * change it, and read the configuration they change, whether or not they
+ * reach it.
  */
-function isPersonalPodOwner(actor: Actor, pod: PodFacts): boolean {
-	return pod.kind === "personal" && pod.ownerId !== null && pod.ownerId === actor.userId;
+const AGENT_MANAGER_GRANTS = new Set<AgentPermission>([
+	"agent.settings.read",
+	"connection.read",
+	"routine.read",
+	"agent.update",
+	"agent.delete",
+	"connection.manage",
+	"routine.manage",
+	"approval.routine.decide",
+	"sandbox.manage",
+	"sandbox.request.decide",
+]);
+
+/**
+ * What a person may do with their own Personal Assistant besides use it:
+ * change its look and its connections, and decide what it asks to reach from
+ * its computer. Sugabots manages the rest of it.
+ */
+const ASSISTANT_OWNER_GRANTS = new Set<AgentPermission>([
+	"agent.update",
+	"connection.manage",
+	"sandbox.request.decide",
+]);
+
+function isAdministrator(role: WorkspaceRole | undefined): boolean {
+	return role === "owner" || role === "admin";
 }
 
-/** The grants a role holds, or nothing at all for somebody outside the workspace. */
-function grantsFor(role: WorkspaceRole | undefined) {
-	if (!role) return undefined;
-	return { workspace: WORKSPACE_GRANTS[role], pod: POD_GRANTS[role] };
+/**
+ * Whether the caller manages every bot in the workspace, those somebody else
+ * made and keeps private included, though not another person's Personal
+ * Assistant: what lists every such bot for them to manage.
+ */
+export function managesEveryAgent(actor: Actor): boolean {
+	return isAdministrator(actor.workspaceRole);
 }
 
 /** Whether the caller may take a workspace-addressed action. */
 export function mayInWorkspace(actor: Actor, permission: WorkspacePermission): boolean {
-	return grantsFor(actor.workspaceRole)?.workspace.has(permission) ?? false;
+	if (!actor.workspaceRole) return false;
+	return WORKSPACE_GRANTS[actor.workspaceRole].has(permission);
 }
 
 /**
- * Whether the caller may take a pod-addressed action on this pod.
+ * Whether the caller may take a channel-addressed action on this channel.
  *
- * `pod` must be a pod in the workspace `actor.workspaceRole` describes; the
- * caller is responsible for not mixing workspaces, which
- * `packages/core/src/authorization/access.ts` does by loading both together.
+ * `pod` must be a channel in the workspace `actor.workspaceRole` describes;
+ * `access.ts` loads both together so they never mix.
  */
 export function mayInPod(actor: Actor, permission: PodPermission, pod: PodFacts): boolean {
-	const grants = grantsFor(actor.workspaceRole);
-	if (!grants) return false;
-	if (pod.kind === "personal") return isPersonalPodOwner(actor, pod);
+	if (!actor.workspaceRole) return false;
+	return pod.isMember && POD_GRANTS[actor.workspaceRole].has(permission);
+}
 
-	return pod.isMember && grants.pod.has(permission);
+/**
+ * Whether the caller reaches the bot: its person for a Personal Assistant,
+ * its creator for a private bot, and anyone in the workspace for a public one.
+ */
+export function reachesAgent(actor: Actor, agent: AgentFacts): boolean {
+	if (!actor.workspaceRole) return false;
+	if (agent.assistantOf !== null) return agent.assistantOf === actor.userId;
+	if (agent.visibility === "private") return agent.createdById === actor.userId;
+	return true;
+}
+
+/**
+ * Whether the caller may take a bot-addressed action. Using a bot takes
+ * reach; changing it takes being its creator or an administrator, who may
+ * change a private bot they don't reach. Nobody but its person changes a
+ * Personal Assistant, and nobody deletes one.
+ */
+export function mayOnAgent(actor: Actor, permission: AgentPermission, agent: AgentFacts): boolean {
+	const role = actor.workspaceRole;
+	if (!role) return false;
+	if (agent.assistantOf !== null) {
+		if (agent.assistantOf !== actor.userId) return false;
+		return agentUserGrants(role).has(permission) || ASSISTANT_OWNER_GRANTS.has(permission);
+	}
+	const manages =
+		role !== "viewer" && (managesEveryAgent(actor) || agent.createdById === actor.userId);
+	if (manages && AGENT_MANAGER_GRANTS.has(permission)) return true;
+	return reachesAgent(actor, agent) && agentUserGrants(role).has(permission);
 }
 
 /** The roles holding a workspace permission. */
@@ -241,41 +310,47 @@ export function rolesGrantedInWorkspace(permission: WorkspacePermission): Worksp
 }
 
 /**
- * The roles holding a pod permission in the shared pods they are members of,
+ * The roles holding a channel permission in the channels they are members of,
  * for the queries that filter by the stored role rather than asking about one
- * caller.
- *
- * The equivalent single-resource answer is `mayInPod`.
+ * caller. The equivalent single-resource answer is `mayInPod`.
  */
 export function rolesGrantedInPod(permission: PodPermission): WorkspaceRole[] {
 	return WORKSPACE_ROLES.filter((role) => POD_GRANTS[role].has(permission));
 }
 
 /**
- * The pod permissions a client needs resolved, as the API returns them.
- *
- * The same grants the API enforces, answered once per pod so the web app never
- * has to reason about roles or ownership itself. The domain rules that hold a
- * Personal pod fixed are folded in here too, so a client never pairs one of
- * these with the pod's kind: renaming one and giving it members are refused to
- * everybody, its owner included.
+ * The channel permissions a client needs resolved, as the API returns them.
+ * `isPublic` says whether somebody not in it may join it.
  */
-export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView {
+export function podPermissions(
+	actor: Actor,
+	pod: PodFacts & { isPublic: boolean },
+): PodPermissionsView {
 	const may = (permission: PodPermission) => mayInPod(actor, permission, pod);
-	const shared = pod.kind === "shared";
 	return {
-		rename: shared && may("pod.update"),
-		manageMembers: shared && may("pod.members.manage"),
-		leave: shared && may("pod.leave"),
-		createAgents: may("agent.create"),
-		updateAgents: may("agent.update"),
-		deleteAgents: may("agent.delete"),
+		rename: may("pod.update"),
+		manageMembers: may("pod.members.manage"),
+		manageBots: may("pod.bots.manage"),
+		leave: may("pod.leave"),
+		join: !pod.isMember && pod.isPublic && mayInWorkspace(actor, "workspace.read"),
+		delete: may("pod.delete"),
+		deleteArtifacts: may("pod.update"),
+	};
+}
+
+/** The bot permissions a client needs resolved, as the API returns them. */
+export function agentPermissions(actor: Actor, agent: AgentFacts): AgentPermissionsView {
+	const may = (permission: AgentPermission) => mayOnAgent(actor, permission, agent);
+	return {
+		update: may("agent.update"),
+		delete: may("agent.delete"),
 		manageConnections: may("connection.manage"),
 		manageSandbox: may("sandbox.manage"),
-		useDesktops: may("sandbox.desktop.use"),
+		useDesktop: may("sandbox.desktop.use"),
 		manageRoutines: may("routine.manage"),
 		runRoutines: may("routine.run"),
-		deleteArtifacts: may("pod.update"),
+		decideApprovals: may("approval.decide"),
+		talk: reachesAgent(actor, agent) && actor.workspaceRole !== undefined,
 	};
 }
 
@@ -283,6 +358,7 @@ export function podPermissions(actor: Actor, pod: PodFacts): PodPermissionsView 
 export function workspacePermissions(actor: Actor): WorkspacePermissionsView {
 	return {
 		createPods: mayInWorkspace(actor, "pod.create"),
+		createAgents: mayInWorkspace(actor, "agent.create"),
 		updateWorkspace: mayInWorkspace(actor, "workspace.update"),
 		manageProviders: mayInWorkspace(actor, "workspace.providers.manage"),
 		manageMembers: mayInWorkspace(actor, "workspace.members.manage"),

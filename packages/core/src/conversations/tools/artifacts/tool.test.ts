@@ -4,11 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { Artifacts } from "../../../artifacts/artifacts.ts";
 import { ARTIFACT_EDIT_TOOL, ARTIFACT_WRITE_TOOL, artifactTools } from "./tool.ts";
 
-const by = { workspaceId: "workspace", podId: "pod", agentId: "agent", threadId: "thread" };
+const by = { workspaceId: "workspace", agentId: "agent", threadId: "thread" };
 
 const page: Artifact = {
 	id: "0199a3a0-0000-7000-8000-0000000000f2",
-	podId: "pod",
+	threadId: "thread",
 	kind: "html",
 	title: "Pipeline",
 	version: 2,

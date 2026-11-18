@@ -1,6 +1,5 @@
 import { Schema } from "effect";
 import { agentColorSchema, agentFaceSchema, agentShapeSchema } from "./agents.ts";
-import { podColorSchema } from "./pods.ts";
 import { providerPresetIdSchema } from "./provider-catalog.ts";
 
 /**
@@ -45,8 +44,6 @@ export const botUsageSchema = Schema.Struct({
 	color: Schema.NullOr(agentColorSchema),
 	face: Schema.NullOr(agentFaceSchema),
 	shape: Schema.NullOr(agentShapeSchema),
-	/** The pod the bot is in now. */
-	podName: Schema.NullOr(Schema.String),
 	...spendFields,
 });
 
@@ -61,18 +58,6 @@ export const modelUsageSchema = Schema.Struct({
 	...spendFields,
 });
 
-/** A pod's spend: the requests its bots' turns made. */
-export const podUsageSchema = Schema.Struct({
-	podId: Schema.String,
-	/** Null for a pod that has since been deleted. */
-	name: Schema.NullOr(Schema.String),
-	/** Null for a pod with no colour chosen, or one since deleted. */
-	color: Schema.NullOr(podColorSchema),
-	/** How many bots are in the pod now. */
-	botCount: countSchema,
-	...spendFields,
-});
-
 export const workspaceUsageSchema = Schema.Struct({
 	month: usageMonthSchema,
 	/** The workspace's IANA time zone, which the month and its days are in, as `Workspace.timeZone` gives it. */
@@ -80,14 +65,18 @@ export const workspaceUsageSchema = Schema.Struct({
 	...spendFields,
 	/** Every day of the month, first to last, including those still to come. */
 	days: Schema.Array(usageDaySchema),
-	/** Most expensive first. */
+	/** Most expensive first, but for the Personal Assistants, in `personalAssistants`. */
 	bots: Schema.Array(botUsageSchema),
 	models: Schema.Array(modelUsageSchema),
-	pods: Schema.Array(podUsageSchema),
 	/**
 	 * What the system agents spent: routing, summaries and titles,
 	 * compaction, and trying models out from settings.
 	 */
 	systemAgents: Schema.Struct(spendFields),
+	/**
+	 * What every person's Personal Assistant spent, together: each is its
+	 * person's alone, so none is named.
+	 */
+	personalAssistants: Schema.Struct(spendFields),
 });
 export type WorkspaceUsage = typeof workspaceUsageSchema.Type;

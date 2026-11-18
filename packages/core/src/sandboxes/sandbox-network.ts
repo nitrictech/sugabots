@@ -1,7 +1,7 @@
 export * as SandboxNetwork from "./sandbox-network.ts";
 
 import {
-	type PodSandboxNetwork,
+	type AgentSandboxNetwork,
 	SANDBOX_NETWORK_MODE_DEFAULT,
 	type SandboxNetworkSettings,
 } from "@sugabots/contracts";
@@ -11,38 +11,38 @@ import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
-import { threadPodId } from "../conversations/threads/rooms.ts";
 import { type Database, query, serviceOperations } from "../database/database.ts";
 import {
+	sandboxAgentAllowedHost,
 	sandboxAllowedHost,
 	sandboxBlockedHost,
-	sandboxPodAllowedHost,
 	thread,
 	toolCall,
+	turn,
 	user,
 } from "../database/schema.ts";
 import type { UserFacing } from "../user-message.ts";
+import { AgentSandboxes } from "./agent-sandboxes.ts";
 import {
 	addedHostsOf,
+	agentAddedHostsOf,
 	blockedHostsOf,
 	blockOn,
-	podAddedHostsOf,
 	TRUSTED_HOSTS,
 } from "./allowed-hosts.ts";
-import { PodSandboxes } from "./pod-sandboxes.ts";
 import { SandboxProviderRepository } from "./sandbox-provider-repository.ts";
 import { Sandboxes } from "./sandboxes.ts";
 
 /**
- * Where sandboxes may connect to. Every pod's sandbox reaches
- * {@link TRUSTED_HOSTS} and the hosts its workspace added, and each pod adds
- * its own; the workspace's blocks keep hosts out of every pod's reach,
- * whatever allows them. A change reaches running sandboxes at once, and the
+ * Where computers may connect to. Every bot's computer reaches
+ * {@link TRUSTED_HOSTS} and the hosts its workspace added, and each bot adds
+ * its own; the workspace's blocks keep hosts out of every computer's reach,
+ * whatever allows them. A change reaches running computers at once, and the
  * others when they are next opened.
  *
  * The workspace's lists take the current actor's `workspace.providers.manage`
- * on the workspace, named by its id or its slug. A pod's own list takes
- * `pod.read` to see and `sandbox.manage` to change.
+ * on the workspace, named by its id or its slug. A bot's own list takes
+ * `agent.settings.read` to see and `sandbox.manage` to change.
  */
 export interface Interface {
 	readonly settings: (
@@ -66,26 +66,26 @@ export interface Interface {
 		workspace: string;
 		host: string;
 	}) => Effect.Effect<SandboxNetworkSettings, AuthorizationDenied, CurrentActor.Service>;
-	readonly podSettings: (
-		podId: string,
-	) => Effect.Effect<PodSandboxNetwork, AuthorizationDenied, CurrentActor.Service>;
+	readonly agentSettings: (
+		agentId: string,
+	) => Effect.Effect<AgentSandboxNetwork, AuthorizationDenied, CurrentActor.Service>;
 	/** Adding a host the workspace blocked fails with {@link HostBlocked}. */
-	readonly addPodHost: (input: {
-		podId: string;
+	readonly addAgentHost: (input: {
+		agentId: string;
 		host: string;
-	}) => Effect.Effect<PodSandboxNetwork, AuthorizationDenied | HostBlocked, CurrentActor.Service>;
-	/** Removing a host the pod never added changes nothing. */
-	readonly removePodHost: (input: {
-		podId: string;
+	}) => Effect.Effect<AgentSandboxNetwork, AuthorizationDenied | HostBlocked, CurrentActor.Service>;
+	/** Removing a host the bot never added changes nothing. */
+	readonly removeAgentHost: (input: {
+		agentId: string;
 		host: string;
-	}) => Effect.Effect<PodSandboxNetwork, AuthorizationDenied, CurrentActor.Service>;
+	}) => Effect.Effect<AgentSandboxNetwork, AuthorizationDenied, CurrentActor.Service>;
 	/**
 	 * The workspace's block that keeps `host` out of its sandboxes, if any, so
 	 * a request for it is refused without asking anyone.
 	 */
 	readonly blockOn: (workspaceId: string, host: string) => Effect.Effect<string | undefined>;
 	/**
-	 * Adds `host` to the pod of the turn whose call `sdkToolCallId` asked for
+	 * Adds `host` to the bot of the turn whose call `sdkToolCallId` asked for
 	 * it, if a person allowed that call and the workspace hasn't blocked the
 	 * host since.
 	 */
@@ -106,7 +106,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SandboxNetwork");
 	const authorization = yield* Authorization.Service;
-	const podSandboxes = yield* PodSandboxes.Service;
+	const agentSandboxes = yield* AgentSandboxes.Service;
 	const providers = yield* SandboxProviderRepository.Service;
 	const sandboxes = yield* Sandboxes.Service;
 
@@ -154,28 +154,28 @@ export const make = Effect.gen(function* () {
 			} satisfies SandboxNetworkSettings;
 		});
 
-	const podSettingsOf = (pod: Pod) =>
+	const agentSettingsOf = (agent: Agent) =>
 		Effect.gen(function* () {
-			const [network, workspaceAdded, podAdded, blocked] = yield* Effect.all([
-				networkOf(pod.workspaceId),
-				addedHostsOf(pod.workspaceId),
-				podAddedHostsOf(pod),
-				blockedHostsOf(pod.workspaceId),
+			const [network, workspaceAdded, agentAdded, blocked] = yield* Effect.all([
+				networkOf(agent.workspaceId),
+				addedHostsOf(agent.workspaceId),
+				agentAddedHostsOf(agent),
+				blockedHostsOf(agent.workspaceId),
 			]);
 			const blocks = blocked.map((row) => row.host);
-			const names = yield* namesOf(podAdded.map((row) => row.addedById));
+			const names = yield* namesOf(agentAdded.map((row) => row.addedById));
 			return {
 				...network,
 				workspaceHosts: [...TRUSTED_HOSTS, ...workspaceAdded.map((row) => row.host)].map(
 					(host) => ({ host, blockedBy: blockOn(host, blocks) ?? null }),
 				),
-				addedHosts: podAdded.map((row) => ({
+				addedHosts: agentAdded.map((row) => ({
 					host: row.host,
 					addedByName: nameOf(names, row.addedById),
 					addedAt: row.createdAt.toISOString(),
 					blockedBy: blockOn(row.host, blocks) ?? null,
 				})),
-			} satisfies PodSandboxNetwork;
+			} satisfies AgentSandboxNetwork;
 		});
 
 	const blockFor = (workspaceId: string, host: string) =>
@@ -186,14 +186,16 @@ export const make = Effect.gen(function* () {
 			),
 		);
 
-	const addToPod = (row: typeof sandboxPodAllowedHost.$inferInsert) =>
-		query((db) => db.insert(sandboxPodAllowedHost).values(row).onConflictDoNothing()).pipe(
-			Effect.andThen(podSandboxes.applyNetwork({ workspaceId: row.workspaceId, podId: row.podId })),
+	const addToAgent = (row: typeof sandboxAgentAllowedHost.$inferInsert) =>
+		query((db) => db.insert(sandboxAgentAllowedHost).values(row).onConflictDoNothing()).pipe(
+			Effect.andThen(
+				agentSandboxes.applyNetwork({ workspaceId: row.workspaceId, agentId: row.agentId }),
+			),
 		);
 
-	const podOf = (standing: { pod: { id: string; workspaceId: string } }): Pod => ({
-		workspaceId: standing.pod.workspaceId,
-		podId: standing.pod.id,
+	const agentOf = (standing: { agent: { id: string; workspaceId: string } }): Agent => ({
+		workspaceId: standing.agent.workspaceId,
+		agentId: standing.agent.id,
 	});
 
 	return Service.of({
@@ -215,7 +217,7 @@ export const make = Effect.gen(function* () {
 								.values({ workspaceId, host, addedById: actor.userId })
 								.onConflictDoNothing(),
 						);
-						yield* podSandboxes.applyNetwork({ workspaceId });
+						yield* agentSandboxes.applyNetwork({ workspaceId });
 					}
 					return yield* settingsOf(workspaceId);
 				}),
@@ -237,7 +239,7 @@ export const make = Effect.gen(function* () {
 							)
 							.returning({ host: sandboxAllowedHost.host }),
 					);
-					if (removed.length > 0) yield* podSandboxes.applyNetwork({ workspaceId });
+					if (removed.length > 0) yield* agentSandboxes.applyNetwork({ workspaceId });
 					return yield* settingsOf(workspaceId);
 				}),
 			),
@@ -254,7 +256,7 @@ export const make = Effect.gen(function* () {
 							.onConflictDoNothing()
 							.returning({ host: sandboxBlockedHost.host }),
 					);
-					if (blocked.length > 0) yield* podSandboxes.applyNetwork({ workspaceId });
+					if (blocked.length > 0) yield* agentSandboxes.applyNetwork({ workspaceId });
 					return yield* settingsOf(workspaceId);
 				}),
 			),
@@ -275,52 +277,52 @@ export const make = Effect.gen(function* () {
 							)
 							.returning({ host: sandboxBlockedHost.host }),
 					);
-					if (unblocked.length > 0) yield* podSandboxes.applyNetwork({ workspaceId });
+					if (unblocked.length > 0) yield* agentSandboxes.applyNetwork({ workspaceId });
 					return yield* settingsOf(workspaceId);
 				}),
 			),
 
-		podSettings: (podId) =>
+		agentSettings: (agentId) =>
 			operation(
-				"podSettings",
-				Effect.flatMap(authorization.pod(podId, "pod.read"), (standing) =>
-					podSettingsOf(podOf(standing)),
+				"agentSettings",
+				Effect.flatMap(authorization.agent(agentId, "agent.settings.read"), (standing) =>
+					agentSettingsOf(agentOf(standing)),
 				),
 			),
 
-		addPodHost: ({ podId, host }) =>
+		addAgentHost: ({ agentId, host }) =>
 			operation(
-				"addPodHost",
+				"addAgentHost",
 				Effect.gen(function* () {
-					const standing = yield* authorization.pod(podId, "sandbox.manage");
-					const pod = podOf(standing);
-					const by = yield* blockFor(pod.workspaceId, host);
+					const standing = yield* authorization.agent(agentId, "sandbox.manage");
+					const agent = agentOf(standing);
+					const by = yield* blockFor(agent.workspaceId, host);
 					if (by !== undefined) return yield* new HostBlocked({ host, by });
 					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToPod({ ...pod, host, addedById: standing.actor.userId });
+						yield* addToAgent({ ...agent, host, addedById: standing.actor.userId });
 					}
-					return yield* podSettingsOf(pod);
+					return yield* agentSettingsOf(agent);
 				}),
 			),
 
-		removePodHost: ({ podId, host }) =>
+		removeAgentHost: ({ agentId, host }) =>
 			operation(
-				"removePodHost",
+				"removeAgentHost",
 				Effect.gen(function* () {
-					const pod = podOf(yield* authorization.pod(podId, "sandbox.manage"));
+					const agent = agentOf(yield* authorization.agent(agentId, "sandbox.manage"));
 					const removed = yield* query((db) =>
 						db
-							.delete(sandboxPodAllowedHost)
+							.delete(sandboxAgentAllowedHost)
 							.where(
 								and(
-									eq(sandboxPodAllowedHost.podId, pod.podId),
-									eq(sandboxPodAllowedHost.host, host),
+									eq(sandboxAgentAllowedHost.agentId, agent.agentId),
+									eq(sandboxAgentAllowedHost.host, host),
 								),
 							)
-							.returning({ host: sandboxPodAllowedHost.host }),
+							.returning({ host: sandboxAgentAllowedHost.host }),
 					);
-					if (removed.length > 0) yield* podSandboxes.applyNetwork(pod);
-					return yield* podSettingsOf(pod);
+					if (removed.length > 0) yield* agentSandboxes.applyNetwork(agent);
+					return yield* agentSettingsOf(agent);
 				}),
 			),
 
@@ -333,13 +335,13 @@ export const make = Effect.gen(function* () {
 					const [call] = yield* query((db) =>
 						db
 							.select({
-								threadId: thread.id,
 								workspaceId: thread.workspaceId,
-								podId: thread.podId,
+								agentId: turn.agentId,
 								approvalStatus: toolCall.approvalStatus,
 								decidedById: toolCall.decidedById,
 							})
 							.from(toolCall)
+							.innerJoin(turn, eq(turn.id, toolCall.turnId))
 							.innerJoin(thread, eq(thread.id, toolCall.threadId))
 							.where(and(eq(toolCall.turnId, turnId), eq(toolCall.sdkToolCallId, sdkToolCallId)))
 							.limit(1),
@@ -349,9 +351,9 @@ export const make = Effect.gen(function* () {
 					const by = yield* blockFor(call.workspaceId, host);
 					if (by !== undefined) return { kind: "blocked", by };
 					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToPod({
+						yield* addToAgent({
 							workspaceId: call.workspaceId,
-							podId: threadPodId(call.threadId, call.podId),
+							agentId: call.agentId,
 							host,
 							addedById: call.decidedById,
 						});
@@ -367,18 +369,18 @@ export const layerNoDeps = Layer.effect(Service, make);
 export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
-		PodSandboxes.layer,
+		AgentSandboxes.layer,
 		SandboxProviderRepository.layer,
 		Sandboxes.layer,
 	]),
 );
 
-interface Pod {
+interface Agent {
 	readonly workspaceId: string;
-	readonly podId: string;
+	readonly agentId: string;
 }
 
-/** The host is blocked for the workspace, so no pod may allow it. */
+/** The host is blocked for the workspace, so no bot may allow it. */
 export class HostBlocked
 	extends Data.TaggedError("SandboxHostBlocked")<{ host: string; by: string }>
 	implements UserFacing

@@ -1,6 +1,7 @@
 import { testPerson } from "@sugabots/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { describeToolCall } from "../threads/message-text.ts";
+import { START_THREAD_TOOL } from "../tools/start-thread/tool.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import type { TurnContext } from "./execution.ts";
@@ -19,9 +20,7 @@ describe("modelPrompt", () => {
 	it("maps people and other agents to attributed user messages", () => {
 		const prompt = modelPrompt(context(), environment());
 
-		expect(prompt.system).toContain(
-			"You are Host Agent (@host-agent), an agent in pod Release of workspace Suga",
-		);
+		expect(prompt.system).toContain("You are Host Agent (@host-agent), a bot in workspace Suga.");
 		expect(prompt.system).toContain("Check facts carefully.");
 		// The history, marked where it ends, then one trailing instruction with
 		// everything that varies between turns, so the prefix the provider caches
@@ -64,7 +63,7 @@ describe("modelPrompt", () => {
 		];
 		const instruction = () => modelPrompt(asking, environment()).messages.at(-1)?.content ?? "";
 		expect(instruction()).toContain(
-			"Other agents in this pod, and what each one knows:\n- Reviewer (@reviewer): Checks facts.\n- Scout (@scout)",
+			"Other bots in this workspace, and what each one knows:\n- Reviewer (@reviewer): Checks facts.\n- Scout (@scout)",
 		);
 		expect(instruction()).toContain(
 			"Use the collaborate tool when you need another agent's answer",
@@ -88,23 +87,28 @@ describe("modelPrompt", () => {
 		);
 	});
 
-	it("tells the agent whether it is in a channel or a thread, and how to start a thread from a channel", () => {
-		const instruction = (type: TurnContext["thread"]["type"]) => {
-			const turn = context();
-			turn.thread.type = type;
-			return modelPrompt(turn, environment()).messages.at(-1)?.content ?? "";
-		};
-		expect(instruction("conversation")).toContain("[Turn] You are in a thread.");
-		const betweenPeople = context();
-		betweenPeople.thread.hostAgentId = null;
-		const amongPeople = modelPrompt(betweenPeople, environment()).messages.at(-1)?.content ?? "";
-		expect(amongPeople).toContain("You are in a thread between people");
-		expect(amongPeople).not.toContain("only you reply here");
-		for (const type of ["pod_chat", "bot_channel"] as const) {
-			expect(instruction(type)).toContain("It is a channel, not a thread");
-			expect(instruction(type)).toContain("call start_thread");
-			expect(instruction(type)).not.toContain("You are in a thread");
-		}
+	it("tells the bot whether it is in one of its tasks or a channel, and how to take on a task from a channel", () => {
+		expect(modelPrompt(context(), environment()).messages.at(-1)?.content).toContain(
+			"You are in one of your tasks",
+		);
+		const inChannel = context();
+		inChannel.thread.type = "pod_chat";
+		inChannel.thread.hostAgentId = null;
+		inChannel.channel = { name: "Release", slug: "release" };
+		const instruction = modelPrompt(inChannel, environment()).messages.at(-1)?.content ?? "";
+		expect(instruction).toContain('You are in "Check the release" in the channel Release');
+		expect(instruction).toContain(`call ${START_THREAD_TOOL}`);
+		expect(instruction).not.toContain("You are in one of your tasks");
+	});
+
+	it("tells the bot who can reach it: everyone, its creator, or its person", () => {
+		const promptFor = (agent: Partial<TurnContext["agent"]>) =>
+			modelPrompt({ ...context(), agent: { ...context().agent, ...agent } }, environment()).system;
+		expect(promptFor({ visibility: "public" })).toContain("You are public");
+		expect(promptFor({ visibility: "private" })).toContain("You are private");
+		expect(promptFor({ visibility: "private", assistantOf: crypto.randomUUID() })).toContain(
+			"You are a Personal Assistant",
+		);
 	});
 
 	it("names the built-in tools on offer, and says nothing about them when there are none", () => {
@@ -553,7 +557,6 @@ function context(): TurnContext {
 		},
 		agent: {
 			id: "0199a3a0-0000-7000-8000-000000000003",
-			podId: "0199a3a0-0000-7000-8000-000000000009",
 			name: "Host Agent",
 			handle: "host-agent",
 			model: "claude-sonnet-4-20250514",
@@ -561,16 +564,16 @@ function context(): TurnContext {
 			disabledTools: [],
 			usesSandbox: false,
 			naturalBrowsing: false,
+			assistantOf: null,
+			visibility: "public",
 			color: "orange",
 			acceptsImages: false,
 		},
 		reason: "default",
 		windowTokens: 256_000,
 		compaction: undefined,
-		startedFrom: undefined,
 		routineInstructions: new Map(),
-		podName: "Release",
-		podSlug: "release",
+		channel: null,
 		workspaceName: "Suga",
 		workspaceSlug: "suga",
 		workspaceTimeZone: "UTC",

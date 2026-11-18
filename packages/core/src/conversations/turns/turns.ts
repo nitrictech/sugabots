@@ -119,7 +119,6 @@ export interface ControlsInterface {
 	 * sent to the turn's workflow, which runs what was allowed.
 	 */
 	readonly decide: (input: {
-		podId: string;
 		toolCallId: string;
 		decision: ToolApprovalDecision["decision"];
 	}) => Effect.Effect<

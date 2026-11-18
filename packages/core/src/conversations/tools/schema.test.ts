@@ -60,7 +60,7 @@ describe("native Effect tool schemas through the AI SDK", () => {
 		});
 		expect(await asSchema(collaborate.inputSchema).jsonSchema).toMatchObject({
 			properties: {
-				to: { type: "string", description: "The other agent's name, exactly as listed" },
+				to: { type: "string", description: "The other bot's name, exactly as listed" },
 				brief: {
 					type: "string",
 					minLength: 1,
@@ -143,7 +143,7 @@ describe("native Effect tool schemas through the AI SDK", () => {
 	it.each([
 		...Object.entries(
 			artifactTools({
-				by: { workspaceId: "workspace", podId: "pod", agentId: "agent", threadId: "thread" },
+				by: { workspaceId: "workspace", agentId: "agent", threadId: "thread" },
 				turnId: "turn",
 				calls: { completedOutputs: unexpectedExecution },
 				authoring: {

@@ -7,20 +7,20 @@ import {
 	builtInToolCatalog,
 	connectionMarkFor,
 	DESCRIPTION_MAX_LENGTH,
-	type Pod,
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
-import { Link, useRouter } from "@tanstack/react-router";
+import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ArrowUpRight, Pencil, X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { useDeleteAgent, useModelName, useUpdateAgent } from "@/lib/agents.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { podSettingsPageLink } from "@/lib/links.ts";
+import { agentSettingsPageLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
+import { useSession } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
@@ -50,18 +50,11 @@ import { AgentRoutines } from "./RoutineEditing.tsx";
  * unprompted. Model and instructions each open on a page of their own in the
  * same place, so the card never rearranges under you.
  *
- * What can be changed comes from the pod's resolved permissions, and a control
+ * What can be changed comes from the bot's resolved permissions, and a control
  * nobody may use is not drawn. Each field saves on its own; instructions are
  * prose somebody may be part-way through, so they wait for Save.
  */
-export function AgentSettingsPage({
-	agent,
-	pod,
-}: {
-	agent: Agent;
-	/** The pod this bot lives in, and what the viewer may do in it. */
-	pod: Pod;
-}) {
+export function AgentSettingsPage({ agent }: { agent: Agent }) {
 	const [page, setPage] = useState<"card" | "model" | "instructions">("card");
 	const update = useUpdateAgent(agent.id);
 	const failure = update.error ? failureMessage(update.error) : undefined;
@@ -72,7 +65,7 @@ export function AgentSettingsPage({
 		/>
 	);
 
-	if (page === "model") {
+	if (page === "model" && !agent.assistant) {
 		return (
 			<SettingsPage
 				back={back}
@@ -84,7 +77,7 @@ export function AgentSettingsPage({
 				<AgentModelPicker
 					agentName={agent.name}
 					model={agent.model}
-					canChoose={pod.permissions.updateAgents}
+					canChoose={agent.permissions.update && !agent.assistant}
 					onChoose={(model) => {
 						void update.mutateAsync({ model }).catch(() => {});
 					}}
@@ -92,11 +85,11 @@ export function AgentSettingsPage({
 			</SettingsPage>
 		);
 	}
-	if (page === "instructions") {
+	if (page === "instructions" && !agent.assistant) {
 		return (
 			<Instructions
 				agent={agent}
-				editable={pod.permissions.updateAgents}
+				editable={agent.permissions.update && !agent.assistant}
 				back={back}
 				save={update.mutateAsync}
 				savePending={update.isPending}
@@ -107,7 +100,6 @@ export function AgentSettingsPage({
 	return (
 		<ContactCard
 			agent={agent}
-			pod={pod}
 			save={update.mutateAsync}
 			savePending={update.isPending}
 			failure={failure}
@@ -121,7 +113,6 @@ type Save = (change: AgentUpdate) => Promise<unknown>;
 
 function ContactCard({
 	agent,
-	pod,
 	save,
 	savePending,
 	failure,
@@ -129,14 +120,15 @@ function ContactCard({
 	onOpenInstructions,
 }: {
 	agent: Agent;
-	pod: Pod;
 	save: Save;
 	savePending: boolean;
 	failure: string | undefined;
 	onOpenModel: () => void;
 	onOpenInstructions: () => void;
 }) {
-	const may = pod.permissions;
+	const may = agent.permissions;
+	// A Personal Assistant's prompt, model and tools are ours: its person changes its look (name, colour, face, shape) and connections.
+	const fixed = agent.assistant;
 	const modelName = useModelName(agent.model);
 	const workspaceName = useWorkspace().workspace?.name ?? "the workspace";
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -151,13 +143,21 @@ function ContactCard({
 			return;
 		}
 		// Back to Bots, or Bots in the deleted bot's place, so Back never returns to it.
-		leaveForPage(router.buildLocation(podSettingsPageLink(pod, "bots")).href);
+		leaveForPage(
+			router.buildLocation(
+				linkOptions({
+					from: "/$workspace",
+					to: "./settings/$section",
+					params: { section: "bots" },
+				}),
+			).href,
+		);
 	}
 
 	return (
 		<SettingsPage
 			hero={
-				may.updateAgents ? (
+				may.update ? (
 					<EditableFace agent={agent} save={save} savePending={savePending} />
 				) : (
 					<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={44} />
@@ -173,48 +173,59 @@ function ContactCard({
 					value={agent.name}
 					maxLength={AGENT_NAME_MAX_LENGTH}
 					required
-					editable={may.updateAgents}
+					editable={may.update}
 					savePending={savePending}
 					onCommit={(name) => save({ name })}
 				/>
-				<ProfileField
-					label="Description"
-					value={agent.description ?? ""}
-					placeholder="One line on what it's for"
-					maxLength={DESCRIPTION_MAX_LENGTH}
-					wide
-					editable={may.updateAgents}
-					savePending={savePending}
-					onCommit={(description) => save({ description })}
-				/>
-				<SettingsRow
-					label="Model"
-					sub={`From the models set up for ${workspaceName}`}
-					trailing={<SettingsValue>{modelName ?? "None chosen"}</SettingsValue>}
-					chevron
-					onClick={onOpenModel}
-				/>
-				<SettingsRow
-					label="Instructions"
-					sub="How it should behave and what to focus on"
-					chevron
-					onClick={onOpenInstructions}
-				/>
-				<AddedByRow agent={agent} />
+				{!fixed && (
+					<>
+						<ProfileField
+							label="Description"
+							value={agent.description ?? ""}
+							placeholder="One line on what it's for"
+							maxLength={DESCRIPTION_MAX_LENGTH}
+							wide
+							editable={may.update}
+							savePending={savePending}
+							onCommit={(description) => save({ description })}
+						/>
+						<VisibilityRow
+							agent={agent}
+							editable={may.update}
+							savePending={savePending}
+							save={save}
+						/>
+						<SettingsRow
+							label="Model"
+							sub={`From the models set up for ${workspaceName}`}
+							trailing={<SettingsValue>{modelName ?? "None chosen"}</SettingsValue>}
+							chevron
+							onClick={onOpenModel}
+						/>
+						<SettingsRow
+							label="Instructions"
+							sub="How it should behave and what to focus on"
+							chevron
+							onClick={onOpenInstructions}
+						/>
+						<AddedByRow agent={agent} />
+					</>
+				)}
 			</SettingsGroup>
-			<BuiltInTools
-				agent={agent}
-				pod={pod}
-				workspaceName={workspaceName}
-				canChange={may.updateAgents}
-				save={save}
-			/>
-			<InheritedTools agent={agent} pod={pod} />
-			<AgentRoutines agent={agent} pod={pod} />
-			{may.deleteAgents && (
+			{!fixed && (
+				<BuiltInTools
+					agent={agent}
+					workspaceName={workspaceName}
+					canChange={may.update}
+					save={save}
+				/>
+			)}
+			<AgentConnections agent={agent} />
+			{!fixed && <AgentRoutines agent={agent} />}
+			{may.delete && !fixed && (
 				<SettingsDanger
 					label="Delete bot"
-					description="Its chat, routines and settings go with it."
+					description="Its tasks, automations and settings go with it."
 					action="Delete"
 					onClick={() => setConfirmingDelete(true)}
 				/>
@@ -223,7 +234,7 @@ function ContactCard({
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
 				title={`Delete ${agent.name}?`}
-				description="Its chat, routines and settings go with it. This can't be undone."
+				description="Its tasks, automations and settings go with it. This can't be undone."
 				pending={remove.isPending}
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={deleteAgent}
@@ -589,29 +600,28 @@ const WEB_TOOLS: readonly BuiltInToolKey[] = builtInToolCatalog
 	.map((entry) => entry.key);
 
 /**
- * The tools `agent` has from its pod's connections, which every bot in the pod
- * shares. They are only shown here: what each allows is set on the pod, which
- * Edit beside the heading leads to. A connection whose tools are all off gives
- * the bot nothing, so it is left out.
+ * The services `agent` is connected to, each with how many of its tools it can
+ * use. What each allows is set on the bot's Connections page, which Manage
+ * beside the heading leads to. A connection whose tools are all off gives the
+ * bot nothing, so it is left out.
  */
-function InheritedTools({ agent, pod }: { agent: Agent; pod: Pod }) {
+function AgentConnections({ agent }: { agent: Agent }) {
 	const backToAgent = useBackToHere(agent.name);
-	const connections = useConnections(pod.id);
+	const connections = useConnections(agent.id);
 	const reachable = connections.data?.filter((connection) => usableToolCount(connection) > 0);
 	return (
 		<SettingsGroup
-			label={`Inherited from ${pod.name}`}
+			label="Connections"
 			action={
 				<Link
-					{...podSettingsPageLink(pod, "connections")}
+					{...agentSettingsPageLink(agent, "connections")}
 					state={backToAgent}
 					className="focus-ring flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground"
 				>
-					Edit in {pod.name}
+					Manage
 					<ArrowUpRight aria-hidden size={13} strokeWidth={2} />
 				</Link>
 			}
-			note={`Every bot in ${pod.name} shares these. What each connection allows is set on the pod.`}
 		>
 			{connections.isError && (
 				<div className="px-4 py-3">
@@ -635,7 +645,6 @@ function InheritedTools({ agent, pod }: { agent: Agent; pod: Pod }) {
 						}
 						label={connection.name}
 						sub={`${tools} ${tools === 1 ? "tool" : "tools"}`}
-						trailing={<SettingsValue>Inherited</SettingsValue>}
 					/>
 				);
 			})}
@@ -644,24 +653,23 @@ function InheritedTools({ agent, pod }: { agent: Agent; pod: Pod }) {
 }
 
 /**
- * The tools `agent` has of its own, rather than from its pod's connections:
+ * The tools `agent` has built in, rather than through its connections:
  * its computer, the web, and the rest of the catalog, each of which can be
  * switched off for it. The computer and the web are set up for the workspace
  * first; until they are, each says so and leads to where an admin sets it up.
  */
 function BuiltInTools({
 	agent,
-	pod,
 	workspaceName,
 	canChange,
 	save,
 }: {
 	agent: Agent;
-	pod: Pod;
 	workspaceName: string;
 	canChange: boolean;
 	save: Save;
 }) {
+	const backToAgent = useBackToHere(agent.name);
 	const webOff = useWebAccess().data?.enabled === false;
 	const computersOff = useSandboxAccess().data?.enabled === false;
 	const isOn = (keys: readonly BuiltInToolKey[]) =>
@@ -674,16 +682,31 @@ function BuiltInTools({
 		}).catch(() => {});
 
 	return (
-		<SettingsGroup label="Built-in tools">
+		<SettingsGroup
+			label="Built-in tools"
+			action={
+				agent.usesSandbox &&
+				!computersOff && (
+					<Link
+						{...agentSettingsPageLink(agent, "computer")}
+						state={backToAgent}
+						className="focus-ring flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground"
+					>
+						Its computer
+						<ArrowUpRight aria-hidden size={13} strokeWidth={2} />
+					</Link>
+				)
+			}
+		>
 			<ToolRow
 				label="Computer"
 				sub={
 					computersOff
 						? `Computers are off for ${workspaceName}`
-						: "Run commands, browse and edit files on the pod's computer"
+						: "Run commands, browse and edit files on a computer of its own"
 				}
 				on={agent.usesSandbox && !computersOff}
-				canChange={pod.permissions.manageSandbox}
+				canChange={agent.permissions.manageSandbox}
 				offReason={computersOff ? `Computers are off for ${workspaceName}` : undefined}
 				onChange={(next) => save({ usesSandbox: next }).catch(() => {})}
 			/>
@@ -756,6 +779,51 @@ function ToolRow({
 					/>
 				) : (
 					<SettingsValue>{on ? "On" : "Off"}</SettingsValue>
+				)
+			}
+		/>
+	);
+}
+
+/**
+ * Whether everyone in the workspace sees the bot, or only its creator: a
+ * toggle for whoever may change the bot, else what it is.
+ */
+function VisibilityRow({
+	agent,
+	editable,
+	savePending,
+	save,
+}: {
+	agent: Agent;
+	editable: boolean;
+	savePending: boolean;
+	save: Save;
+}) {
+	const isPublic = agent.visibility === "public";
+	const mine = agent.createdById === useSession().user?.id;
+	return (
+		<SettingsRow
+			label="Public"
+			sub={
+				isPublic
+					? "Everyone in the workspace can see it, talk to it and add it to channels. Making it private takes it out of its channels"
+					: mine
+						? "Only you can see it and talk to it"
+						: "Only the person who made it can see it and talk to it"
+			}
+			trailing={
+				editable ? (
+					<Toggle
+						checked={isPublic}
+						disabled={savePending}
+						label={isPublic ? "Make private" : "Make public"}
+						onChange={(on) => {
+							void save({ visibility: on ? "public" : "private" }).catch(() => {});
+						}}
+					/>
+				) : (
+					<SettingsValue>{isPublic ? "Public" : "Private"}</SettingsValue>
 				)
 			}
 		/>

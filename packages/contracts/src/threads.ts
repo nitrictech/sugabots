@@ -25,7 +25,6 @@ export const MAX_THREAD_HISTORY_LIMIT = 100;
 export const threadTypeSchema = Schema.Literals([
 	"conversation",
 	"pod_chat",
-	"bot_channel",
 	"collaboration",
 	"routine",
 	"routine_feed",
@@ -35,8 +34,8 @@ export const threadTypeSchema = Schema.Literals([
 
 export type ThreadType = typeof threadTypeSchema.Type;
 
-/** The types of room that are channels, which last and which threads are started from. */
-export const channelTypeSchema = Schema.Literals(["pod_chat", "bot_channel"]);
+/** The types of room that are a channel's conversations: its main chat and its threads. */
+export const channelTypeSchema = Schema.Literals(["pod_chat"]);
 
 export type ChannelType = typeof channelTypeSchema.Type;
 
@@ -46,7 +45,6 @@ export const isChannelType = Schema.is(channelTypeSchema);
 export const NOTIFYING_THREAD_TYPES: ReadonlySet<ThreadType> = new Set([
 	"conversation",
 	"pod_chat",
-	"bot_channel",
 	"direct",
 ]);
 
@@ -67,9 +65,9 @@ export type ThreadHistoryQuery = typeof threadHistoryQuerySchema.Type;
 export const threadSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	/** The pod it is in; null on a direct message between people, which is in none. */
+	/** The channel it is in; only a channel's own conversations are in one. */
 	podId: Schema.NullOr(uuidSchema),
-	/** The bot the thread is with; null on a pod's chat, and on a thread between people. */
+	/** The bot the thread is with; null on a channel's conversation and a direct message. */
 	hostAgentId: Schema.NullOr(uuidSchema),
 	/**
 	 * The conversation it is in: its own id on a conversation, a pod's chat or
@@ -625,6 +623,17 @@ export type Message = typeof messageSchema.Type;
 
 export const MAX_THREAD_SUMMARY_CHARACTERS = 4_000;
 
+/** The most a bot's summary of what it has been doing may say. */
+export const MAX_BOT_SUMMARY_CHARACTERS = 1_000;
+
+/** What a bot has been doing lately, written by the Summariser from its tasks' summaries. */
+export const botSummarySchema = Schema.Struct({
+	content: Schema.String,
+	updatedAt: isoTimestampSchema,
+});
+
+export type BotSummary = typeof botSummarySchema.Type;
+
 export const threadSummarySchema = Schema.Struct({
 	content: Schema.Trim.check(
 		Schema.isMinLength(1),
@@ -655,8 +664,11 @@ export const threadDetailsSchema = Schema.Struct({
 	capabilities: Schema.optional(
 		Schema.Struct({
 			approveToolCalls: Schema.Boolean,
-			/** Whether this person may decide the pod's requests to change its sandbox. */
-			approveSandboxRequests: Schema.optional(Schema.Boolean),
+			/**
+			 * The bots in the thread whose requests to change their computers this
+			 * person may decide: each bot's creator or an admin decides its own.
+			 */
+			approveSandboxRequestsOf: Schema.optional(Schema.Array(uuidSchema)),
 		}),
 	),
 	routineExecution: Schema.NullOr(routineExecutionSchema),
@@ -672,11 +684,9 @@ export const threadDetailsSchema = Schema.Struct({
 			pausedAfterFailures: Schema.Boolean,
 		}),
 	),
-	/** The message in a pod's chat that this thread was started from, which stays there. */
-	startedFrom: Schema.NullOr(messageSchema),
 	participants: Schema.mutable(Schema.Array(threadParticipantSchema)),
 	/**
-	 * The pod's agents, whether or not they have spoken. Who a mention can name,
+	 * The channel's bots, whether or not they have spoken. Who a mention can name,
 	 * which is wider than who has joined.
 	 */
 	crew: Schema.mutable(Schema.Array(threadParticipantSchema)),

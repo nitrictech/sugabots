@@ -2,14 +2,13 @@ import {
 	MAX_ROUTINE_TRIGGERS,
 	MIN_WEBHOOK_SECRET_CHARACTERS,
 	type Routine,
-	type RoutineResults,
 	type RoutineTrigger,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import type { Authorization } from "../../authorization/authorization.ts";
-import type { PodPermission } from "../../authorization/permissions.ts";
+import type { AgentPermission } from "../../authorization/permissions.ts";
 import { query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { routine, routineTrigger } from "../../database/schema.ts";
@@ -35,7 +34,7 @@ export interface Scope {
 export const scopeOf = (
 	authorization: Authorization.Interface,
 	{ agentId, routineId }: OnAgent,
-	permission: PodPermission,
+	permission: AgentPermission,
 ) =>
 	Effect.map(
 		authorization.agent(agentId, permission),
@@ -51,18 +50,6 @@ export const inScope = (scope: Scope) =>
 		isNull(routine.deletedAt),
 	);
 
-/**
- * Whether a run's result is posted in its pod's chat as well as in the
- * routine's thread: when its routine says so, and its pod is shared, since
- * only a shared pod has chats.
- */
-export function resultGoesToPodChat(
-	results: RoutineResults,
-	podKind: schema.PodRow["kind"],
-): boolean {
-	return results === "post_to_chat" && podKind === "shared";
-}
-
 export function toRoutine(
 	row: schema.RoutineRow,
 	triggers: readonly schema.RoutineTriggerRow[],
@@ -75,8 +62,6 @@ export function toRoutine(
 		instructions: row.instructions,
 		triggers: triggers.map(toTrigger),
 		state: row.state,
-		results: row.results,
-		chatId: row.chatId,
 		createdById: row.createdById,
 		createdByAgentId: row.createdByAgentId,
 		createdAt: row.createdAt.toISOString(),
@@ -113,16 +98,6 @@ export const routineWithTriggers = (row: schema.RoutineRow) =>
 export class RoutineNotFound extends Data.TaggedError("RoutineNotFound") implements UserFacing {
 	get userMessage() {
 		return userText`No such Routine`;
-	}
-}
-
-/** The chat a routine's results were to go to is not one of its pod's chats. */
-export class RoutineChatNotFound
-	extends Data.TaggedError("RoutineChatNotFound")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`No such chat in the routine's pod`;
 	}
 }
 
@@ -173,12 +148,12 @@ export class RoutineDeliveryIdTooLong
 }
 
 /** A repository trigger for a repository the routine's agent's pod doesn't have. */
-export class RoutineRepositoryNotInPod
-	extends Data.TaggedError("RoutineRepositoryNotInPod")
+export class RoutineRepositoryNotConnected
+	extends Data.TaggedError("RoutineRepositoryNotConnected")
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`That repository isn't one of the bot's pod's. Add it in the pod's settings first.`;
+		return userText`That repository isn't one the bot's GitHub app works on. Add it in the bot's settings first.`;
 	}
 }
 

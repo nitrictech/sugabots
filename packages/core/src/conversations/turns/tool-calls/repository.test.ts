@@ -3,11 +3,10 @@ import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ResourceHidden } from "../../../authorization/access.ts";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
 import {
+	agent,
 	connection,
-	podMember,
 	toolCall,
 	turn,
 	user,
@@ -77,7 +76,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		prepare: Context.get(conversations, TurnExecution.Service).prepare,
 	});
 	let workspaceId: string;
-	let podId: string;
+	let hostId: string;
 	let memberId: string;
 	let threadId: string;
 	let connectionId: string;
@@ -96,7 +95,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, podId, memberId, threadId, connectionId } = await aChatAwaitingReply(chatsAs));
+		({ workspaceId, hostId, memberId, threadId, connectionId } = await aChatAwaitingReply(chatsAs));
 		const [run] = await runOnPostgres(runningTurns(threadId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);
@@ -347,9 +346,13 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await expect(approvals.beginExecution(execution)).rejects.toThrow("turned off");
 	});
 
-	it("conceals a pending approval from somebody who cannot reach the pod", async () => {
+	it("conceals a pending approval from somebody who cannot reach the bot", async () => {
 		const pending = pendingCall({ sdkToolCallId: "sdk-stranger" });
 		await park(pending);
+		// A private bot, which only its creator reaches.
+		await onDatabase((db) =>
+			db.update(agent).set({ visibility: "private" }).where(eq(agent.id, hostId)),
+		);
 		const [stranger] = await onDatabase((db) =>
 			db
 				.insert(user)
@@ -362,11 +365,11 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		);
 
 		await expect(
-			approvalsAs(stranger.id).decide({ podId, toolCallId: pending.id, decision: "allow_once" }),
-		).rejects.toBeInstanceOf(ResourceHidden);
+			approvalsAs(stranger.id).decide({ toolCallId: pending.id, decision: "allow_once" }),
+		).rejects.toBeInstanceOf(Turns.ToolApprovalNotFound);
 	});
 
-	it("refuses a decision to somebody in the pod who may not decide", async () => {
+	it("refuses a decision to somebody who reaches the bot but may not decide", async () => {
 		const pending = pendingCall({ sdkToolCallId: "sdk-viewer" });
 		await park(pending);
 		const [viewer] = await onDatabase((db) =>
@@ -379,12 +382,9 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId, userId: viewer.id, role: "viewer" }),
 		);
-		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId, podId, userId: viewer.id }),
-		);
 
 		await expect(
-			approvalsAs(viewer.id).decide({ podId, toolCallId: pending.id, decision: "allow_once" }),
+			approvalsAs(viewer.id).decide({ toolCallId: pending.id, decision: "allow_once" }),
 		).rejects.toBeInstanceOf(ToolApprovalForbidden);
 		const [undecided] = await onDatabase((db) =>
 			db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
@@ -487,7 +487,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 			await onPostgresAs(memberId)(
 				Context.get(await conversationsForTests(bus, signals), Turns.Controls),
-			).decide({ podId, toolCallId: pending.id, decision: "allow_once" });
+			).decide({ toolCallId: pending.id, decision: "allow_once" });
 
 			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
 			const [decided] = await onDatabase((db) =>
@@ -496,7 +496,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			expect(decided).toMatchObject({ approvalStatus: "allowed", decidedById: memberId });
 		});
 
-		it("takes the decision of an administrator who is not in the pod", async () => {
+		it("takes the decision of an administrator who did not make the bot", async () => {
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 			const [administrator] = await onDatabase((db) =>
@@ -512,7 +512,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 			await onPostgresAs(administrator.id)(
 				Context.get(await conversationsForTests(bus, signals), Turns.Controls),
-			).decide({ podId, toolCallId: pending.id, decision: "allow_once" });
+			).decide({ toolCallId: pending.id, decision: "allow_once" });
 
 			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(2));
 			const [decided] = await onDatabase((db) =>
@@ -528,7 +528,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				Context.get(await conversationsForTests(bus, signals), Turns.Controls),
 			);
 			const decide = (decision: "allow_once" | "deny") =>
-				deciding.decide({ podId, toolCallId: pending.id, decision });
+				deciding.decide({ toolCallId: pending.id, decision });
 
 			await decide("allow_once");
 
@@ -543,7 +543,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 
 			await onPostgresAs(memberId)(
 				Context.get(await conversationsForTests(bus, unheard), Turns.Controls),
-			).decide({ podId, toolCallId: pending.id, decision: "allow_once" });
+			).decide({ toolCallId: pending.id, decision: "allow_once" });
 
 			expect(delivered.map(({ event }) => event)).toContainEqual(
 				expect.objectContaining({

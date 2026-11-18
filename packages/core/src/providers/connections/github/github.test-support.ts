@@ -1,6 +1,13 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
 import { Effect, Layer } from "effect";
-import { pod, podMember, user, workspace, workspaceMember } from "../../../database/schema.ts";
+import {
+	agent,
+	pod,
+	podMember,
+	user,
+	workspace,
+	workspaceMember,
+} from "../../../database/schema.ts";
 import { onDatabase } from "../../../database/testing.ts";
 import { Installation } from "../../../installation/installation.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
@@ -170,8 +177,6 @@ export async function workspaceWithPod(label: string) {
 			.insert(pod)
 			.values({
 				workspaceId,
-				ownerId: null,
-				kind: "shared",
 				name: "Builders",
 				slug: `builders-${suffix}`,
 				createdById: admin.id,
@@ -182,19 +187,38 @@ export async function workspaceWithPod(label: string) {
 	await onDatabase((db) =>
 		db.insert(podMember).values({ workspaceId, podId: shared.id, userId: member.id }),
 	);
-	return { workspaceId, podId: shared.id, adminId: admin.id, memberId: member.id };
+	const [bot] = await onDatabase((db) =>
+		db
+			.insert(agent)
+			.values({
+				workspaceId,
+				name: "Builder",
+				handle: "builder",
+				color: "sky",
+				face: "pill",
+			})
+			.returning(),
+	);
+	if (!bot) throw new Error("fixture");
+	return {
+		workspaceId,
+		podId: shared.id,
+		agentId: bot.id,
+		adminId: admin.id,
+		memberId: member.id,
+	};
 }
 
 /**
- * The pod's GitHub connection, its own app made by the fixture's admin but
+ * The bot's GitHub app, made by the fixture's admin but
  * not yet installed, and the `state` that installs it.
  */
 export async function madeConnection(
 	gitHubApps: GitHubApps.Interface,
-	{ podId, adminId }: { podId: string; adminId: string },
+	{ agentId, adminId }: { agentId: string; adminId: string },
 ) {
 	const asAdmin = onPostgresAs(adminId)(gitHubApps);
-	const form = await asAdmin.start({ podId, organization: undefined });
+	const form = await asAdmin.start({ agentId, organization: undefined });
 	const made = await asAdmin.made({ code: MANIFEST_CODE, state: stateIn(form.url) });
 	if (made.kind !== "next") throw new Error(`Not made: ${JSON.stringify(made)}`);
 	// The connection's id ends its webhook's address.
@@ -203,10 +227,10 @@ export async function madeConnection(
 	return { connectionId, installState: stateIn(made.url) };
 }
 
-/** The pod's GitHub connection, its own app made by the fixture's admin and installed on `acme`. */
+/** The bot's GitHub app, made by the fixture's admin and installed on `acme`. */
 export async function installedConnection(
 	gitHubApps: GitHubApps.Interface,
-	fixture: { podId: string; adminId: string },
+	fixture: { agentId: string; adminId: string },
 ) {
 	const { connectionId, installState } = await madeConnection(gitHubApps, fixture);
 	const installed = await onPostgresAs(fixture.adminId)(gitHubApps).installed({

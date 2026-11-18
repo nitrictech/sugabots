@@ -44,7 +44,7 @@ export interface BrowserSession {
 }
 
 const SCREENSHOT_TOOL = "browser_take_screenshot";
-const IMAGE_BEFORE_PASSWORDS = userText`This sandbox's image is from before desktops had passwords. Upgrade the pod's sandbox to open its desktop.`;
+const IMAGE_BEFORE_PASSWORDS = userText`This computer's image is from before desktops had passwords. Upgrade the bot's computer to open its desktop.`;
 const NO_BROWSER = userText`This sandbox's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
 
 /** An agent in a thread, whose desktop there is drawn in the agent's colour. */

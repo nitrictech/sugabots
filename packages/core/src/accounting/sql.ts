@@ -17,7 +17,7 @@ import type { ModelRequests } from "./model-requests.ts";
  * One request sent to a model provider: what it was for, what it used, and
  * what it cost.
  *
- * The ledger outlives what it describes. The pod, agent, thread, turn and
+ * The ledger outlives what it describes. The bot, thread, turn and
  * provider are copied here without foreign keys, so deleting any of them
  * neither erases what was spent nor is blocked by it: they say who a request
  * was made for, not whether that still exists.
@@ -28,8 +28,6 @@ export const modelRequest = pgTable(
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id").notNull(),
 		purpose: text("purpose").$type<ModelRequests.Purpose>().notNull(),
-		/** The pod the request served, as it was then; system work names the one it worked in. */
-		podId: uuid("pod_id"),
 		agentId: uuid("agent_id"),
 		/** The conversation the request served, never a system agent's own child thread. */
 		threadId: uuid("thread_id"),

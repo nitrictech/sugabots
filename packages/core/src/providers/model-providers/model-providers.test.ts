@@ -3,14 +3,7 @@ import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
-import {
-	agent,
-	modelProvider,
-	pod,
-	user,
-	workspace,
-	workspaceMember,
-} from "../../database/schema.ts";
+import { agent, modelProvider, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -905,18 +898,10 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 					enabled: true,
 				});
 				await setup.setDefaultModel({ workspace: workspaceId, model: "third" });
-				const [crew] = await onDatabase((db) =>
-					db
-						.insert(pod)
-						.values({ workspaceId, kind: "shared", name: "Crew", slug: "crew" })
-						.returning({ id: pod.id }),
-				);
-				if (!crew) throw new Error("could not create the test pod");
 				await onDatabase((db) =>
 					db.insert(agent).values(
 						["Ada", "Grace"].map((name) => ({
 							workspaceId,
-							podId: crew.id,
 							name,
 							handle: name.toLowerCase(),
 							color: "red" as const,

@@ -25,12 +25,12 @@ import type { OAuthRecord } from "./oauth.ts";
 import { toolAccessOf } from "./tool-access.ts";
 
 /**
- * The only writer of `connection`: the MCP servers and GitHub apps a pod's
- * agents may use, the MCP servers' sealed secrets and OAuth records, and the
+ * The only writer of `connection`: the MCP servers and GitHub apps each bot
+ * may use, the MCP servers' sealed secrets and OAuth records, and the
  * apps' sealed credentials.
  *
- * A name, and the handle made from it, is unique per pod. `target` does not
- * look at what the pod's bots may do with the tools: a connection whose tools
+ * A name, and the handle made from it, is unique per bot. `target` does not
+ * look at what the bot may do with the tools: a connection whose tools
  * are all off can still be tested.
  *
  * What a person chooses for a tool is not a change of configuration: it
@@ -43,17 +43,17 @@ import { toolAccessOf } from "./tool-access.ts";
 export interface Interface {
 	readonly create: (
 		workspaceId: string,
-		podId: string,
+		agentId: string,
 		userId: string,
 		input: NewConnection,
 	) => Effect.Effect<ConnectionRow, ConnectionNameTaken>;
 	/**
-	 * Gives the pod a GitHub connection to the app made for it, `id`. It
+	 * Gives the bot a GitHub connection to the app made for it, `id`. It
 	 * waits on `installed` before it is signed in.
 	 */
 	readonly createGitHub: (
 		workspaceId: string,
-		podId: string,
+		agentId: string,
 		userId: string,
 		input: {
 			id: string;
@@ -88,13 +88,13 @@ export interface Interface {
 	readonly reconfigured: (workspaceId: string, connectionId: string) => Effect.Effect<void>;
 	readonly update: (
 		workspaceId: string,
-		podId: string,
+		agentId: string,
 		connectionId: string,
 		changes: ConnectionUpdate,
 	) => Effect.Effect<ConnectionRow | undefined, ConnectionNameTaken | UnknownConnectionTool>;
 	readonly remove: (
 		workspaceId: string,
-		podId: string,
+		agentId: string,
 		connectionId: string,
 	) => Effect.Effect<boolean>;
 	/**
@@ -109,7 +109,7 @@ export interface Interface {
 	) => Effect.Effect<void>;
 	readonly target: (
 		workspaceId: string,
-		podId: string,
+		agentId: string,
 		connectionId: string,
 	) => Effect.Effect<ConnectionTarget | undefined>;
 	/**
@@ -117,7 +117,7 @@ export interface Interface {
 	 * waiting on its sign-in offers nothing, and neither does one whose every
 	 * listed tool is off, so a turn does not reach its server at all.
 	 */
-	readonly targetsForPod: (workspaceId: string, podId: string) => Effect.Effect<PodTargets>;
+	readonly targetsForAgent: (workspaceId: string, agentId: string) => Effect.Effect<AgentTargets>;
 	/** What the OAuth client has learnt and been issued, unsealed. */
 	readonly oauthRecord: (
 		workspaceId: string,
@@ -136,7 +136,7 @@ export interface Interface {
 	readonly byOauthState: (state: string) => Effect.Effect<
 		| {
 				workspaceId: string;
-				podId: string;
+				agentId: string;
 				connectionId: string;
 				startedByUserId: string | undefined;
 		  }
@@ -171,7 +171,7 @@ export const make = Effect.gen(function* () {
 	};
 
 	return Service.of({
-		create: (workspaceId, podId, userId, input) =>
+		create: (workspaceId, agentId, userId, input) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
@@ -190,7 +190,7 @@ export const make = Effect.gen(function* () {
 								.insert(connection)
 								.values({
 									workspaceId,
-									podId,
+									agentId,
 									createdById: userId,
 									handle: handleFromName(values.name),
 									...values,
@@ -205,7 +205,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		createGitHub: (workspaceId, podId, userId, input) =>
+		createGitHub: (workspaceId, agentId, userId, input) =>
 			operation(
 				"createGitHub",
 				Effect.gen(function* () {
@@ -217,7 +217,7 @@ export const make = Effect.gen(function* () {
 								.insert(connection)
 								.values({
 									workspaceId,
-									podId,
+									agentId,
 									createdById: userId,
 									kind: "github",
 									name,
@@ -324,15 +324,15 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		update: (workspaceId, podId, connectionId, changes) =>
+		update: (workspaceId, agentId, connectionId, changes) =>
 			operation(
 				"update",
 				transaction(
 					Effect.gen(function* () {
-						const inPod = and(
+						const ofAgent = and(
 							eq(connection.id, connectionId),
 							eq(connection.workspaceId, workspaceId),
-							eq(connection.podId, podId),
+							eq(connection.agentId, agentId),
 						);
 						const connectionChanged =
 							changes.url !== undefined ||
@@ -347,7 +347,7 @@ export const make = Effect.gen(function* () {
 								db
 									.select({ kind: connection.kind, url: connection.url, names: listedToolNames })
 									.from(connection)
-									.where(inPod)
+									.where(ofAgent)
 									.limit(1)
 									.for("update"),
 							);
@@ -389,7 +389,7 @@ export const make = Effect.gen(function* () {
 										lastTestedAt: connectionChanged ? null : undefined,
 										lastTestError: connectionChanged ? null : undefined,
 									})
-									.where(inPod)
+									.where(ofAgent)
 									.returning(),
 							(failure) => (isUniqueViolation(failure) ? new ConnectionNameTaken() : undefined),
 						);
@@ -398,7 +398,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		remove: (workspaceId, podId, connectionId) =>
+		remove: (workspaceId, agentId, connectionId) =>
 			operation(
 				"remove",
 				query((db) =>
@@ -408,7 +408,7 @@ export const make = Effect.gen(function* () {
 							and(
 								eq(connection.id, connectionId),
 								eq(connection.workspaceId, workspaceId),
-								eq(connection.podId, podId),
+								eq(connection.agentId, agentId),
 							),
 						)
 						.returning({ id: connection.id }),
@@ -439,7 +439,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		target: (workspaceId, podId, connectionId) =>
+		target: (workspaceId, agentId, connectionId) =>
 			operation(
 				"target",
 				query((db) =>
@@ -450,16 +450,16 @@ export const make = Effect.gen(function* () {
 							and(
 								eq(connection.id, connectionId),
 								eq(connection.workspaceId, workspaceId),
-								eq(connection.podId, podId),
+								eq(connection.agentId, agentId),
 							),
 						)
 						.limit(1),
 				).pipe(Effect.map(([row]) => row && toTarget(row))),
 			),
 
-		targetsForPod: (workspaceId, podId) =>
+		targetsForAgent: (workspaceId, agentId) =>
 			operation(
-				"targetsForPod",
+				"targetsForAgent",
 				query((db) =>
 					db
 						.select()
@@ -467,7 +467,7 @@ export const make = Effect.gen(function* () {
 						.where(
 							and(
 								eq(connection.workspaceId, workspaceId),
-								eq(connection.podId, podId),
+								eq(connection.agentId, agentId),
 								// GitHub's tools work through its app, with no address of its own to reach.
 								inArray(connection.kind, ["mcp", "http"]),
 							),
@@ -525,7 +525,7 @@ export const make = Effect.gen(function* () {
 						([row]) =>
 							row && {
 								workspaceId: row.workspaceId,
-								podId: row.podId,
+								agentId: row.agentId,
 								connectionId: row.id,
 								startedByUserId: unsealOauthRecord(row, cipher)?.startedByUserId,
 							},
@@ -537,12 +537,12 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** A pod's connections as a turn sees them. */
-export interface PodTargets {
+/** A bot's connections as a turn sees them. */
+export interface AgentTargets {
 	targets: ConnectionTarget[];
 	/**
 	 * Connections that offer nothing until someone signs in again, by handle,
-	 * and by address so they still count as ones the pod has.
+	 * and by address so they still count as ones the bot has.
 	 */
 	signInExpired: Pick<ConnectionTarget, "handle" | "url">[];
 }
@@ -558,7 +558,7 @@ export class ConnectionNameTaken
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`A connection with that name already exists in this pod`;
+		return userText`A connection with that name already exists for this bot`;
 	}
 }
 

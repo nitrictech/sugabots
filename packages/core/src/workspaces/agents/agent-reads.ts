@@ -1,33 +1,42 @@
 import type { Agent, SystemAgent } from "@sugabots/contracts";
-import { and, asc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, or } from "drizzle-orm";
 import { Effect } from "effect";
-import type { Visibility } from "../../authorization/visibility.ts";
+import { reachesAgentFor } from "../../authorization/access.ts";
+import { type Actor, managesEveryAgent } from "../../authorization/permissions.ts";
 import { query } from "../../database/database.ts";
-import { agent } from "../../database/schema.ts";
+import { agent, pinnedAgent } from "../../database/schema.ts";
 import { crewAgentRow, toAgent } from "./agent.ts";
 import { SYSTEM_AGENTS } from "./system-agents.ts";
 
 /**
- * The crew agents in a workspace's pods that `reachesPod`, `Visibility`'s
- * rule for somebody, says they reach, by name. System agents are in no pod
- * and are not here.
+ * The bots in a workspace that `actor` sees, by name: those they reach, and,
+ * for an administrator, every private bot too, which they see listed but
+ * can't open. Each says whether `actor` pinned it. System bots are not here.
  */
-export const visibleCrewAgents = (workspaceId: string, reachesPod: Visibility.ReachesPod) =>
+export const visibleCrewAgents = (workspaceId: string, actor: Actor) =>
 	query((db) =>
 		db
-			.select()
+			.select({ agent, pinnedAt: pinnedAgent.createdAt })
 			.from(agent)
-			// `reachesPod` is already false for a null pod; the explicit check keeps
-			// system agents out without relying on how NULL propagates in it.
+			.leftJoin(
+				pinnedAgent,
+				and(eq(pinnedAgent.agentId, agent.id), eq(pinnedAgent.userId, actor.userId)),
+			)
 			.where(
-				and(eq(agent.workspaceId, workspaceId), isNotNull(agent.podId), reachesPod(agent.podId)),
+				and(
+					eq(agent.workspaceId, workspaceId),
+					isNull(agent.systemAgentKey),
+					managesEveryAgent(actor)
+						? or(isNull(agent.assistantOf), eq(agent.assistantOf, actor.userId))
+						: reachesAgentFor(agent.id, actor.userId),
+				),
 			)
 			.orderBy(asc(agent.name)),
 	).pipe(
 		Effect.map((rows): Agent[] =>
 			rows.flatMap((row) => {
-				const crew = crewAgentRow(row);
-				return crew ? [toAgent(crew)] : [];
+				const crew = crewAgentRow(row.agent);
+				return crew ? [toAgent(crew, { actor, pinned: row.pinnedAt !== null })] : [];
 			}),
 		),
 	);

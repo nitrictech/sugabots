@@ -2,7 +2,6 @@ import { handleFromName, type WorkspaceRole } from "@sugabots/contracts";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	agent,
-	pod,
 	thread,
 	threadParticipant,
 	user,
@@ -63,26 +62,11 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 		if (!space) throw new Error("Could not create a workspace");
 		workspaceId = space.id;
 		owner = await member("Owner", "owner");
-		const [room] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId,
-					ownerId: owner.id,
-					kind: "shared",
-					name: "Access pod",
-					slug: `access-${suffix}`,
-					createdById: owner.id,
-				})
-				.returning(),
-		);
-		if (!room) throw new Error("Could not create a pod");
 		const [host] = await onDatabase((db) =>
 			db
 				.insert(agent)
 				.values({
 					workspaceId,
-					podId: room.id,
 					name: "Helper",
 					handle: handleFromName(`Helper ${suffix}`),
 					color: "green",
@@ -98,7 +82,6 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 				.insert(thread)
 				.values({
 					workspaceId,
-					podId: room.id,
 					hostAgentId: host.id,
 					type: "conversation",
 					title: "Access",

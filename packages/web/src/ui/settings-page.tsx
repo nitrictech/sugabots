@@ -329,19 +329,24 @@ export function SettingsFieldRow({
 /**
  * A name, edited in place, which saves trimmed when you leave it or press
  * Enter. Escape, or leaving it blank or unchanged, puts the name back; so does
- * a save that fails, and `error` says why under it.
+ * a save that fails, and `error` says why under it. With `optional`, as for a
+ * description, leaving it blank saves it blank.
  */
 export function SettingsNameRow({
+	label = "Name",
 	name,
 	maxLength,
+	optional = false,
 	savePending,
 	error,
 	onCommit,
 }: {
+	label?: string;
 	name: string;
 	maxLength: number;
+	optional?: boolean;
 	savePending: boolean;
-	error: string | undefined;
+	error?: string | undefined;
 	onCommit: (name: string) => Promise<unknown>;
 }) {
 	const [draft, setDraft] = useState(name);
@@ -349,7 +354,7 @@ export function SettingsNameRow({
 
 	function commit() {
 		const next = draft.trim();
-		if (savePending || next === name || next === "") {
+		if (savePending || next === name || (next === "" && !optional)) {
 			setDraft(name);
 			return;
 		}
@@ -359,7 +364,7 @@ export function SettingsNameRow({
 
 	return (
 		<>
-			<SettingsControlRow label="Name" htmlFor={id}>
+			<SettingsControlRow label={label} htmlFor={id}>
 				<input
 					id={id}
 					value={draft}

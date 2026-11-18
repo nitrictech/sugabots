@@ -15,7 +15,7 @@ export const agentRoutes = HttpApiBuilder.group(ServerApi, "agents", (handlers) 
 			)
 			.handle("create", ({ params, payload }) =>
 				agents
-					.create({ podId: params.podId, agent: payload })
+					.create({ workspace: params.workspace, agent: payload })
 					.pipe(asSessionUser, asHttpError(agentErrors)),
 			)
 			.handle("get", ({ params }) =>
@@ -28,6 +28,21 @@ export const agentRoutes = HttpApiBuilder.group(ServerApi, "agents", (handlers) 
 			)
 			.handle("remove", ({ params }) =>
 				agents.remove({ agentId: params.agentId }).pipe(asSessionUser, asHttpError(agentErrors)),
+			)
+			.handle("pin", ({ params }) =>
+				agents
+					.setPinned({ agentId: params.agentId, pinned: true })
+					.pipe(asSessionUser, asHttpError(agentErrors)),
+			)
+			.handle("unpin", ({ params }) =>
+				agents
+					.setPinned({ agentId: params.agentId, pinned: false })
+					.pipe(asSessionUser, asHttpError(agentErrors)),
+			)
+			.handle("ensureAssistant", ({ params, payload }) =>
+				agents
+					.ensureAssistant({ workspace: params.workspace, model: payload.model })
+					.pipe(asSessionUser, asHttpError(agentErrors)),
 			);
 	}),
 );
@@ -40,5 +55,8 @@ const agentErrors = {
 	AgentHandleReserved: BadRequest,
 	AgentGone: NotFound,
 	SystemAgentImmutable: BadRequest,
-	PodOutsideWorkspace: BadRequest,
+	AssistantStaysPrivate: BadRequest,
+	AssistantInstructionsManaged: BadRequest,
+	AssistantManaged: BadRequest,
+	SandboxUnavailable: Conflict,
 };

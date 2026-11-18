@@ -1,10 +1,10 @@
-import { PERSONAL_POD_SLUG, type PodColor } from "@sugabots/contracts";
-import { and, eq, isNotNull } from "drizzle-orm";
+import type { PodColor, PodVisibility } from "@sugabots/contracts";
+import { and, eq } from "drizzle-orm";
+import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import {
-	agent,
 	modelProvider,
 	pod,
 	podMember,
@@ -19,25 +19,23 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
+import { noComputers } from "../../sandboxes/testing.ts";
 import { AgentAdministration } from "../agents/agent-administration.ts";
-import { INTERVIEW_PROMPT } from "../agents/interview-prompt.ts";
 import { servedOnPostgresAs } from "../testing.ts";
-import { PersonalPods } from "./personal-pods.ts";
 import { PodAdministration } from "./pod-administration.ts";
 import { PodRepository } from "./pod-repository.ts";
 
 /**
- * The repository, the administration over it, and the authorisation queries
- * against real SQL.
+ * Channels: the repository, the administration over it, and the authorisation
+ * queries against real SQL.
  *
- * The joins behind `Authorization.pod`, the `reachesPod` predicate a list is
- * scoped by, and the create-plus-membership transaction are exactly the parts
- * a fake cannot check. Needs a migrated database and skips without one, as
+ * The joins behind `Authorization.pod`, the query a list is scoped by, and the
+ * create-plus-membership transaction are exactly the parts a fake cannot
+ * check. Needs a migrated database and skips without one, as
  * `db/schema.test.ts` does; CI always has one.
  */
-describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
+describe.skipIf(!process.env.DATABASE_URL)("channels, against Postgres", () => {
 	let repository: Promised<PodRepository.Interface>;
-	let personalPods: Promised<PersonalPods.Interface>;
 	let administrationAs: (userId: string) => Promised<PodAdministration.Interface>;
 	let agentsAs: (userId: string) => Promised<AgentAdministration.Interface>;
 	let authorizationAs: (userId: string) => Promised<Authorization.Interface>;
@@ -51,9 +49,11 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 	beforeAll(async () => {
 		repository = await servedOnPostgres(PodRepository.Service, PodRepository.layer);
-		personalPods = await servedOnPostgres(PersonalPods.Service, PersonalPods.layer);
 		administrationAs = await servedOnPostgresAs(PodAdministration.Service, PodAdministration.layer);
-		agentsAs = await servedOnPostgresAs(AgentAdministration.Service, AgentAdministration.layer);
+		agentsAs = await servedOnPostgresAs(
+			AgentAdministration.Service,
+			AgentAdministration.layer.pipe(Layer.provide(noComputers)),
+		);
 		authorizationAs = await servedOnPostgresAs(Authorization.Service, Authorization.layer);
 	});
 
@@ -61,17 +61,26 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		await closeDatabase();
 	});
 
-	const create = (creatorId: string, input: { name: string; slug: string; color?: PodColor }) =>
-		administrationAs(creatorId).create({ workspace: workspaceId, ...input });
+	const create = (
+		creatorId: string,
+		input: { name: string; slug: string; color?: PodColor; visibility?: PodVisibility },
+	) => administrationAs(creatorId).create({ workspace: workspaceId, ...input });
 	const createIn = (
 		inWorkspace: string,
 		creatorId: string,
-		input: { name: string; slug: string },
+		input: { name: string; slug: string; visibility?: PodVisibility },
 	) => administrationAs(creatorId).create({ workspace: inWorkspace, ...input });
 	const visibleTo = (userId: string, inWorkspace = workspaceId) =>
 		administrationAs(userId).list({ workspace: inWorkspace });
-	const ensurePersonal = (ownerId: string, model: string) =>
-		administrationAs(ownerId).ensurePersonal({ workspace: workspaceId, model });
+	/** The ids of the channels `userId` is listed, with whether they are in each. */
+	const listedTo = async (userId: string, inWorkspace = workspaceId) =>
+		(await visibleTo(userId, inWorkspace)).map(({ id, isMember }) => ({ id, isMember }));
+	/** A bot `creatorId` made, public unless said otherwise. */
+	const aBot = async (creatorId: string, name: string, visibility?: "public" | "private") =>
+		agentsAs(creatorId).create({
+			workspace: workspaceId,
+			agent: { name, model: "test-model", visibility },
+		});
 	const membersOf = (podId: string) => administrationAs(adminId).members({ podId });
 
 	beforeEach(async () => {
@@ -127,7 +136,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			]),
 		);
 
-		// The models the cases provision Personal Assistants on.
+		// The model the cases make bots on.
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)
@@ -145,7 +154,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		}
 		await onDatabase((db) =>
 			db.insert(providerModel).values(
-				["first-model", "second-model", "test-model"].map((modelId) => ({
+				["test-model"].map((modelId) => ({
 					workspaceId,
 					providerId: provider.id,
 					modelId,
@@ -157,25 +166,27 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 	});
 
 	describe("creating", () => {
-		it("puts the creator in the pod, so an admin is not locked out of it", async () => {
-			const made = await create(adminId, { name: "Suga", slug: "suga" });
+		it("puts the creator in the channel, and lists a public one to everybody to join", async () => {
+			const made = await create(memberId, { name: "Suga", slug: "suga" });
 
-			expect(await visibleTo(adminId)).toEqual([made]);
-			expect(await visibleTo(memberId)).toEqual([]);
+			expect(made).toMatchObject({ visibility: "public", isMember: true });
+			expect(await listedTo(memberId)).toEqual([{ id: made.id, isMember: true }]);
+			expect(await visibleTo(viewerId)).toEqual([
+				expect.objectContaining({
+					id: made.id,
+					isMember: false,
+					permissions: expect.objectContaining({ join: true, leave: false }),
+				}),
+			]);
 		});
 
-		it("puts no system agent in a new pod, since the workspace owns them", async () => {
-			// A pod has nothing to place: the workspace's Scribe and Compaction
-			// serve every pod in it, and are set up once for all of them.
-			const made = await create(adminId, { name: "Product", slug: "product" });
+		it("lists a private channel only to the people in it", async () => {
+			const made = await create(memberId, { name: "Suga", slug: "suga", visibility: "private" });
 
-			const placed = await onDatabase((db) =>
-				db
-					.select({ key: agent.systemAgentKey })
-					.from(agent)
-					.where(and(eq(agent.podId, made.id), isNotNull(agent.systemAgentKey))),
-			);
-			expect(placed).toEqual([]);
+			expect(await listedTo(memberId)).toEqual([{ id: made.id, isMember: true }]);
+			// Administrators are in every channel, private ones included.
+			expect(await listedTo(adminId)).toEqual([{ id: made.id, isMember: true }]);
+			expect(await visibleTo(viewerId)).toEqual([]);
 		});
 
 		it("refuses a slug already used in the same workspace", async () => {
@@ -203,7 +214,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect(rows.filter((row) => row.workspaceId === workspaceId)).toHaveLength(2);
 		});
 
-		it("gives a pod with no colour chosen one no other pod in the workspace has yet", async () => {
+		it("gives a channel with no colour chosen one no other channel in the workspace has yet", async () => {
 			await create(adminId, { name: "Suga", slug: "suga", color: "green" });
 			await create(adminId, { name: "Sales", slug: "sales", color: "plum" });
 
@@ -251,8 +262,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			).rejects.toThrow();
 		});
 
-		it("revokes pod grants when a workspace member leaves and does not restore them", async () => {
-			const made = await create(adminId, { name: "Suga", slug: "suga" });
+		it("takes somebody out of their channels when they leave the workspace, and does not put them back", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga", visibility: "private" });
 			await repository.addMember(workspaceId, made.id, memberId);
 
 			await onDatabase((db) =>
@@ -274,126 +285,98 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 		});
 	});
 
-	describe("personal pods", () => {
-		it("provisions one private pod and an assistant that keeps what its owner changes", async () => {
-			const personal = await ensurePersonal(memberId, "first-model");
-			const [assistant] = await onDatabase((db) =>
-				db
-					.select()
-					.from(agent)
-					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
-			);
-			if (!assistant) throw new Error("Personal Assistant was not provisioned");
+	describe("joining and inviting", () => {
+		it("lets anybody in the workspace join a public channel, once", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga" });
 
-			expect(personal).toMatchObject({ kind: "personal", ownerId: memberId });
-			expect(assistant).toMatchObject({
-				name: "Personal Assistant",
-				model: "first-model",
-				prompt: INTERVIEW_PROMPT,
+			expect(await administrationAs(viewerId).join({ podId: made.id })).toMatchObject({
+				isMember: true,
+				permissions: { join: false, leave: true },
 			});
+			await administrationAs(viewerId).join({ podId: made.id });
 
-			await onDatabase((db) =>
-				db
-					.update(agent)
-					.set({ name: "Friday", prompt: "Keep this customization." })
-					.where(eq(agent.id, assistant.id)),
+			expect((await membersOf(made.id)).map(({ userId }) => userId).toSorted()).toEqual(
+				[adminId, viewerId].toSorted(),
 			);
-			await ensurePersonal(memberId, "second-model");
-
-			const provisioned = await onDatabase((db) =>
-				db
-					.select()
-					.from(agent)
-					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
-			);
-			expect(provisioned).toHaveLength(1);
-			expect(provisioned[0]).toMatchObject({
-				name: "Friday",
-				model: "first-model",
-				prompt: "Keep this customization.",
-			});
 		});
 
-		it("moves an assistant to the model named when the workspace does not offer its own", async () => {
-			// Provisioned without a model, as somebody joining is.
-			const personal = await personalPods.provision({ workspaceId, userId: memberId });
-			const [unassigned] = await onDatabase((db) =>
-				db
-					.select({ model: agent.model })
-					.from(agent)
-					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
-			);
-			expect(unassigned?.model).toBeNull();
+		it("does not let anybody join a private channel, and hides it from them", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga", visibility: "private" });
 
-			await ensurePersonal(memberId, "second-model");
-
-			const [assistant] = await onDatabase((db) =>
-				db
-					.select({ model: agent.model })
-					.from(agent)
-					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
-			);
-			expect(assistant?.model).toBe("second-model");
-		});
-
-		it("refuses a model the workspace does not offer", async () => {
-			await expect(ensurePersonal(memberId, "unknown-model")).rejects.toMatchObject({
-				_tag: "ModelNotEnabled",
-			});
-		});
-
-		it("is invisible to other members and workspace administrators", async () => {
-			const personal = await ensurePersonal(memberId, "test-model");
-			const [assistant] = await onDatabase((db) =>
-				db
-					.select({ id: agent.id })
-					.from(agent)
-					.where(and(eq(agent.podId, personal.id), eq(agent.provisionedKey, "personal-assistant"))),
-			);
-			if (!assistant) throw new Error("Personal Assistant was not provisioned");
-
-			expect(await authorizationAs(memberId).pod(personal.id, "pod.delete")).toMatchObject({
-				facts: { isMember: true },
-			});
-			await expect(authorizationAs(adminId).pod(personal.id, "pod.read")).rejects.toThrow(
+			await expect(administrationAs(memberId).join({ podId: made.id })).rejects.toThrow(
 				ResourceHidden,
 			);
-			await expect(authorizationAs(adminId).agent(assistant.id, "agent.read")).rejects.toThrow(
+			await expect(administrationAs(outsiderId).join({ podId: made.id })).rejects.toThrow(
 				ResourceHidden,
 			);
-			expect(
-				(await agentsAs(adminId).list({ workspace: workspaceId })).map(({ id }) => id),
-			).not.toContain(assistant.id);
 		});
 
-		it("rejects adding another workspace member", async () => {
-			const personal = await ensurePersonal(memberId, "test-model");
+		it("lets a member in a channel invite and remove people, and a viewer neither", async () => {
+			const made = await create(memberId, { name: "Suga", slug: "suga", visibility: "private" });
 
-			expect(await repository.addMember(workspaceId, personal.id, adminId)).toBe("personal_pod");
+			await administrationAs(memberId).addMember({ podId: made.id, userId: viewerId });
 			await expect(
-				onDatabase((db) =>
-					db.insert(podMember).values({ workspaceId, podId: personal.id, userId: adminId }),
-				),
-			).rejects.toThrow();
+				administrationAs(viewerId).removeMember({ podId: made.id, userId: memberId }),
+			).rejects.toThrow(ActionForbidden);
+			await administrationAs(memberId).removeMember({ podId: made.id, userId: viewerId });
+
+			expect((await membersOf(made.id)).map(({ userId }) => userId).toSorted()).toEqual(
+				[adminId, memberId].toSorted(),
+			);
+			await expect(
+				administrationAs(memberId).removeMember({ podId: made.id, userId: viewerId }),
+			).rejects.toBeInstanceOf(PodAdministration.NotInPod);
+			await expect(
+				administrationAs(memberId).removeMember({ podId: made.id, userId: adminId }),
+			).rejects.toBeInstanceOf(PodAdministration.AdministratorInEveryChannel);
+			await expect(
+				administrationAs(memberId).addMember({ podId: made.id, userId: outsiderId }),
+			).rejects.toBeInstanceOf(PodAdministration.NotInWorkspace);
+		});
+	});
+
+	describe("bots", () => {
+		it("adds a public bot to a channel, lists it, and takes it out", async () => {
+			const made = await create(memberId, { name: "Suga", slug: "suga" });
+			const bot = await aBot(adminId, "Triage");
+
+			await administrationAs(memberId).addBot({ podId: made.id, agentId: bot.id });
+			await administrationAs(memberId).addBot({ podId: made.id, agentId: bot.id });
+			expect(
+				(await administrationAs(memberId).bots({ podId: made.id })).map(({ id }) => id),
+			).toEqual([bot.id]);
+
+			await administrationAs(memberId).removeBot({ podId: made.id, agentId: bot.id });
+			expect(await administrationAs(memberId).bots({ podId: made.id })).toEqual([]);
 		});
 
-		it("does not change its name, address or colour", async () => {
-			const personal = await ensurePersonal(memberId, "test-model");
+		it("refuses a private bot, even its creator's, and hides one the person doesn't reach", async () => {
+			const made = await create(memberId, { name: "Suga", slug: "suga" });
+			const own = await aBot(memberId, "Diary", "private");
+			const someoneElses = await aBot(adminId, "Ledger", "private");
 
-			await expect(repository.update(workspaceId, personal.id, { name: "Mine" })).rejects.toThrow(
-				PodRepository.PersonalPodFixed,
-			);
-			await expect(repository.update(workspaceId, personal.id, { slug: "mine" })).rejects.toThrow(
-				PodRepository.PersonalPodFixed,
-			);
-			await expect(repository.update(workspaceId, personal.id, { color: "rose" })).rejects.toThrow(
-				PodRepository.PersonalPodFixed,
-			);
+			await expect(
+				administrationAs(memberId).addBot({ podId: made.id, agentId: own.id }),
+			).rejects.toBeInstanceOf(PodRepository.BotNotPublic);
+			await expect(
+				administrationAs(memberId).addBot({ podId: made.id, agentId: someoneElses.id }),
+			).rejects.toThrow(ResourceHidden);
+			expect(await administrationAs(memberId).bots({ podId: made.id })).toEqual([]);
+		});
+
+		it("does not let a viewer add a bot", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga" });
+			const bot = await aBot(adminId, "Triage");
+			await repository.addMember(workspaceId, made.id, viewerId);
+
+			await expect(
+				administrationAs(viewerId).addBot({ podId: made.id, agentId: bot.id }),
+			).rejects.toThrow(ActionForbidden);
 		});
 	});
 
 	describe("renaming", () => {
-		it("refuses a slug another pod in the workspace holds", async () => {
+		it("refuses a slug another channel in the workspace holds", async () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 			await create(adminId, { name: "Sales", slug: "sales" });
 
@@ -402,8 +385,8 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			);
 		});
 
-		it("says the pod is gone, not that its slug is taken", async () => {
-			// Renaming a pod somebody else deleted in between.
+		it("says the channel is gone, not that its slug is taken", async () => {
+			// Renaming a channel somebody else deleted in between.
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 			await repository.remove(workspaceId, made.id);
 
@@ -418,7 +401,10 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect(await authorizationAs(adminId).workspace(workspaceId, "pod.create")).toMatchObject({
 				actor: { workspaceRole: "admin" },
 			});
-			await expect(authorizationAs(memberId).workspace(workspaceId, "pod.create")).rejects.toThrow(
+			expect(await authorizationAs(memberId).workspace(workspaceId, "pod.create")).toMatchObject({
+				actor: { workspaceRole: "member" },
+			});
+			await expect(authorizationAs(viewerId).workspace(workspaceId, "pod.create")).rejects.toThrow(
 				ActionForbidden,
 			);
 			await expect(
@@ -426,7 +412,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			).rejects.toThrow(ResourceHidden);
 		});
 
-		it("puts every administrator in a new shared pod, and keeps them there", async () => {
+		it("puts every administrator in a new channel, and keeps them there", async () => {
 			await onDatabase((db) =>
 				db
 					.update(workspaceMember)
@@ -444,88 +430,89 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect(await repository.removeMember(workspaceId, made.id, viewerId)).toBe("administrator");
 		});
 
-		it("gives a member the pods they have joined, and nothing else", async () => {
+		it("gives a member the channels they are in, and nothing else", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
 			const apart = await create(adminId, { name: "Legal", slug: "legal" });
 			await repository.addMember(workspaceId, joined.id, memberId);
 
-			expect(await authorizationAs(memberId).pod(joined.id, "agent.create")).toMatchObject({
+			expect(await authorizationAs(memberId).pod(joined.id, "pod.bots.manage")).toMatchObject({
 				facts: { isMember: true },
 			});
-			await expect(authorizationAs(memberId).pod(joined.id, "agent.delete")).rejects.toThrow(
+			await expect(authorizationAs(memberId).pod(joined.id, "pod.delete")).rejects.toThrow(
 				ActionForbidden,
 			);
+			// Listed to join, but not reached until they do.
 			await expect(authorizationAs(memberId).pod(apart.id, "pod.read")).rejects.toThrow(
 				ResourceHidden,
 			);
 		});
 
-		it("lists exactly the pods each role may read one by one", async () => {
+		it("lists exactly the channels each role may read one by one as theirs, and other public ones to join", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
 			const apart = await create(adminId, { name: "Legal", slug: "legal" });
+			const secret = await create(adminId, { name: "Board", slug: "board", visibility: "private" });
 			await repository.addMember(workspaceId, joined.id, memberId);
 			await repository.addMember(workspaceId, joined.id, viewerId);
 			const people = { admin: adminId, member: memberId, viewer: viewerId };
-			const pods: Record<string, string> = {
-				"shared, with the member and viewer in it": joined.id,
-				"shared, with only the administrator in it": apart.id,
+			const channels: Record<string, { id: string; isPublic: boolean }> = {
+				"public, with the member and viewer in it": { id: joined.id, isPublic: true },
+				"public, with only the administrator in it": { id: apart.id, isPublic: true },
+				"private, with only the administrator in it": { id: secret.id, isPublic: false },
 			};
-			for (const [role, userId] of Object.entries(people)) {
-				pods[`${role}'s Personal pod`] = (await ensurePersonal(userId, "test-model")).id;
-			}
 
 			for (const [role, userId] of Object.entries(people)) {
-				const listed = new Set((await visibleTo(userId)).map(({ id }) => id));
-				for (const [pod, podId] of Object.entries(pods)) {
+				const listed = new Map((await listedTo(userId)).map(({ id, isMember }) => [id, isMember]));
+				for (const [channel, { id, isPublic }] of Object.entries(channels)) {
 					const readable = await authorizationAs(userId)
-						.pod(podId, "pod.read")
+						.pod(id, "pod.read")
 						.then(() => true)
 						.catch((refusal) =>
 							refusal instanceof ResourceHidden ? false : Promise.reject(refusal),
 						);
-					expect({ role, pod, listed: listed.has(podId) }).toEqual({ role, pod, listed: readable });
+					expect({ role, channel, listed: listed.get(id) }).toEqual({
+						role,
+						channel,
+						listed: readable ? true : isPublic ? false : undefined,
+					});
 				}
 			}
-			expect((await visibleTo(adminId)).map(({ id }) => id)).toEqual(
-				expect.arrayContaining([joined.id, apart.id]),
-			);
 		});
 
-		it("carries the resolved permissions on each pod it lists", async () => {
+		it("carries the resolved permissions on each channel it lists", async () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
 			await repository.addMember(workspaceId, made.id, memberId);
 
 			const [seen] = (await visibleTo(memberId)).filter(({ id }) => id === made.id);
 
-			expect(seen?.permissions).toMatchObject({
-				createAgents: true,
-				updateAgents: true,
-				deleteAgents: false,
-				manageConnections: false,
-				manageSandbox: false,
-				useDesktops: true,
+			expect(seen?.permissions).toEqual({
+				rename: false,
+				manageMembers: true,
+				manageBots: true,
+				leave: true,
+				join: false,
+				delete: false,
+				deleteArtifacts: false,
 			});
 		});
 
-		it("gives a viewer the pods they have joined, to read and take part in", async () => {
+		it("gives a viewer the channels they are in, to read and take part in", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
-			const apart = await create(adminId, { name: "Legal", slug: "legal" });
+			const apart = await create(adminId, { name: "Legal", slug: "legal", visibility: "private" });
 			await repository.addMember(workspaceId, joined.id, viewerId);
 
 			const standing = await authorizationAs(viewerId).pod(joined.id, "pod.read");
 
-			expect(standing.may("routine.read")).toBe(true);
-			expect(standing.may("agent.update")).toBe(false);
-			await expect(authorizationAs(viewerId).pod(joined.id, "agent.create")).rejects.toThrow(
+			expect(standing.may("approval.decide")).toBe(false);
+			await expect(authorizationAs(viewerId).pod(joined.id, "pod.bots.manage")).rejects.toThrow(
 				ActionForbidden,
 			);
 			await expect(authorizationAs(viewerId).pod(apart.id, "pod.read")).rejects.toThrow(
 				ResourceHidden,
 			);
-			expect((await visibleTo(viewerId)).map(({ id }) => id)).toEqual([joined.id]);
+			expect(await listedTo(viewerId)).toEqual([{ id: joined.id, isMember: true }]);
 		});
 
-		it("carries a viewer's permissions on the pods it lists, all closed but leaving", async () => {
+		it("carries a viewer's permissions on the channels it lists, all closed but leaving", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
 			await repository.addMember(workspaceId, joined.id, viewerId);
 
@@ -536,18 +523,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			expect(Object.values(others)).not.toContain(true);
 		});
 
-		it("leaves a viewer in charge of their own Personal pod", async () => {
-			const personal = await ensurePersonal(viewerId, "test-model");
-
-			expect(personal.permissions).toMatchObject({
-				createAgents: true,
-				manageConnections: true,
-				manageSandbox: true,
-				manageRoutines: true,
-			});
-		});
-
-		it("lets a member leave a shared pod, and keeps an administrator in it", async () => {
+		it("lets a member leave a channel, and keeps an administrator in it", async () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
 			await repository.addMember(workspaceId, made.id, memberId);
 
@@ -559,7 +535,7 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 			);
 		});
 
-		it("keeps a demoted administrator in their pods, with a member's permissions there", async () => {
+		it("keeps a demoted administrator in their channels, with a member's permissions there", async () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
 
 			await onDatabase((db) =>
@@ -581,11 +557,12 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 
 		it("does not carry an administrator's reach into another workspace", async () => {
 			// Ada administers both, so the only thing keeping her out of the other
-			// one's pods would be the id — which is exactly what must not be true.
+			// one's channels would be the id, which is exactly what must not be true.
 			const here = await create(adminId, { name: "Sales", slug: "sales" });
 			const there = await createIn(otherWorkspaceId, adminId, {
 				name: "Sales",
 				slug: "sales",
+				visibility: "private",
 			});
 
 			expect(await visibleTo(adminId)).toEqual([expect.objectContaining({ id: here.id })]);
@@ -625,16 +602,16 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 				ActionForbidden,
 			);
 			await expect(
-				administrationAs(memberId).addMember({ podId: made.id, userId: viewerId }),
+				administrationAs(memberId).update({ podId: made.id, changes: { name: "Ours" } }),
 			).rejects.toThrow(ActionForbidden);
-			await expect(create(memberId, { name: "Mine", slug: "mine" })).rejects.toThrow(
+			await expect(create(viewerId, { name: "Mine", slug: "mine" })).rejects.toThrow(
 				ActionForbidden,
 			);
-			expect((await membersOf(made.id)).map(({ userId }) => userId)).not.toContain(viewerId);
+			expect(await listedTo(viewerId)).toEqual([{ id: made.id, isMember: false }]);
 		});
 
-		it("hides a pod from somebody who does not reach it, whatever they asked", async () => {
-			const made = await create(adminId, { name: "Sales", slug: "sales" });
+		it("hides a channel from somebody who is not in it, whatever they asked", async () => {
+			const made = await create(adminId, { name: "Sales", slug: "sales", visibility: "private" });
 
 			await expect(
 				administrationAs(memberId).update({ podId: made.id, changes: { name: "Ours" } }),
@@ -647,47 +624,19 @@ describe.skipIf(!process.env.DATABASE_URL)("pods, against Postgres", () => {
 	});
 
 	describe("workspace membership lifecycle", () => {
-		it("lets somebody who created a shared pod leave the workspace", async () => {
-			const made = await create(adminId, { name: "Sales", slug: "sales" });
-			await ensurePersonal(adminId, "test-model");
+		it("lets somebody who created a channel leave the workspace, and keeps the channel", async () => {
+			const made = await create(memberId, { name: "Sales", slug: "sales" });
 
-			// What better-auth's beforeRemoveMember hook does, then the removal.
-			await onDatabase((db) =>
-				db
-					.delete(pod)
-					.where(
-						and(
-							eq(pod.workspaceId, workspaceId),
-							eq(pod.ownerId, adminId),
-							eq(pod.kind, "personal"),
-						),
-					),
-			);
 			await onDatabase((db) =>
 				db
 					.delete(workspaceMember)
 					.where(
-						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, adminId)),
+						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, memberId)),
 					),
 			);
 
 			const [survivor] = await onDatabase((db) => db.select().from(pod).where(eq(pod.id, made.id)));
-			expect(survivor).toMatchObject({ ownerId: null });
-		});
-
-		it("refuses a Personal pod with no owner", async () => {
-			await expect(
-				onDatabase((db) =>
-					db.insert(pod).values({
-						workspaceId,
-						kind: "personal",
-						name: "Personal",
-						// The slug a Personal pod must have, so the missing owner is the
-						// only thing wrong with this row.
-						slug: PERSONAL_POD_SLUG,
-					}),
-				),
-			).rejects.toThrow();
+			expect(survivor).toMatchObject({ id: made.id });
 		});
 	});
 });

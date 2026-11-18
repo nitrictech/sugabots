@@ -23,12 +23,11 @@ To switch one off for a bot, open the bot's settings, go to **Tools**, and use
 **Turn off**.
 
 Bots can also [ask each other for help](/docs/conversations#bots-asking-bots).
-That's always on when a pod has more than one bot.
+That's always on.
 
 ## Tools from connections
 
-A connection's tools belong to the pod, and every bot in the pod can use them.
-Each tool has its own approval:
+A connection's tools belong to its bot. Each tool has its own approval:
 
 | Approval | What happens |
 | --- | --- |
@@ -41,7 +40,7 @@ on **Off** when the app says it deletes or overwrites, and on **Ask** otherwise.
 A choice stays, even while the app stops listing the tool. Turning a tool off
 also stops a call someone already allowed but that hasn't run yet.
 
-To change them, open the pod's settings and find **Connections**. Each row's
+To change them, open the bot's settings and find **Connections**. Each row's
 menu sets every tool of that connection at once, and says **Custom** when they
 differ. Open a connection to see its tools, the ones that read apart from the
 ones that make changes: each group's menu sets all of its tools, and each tool
@@ -58,6 +57,11 @@ Set the tool's approval and pick what the bot wants to do. A read and a change a
 A waiting call shows in the chat with **Allow** and **Deny**. Allow lets that
 one call run. There's no "always allow": the next call asks again.
 
-- **Admins and members** can answer approvals in chats.
+- **Anyone who can talk to the bot**, except viewers, can answer approvals in
+  its tasks. In a channel, anyone in it except viewers can answer.
 - **Viewers** see "Waiting for someone with permission to answer this."
-- **Only admins** can answer approvals raised by a [routine](/docs/routines) run.
+- **Only the bot's creator, the owner and admins** can answer approvals raised
+  by an [automation](/docs/automations) run. On your Personal Assistant, that's
+  you.
+- **Only the bot's creator, the owner and admins** can allow a bot's computer
+  to reach an internet address it couldn't before.

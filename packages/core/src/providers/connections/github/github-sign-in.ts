@@ -5,17 +5,16 @@ import { SandboxCredentials } from "../../../sandboxes/sandbox-credentials.ts";
 import { GitHubConnections } from "./github-connections.ts";
 
 /**
- * Signs each pod's sandbox in to read its GitHub connection's repositories
- * with git, with a read-only token for them alone. A pod with no GitHub
- * connection, or whose token can't be had, is signed in to nothing; the
- * failure is logged.
+ * Signs each bot's computer in to read its GitHub app's repositories with
+ * git, with a read-only token for them alone. A bot with no GitHub app, or
+ * whose token can't be had, is signed in to nothing; the failure is logged.
  */
 export const make = Effect.gen(function* () {
 	const connections = yield* GitHubConnections.Service;
 	return SandboxCredentials.Service.of({
-		forPod: (pod) =>
+		forAgent: (agent) =>
 			Effect.gen(function* () {
-				const connected = yield* connections.forPod(pod);
+				const connected = yield* connections.forAgent(agent);
 				if (!connected || connected.repositories.length === 0) {
 					return SandboxCredentials.NOT_SIGNED_IN;
 				}
@@ -28,7 +27,7 @@ export const make = Effect.gen(function* () {
 			}).pipe(
 				Effect.catch((failure) =>
 					Effect.as(
-						Effect.logWarning("Couldn't get a read token for a pod's GitHub connection", failure),
+						Effect.logWarning("Couldn't get a read token for a bot's GitHub app", failure),
 						SandboxCredentials.NOT_SIGNED_IN,
 					),
 				),

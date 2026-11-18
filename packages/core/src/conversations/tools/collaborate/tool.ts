@@ -62,10 +62,10 @@ export function collaborateTool({
 }: CollaborateToolOptions) {
 	return tool({
 		description:
-			"Collaborate with another agent in this pod. Write a self-contained brief: the collaborator sees only what you write here, not this conversation. You get their answer back, or a note that it is still coming.",
+			"Ask another bot in the workspace, any bot, private ones included, to help. Write a self-contained brief: the bot sees only what you write here, not this conversation. You get its answer back, or a note that it is still coming.",
 		inputSchema: Schema.Struct({
 			to: Schema.String.check(Schema.isMaxLength(AGENT_NAME_MAX_LENGTH)).annotate({
-				description: "The other agent's name, exactly as listed",
+				description: "The other bot's name, exactly as listed",
 			}),
 			brief: Schema.String.check(
 				Schema.isMinLength(1),

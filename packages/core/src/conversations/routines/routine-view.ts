@@ -6,11 +6,10 @@ import { Data, Effect } from "effect";
 import { Authorization } from "../../authorization/authorization.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations } from "../../database/database.ts";
-import { agent, pod, routine, routineExecution, thread } from "../../database/schema.ts";
+import { agent, routine, routineExecution, thread } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
-import { crewOf } from "../threads/participants.ts";
 import { resultPosted, toRoutineExecution } from "./execution.ts";
 import {
 	inScope,
@@ -33,19 +32,21 @@ export const makeView = Effect.gen(function* () {
 			operation(
 				"listInWorkspace",
 				Effect.gen(function* () {
-					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
-					const reachesPod = yield* visibility.reachesPod;
+					const { workspaceId, actor } = yield* authorization.workspace(
+						workspace,
+						"workspace.read",
+					);
+					const reachesAgent = yield* visibility.reachesAgent;
 					const rows = yield* query((db) =>
 						db
-							.select({ routine, agent, pod: { id: pod.id, slug: pod.slug } })
+							.select({ routine, agent })
 							.from(routine)
 							.innerJoin(agent, eq(agent.id, routine.agentId))
-							.innerJoin(pod, crewOf(pod.id))
 							.where(
 								and(
 									eq(routine.workspaceId, workspaceId),
 									isNull(routine.deletedAt),
-									reachesPod(pod.id),
+									reachesAgent(agent.id),
 								),
 							)
 							.orderBy(asc(routine.name), asc(routine.id)),
@@ -58,8 +59,7 @@ export const makeView = Effect.gen(function* () {
 							? [
 									{
 										routine: toRoutine(row.routine, routineTriggers),
-										agent: toAgent(crew),
-										pod: row.pod,
+										agent: toAgent(crew, { actor }),
 									},
 								]
 							: [];

@@ -127,7 +127,7 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 	return (
 		<AuthLayout
 			title={workspace ? `You have been invited to ${workspace}.` : "Reading the invitation…"}
-			subtitle="You will join as a member. Threads in a pod are visible to everyone in it."
+			subtitle="You will join as a member. Conversations in a channel are visible to everyone in it."
 		>
 			<Button size="lg" onClick={accept} disabled={busy || !workspace} className="w-full">
 				Accept invite

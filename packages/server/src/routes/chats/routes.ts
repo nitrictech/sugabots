@@ -32,10 +32,20 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("approvals", ({ params }) =>
 				view.approvals(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("openBotChannel", ({ params, payload }) =>
+			.handle("botTasks", ({ params }) =>
+				view.botTasks(params.agentId).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("startTask", ({ params, payload }) =>
 				chats
-					.openBotChannel({ ...payload, workspace: params.workspace })
+					.startTask({
+						agentId: params.agentId,
+						messageId: payload.id,
+						content: payload.message,
+					})
 					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("startInterview", ({ params }) =>
+				chats.startInterview(params.agentId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("directMessages", ({ params }) =>
 				view.directMessages(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
@@ -77,21 +87,6 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 				chats
 					.changeChat({ conversationId: params.conversationId, change: { archived: true } })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
-			)
-			.handle("startThread", ({ params, payload }) =>
-				chats
-					.startThread({
-						conversationId: params.conversationId,
-						messageId: payload.id,
-						content: payload.message,
-						attachments: payload.attachments,
-						replyTo: payload.replyTo,
-						hostAgentId: payload.hostAgentId,
-					})
-					.pipe(asSessionUser, asHttpError(chatErrors)),
-			)
-			.handle("threadFrom", ({ params }) =>
-				chats.threadFrom(params.messageId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("markDone", ({ params }) =>
 				chats

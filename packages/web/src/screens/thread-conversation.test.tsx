@@ -77,7 +77,7 @@ function connection(handle: string, name: string, url: string): Connection {
 	return {
 		id: `0199a3a0-0000-7000-8000-00000000${handle.length}aa1`,
 		workspaceId: "0199a3a0-0000-7000-8000-0000000000a1",
-		podId: POD,
+		agentId: POD,
 		name,
 		handle,
 		url,
@@ -116,7 +116,6 @@ function show(
 				participants={participants}
 				members={[podmate]}
 				threadType="conversation"
-				podId={POD}
 				onOpenThread={() => undefined}
 				dividers={false}
 				approvalCapabilities={{ approveToolCalls: over.canApprove ?? true }}

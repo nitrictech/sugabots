@@ -118,7 +118,7 @@ export function ChannelActions({
 				open={archiving}
 				onOpenChange={setArchiving}
 				title={`Archive ${name}?`}
-				description="It leaves the pod's list for everyone. Threads started from it stay."
+				description="It leaves the channel's list for everyone."
 				confirmLabel="Archive"
 				pending={archive.isPending}
 				error={archive.isError ? "The channel was not archived. Try again." : undefined}

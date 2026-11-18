@@ -32,9 +32,9 @@ import { Installation } from "@sugabots/core/installation/installation";
 import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
 import { unimplemented } from "@sugabots/core/testing";
 import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
+import { PersonalAssistants } from "@sugabots/core/workspaces/agents/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { PersonalPods } from "@sugabots/core/workspaces/pods/personal-pods";
 import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
@@ -45,24 +45,27 @@ import {
 	ensureConnections,
 	ensureConversations,
 	type RoutineRun,
-	type Scene,
 	type SeedConnection,
+	type TaskScene,
 } from "./conversations.ts";
 import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
 
 /**
- * Showcase seed: Fieldnote, a small company with the people, pods and bots
- * the website's screenshots and demo video show. Run it with
+ * Showcase seed: Fieldnote, a small company with the people, channels and
+ * bots the website's screenshots and demo video show. Run it with
  * `bun run db:seed:showcase`, against a migrated database.
  *
  * Everyone signs in with `PASSWORD`, and has an Unsplash portrait for a face.
  * Anita owns the workspace; sign in as her.
  *
- * The pods' chats come already written (see `conversations.ts`): people
- * talking, the threads they started there by mentioning a bot, a
- * collaboration, an artifact, and routine runs in their routines' threads.
- * Support's chat holds only the morning queue, where the demo's story starts
- * (see `stage.ts`). The pods' connections are added too, signed out.
+ * Anita made every bot. The team's bots are public, each added to the
+ * channel whose work it does and pinned for that channel's people; her own
+ * two are private. The conversations come already written (see
+ * `conversations.ts`): people talking in the channels' main chats and the
+ * bots they mention answering there, tasks people started with a bot, a
+ * collaboration, a file, and automation runs. Support's chat holds only the
+ * morning's handover, where the demo's story starts (see `stage.ts`). Each
+ * channel's bots get its connections too, signed out.
  *
  * Each bot goes on the first model the workspace offers that it prefers,
  * else the workspace's default. A new workspace offers none, so connect
@@ -83,7 +86,7 @@ const WORKSPACE = { name: "Fieldnote", slug: "fieldnote" };
 
 type PersonKey = "anita" | "gary" | "lorraine" | "doreen" | "rob";
 
-/** Anita owns the workspace, which puts her in every shared pod. */
+/** Anita owns the workspace, which puts her in every channel. */
 const OWNER: PersonKey = "anita";
 
 /**
@@ -126,10 +129,10 @@ const PEOPLE: Record<PersonKey, { name: string; email: string; image: string }> 
 	},
 };
 
-type SharedPodKey = "growth" | "support" | "engineering";
+type ChannelKey = "growth" | "support" | "engineering";
 
-const SHARED_PODS: Record<
-	SharedPodKey,
+const CHANNELS: Record<
+	ChannelKey,
 	{ name: string; color: PodColor; members: readonly PersonKey[] }
 > = {
 	growth: { name: "Growth", color: "green", members: ["gary", "lorraine"] },
@@ -196,7 +199,8 @@ const OPENROUTER_CLAUDE: ModelChoice = {
 
 interface SeedBot {
 	name: string;
-	pod: SharedPodKey | "personal";
+	/** The channel a public bot is in; a private bot, only Anita's, is in none. */
+	channel: ChannelKey | "private";
 	color: AgentColor;
 	face: AgentFace;
 	shape: AgentShape;
@@ -212,7 +216,7 @@ interface SeedBot {
 const BOTS: readonly SeedBot[] = [
 	{
 		name: "Growth Desk",
-		pod: "growth",
+		channel: "growth",
 		color: "green",
 		face: "pill",
 		shape: "leaf",
@@ -224,7 +228,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Pricing Analyst",
-		pod: "growth",
+		channel: "growth",
 		color: "sky",
 		face: "square",
 		shape: "hexagon",
@@ -236,7 +240,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Copywriter",
-		pod: "growth",
+		channel: "growth",
 		color: "orange",
 		face: "arc",
 		shape: "blob",
@@ -248,19 +252,19 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Ticket Desk",
-		pod: "support",
+		channel: "support",
 		color: "purple",
 		face: "dot",
 		shape: "circle",
 		description: "Works the support queue and handles refunds.",
 		prompt:
-			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right person in the pod. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason. When a billing problem needs explaining, ask Billing Engineer why it happened.",
+			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right person in the channel. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason. When a billing problem needs explaining, ask Billing Engineer why it happened.",
 		models: [CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 41,
 	},
 	{
 		name: "Inbox Sorter",
-		pod: "support",
+		channel: "support",
 		color: "yellow",
 		face: "pill",
 		shape: "squircle",
@@ -272,46 +276,46 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Billing Engineer",
-		pod: "support",
+		channel: "support",
 		color: "red",
 		face: "square",
 		shape: "antenna",
-		description: "Digs into billing bugs in its sandbox.",
+		description: "Digs into billing bugs on its computer.",
 		prompt:
-			"You find out why billing went wrong for a customer. Reproduce it in your sandbox against the billing code, run the tests, and say plainly what caused it and what fixes it. Open a pull request with the fix, and write the incident up for the team.",
+			"You find out why billing went wrong for a customer. Reproduce it on your computer against the billing code, run the tests, and say plainly what caused it and what fixes it. Open a pull request with the fix, and write the incident up for the team.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		usesSandbox: true,
 		requestsPerWeekday: 7,
 	},
 	{
 		name: "Code Reviewer",
-		pod: "engineering",
+		channel: "engineering",
 		color: "rose",
 		face: "wink",
 		shape: "octagon",
-		description: "Reviews pull requests and runs the tests in its sandbox.",
+		description: "Reviews pull requests and runs the tests on its computer.",
 		prompt:
-			"You review Fieldnote's pull requests. Check out the branch in your sandbox, run the tests, and reply with what fails, what's risky and what you'd change. Lead with the one thing that matters most.",
+			"You review Fieldnote's pull requests. Check out the branch on your computer, run the tests, and reply with what fails, what's risky and what you'd change. Lead with the one thing that matters most.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		usesSandbox: true,
 		requestsPerWeekday: 18,
 	},
 	{
 		name: "Researcher",
-		pod: "engineering",
+		channel: "engineering",
 		color: "ice",
 		face: "arc",
 		shape: "drop",
 		description: "Reads the long stuff so you don't have to.",
 		prompt:
-			"You read papers, docs, changelogs and long threads for the engineering team, and summarise what matters for Fieldnote. Quote the source for every claim. Use your sandbox to try code samples before recommending them.",
+			"You read papers, docs, changelogs and long threads for the engineering team, and summarise what matters for Fieldnote. Quote the source for every claim. Use your computer to try code samples before recommending them.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		usesSandbox: true,
 		requestsPerWeekday: 9,
 	},
 	{
 		name: "Journal",
-		pod: "personal",
+		channel: "private",
 		color: "teal",
 		face: "dot",
 		shape: "pebble",
@@ -323,7 +327,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Trip Planner",
-		pod: "personal",
+		channel: "private",
 		color: "sky",
 		face: "pill",
 		shape: "dome",
@@ -343,8 +347,7 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 		routine: {
 			name: "Monday pipeline summary",
 			instructions:
-				"Summarise last week's deals: what closed, what slipped and what needs a reply today. Post it to the pod.",
-			results: "post_to_chat",
+				"Summarise last week's deals: what closed, what slipped and what needs a reply today.",
 			triggers: [weekly(["mon"], [minutes(9)])],
 		},
 	},
@@ -354,7 +357,6 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 			name: "Morning queue",
 			instructions:
 				"Go through the tickets that came in overnight. Answer what you can and list what needs a person, oldest first.",
-			results: "post_to_chat",
 			triggers: [weekly(["mon", "tue", "wed", "thu", "fri"], [minutes(8, 30)])],
 		},
 	},
@@ -372,7 +374,6 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 			name: "Review new pull requests",
 			instructions:
 				"A pull request was opened or updated. Review it, run the tests, and post what you find.",
-			results: "post_to_chat",
 			triggers: [{ kind: "webhook", auth: { kind: "github" } }],
 		},
 	},
@@ -397,14 +398,14 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 ];
 
 /**
- * What the pods' people said in their chats, and the threads they started
- * there by mentioning a bot. Times are on the morning of the day they happen
- * (see `conversations.ts`), and a reply quotes by `key`. Support's chat has
- * only Ticket Desk's morning queue, where the demo's story starts.
+ * What the channels' people said in their main chats, and what the bots they
+ * mentioned answered there. Times are on the morning of the day they happen
+ * (see `conversations.ts`). Support's chat has only the morning's handover,
+ * where the demo's story starts.
  */
 const CHATS: readonly ChatScene<PersonKey>[] = [
 	{
-		pod: "growth",
+		channel: "growth",
 		messages: [
 			{
 				at: { time: "9:02" },
@@ -412,99 +413,19 @@ const CHATS: readonly ChatScene<PersonKey>[] = [
 				parts: [{ text: "Morning! Pipeline review has moved to 2pm today." }],
 			},
 			{
-				at: { time: "9:12" },
-				from: { person: "gary" },
-				parts: [
-					{
-						text: "@growth-desk Fernhill Outfitters replied about pricing. Can you draft the answer?",
-					},
-				],
-				thread: {
-					bot: "Growth Desk",
-					messages: [
-						{
-							key: "fernhill-draft",
-							at: { time: "9:13" },
-							from: { bot: "Growth Desk" },
-							parts: [
-								{
-									text: "Drafted. Their usage is up 40% since March, so I've led with Business:\n\n> Hi Dana, thanks for coming back to us. With 32 people now using Fieldnote every week, Business is the better fit: SSO, audit logs and priority support at $48 a seat, or $40.80 on an annual plan. Happy to walk your team through it this week.\n\nWant me to send it from the shared inbox?",
-								},
-							],
-							reactions: [{ emoji: "👍", by: ["anita", "lorraine"] }],
-						},
-						{
-							at: { time: "9:15" },
-							from: { person: "lorraine" },
-							replyTo: "fernhill-draft",
-							parts: [{ text: "Hold it until I've spoken to their team tomorrow." }],
-						},
-						{
-							at: { time: "9:16" },
-							from: { person: "gary" },
-							parts: [{ text: "Makes sense. I'll leave it in drafts." }],
-						},
-					],
-				},
-			},
-			{
-				at: { time: "10:02" },
-				from: { person: "gary" },
-				parts: [
-					{ text: "@growth-desk Brightwater Supply wants 25% off the annual tier. Can we do it?" },
-				],
-				thread: {
-					bot: "Growth Desk",
-					messages: [
-						{
-							at: { time: "10:04" },
-							from: { bot: "Growth Desk" },
-							parts: [
-								{ text: "I'll check the margin with Pricing Analyst." },
-								{
-									collaboration: {
-										with: "Pricing Analyst",
-										title: "Margin check for Brightwater Supply",
-										brief:
-											"Brightwater Supply wants 25% off the annual Business tier for 40 seats. Does that clear our 70% margin floor? If it does, draft the quote.",
-										answer:
-											"It clears. 25% off list puts Business at $36 a seat, which leaves a 72% gross margin at 40 seats. I've drafted quote Q-1182: 40 seats, annual, $17,280 a year.",
-										answeredAt: { time: "10:04" },
-									},
-								},
-								{
-									text: "Yes. At 25% off, Business comes to $36 a seat and still clears our margin floor. Pricing Analyst has drafted quote Q-1182 for 40 seats at $17,280 a year. Want me to send it to Brightwater?",
-								},
-							],
-							reactions: [{ emoji: "🎉", by: ["gary"] }],
-						},
-						{
-							at: { time: "10:06" },
-							from: { person: "lorraine" },
-							parts: [{ text: "Nice. Send it, and copy me in." }],
-						},
-					],
-				},
-			},
-			{
 				at: { time: "10:40" },
 				from: { person: "lorraine" },
 				parts: [{ text: "@copywriter Can you draft a short post announcing invoices in AUD?" }],
-				thread: {
-					bot: "Copywriter",
-					messages: [
-						{
-							at: { time: "10:41" },
-							from: { bot: "Copywriter" },
-							parts: [
-								{
-									text: "**Invoices in Australian dollars**\n\nFieldnote now bills in AUD. Teams in Australia can switch their currency in Settings → Billing, and their next invoice arrives in dollars they don't have to convert. No new plan, no price change, just one less line on your bank statement.\n\nIf it needs to be shorter, I'd cut the last sentence.",
-								},
-							],
-							reactions: [{ emoji: "❤️", by: ["lorraine"] }],
-						},
-					],
-				},
+			},
+			{
+				at: { time: "10:41" },
+				from: { bot: "Copywriter" },
+				parts: [
+					{
+						text: "**Invoices in Australian dollars**\n\nFieldnote now bills in AUD. Teams in Australia can switch their currency in Settings → Billing, and their next invoice arrives in dollars they don't have to convert. No new plan, no price change, just one less line on your bank statement.\n\nIf it needs to be shorter, I'd cut the last sentence.",
+					},
+				],
+				reactions: [{ emoji: "❤️", by: ["lorraine"] }],
 			},
 			{
 				at: { time: "10:52" },
@@ -520,7 +441,7 @@ const CHATS: readonly ChatScene<PersonKey>[] = [
 		],
 	},
 	{
-		pod: "engineering",
+		channel: "engineering",
 		messages: [
 			{
 				at: { time: "9:40" },
@@ -536,74 +457,163 @@ const CHATS: readonly ChatScene<PersonKey>[] = [
 						text: "@code-reviewer Can you review PR #482 before I merge? It moves the export job onto the new queue.",
 					},
 				],
-				thread: {
-					bot: "Code Reviewer",
-					messages: [
-						{
-							at: { time: "10:26" },
-							from: { bot: "Code Reviewer" },
-							parts: [
-								{
-									text: "Reviewed #482 and ran the tests in my sandbox: 212 passed, 1 failed.\n\n**Fix before merging**\n- `export.test.ts` fails: the job now retries 5 times, but the test still expects 3.\n\n**Worth a look**\n- `ExportJob.run` sets no timeout, so a stuck export holds a worker for good.\n- The queue name is written out in two places. A constant would keep them in step.\n\nThe rest looks good, and the new retry backoff is a clear improvement.",
-								},
-							],
-							reactions: [{ emoji: "👀", by: ["gary"] }],
-						},
-						{
-							at: { time: "10:31" },
-							from: { person: "rob" },
-							parts: [{ text: "Good catch on the timeout. Fixing both now." }],
-						},
-					],
-				},
 			},
 			{
-				at: { time: "11:05" },
-				from: { person: "gary" },
-				parts: [{ text: "@researcher What changed in Postgres 18 that matters for us?" }],
-				thread: {
-					bot: "Researcher",
-					messages: [
-						{
-							at: { time: "11:07" },
-							from: { bot: "Researcher" },
-							parts: [
-								{
-									text: "Three things, from the release notes:\n\n1. **Asynchronous I/O.** Sequential scans and vacuum read ahead in parallel. Our nightly export scans should get faster with no changes.\n2. **`uuidv7()` built in.** We generate v7 ids in the app today; the database can now do it, and they sort by time.\n3. **Upgrades keep planner statistics.** No slow queries for the first hour after a major upgrade.\n\nNothing in it breaks our schema. I'd try it on staging first for the I/O change.",
-								},
-							],
-						},
-						{
-							at: { time: "11:12" },
-							from: { person: "gary" },
-							parts: [
-								{
-									text: "Can you compare pg-boss, Graphile Worker and pgmq for the export queue? One page is plenty.",
-								},
-							],
-						},
-						{
-							at: { time: "11:16" },
-							from: { bot: "Researcher" },
-							parts: [
-								{ artifact: { kind: "html", title: QUEUE_REPORT_TITLE, content: QUEUE_REPORT } },
-								{
-									text: "Graphile Worker fits best: it picks up jobs over LISTEN/NOTIFY, has cron built in, and retries with backoff, all on the Postgres we already run. pg-boss is a close second. The comparison and next steps are in the page below.",
-								},
-							],
-							reactions: [{ emoji: "🙌", by: ["rob"] }],
-						},
-					],
-				},
+				at: { time: "10:26" },
+				from: { bot: "Code Reviewer" },
+				parts: [
+					{
+						text: "Reviewed #482 and ran the tests on my computer: 212 passed, 1 failed.\n\n**Fix before merging**\n- `export.test.ts` fails: the job now retries 5 times, but the test still expects 3.\n\n**Worth a look**\n- `ExportJob.run` sets no timeout, so a stuck export holds a worker for good.\n- The queue name is written out in two places. A constant would keep them in step.\n\nThe rest looks good, and the new retry backoff is a clear improvement.",
+					},
+				],
+				reactions: [{ emoji: "👀", by: ["gary"] }],
+			},
+			{
+				at: { time: "10:31" },
+				from: { person: "rob" },
+				parts: [{ text: "Good catch on the timeout. Fixing both now." }],
+			},
+		],
+	},
+	{
+		channel: "support",
+		messages: [
+			{
+				at: { time: "8:41" },
+				from: { person: "doreen" },
+				parts: [
+					{
+						text: "Morning queue's in. Brightline can't sign in since the SSO change, so I'm taking that one.",
+					},
+				],
+			},
+			{
+				at: { time: "8:44" },
+				from: { person: "lorraine" },
+				parts: [
+					{
+						text: "Thanks. Kestrel Freight says they were charged twice on 3 Oct, so that needs a refund today.",
+					},
+				],
 			},
 		],
 	},
 ];
 
-/** Conversations with a bot alone, outside any pod's chat: a personal pod has no chat. */
-const CONVERSATIONS: readonly Scene<PersonKey>[] = [
+/**
+ * Tasks people started with a bot. Anyone who can see the bot can read them
+ * and join in, as Lorraine does in Gary's.
+ */
+const TASKS: readonly TaskScene<PersonKey>[] = [
 	{
-		pod: "personal",
+		bot: "Growth Desk",
+		messages: [
+			{
+				at: { time: "9:12" },
+				from: { person: "gary" },
+				parts: [{ text: "Fernhill Outfitters replied about pricing. Can you draft the answer?" }],
+			},
+			{
+				key: "fernhill-draft",
+				at: { time: "9:13" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{
+						text: "Drafted. Their usage is up 40% since March, so I've led with Business:\n\n> Hi Dana, thanks for coming back to us. With 32 people now using Fieldnote every week, Business is the better fit: SSO, audit logs and priority support at $48 a seat, or $40.80 on an annual plan. Happy to walk your team through it this week.\n\nWant me to send it from the shared inbox?",
+					},
+				],
+				reactions: [{ emoji: "👍", by: ["anita", "lorraine"] }],
+			},
+			{
+				at: { time: "9:15" },
+				from: { person: "lorraine" },
+				replyTo: "fernhill-draft",
+				parts: [{ text: "Hold it until I've spoken to their team tomorrow." }],
+			},
+			{
+				at: { time: "9:16" },
+				from: { person: "gary" },
+				parts: [{ text: "Makes sense. I'll leave it in drafts." }],
+			},
+		],
+	},
+	{
+		bot: "Growth Desk",
+		messages: [
+			{
+				at: { time: "10:02" },
+				from: { person: "gary" },
+				parts: [{ text: "Brightwater Supply wants 25% off the annual tier. Can we do it?" }],
+			},
+			{
+				at: { time: "10:04" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{ text: "I'll check the margin with Pricing Analyst." },
+					{
+						collaboration: {
+							with: "Pricing Analyst",
+							title: "Margin check for Brightwater Supply",
+							brief:
+								"Brightwater Supply wants 25% off the annual Business tier for 40 seats. Does that clear our 70% margin floor? If it does, draft the quote.",
+							answer:
+								"It clears. 25% off list puts Business at $36 a seat, which leaves a 72% gross margin at 40 seats. I've drafted quote Q-1182: 40 seats, annual, $17,280 a year.",
+							answeredAt: { time: "10:04" },
+						},
+					},
+					{
+						text: "Yes. At 25% off, Business comes to $36 a seat and still clears our margin floor. Pricing Analyst has drafted quote Q-1182 for 40 seats at $17,280 a year. Want me to send it to Brightwater?",
+					},
+				],
+				reactions: [{ emoji: "🎉", by: ["gary"] }],
+			},
+			{
+				at: { time: "10:06" },
+				from: { person: "lorraine" },
+				parts: [{ text: "Nice. Send it, and copy me in." }],
+			},
+		],
+	},
+	{
+		bot: "Researcher",
+		messages: [
+			{
+				at: { time: "11:05" },
+				from: { person: "gary" },
+				parts: [{ text: "What changed in Postgres 18 that matters for us?" }],
+			},
+			{
+				at: { time: "11:07" },
+				from: { bot: "Researcher" },
+				parts: [
+					{
+						text: "Three things, from the release notes:\n\n1. **Asynchronous I/O.** Sequential scans and vacuum read ahead in parallel. Our nightly export scans should get faster with no changes.\n2. **`uuidv7()` built in.** We generate v7 ids in the app today; the database can now do it, and they sort by time.\n3. **Upgrades keep planner statistics.** No slow queries for the first hour after a major upgrade.\n\nNothing in it breaks our schema. I'd try it on staging first for the I/O change.",
+					},
+				],
+			},
+			{
+				at: { time: "11:12" },
+				from: { person: "gary" },
+				parts: [
+					{
+						text: "Can you compare pg-boss, Graphile Worker and pgmq for the export queue? One page is plenty.",
+					},
+				],
+			},
+			{
+				at: { time: "11:16" },
+				from: { bot: "Researcher" },
+				parts: [
+					{ artifact: { kind: "html", title: QUEUE_REPORT_TITLE, content: QUEUE_REPORT } },
+					{
+						text: "Graphile Worker fits best: it picks up jobs over LISTEN/NOTIFY, has cron built in, and retries with backoff, all on the Postgres we already run. pg-boss is a close second. The comparison and next steps are in the page below.",
+					},
+				],
+				reactions: [{ emoji: "🙌", by: ["rob"] }],
+			},
+		],
+	},
+	{
 		bot: "Journal",
 		messages: [
 			{
@@ -628,10 +638,9 @@ const CONVERSATIONS: readonly Scene<PersonKey>[] = [
 	},
 ];
 
-/** Past runs of routines, so their threads, run lists and the pods' chats have history. */
+/** Past runs of automations, so their threads and run lists have history. */
 const ROUTINE_RUNS: readonly RoutineRun[] = [
 	{
-		pod: "support",
 		bot: "Ticket Desk",
 		routine: "Morning queue",
 		scheduledAt: { time: "8:30", day: "previous weekday" },
@@ -640,7 +649,6 @@ const ROUTINE_RUNS: readonly RoutineRun[] = [
 			"Morning queue: 4 new tickets overnight.\n\n- Answered 3 how-to questions (exports, seat changes, SSO setup)\n- Oakridge: asking about invoices in AUD. Needs a person\n\nOldest waiting: Oakridge, 9 hours.",
 	},
 	{
-		pod: "support",
 		bot: "Ticket Desk",
 		routine: "Morning queue",
 		scheduledAt: { time: "8:30" },
@@ -649,7 +657,6 @@ const ROUTINE_RUNS: readonly RoutineRun[] = [
 			"Morning queue: 7 new tickets overnight.\n\n- Answered 4 how-to questions (exports, SSO setup, seat changes)\n- Kestrel Freight: charged twice on 3 Oct. Needs a refund\n- Brightline: can't sign in since the SSO change. Handed to Doreen\n- Oakridge: still waiting on AUD invoices. Needs a person\n\nOldest waiting: Oakridge, 33 hours.",
 	},
 	{
-		pod: "growth",
 		bot: "Growth Desk",
 		routine: "Monday pipeline summary",
 		scheduledAt: { time: "9:00", day: "previous monday" },
@@ -659,7 +666,7 @@ const ROUTINE_RUNS: readonly RoutineRun[] = [
 	},
 ];
 
-/** The pods' MCP servers, signed out: sign in to one in Settings to use it for real. */
+/** The channels' MCP servers, signed out: sign in to one in Settings to use it for real. */
 /** Linear's own MCP tools, so its connection's permissions look as they do when signed in for real. */
 const LINEAR_READING = [
 	"list_issues",
@@ -727,7 +734,7 @@ function connectionTool(name: string, { readOnly }: { readOnly: boolean }) {
 
 const CONNECTIONS: readonly SeedConnection[] = [
 	{
-		pod: "support",
+		channel: "support",
 		name: "Stripe",
 		handle: "stripe",
 		url: "https://mcp.stripe.com",
@@ -761,7 +768,7 @@ const CONNECTIONS: readonly SeedConnection[] = [
 		toolAccess: { create_refund: "ask", create_invoice: "ask" },
 	},
 	{
-		pod: "engineering",
+		channel: "engineering",
 		name: "Linear",
 		handle: "linear",
 		url: "https://mcp.linear.app/mcp",
@@ -780,7 +787,7 @@ const CONNECTIONS: readonly SeedConnection[] = [
 		},
 	},
 	{
-		pod: "engineering",
+		channel: "engineering",
 		name: "Notion",
 		handle: "notion",
 		url: "https://mcp.notion.com/mcp",
@@ -828,14 +835,13 @@ const seed = Effect.gen(function* () {
 		{ discard: true },
 	);
 
-	const podIds = yield* ensurePods(workspaceId, people);
+	const channelIds = yield* ensureChannels(workspaceId, people);
 	yield* ensureProviders(workspaceId, people[OWNER]);
 	const offered = yield* offeredModels(workspaceId);
 	const botIds = yield* Effect.forEach(BOTS, (bot) =>
 		Effect.map(
 			ensureBot({
 				workspaceId,
-				podId: podIds[bot.pod],
 				createdById: people[OWNER],
 				bot,
 				model: chooseModel(bot, offered),
@@ -843,6 +849,7 @@ const seed = Effect.gen(function* () {
 			(id) => [bot.name, id] as const,
 		),
 	).pipe(Effect.map((entries) => new Map(entries)));
+	yield* placeBots({ workspaceId, people, channelIds, botIds });
 
 	yield* Effect.forEach(
 		ROUTINES,
@@ -858,7 +865,7 @@ const seed = Effect.gen(function* () {
 
 	yield* ensureConnections({
 		workspaceId,
-		podIds,
+		channelIds,
 		createdById: people[OWNER],
 		connections: CONNECTIONS,
 	});
@@ -866,14 +873,14 @@ const seed = Effect.gen(function* () {
 		{
 			workspaceId,
 			people,
-			podIds,
+			channelIds,
 			botIds,
 			botModels: new Map(BOTS.map((bot) => [bot.name, chooseModel(bot, offered)])),
 		},
-		{ chats: CHATS, conversations: CONVERSATIONS, runs: ROUTINE_RUNS },
+		{ chats: CHATS, tasks: TASKS, runs: ROUTINE_RUNS },
 	);
 
-	const ledgerRows = yield* fillLedger({ workspaceId, podIds, botIds });
+	const ledgerRows = yield* fillLedger({ workspaceId, botIds });
 
 	console.log(`workspace ${WORKSPACE.slug}, owned by ${PEOPLE[OWNER].email}`);
 	console.log(
@@ -889,7 +896,7 @@ const seed = Effect.gen(function* () {
 	console.log(
 		conversations === 0
 			? "conversations already there"
-			: `conversations: ${conversations} chats and routine runs written`,
+			: `conversations: ${conversations} chats, tasks and automation runs written`,
 	);
 	console.log(
 		ledgerRows === 0
@@ -898,7 +905,7 @@ const seed = Effect.gen(function* () {
 	);
 });
 
-/** Made the way the app makes one, so it has its system agents, preset providers and the owner's Personal pod. */
+/** Made the way the app makes one, so it has its system bots, preset providers and the owner's Personal Assistant. */
 const ensureWorkspace = (ownerId: string) =>
 	Effect.gen(function* () {
 		const membership = yield* Membership.Service;
@@ -927,7 +934,7 @@ const ensureWorkspace = (ownerId: string) =>
 			);
 	});
 
-/** By invitation, the way a teammate joins, which also gives them their Personal pod. */
+/** By invitation, the way a teammate joins, which also gives them their Personal Assistant. */
 const joinWorkspace = (input: {
 	workspaceId: string;
 	ownerId: string;
@@ -957,21 +964,24 @@ const joinWorkspace = (input: {
 			);
 	});
 
-/** The shared pods with their members, and the owner's Personal pod, by key. */
-const ensurePods = (workspaceId: string, people: Record<PersonKey, string>) =>
+/**
+ * The channels with their members, by key, and the owner's Personal
+ * Assistant, which a workspace made before assistants existed lacks.
+ */
+const ensureChannels = (workspaceId: string, people: Record<PersonKey, string>) =>
 	Effect.gen(function* () {
 		const pods = yield* PodRepository.Service;
-		const personalPods = yield* PersonalPods.Service;
-		const personal = yield* personalPods.provision({ workspaceId, userId: people[OWNER] });
-		const shared = yield* Effect.forEach(
-			Object.entries(SHARED_PODS) as [SharedPodKey, (typeof SHARED_PODS)[SharedPodKey]][],
+		const personalAssistants = yield* PersonalAssistants.Service;
+		yield* personalAssistants.provision({ workspaceId, userId: people[OWNER] });
+		const channels = yield* Effect.forEach(
+			Object.entries(CHANNELS) as [ChannelKey, (typeof CHANNELS)[ChannelKey]][],
 			([key, { name, color, members }]) =>
 				Effect.gen(function* () {
 					const podId = yield* pods
 						.create(workspaceId, { creatorId: people[OWNER], name, slug: key, color })
 						.pipe(
 							Effect.map((created) => created.id),
-							Effect.catchTag("PodSlugTaken", () => podIdBySlug(workspaceId, key)),
+							Effect.catchTag("PodSlugTaken", () => channelIdBySlug(workspaceId, key)),
 						);
 					yield* Effect.forEach(
 						members,
@@ -981,22 +991,52 @@ const ensurePods = (workspaceId: string, people: Record<PersonKey, string>) =>
 					return [key, podId] as const;
 				}),
 		);
-		return { ...Object.fromEntries(shared), personal: personal.id } as Record<
-			SharedPodKey | "personal",
-			string
-		>;
+		return Object.fromEntries(channels) as Record<ChannelKey, string>;
 	});
 
-const podIdBySlug = (workspaceId: string, slug: string) =>
+const channelIdBySlug = (workspaceId: string, slug: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
 				.select({ id: pod.id })
 				.from(pod)
-				.where(and(eq(pod.workspaceId, workspaceId), eq(pod.slug, slug), eq(pod.kind, "shared"))),
+				.where(and(eq(pod.workspaceId, workspaceId), eq(pod.slug, slug))),
 		),
-		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error(`Pod ${slug} is missing`))),
+		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error(`Channel ${slug} is missing`))),
 	);
+
+/**
+ * Adds each public bot to its channel, and pins it for the channel's people.
+ * Anita made them all, so they are already pinned for her.
+ */
+const placeBots = (input: {
+	workspaceId: string;
+	people: Record<PersonKey, string>;
+	channelIds: Record<ChannelKey, string>;
+	botIds: ReadonlyMap<string, string>;
+}) =>
+	Effect.gen(function* () {
+		const pods = yield* PodRepository.Service;
+		const agents = yield* AgentRepository.Service;
+		for (const bot of BOTS) {
+			const agentId = input.botIds.get(bot.name);
+			if (bot.channel === "private" || !agentId) continue;
+			yield* pods
+				.addBot(input.workspaceId, input.channelIds[bot.channel], agentId)
+				.pipe(Effect.orDie);
+			yield* Effect.forEach(
+				CHANNELS[bot.channel].members,
+				(member) =>
+					agents.setPinned({
+						workspaceId: input.workspaceId,
+						userId: input.people[member],
+						agentId,
+						pinned: true,
+					}),
+				{ discard: true },
+			);
+		}
+	});
 
 /**
  * The catalog providers the bots prefer that a new workspace isn't given,
@@ -1069,7 +1109,6 @@ function chooseModel(bot: SeedBot, offered: readonly OfferedModel[]): string {
 /** Creates the bot, or moves the one a previous run made onto `model`. */
 const ensureBot = (input: {
 	workspaceId: string;
-	podId: string;
 	createdById: string;
 	bot: SeedBot;
 	model: string;
@@ -1081,8 +1120,8 @@ const ensureBot = (input: {
 			.create(input.workspaceId, {
 				createdById: input.createdById,
 				agent: {
-					podId: input.podId,
 					name: bot.name,
+					visibility: bot.channel === "private" ? "private" : "public",
 					color: bot.color,
 					face: bot.face,
 					shape: bot.shape,
@@ -1102,11 +1141,9 @@ const ensureBot = (input: {
 			db
 				.select({ id: agent.id })
 				.from(agent)
-				.where(and(eq(agent.podId, input.podId), eq(agent.name, bot.name))),
+				.where(and(eq(agent.workspaceId, input.workspaceId), eq(agent.name, bot.name))),
 		);
-		if (!existing) {
-			return yield* Effect.die(new Error(`${bot.name} is named by another pod's bot`));
-		}
+		if (!existing) return yield* Effect.die(new Error(`${bot.name} was not made`));
 		yield* agents
 			.update(input.workspaceId, existing.id, { model: input.model, shape: bot.shape })
 			.pipe(Effect.orDie);
@@ -1181,14 +1218,10 @@ const LEDGER_INSERT_BATCH = 500;
 
 /**
  * Six weeks of the bots' model requests, quieter at weekends, so the Usage
- * page has days, bots, models and pods to show. Skipped when an earlier run
+ * page has days, bots and models to show. Skipped when an earlier run
  * wrote them: seeded rows are the only agent turns with no turn.
  */
-const fillLedger = (input: {
-	workspaceId: string;
-	podIds: Record<SharedPodKey | "personal", string>;
-	botIds: ReadonlyMap<string, string>;
-}) =>
+const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, string> }) =>
 	Effect.gen(function* () {
 		const [seeded] = yield* query((db) =>
 			db
@@ -1241,7 +1274,6 @@ const fillLedger = (input: {
 					rows.push({
 						workspaceId: input.workspaceId,
 						purpose: "agent-turn",
-						podId: input.podIds[bot.pod],
 						agentId,
 						step: 0,
 						providerId,
@@ -1293,7 +1325,7 @@ seed.pipe(
 		Layer.mergeAll(
 			Authentication.layer,
 			Membership.layer,
-			PersonalPods.layer,
+			PersonalAssistants.layer,
 			PodRepository.layer,
 			AgentRepository.layer,
 			ModelProviderRepository.layer,

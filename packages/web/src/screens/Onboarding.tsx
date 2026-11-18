@@ -7,7 +7,6 @@ import {
 	type AgentShape,
 	effectiveCapabilities,
 	type ModelProvider,
-	type Pod,
 	type ProviderModel,
 	presetSignInService,
 	providerIsReady,
@@ -29,7 +28,8 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useAgents, useModels, useUpdateAgent } from "@/lib/agents.ts";
+import { useAgents, useCreateAgent, useEnsureAssistant, useModels } from "@/lib/agents.ts";
+import { useStartInterview } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import {
@@ -37,7 +37,6 @@ import {
 	useCompleteOnboarding,
 	useListFirstProviderModels,
 } from "@/lib/onboarding.ts";
-import { useEnsurePersonalPod, usePods } from "@/lib/pods.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import type { Session } from "@/lib/session.ts";
 import {
@@ -62,8 +61,8 @@ import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 /*
  * Setting up a workspace: name it, connect a model, make the first bot, invite
  * people, then meet the bot. Signing in comes before, on the login page, which
- * is the welcome. The first bot is the Personal pod's own, which the workspace
- * made with it, so making it here is giving it a face and a name.
+ * is the welcome. The first bot is the person's Personal Assistant, which the
+ * workspace made with it, so making it here is giving it a face and a name.
  */
 
 type Step = "workspace" | "model" | "bot" | "invite" | "ready";
@@ -105,26 +104,32 @@ export function Onboarding(props: SetupProps) {
 
 function SetupSteps({ session, workspace, onAddress, onCancel }: SetupProps) {
 	const cancelling = useRef(false);
-	const pods = usePods();
 	const models = useModels(Boolean(workspace));
 	const { agents, isPending: agentsPending, error: agentsError, refetch } = useAgents();
 	const [chosen, setChosen] = useState<Step>();
-	const personalPod = pods.data?.find(
-		(pod) => pod.kind === "personal" && pod.ownerId === session.user?.id,
-	);
+	// The Personal Assistant the workspace made for its maker, which the model step sets up,
+	// and the first bot they make here, a public one of the workspace's.
+	const assistant = agents?.find((agent) => agent.assistant);
 	const firstBot = agents?.find(
-		(agent) => agent.podId === personalPod?.id && agent.systemAgentKey === null,
+		(agent) =>
+			!agent.assistant && agent.systemAgentKey === null && agent.createdById === session.user?.id,
 	);
-	const botHasModel =
-		models.data?.models.some((model) => model.modelId === firstBot?.model) ?? false;
+	const assistantHasModel =
+		models.data?.models.some((model) => model.modelId === assistant?.model) ?? false;
 	// Coming back part way through picks up where the workspace says it got to.
-	const inferred: Step = !workspace ? "workspace" : botHasModel ? "bot" : "model";
+	const inferred: Step = !workspace
+		? "workspace"
+		: !assistantHasModel
+			? "model"
+			: firstBot
+				? "invite"
+				: "bot";
 	const step = chosen ?? inferred;
 	// Made, but not yet among the workspaces read back, so there is none to set up yet.
 	const loading =
 		(!workspace && step !== "workspace") ||
-		(Boolean(workspace) && (pods.isPending || models.isPending || agentsPending));
-	const failure = pods.error ?? models.error ?? agentsError;
+		(Boolean(workspace) && (models.isPending || agentsPending));
+	const failure = models.error ?? agentsError;
 	const index = counted.indexOf(step);
 	const back = index > 0 ? counted[index - 1] : undefined;
 
@@ -151,7 +156,7 @@ function SetupSteps({ session, workspace, onAddress, onCancel }: SetupProps) {
 					<Alert>{failureMessage(failure)}</Alert>
 					<Button
 						variant="secondary"
-						onClick={() => void Promise.all([pods.refetch(), models.refetch(), refetch()])}
+						onClick={() => void Promise.all([models.refetch(), refetch()])}
 					>
 						Try again
 					</Button>
@@ -164,15 +169,17 @@ function SetupSteps({ session, workspace, onAddress, onCancel }: SetupProps) {
 					onContinue={() => setChosen("model")}
 				/>
 			) : step === "model" ? (
-				<ModelStep bot={firstBot} onContinue={() => setChosen("bot")} />
-			) : !workspace || !personalPod ? (
-				<PersonalPodMissing modelId={models.data?.models[0]?.modelId} />
+				<ModelStep bot={assistant} onContinue={() => setChosen("bot")} />
+			) : !workspace || !assistant ? (
+				<AssistantMissing modelId={models.data?.models[0]?.modelId} />
 			) : step === "bot" ? (
-				<BotStep bot={firstBot} onCreated={() => setChosen("invite")} />
+				<BotStep model={assistant.model} made={firstBot} onCreated={() => setChosen("invite")} />
 			) : step === "invite" ? (
 				<InviteStep workspaceId={workspace.id} onContinue={() => setChosen("ready")} />
 			) : firstBot ? (
-				<ReadyStep workspace={workspace} pod={personalPod} bot={firstBot} />
+				<ReadyStep workspace={workspace} bot={firstBot} />
+			) : step === "ready" ? (
+				<BotStep model={assistant.model} made={undefined} onCreated={() => setChosen("invite")} />
 			) : null}
 		</OnboardingFrame>
 	);
@@ -581,25 +588,41 @@ function ChooseModelStep({
 	);
 }
 
-function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
-	const update = useUpdateAgent(bot?.id ?? "");
-	// The Personal pod's bot starts as a placeholder; it becomes yours here.
-	const started = bot && bot.name !== "Personal Assistant";
-	const [color, setColor] = useState<AgentColor>(started ? bot.color : "green");
-	const [shape, setShape] = useState<AgentShape>(started ? bot.shape : "circle");
-	const [face, setFace] = useState<AgentFace>(started ? bot.face : "pill");
-	const [name, setName] = useState(started ? bot.name : "");
+/**
+ * Making the workspace's first bot, a public one, on the model chosen for
+ * the Personal Assistant. Coming back to it once made goes on with that one.
+ */
+function BotStep({
+	model,
+	made,
+	onCreated,
+}: {
+	model: string | null;
+	made: Agent | undefined;
+	onCreated: () => void;
+}) {
+	const create = useCreateAgent();
+	const [color, setColor] = useState<AgentColor>(made?.color ?? "green");
+	const [shape, setShape] = useState<AgentShape>(made?.shape ?? "circle");
+	const [face, setFace] = useState<AgentFace>(made?.face ?? "pill");
+	const [name, setName] = useState(made?.name ?? "");
 	const trimmed = name.trim();
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
-		if (!bot || !trimmed) return;
+		if (made) {
+			onCreated();
+			return;
+		}
+		if (!model || !trimmed) return;
 		try {
-			await update.mutateAsync({
+			await create.mutateAsync({
 				name: trimmed,
+				model,
 				color,
 				shape,
 				face,
+				visibility: "public",
 			});
 		} catch {
 			return;
@@ -631,15 +654,15 @@ function BotStep({ bot, onCreated }: { bot?: Agent; onCreated: () => void }) {
 				placeholder="Give it a name"
 				className={fieldClass}
 			/>
-			{!bot && <Alert>Your Personal pod has no bot to set up. Reload to try again.</Alert>}
-			{update.error && <Alert>{failureMessage(update.error)}</Alert>}
+			{!model && <Alert>Choose a model first, so the bot has something to think with.</Alert>}
+			{create.error && <Alert>{failureMessage(create.error)}</Alert>}
 			<Button
 				type="submit"
 				size="lg"
 				className="w-full"
-				disabled={!bot || !trimmed || update.isPending}
+				disabled={(!made && (!model || !trimmed)) || create.isPending}
 			>
-				{update.isPending ? "Creating…" : "Create bot"}
+				{create.isPending ? "Creating…" : made ? "Continue" : "Create bot"}
 			</Button>
 		</form>
 	);
@@ -710,7 +733,7 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 	return (
 		<form onSubmit={submit} className="flex flex-col gap-5.5">
 			<StepHeading title="Bring your friends">
-				Invite people to your workspace. You can add them to pods later.
+				Invite people to your workspace. You can add them to channels later.
 			</StepHeading>
 			<div className="focus-ring-within flex min-h-13 flex-wrap items-center gap-1.5 rounded-2xl bg-list px-3 py-2.5">
 				{emails.map((email) => (
@@ -764,28 +787,31 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 	);
 }
 
-function ReadyStep({
-	workspace,
-	pod,
-	bot,
-}: {
-	workspace: { id: string; slug: string };
-	pod: Pod;
-	bot: Agent;
-}) {
+function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }; bot: Agent }) {
 	const navigate = useNavigate();
 	const complete = useCompleteOnboarding();
+	const interview = useStartInterview();
 
 	async function finish() {
 		try {
-			await complete.mutateAsync({ workspaceId: workspace.id, podId: pod.id, agentId: bot.id });
+			await complete.mutateAsync({ workspaceId: workspace.id, agentId: bot.id });
 		} catch {
 			return;
 		}
+		// The new bot asks its maker what it's for in a task of its own, as its greeting says.
+		const task = await interview.mutateAsync(bot.id).catch(() => null);
 		// Onboarding is outside any workspace, so this names one; the link helpers are for pages inside.
+		if (task) {
+			await navigate({
+				to: "/$workspace/bots/$bot/tasks/$conversation",
+				params: { workspace: workspace.slug, bot: bot.handle, conversation: task.id },
+				replace: true,
+			});
+			return;
+		}
 		await navigate({
-			to: "/$workspace/pods/$pod/agents/$agent",
-			params: { workspace: workspace.slug, pod: pod.slug, agent: bot.handle },
+			to: "/$workspace/bots/$bot",
+			params: { workspace: workspace.slug, bot: bot.handle },
 			replace: true,
 		});
 	}
@@ -829,15 +855,16 @@ function ReadyStep({
 }
 
 /**
- * The workspace makes each member's Personal pod as they join, so this is a
- * recovery rather than a step: making it again, on the model just connected.
+ * The workspace makes each member's Personal Assistant as they join, so this
+ * is a recovery rather than a step: making it again, on the model just
+ * connected.
  */
-function PersonalPodMissing({ modelId }: { modelId?: string }) {
-	const ensure = useEnsurePersonalPod();
+function AssistantMissing({ modelId }: { modelId?: string }) {
+	const ensure = useEnsureAssistant();
 	return (
 		<>
-			<StepHeading title="Your Personal pod is missing">
-				It is where your first bot lives. Make it again to carry on.
+			<StepHeading title="Your Personal Assistant is missing">
+				It is your first bot. Make it again to carry on.
 			</StepHeading>
 			{ensure.error && <Alert>{failureMessage(ensure.error)}</Alert>}
 			<Button

@@ -2,14 +2,14 @@ import { NodeRuntime } from "@effect/platform-node";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
-import { pod, workspace } from "@sugabots/core/database/schema";
+import { agent, pod, workspace } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
+import { PersonalAssistants } from "@sugabots/core/workspaces/agents/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { PersonalPods } from "@sugabots/core/workspaces/pods/personal-pods";
 import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, type SQL } from "drizzle-orm";
@@ -21,8 +21,9 @@ import { ensureAccount, seedAccountsLayer } from "./accounts.ts";
  * opening. Run it with `bun run db:seed`, against a migrated database.
  *
  * It creates an account you can sign in as, the workspace everything else
- * hangs off, the membership joining them, two pods, and the three agents
- * the design's artboards show.
+ * hangs off, the membership joining them, the person's Personal Assistant,
+ * a channel, and the three bots the design's artboards show: two private to
+ * the person and one public bot in the channel.
  *
  * Every step must be idempotent, because this is run repeatedly against a
  * database that already has data in it, not only against an empty one.
@@ -37,13 +38,13 @@ const seed = Effect.gen(function* () {
 		return yield* Effect.die(new Error("The development seed cannot run in production."));
 	}
 	const membership = yield* Membership.Service;
-	const personalPods = yield* PersonalPods.Service;
+	const personalAssistants = yield* PersonalAssistants.Service;
 	const pods = yield* PodRepository.Service;
 	const agents = yield* AgentRepository.Service;
 	const personId = yield* ensureAccount({ name: "Development", email: EMAIL, password: PASSWORD });
 
-	// Made the way the app makes one, so it has its system agents, search
-	// provider and the person's Personal pod. The system agents are left unset:
+	// Made the way the app makes one, so it has its system bots, search
+	// provider and the person's Personal Assistant. The system bots are left unset:
 	// the seed provisions no model provider, so naming a model would only make
 	// them look ready while nothing they need is configured.
 	const workspaceId = yield* membership
@@ -56,7 +57,9 @@ const seed = Effect.gen(function* () {
 	// The seed stands in for setting it up, so it opens straight into the app.
 	yield* Onboarding.recordSetupCompleted(workspaceId);
 
-	const personal = yield* personalPods.provision({ workspaceId, userId: personId });
+	// Already made with a new workspace; this makes it when a run before
+	// the Personal Assistant existed made the workspace.
+	yield* personalAssistants.provision({ workspaceId, userId: personId });
 	const supportId = yield* pods
 		.create(workspaceId, { creatorId: personId, name: "Support", slug: "support" })
 		.pipe(
@@ -74,7 +77,7 @@ const seed = Effect.gen(function* () {
 			face: "pill" as const,
 			shape: "squircle" as const,
 			description: "Reads and writes Linear on the team's behalf.",
-			podId: personal.id,
+			visibility: "private" as const,
 		},
 		{
 			name: "Issue Triager",
@@ -82,7 +85,7 @@ const seed = Effect.gen(function* () {
 			face: "dot" as const,
 			shape: "hexagon" as const,
 			description: "Sorts incoming issues every weekday morning.",
-			podId: personal.id,
+			visibility: "private" as const,
 		},
 		{
 			name: "Customer Research",
@@ -90,20 +93,28 @@ const seed = Effect.gen(function* () {
 			face: "arc" as const,
 			shape: "blob" as const,
 			description: "Digs through calls and notes for what customers asked for.",
-			podId: supportId,
+			visibility: "public" as const,
+			channelId: supportId,
 		},
 	]) {
-		yield* agents
-			.create(workspaceId, { createdById: personId, agent: { ...seedling, model } })
-			.pipe(Effect.catchTag("AgentNameTaken", () => Effect.void));
+		const { channelId, ...bot } = seedling;
+		const botId = yield* agents
+			.create(workspaceId, { createdById: personId, agent: { ...bot, model } })
+			.pipe(
+				Effect.map((created) => created.id),
+				Effect.catchTag("AgentNameTaken", () =>
+					idOf(agent, and(eq(agent.workspaceId, workspaceId), eq(agent.name, bot.name))),
+				),
+			);
+		if (channelId) yield* pods.addBot(workspaceId, channelId, botId);
 	}
 
 	console.log(`workspace dev, administered by ${EMAIL} (password: ${PASSWORD})`);
-	console.log("pods Personal and Support, three agents between them");
+	console.log("channel Support, and three bots: two private, one public in Support");
 });
 
 /** The id of the one row of `table` matching `where`, which a previous run made. */
-const idOf = (table: typeof workspace | typeof pod, where: SQL | undefined) =>
+const idOf = (table: typeof workspace | typeof pod | typeof agent, where: SQL | undefined) =>
 	Effect.flatMap(
 		query((db) => db.select({ id: table.id }).from(table).where(where).limit(1)),
 		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error("A seeded row is missing"))),
@@ -115,7 +126,7 @@ seed.pipe(
 		Layer.mergeAll(
 			Authentication.layer,
 			Membership.layer,
-			PersonalPods.layer,
+			PersonalAssistants.layer,
 			PodRepository.layer,
 			AgentRepository.layer,
 		).pipe(

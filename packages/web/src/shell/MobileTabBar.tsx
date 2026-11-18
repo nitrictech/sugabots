@@ -1,10 +1,9 @@
 import { useRender } from "@base-ui/react/use-render";
-import { Link, useMatchRoute, useParams } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import { cn } from "cn";
 import { House, Inbox, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useAttentionCounts } from "@/lib/chats.ts";
-import { findPod, usePods } from "@/lib/pods.ts";
 import { useSession } from "@/lib/session.ts";
 import { InboxNews } from "@/shell/InboxNews.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -52,12 +51,10 @@ export function MobileTabBar({ className }: { className?: string }) {
 				/>
 				<TabLink
 					render={
-						home?.kind === "directMessages" ? (
+						home === "directMessages" ? (
 							<Link from="/$workspace" to="./dm" />
-						) : home?.kind === "pod" ? (
-							<Link from="/$workspace" to="./pods/$pod" params={{ pod: home.slug }} />
 						) : (
-							<Link from="/$workspace" to="./agents" />
+							<Link from="/$workspace" to="./home" />
 						)
 					}
 					current={tab === "home"}
@@ -185,31 +182,18 @@ function isTextEntry(element: Element | null): boolean {
 	return element instanceof HTMLElement && element.isContentEditable;
 }
 
-/** Where Home goes back to: a pod, or the direct messages. */
-type HomePlace = { kind: "pod"; slug: string } | { kind: "directMessages" };
+/** Where Home goes back to: Home itself, or the direct messages. */
+type HomePlace = "home" | "directMessages";
 
-/**
- * The pod or the direct messages Home last showed, so coming back to Home
- * from another tab returns there; until one is shown, Home opens the
- * workspace's first pod.
- */
-function useHomePlace(): HomePlace | undefined {
-	const { pod } = useParams({ strict: false });
+/** Whether Home last showed the direct messages, so coming back to Home from another tab returns there. */
+function useHomePlace(): HomePlace {
 	const matchRoute = useMatchRoute();
-	const { data: pods } = usePods();
-	const [last, setLast] = useState<HomePlace>();
+	const [last, setLast] = useState<HomePlace>("home");
 	const showing: HomePlace | undefined = matchRoute({ to: "/$workspace/dm", fuzzy: true })
-		? { kind: "directMessages" }
-		: pod !== undefined
-			? { kind: "pod", slug: pod }
+		? "directMessages"
+		: matchRoute({ to: "/$workspace/home" })
+			? "home"
 			: undefined;
-	if (showing && !samePlace(showing, last)) setLast(showing);
-	const remembered = showing ?? last;
-	if (remembered?.kind === "pod" && !findPod(pods, remembered.slug)) return undefined;
-	return remembered;
-}
-
-function samePlace(left: HomePlace, right: HomePlace | undefined): boolean {
-	if (left.kind === "pod") return right?.kind === "pod" && right.slug === left.slug;
-	return right?.kind === left.kind;
+	if (showing && showing !== last) setLast(showing);
+	return showing ?? last;
 }

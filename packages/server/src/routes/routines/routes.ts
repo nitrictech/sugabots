@@ -121,7 +121,7 @@ const routineErrors = {
 	RoutineChatNotFound: BadRequest,
 	RoutineNameTaken: Conflict,
 	RoutineNotFound: NotFound,
-	RoutineRepositoryNotInPod: BadRequest,
+	RoutineRepositoryNotConnected: BadRequest,
 	RoutineTriggerConflict: Conflict,
 	RoutineTriggerKindChanged: BadRequest,
 	RoutineTriggerNotFound: NotFound,

@@ -6,9 +6,9 @@ import { appHandlers, chatPath, StoryApp, storyBots, storyPods } from "@/story-a
 
 const API = import.meta.env.VITE_API_URL as string;
 
-const [bot] = storyBots;
-const pod = storyPods.find((one) => one.id === bot?.podId);
-if (!bot || !pod) throw new Error("The story app has no bot in a pod");
+const bot = storyBots.find((one) => !one.assistant);
+const [pod] = storyPods;
+if (!bot || !pod) throw new Error("The story app has no bot or channel");
 
 /**
  * Right-clicks `row` until its notifications menu opens: a row only has the
@@ -136,27 +136,5 @@ export const OpeningNotificationSettings = meta.story({
 		await userEvent.click(await screen.findByRole("menuitem", { name: "More options" }));
 		await chooseAndClose(await screen.findByRole("menuitem", { name: "Notification settings" }));
 		await expect(await canvas.findByRole("heading", { name: "Notifications" })).toBeVisible();
-	},
-});
-
-/**
- * A pod's menu chooses its level, and a bot in it then defaults to the pod's
- * rather than the person's own.
- */
-export const ChoosingAPodsLevel = meta.story({
-	render: () => <StoryApp path={chatPath(bot)} />,
-	play: async ({ canvas }) => {
-		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
-		const podRow = within(await sidebar.findByRole("group", { name: pod.name })).getByRole(
-			"button",
-			{ name: pod.name },
-		);
-		await openMenuOf(podRow);
-		await chooseAndClose(await screen.findByRole("menuitemradio", { name: "Everything" }));
-
-		await openMenuOf(sidebar.getByText(bot.name));
-		await expect(
-			await screen.findByRole("menuitemradio", { name: "Default (everything)" }),
-		).toHaveAttribute("aria-checked", "true");
 	},
 });

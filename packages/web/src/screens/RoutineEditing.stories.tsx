@@ -1,11 +1,4 @@
-import type {
-	Agent,
-	ChatList,
-	Pod,
-	Routine,
-	RoutineTriggerInput,
-	WorkspaceRoutine,
-} from "@sugabots/contracts";
+import type { Agent, Routine, RoutineTriggerInput, WorkspaceRoutine } from "@sugabots/contracts";
 import { routineTriggers, type TestRoutineTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 // A menu is portalled to the body, so reaching it means `screen` rather than the story's canvas.
@@ -18,7 +11,6 @@ import {
 	growthDesk,
 	linearHandler,
 	oncall,
-	personal,
 	revenue,
 } from "@/shell/story-fixtures.ts";
 import {
@@ -30,23 +22,22 @@ import {
 } from "../story-app.tsx";
 
 /*
- * Making and changing routines on a pod's Routines page: one set up in the
+ * Making and changing automations on a bot's Automations page: one set up in the
  * panel beside its own thread, or one being made beside the list. On a phone
  * the routine covers the list, with the way back to it.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
 const PHONE = { viewport: { value: "iphone12", isRotated: false } };
-/** A routine being made beside Revenue's routines. */
-const newInRevenue = `/${storyWorkspace.slug}/pods/${revenue.slug}/routines/new`;
+/** An automation being made beside Growth Desk's automations. */
+const newInRevenue = `/${storyWorkspace.slug}/bots/${growthDesk.handle}/automations/new`;
 
 function placed(
 	n: number,
 	name: string,
 	agent: Agent,
-	pod: Pod,
 	trigger: TestRoutineTrigger | readonly TestRoutineTrigger[],
-	fields: Partial<Pick<Routine, "state" | "results">> = {},
+	fields: Partial<Pick<Routine, "state">> = {},
 ): WorkspaceRoutine {
 	const id = `0199a3a0-0000-7000-8000-0000000002${String(n).padStart(2, "0")}`;
 	return {
@@ -58,8 +49,6 @@ function placed(
 			instructions: `${name}: look over what changed and post a short summary.`,
 			triggers: routineTriggers(id, ...[trigger].flat()),
 			state: "enabled",
-			results: "post_to_chat",
-			chatId: null,
 			createdById: null,
 			createdByAgentId: null,
 			createdAt: "2026-09-01T00:00:00.000Z",
@@ -67,7 +56,6 @@ function placed(
 			...fields,
 		},
 		agent,
-		pod: { id: pod.id, slug: pod.slug },
 	};
 }
 
@@ -78,49 +66,24 @@ const cron = (expression: string): TestRoutineTrigger => ({
 	nextScheduledAt: null,
 });
 
-const overnight = placed(1, "Overnight outbound", growthDesk, revenue, cron("0 6 * * *"));
-const morningBrief = placed(2, "Morning brief", chief, personal, cron("0 8 * * 1-5"));
-const churnReport = placed(
-	3,
-	"Weekly churn report",
-	accountManager,
-	revenue,
-	cron("0 9 * * 1,3,5"),
-	{
-		state: "paused",
-	},
-);
-const incidentIntake = placed(
-	4,
-	"Incident intake",
-	oncall,
-	engineering,
-	{
-		kind: "webhook",
-		auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
-	},
-	{ results: "keep_in_run" },
-);
-const slackMentions = placed(
-	6,
-	"Slack mentions",
-	accountManager,
-	revenue,
-	{
-		kind: "webhook",
-		auth: { kind: "slack" },
-	},
-	{ results: "keep_in_run" },
-);
-const signups = placed(
-	7,
-	"New signup triage",
-	linearHandler,
-	engineering,
-	{ kind: "webhook", auth: { kind: "basic", username: "sugabots" } },
-	{ results: "keep_in_run" },
-);
-const standups = placed(8, "Standup notes", chief, personal, {
+const overnight = placed(1, "Overnight outbound", growthDesk, cron("0 6 * * *"));
+const morningBrief = placed(2, "Morning brief", chief, cron("0 8 * * 1-5"));
+const churnReport = placed(3, "Weekly churn report", accountManager, cron("0 9 * * 1,3,5"), {
+	state: "paused",
+});
+const incidentIntake = placed(4, "Incident intake", oncall, {
+	kind: "webhook",
+	auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
+});
+const slackMentions = placed(6, "Slack mentions", accountManager, {
+	kind: "webhook",
+	auth: { kind: "slack" },
+});
+const signups = placed(7, "New signup triage", linearHandler, {
+	kind: "webhook",
+	auth: { kind: "basic", username: "sugabots" },
+});
+const standups = placed(8, "Standup notes", chief, {
 	kind: "cron",
 	schedule: {
 		repeat: "weekly",
@@ -132,7 +95,7 @@ const standups = placed(8, "Standup notes", chief, personal, {
 	timezone: "UTC",
 	nextScheduledAt: null,
 });
-const quarterClose = placed(9, "Quarter close", accountManager, revenue, {
+const quarterClose = placed(9, "Quarter close", accountManager, {
 	kind: "cron",
 	schedule: {
 		repeat: "monthly",
@@ -144,37 +107,27 @@ const quarterClose = placed(9, "Quarter close", accountManager, revenue, {
 	timezone: "UTC",
 	nextScheduledAt: null,
 });
-const releaseWatch = placed(
-	11,
-	"Release watch",
-	oncall,
-	engineering,
-	[cron("0 9 * * 1-5"), cron("0 17 * * 5"), { kind: "webhook", auth: { kind: "bearer" } }],
-	{ results: "keep_in_run" },
-);
+const releaseWatch = placed(11, "Release watch", oncall, [
+	cron("0 9 * * 1-5"),
+	cron("0 17 * * 5"),
+	{ kind: "webhook", auth: { kind: "bearer" } },
+]);
 const GITHUB_CONNECTION_ID = "0199b0f2-6a4e-7c1d-9a52-3c5e1f2d4b6a";
-const pullRequestReviews = placed(
-	10,
-	"Pull request reviews",
-	oncall,
-	engineering,
-	{
-		kind: "github",
-		connectionId: GITHUB_CONNECTION_ID,
-		repository: "acme/web",
-		events: ["pull_request_opened", "pull_request_review"],
-	},
-	{ results: "keep_in_run" },
-);
+const pullRequestReviews = placed(10, "Pull request reviews", oncall, {
+	kind: "github",
+	connectionId: GITHUB_CONNECTION_ID,
+	repository: "acme/web",
+	events: ["pull_request_opened", "pull_request_review"],
+});
 
 /** Each pod's GitHub connection, to `acme`, working on `acme/web` and `acme/infra`. */
 const podRepositories = [
-	http.get(`${API}/pods/:podId/connections`, ({ params }) =>
+	http.get(`${API}/agents/:agentId/connections`, ({ params }) =>
 		HttpResponse.json([
 			{
 				id: GITHUB_CONNECTION_ID,
 				workspaceId: engineering.workspaceId,
-				podId: params.podId,
+				agentId: params.agentId,
 				name: "GitHub",
 				handle: "github",
 				kind: "github",
@@ -195,7 +148,7 @@ const podRepositories = [
 			},
 		]),
 	),
-	http.get(`${API}/pods/:podId/connections/:connectionId/repositories`, () =>
+	http.get(`${API}/agents/:agentId/connections/:connectionId/repositories`, () =>
 		HttpResponse.json({
 			account: "acme",
 			repositories: ["acme/web", "acme/infra"].map((repository) => ({
@@ -234,15 +187,12 @@ function routinesAnswer(items: WorkspaceRoutine[]) {
 				items.map(({ routine }) => routine).filter((routine) => routine.agentId === params.agentId),
 			),
 		),
-		http.get(`${API}/workspaces/:workspace/chats`, ({ request }) => {
-			const pod = new URL(request.url).searchParams.get("pod");
-			const chatList: ChatList = {
-				chats: [],
-				channels: [],
-				threads: [],
+		http.get(`${API}/agents/:agentId/tasks`, ({ params }) =>
+			HttpResponse.json({
+				tasks: [],
 				routines: items
-					.filter((item) => item.pod.slug === pod || item.pod.id === pod)
-					.map(({ routine, agent, pod }) => ({
+					.filter((item) => item.agent.id === params.agentId)
+					.map(({ routine, agent }) => ({
 						routine: {
 							id: routine.id,
 							name: routine.name,
@@ -252,10 +202,9 @@ function routinesAnswer(items: WorkspaceRoutine[]) {
 						},
 						agent,
 						conversation: {
-							kind: "routine_feed",
-							id: feedOf({ routine, agent, pod }),
+							kind: "routine_feed" as const,
+							id: feedOf({ routine, agent }),
 							workspaceId: storyWorkspace.id,
-							podId: pod.id,
 							title: routine.name,
 							createdAt: routine.createdAt,
 							updatedAt: routine.updatedAt,
@@ -264,9 +213,8 @@ function routinesAnswer(items: WorkspaceRoutine[]) {
 						},
 						mentionsYou: false,
 					})),
-			};
-			return HttpResponse.json(chatList);
-		}),
+			}),
+		),
 		http.get(`${API}/threads/:threadId`, ({ params }) => {
 			const one = items.find((item) => feedOf(item) === params.threadId);
 			if (!one) return HttpResponse.json({ message: "No such thread" }, { status: 404 });
@@ -297,7 +245,7 @@ function routinesAnswer(items: WorkspaceRoutine[]) {
 
 /** `one`'s own thread, beside its pod's routines, where the panel beside it sets the routine up. */
 const pageOf = (one: WorkspaceRoutine) =>
-	`/${storyWorkspace.slug}/pods/${one.pod.slug}/routines/${one.routine.id}`;
+	`/${storyWorkspace.slug}/bots/${one.agent.handle}/automations/${one.routine.id}`;
 
 type Canvas = ReturnType<typeof within>;
 
@@ -739,7 +687,9 @@ export const AsAMember = meta.story({
 /** On a phone a routine being made covers the list, with the way back to it. */
 export const PhoneNewRoutine = meta.story({
 	globals: PHONE,
-	render: () => <StoryApp path={`${newInRevenue}?bot=${accountManager.handle}`} />,
+	render: () => (
+		<StoryApp path={`/${storyWorkspace.slug}/bots/${accountManager.handle}/automations/new`} />
+	),
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("link", { name: "Routines" })).toBeInTheDocument();
 		await expect(await canvas.findByRole("heading", { name: "New routine" })).toBeInTheDocument();

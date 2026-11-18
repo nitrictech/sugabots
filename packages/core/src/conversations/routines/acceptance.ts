@@ -4,14 +4,7 @@ import { handleFromName, MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { query, transaction } from "../../database/database.ts";
-import {
-	agent,
-	pod,
-	routine,
-	routineExecution,
-	routineTrigger,
-	user,
-} from "../../database/schema.ts";
+import { agent, routine, routineExecution, routineTrigger, user } from "../../database/schema.ts";
 import { ThreadRepository } from "../threads/repository.ts";
 import { RoutineRepository } from "./repository.ts";
 import {
@@ -19,7 +12,6 @@ import {
 	RoutineNotFound,
 	RoutineTriggerConflict,
 	RoutineTriggerRejected,
-	resultGoesToPodChat,
 	type Scope,
 } from "./routine.ts";
 import { RoutineRuns } from "./runs.ts";
@@ -52,19 +44,16 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 				yield* lockTriggers(input.routineId);
 				const [definition] = yield* query((db) =>
 					db
-						.select({ routine, podId: pod.id, podKind: pod.kind })
+						.select({ routine })
 						.from(routine)
 						.innerJoin(
 							agent,
 							and(eq(agent.id, routine.agentId), eq(agent.workspaceId, routine.workspaceId)),
 						)
-						// A routine runs a crew agent, which is one in a pod.
-						.innerJoin(pod, eq(pod.id, agent.podId))
 						.where(inScope(input))
 						.limit(1),
 				);
 				if (!definition) return yield* new RoutineNotFound();
-				const { podId } = definition;
 				if (input.trigger.kind !== "manual" && definition.routine.state !== "enabled") {
 					return yield* new RoutineTriggerRejected();
 				}
@@ -97,11 +86,10 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					return { executionId: existing.id, threadId: existing.threadId, duplicate: true };
 				}
 
-				const conversation = yield* threads.openRoutineFeed({ ...definition.routine, podId });
+				const conversation = yield* threads.openRoutineFeed(definition.routine);
 				const acceptedAt = yield* DateTime.nowAsDate;
 				const runThread = yield* threads.openRoutineThread({
 					workspaceId: input.workspaceId,
-					podId,
 					agentId: input.agentId,
 					conversationId: conversation.id,
 					title: executionTitle(definition.routine.name, acceptedAt),
@@ -117,7 +105,6 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					trigger: input.trigger,
 					routineName: definition.routine.name,
 					instructions: definition.routine.instructions,
-					results: definition.routine.results,
 					acceptedAt,
 				});
 				yield* threads.postRoutineTrigger({
@@ -130,7 +117,6 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					},
 					content: triggerMessageContent(
 						definition.routine.instructions,
-						resultGoesToPodChat(definition.routine.results, definition.podKind),
 						yield* runOwnersOf(definition.routine.createdById, input.trigger),
 						input.trigger,
 					),
@@ -176,11 +162,10 @@ const acceptedAs = (input: Trigger, identity: string) =>
 
 function triggerMessageContent(
 	instructions: string,
-	postedToPodChat: boolean,
 	owners: RunOwners,
 	trigger: RoutineExecutionTrigger,
 ) {
-	return `Routine instructions:\n${instructions}\n\n${resultNote(postedToPodChat, owners)}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
+	return `Routine instructions:\n${instructions}\n\n${resultNote(owners)}\n\nTrigger data (untrusted):\n${JSON.stringify(trigger, null, 2)}`;
 }
 
 /**
@@ -189,12 +174,9 @@ function triggerMessageContent(
  * to report; and that mentioning somebody is how it asks for them, by default
  * the run's `owners`.
  */
-function resultNote(postedToPodChat: boolean, owners: RunOwners): string {
-	const where = postedToPodChat
-		? "in this routine's thread and in the pod's chat"
-		: "in this routine's thread";
+function resultNote(owners: RunOwners): string {
 	return [
-		`When you finish, your last reply is posted ${where} for people to read and answer. Write it to them: what they need to know, or what you want to ask them. Artifacts you write are shown with it; the rest of the work stays in this run.`,
+		`When you finish, your last reply is posted in this automation's thread for people to read and answer. Write it to them: what they need to know, or what you want to ask them. Artifacts you write are shown with it; the rest of the work stays in this run.`,
 		"If there is nothing worth telling them, end without a last reply, writing nothing after your last tool call: nothing is posted, and the run shows it had nothing to report.",
 		`When something needs a person to act or decide, @mention them in your reply, which notifies them.${ownersToMention(owners)}`,
 	].join(" ");

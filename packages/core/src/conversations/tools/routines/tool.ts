@@ -2,7 +2,6 @@ import {
 	MAX_CRON_EXPRESSION_CHARACTERS,
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
 	MAX_ROUTINE_NAME_CHARACTERS,
-	routineResultsSchema,
 } from "@sugabots/contracts";
 import { type Tool, tool } from "ai";
 import { Effect, Schema } from "effect";
@@ -56,11 +55,6 @@ const instructions = Schema.Trim.check(
 		"What you will do each time it runs, written to yourself as the person would ask you in the chat.",
 });
 
-const results = routineResultsSchema.annotate({
-	description:
-		"post_to_chat: your last reply of each run is posted in this chat for people to read and answer; use it for anything people should see, such as a standup, a check-in or a report. keep_in_run: the result stays inside the run; use it for work handled out of sight.",
-});
-
 /**
  * The routine tools: a bot lists, sets up and changes its own routines, for
  * the person whose message it is answering. Schedules are cron expressions in
@@ -98,13 +92,13 @@ export function routineTools({
 	return {
 		[LIST_ROUTINES_TOOL]: tool({
 			description:
-				"List your routines: the jobs you do without being asked, with what starts each (its schedules, webhooks or repository events), whether it is paused, and where its result goes. Check here before setting up a routine, so you change one that exists rather than make a second.",
+				"List your routines: the jobs you do without being asked, with what starts each (its schedules, webhooks or repository events), and whether it is paused. Check here before setting up a routine, so you change one that exists rather than make a second.",
 			inputSchema: noInputSchema,
 			execute: () => answer(Effect.map(routines.list(bot), (listed) => ({ routines: listed }))),
 		}),
 		[CREATE_ROUTINE_TOOL]: tool({
 			description: `Set up a routine: a job you do on a schedule without being asked, such as a 9am standup or a weekly report. Only when the person asks for one, or agrees to one you suggest. Schedules run in ${zone}. When it is set up, tell them when it runs and link its name to the settingsUrl you get back, where they can change or remove it.`,
-			inputSchema: Schema.Struct({ name, instructions, schedule, results }).pipe(
+			inputSchema: Schema.Struct({ name, instructions, schedule }).pipe(
 				Schema.toStandardSchemaV1,
 				Schema.toStandardJSONSchemaV1,
 			),
@@ -112,7 +106,7 @@ export function routineTools({
 				answer(Effect.map(routines.create(bot, input), (routine) => ({ routine }))),
 		}),
 		[UPDATE_ROUTINE_TOOL]: tool({
-			description: `Change one of your routines, by the id list_routines gives: its name, instructions, schedule, where its result goes, or whether it is paused. Give only what changes. Schedules run in ${zone}. Its schedule can be changed here only while that schedule is all that starts it; other triggers are changed in its settings.`,
+			description: `Change one of your routines, by the id list_routines gives: its name, instructions, schedule, or whether it is paused. Give only what changes. Schedules run in ${zone}. Its schedule can be changed here only while that schedule is all that starts it; other triggers are changed in its settings.`,
 			inputSchema: Schema.Struct({
 				routineId: Schema.String.check(Schema.isUUID()).annotate({
 					description: "The routine's id, from list_routines.",
@@ -120,7 +114,6 @@ export function routineTools({
 				name: Schema.optional(name),
 				instructions: Schema.optional(instructions),
 				schedule: Schema.optional(schedule),
-				results: Schema.optional(results),
 				paused: Schema.optional(
 					Schema.Boolean.annotate({ description: "true pauses it; false sets it running again." }),
 				),

@@ -9,7 +9,6 @@ import { EventStore } from "../../database/events/store.ts";
 import {
 	agent,
 	message,
-	pod,
 	toolCall,
 	turn,
 	workspace,
@@ -313,7 +312,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		const outcome = await segmentWith(model, {
 			connectionTools: {
-				forPod: () =>
+				forAgent: () =>
 					Effect.succeed({
 						tools: {
 							wiki__wipe: {
@@ -378,7 +377,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		await segmentWith(model, {
 			connectionTools: {
-				forPod: () =>
+				forAgent: () =>
 					Effect.succeed({
 						tools: {
 							wiki__wipe: {
@@ -460,13 +459,12 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			});
 			const [place] = await onDatabase((db) =>
 				db
-					.select({ workspace: workspace.slug, pod: pod.slug, handle: agent.handle })
+					.select({ workspace: workspace.slug, handle: agent.handle })
 					.from(agent)
-					.innerJoin(pod, eq(pod.id, agent.podId))
 					.innerJoin(workspace, eq(workspace.id, agent.workspaceId))
 					.where(eq(agent.id, hostId)),
 			);
-			const settingsUrl = `http://sugabots.test/${place?.workspace}/settings/pods/${place?.pod}/agents/${place?.handle}`;
+			const settingsUrl = `http://sugabots.test/${place?.workspace}/settings/bots/${place?.handle}`;
 			expect(await storedReply()).toMatchObject({
 				content: `Saved: ${JSON.stringify({ saved: true, settingsUrl })}.`,
 			});

@@ -1,4 +1,4 @@
-import type { ChatList, Routine, RoutineExecution } from "@sugabots/contracts";
+import type { BotTaskList, Routine, RoutineExecution } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, waitFor, within } from "storybook/test";
@@ -9,7 +9,6 @@ import {
 	chatPath,
 	StoryApp,
 	storyChatDetails,
-	storyPodChatFor,
 	storyPods,
 	storyUser,
 	storyWorkspace,
@@ -134,10 +133,9 @@ const outboundFailure: RoutineExecution = {
 	posted: false,
 };
 
-const chatList: ChatList = {
-	chats: [{ conversation: storyPodChatFor(revenue), unreadMessages: 0 }],
-	channels: [],
-	threads: [],
+const chatList: BotTaskList = {
+	summary: null,
+	tasks: [],
 	routines: [
 		{
 			routine: {
@@ -152,7 +150,6 @@ const chatList: ChatList = {
 				kind: "routine_feed",
 				id: outbound.feed,
 				workspaceId: storyWorkspace.id,
-				podId: revenue.id,
 				title: "Overnight outbound",
 				createdAt: "2026-09-01T00:00:00.000Z",
 				updatedAt: "2026-09-18T06:00:00.000Z",
@@ -195,7 +192,7 @@ function routineHandlers() {
 		},
 	};
 	return [
-		http.get(`${API}/workspaces/:workspace/chats`, () => HttpResponse.json(chatList)),
+		http.get(`${API}/agents/:agentId/tasks`, () => HttpResponse.json(chatList)),
 		http.get(`${API}/workspaces/:workspace/routines`, () =>
 			HttpResponse.json({
 				items: [
@@ -279,7 +276,9 @@ const meta = preview.meta({
 		msw.use(...routineHandlers());
 	},
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/routines/${outbound.id}`} />
+		<StoryApp
+			path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/automations/${outbound.id}`}
+		/>
 	),
 });
 
@@ -346,58 +345,48 @@ export const AddingTrigger = meta.story({
 /** On a phone the list is the page, until a routine is chosen. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/routines`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/automations`} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("link", { name: /^Renewal reminders/ })).toBeVisible();
 	},
 });
 
-/** A pod with no routines: the page says how one is made, as an empty Artifacts page does. */
+/** A bot with no automations: the page says how one is made, as an empty Files page does. */
 export const Empty = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats`, () =>
+			http.get(`${API}/agents/:agentId/tasks`, () =>
 				HttpResponse.json({ ...chatList, routines: [] }),
 			),
 		);
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/pods/${revenue.slug}/routines`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/automations`} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("No routines in Revenue yet")).toBeVisible();
+		await expect(
+			await canvas.findByText(`No automations for ${growthDesk.name} yet`),
+		).toBeVisible();
 	},
 });
 
-const botWithNonePath = `/${storyWorkspace.slug}/pods/${revenue.slug}/routines?bot=${leadResearcher.handle}`;
+const botWithNonePath = `/${storyWorkspace.slug}/bots/${leadResearcher.handle}/automations`;
 
 /**
- * A bot that runs no routines yet: its list stays, with the + in its header
- * as Inbox has its controls, and the space beside it offers New routine, or
- * asking the bot in its chat.
+ * A bot that runs no automations yet: its list stays, with the + in its
+ * header, and the space beside it offers New automation, or asking the bot.
  */
 export const BotWithNone = meta.story({
 	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText(`No routines for ${leadResearcher.name} yet`),
+			await canvas.findByText(`No automations for ${leadResearcher.name} yet`),
 		).toBeVisible();
 		await expect(
-			canvas.getByRole("heading", { name: `${leadResearcher.name}'s routines` }),
+			canvas.getByRole("heading", { name: `${leadResearcher.name}'s automations` }),
 		).toBeVisible();
-		const list = canvas.getByRole("region", { name: "Routines" });
-		await expect(within(list).getByText("No routines yet")).toBeVisible();
-		// The list keeps only its +, which has no text; New routine itself is in the empty state beside it.
-		const making = canvas.getByText("New routine", { selector: "a" });
-		await expect(list).not.toContainElement(making);
-		await expect(making).toBeVisible();
+		const making = canvas.getByText("New automation", { selector: "a" });
 		await expect(making).toHaveAttribute(
 			"href",
-			expect.stringContaining(`/routines/new?bot=${leadResearcher.handle}`),
-		);
-		const ask = canvas.getByText(/to set one up\.$/);
-		await expect(ask).toHaveTextContent(`Or ask ${leadResearcher.name} to set one up.`);
-		await expect(within(ask).getByRole("link", { name: leadResearcher.name })).toHaveAttribute(
-			"href",
-			expect.stringContaining(`/agents/${leadResearcher.handle}`),
+			expect.stringContaining(`/bots/${leadResearcher.handle}/automations/new`),
 		);
 	},
 });

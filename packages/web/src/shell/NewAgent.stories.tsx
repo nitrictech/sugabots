@@ -101,7 +101,6 @@ const meta = preview.meta({
  * bot as it will be, named over it.
  */
 export const InAPod = meta.story({
-	args: { podId: revenue.id },
 	play: async ({ userEvent }) => {
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
@@ -121,7 +120,6 @@ export const InAPod = meta.story({
 
 /** Before any model is connected, it says where to connect one, and cannot make the bot yet. */
 export const NoModelYet = meta.story({
-	args: { podId: revenue.id },
 	render: (args) => (
 		<Preview models={false}>
 			<Dialog open>
@@ -142,7 +140,6 @@ export const NoModelYet = meta.story({
  * is shown, without a prompt, so it starts by asking what it's for.
  */
 export const MadeAsShown = meta.story({
-	args: { podId: revenue.id },
 	beforeEach({ msw }) {
 		created = [];
 		msw.use(createAgent, listAgents);
@@ -173,7 +170,6 @@ export const MadeAsShown = meta.story({
 
 /** The × discards a bot that has a name and a model, rather than making it. */
 export const ClosedWithoutMaking = meta.story({
-	args: { podId: revenue.id },
 	beforeEach({ msw }) {
 		created = [];
 		msw.use(createAgent, listAgents);
@@ -193,7 +189,6 @@ export const ClosedWithoutMaking = meta.story({
  * provider's, with what each can do; a search narrows a long list.
  */
 export const ChoosingAModel = meta.story({
-	args: { podId: revenue.id },
 	play: async ({ userEvent }) => {
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		const models = within(dialog).getByRole("region", { name: "Model" });

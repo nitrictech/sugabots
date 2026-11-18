@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { growthDesk } from "@/shell/story-fixtures.ts";
 import { storyModel } from "@/story-app.tsx";
 import { DetailsSidebar } from "./DetailsSidebar.tsx";
 
@@ -74,8 +74,6 @@ function routine(id: string, name: string, expression: string): Routine {
 			nextScheduledAt: null,
 		}),
 		state: "enabled",
-		results: "keep_in_run",
-		chatId: null,
 		createdById: null,
 		createdByAgentId: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
@@ -93,7 +91,7 @@ function connection(id: string, name: string, url: string): Connection {
 	return {
 		id,
 		workspaceId: WORKSPACE,
-		podId: revenue.id,
+		agentId: growthDesk.id,
 		name,
 		handle: name.toLowerCase(),
 		url,
@@ -126,7 +124,6 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	args: {
 		agent: growthDesk,
-		pod: revenue,
 		threadId,
 		user,
 		contents: {
@@ -152,7 +149,7 @@ const meta = preview.meta({
 				const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
 				client.setQueryData(["routines", "agent", growthDesk.id], routines);
 				client.setQueryData(
-					["connections", revenue.id],
+					["connections", growthDesk.id],
 					context.parameters.connections ?? connections,
 				);
 				client.setQueryData(["models", WORKSPACE], { models: [storyModel] });
@@ -200,7 +197,7 @@ export const Default = meta.story({
 		await expect(canvas.getByText(storyModel.displayName)).toBeVisible();
 		await expect(canvas.queryByText("You")).toBeNull();
 		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeInTheDocument();
-		await expect(canvas.getByRole("heading", { name: "In this thread" })).toBeVisible();
+		await expect(canvas.getByRole("heading", { name: "In this conversation" })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "northwind-pricing.pdf" })).toBeVisible();
 		await expect(canvas.queryByText("Sam Park")).toBeNull();
 	},
@@ -209,7 +206,7 @@ export const Default = meta.story({
 /** Expanded opens who is in the thread, each folded list, and the summary. */
 export const Expanded = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: /in this thread$/ }));
+		await userEvent.click(canvas.getByRole("button", { name: /in this conversation$/ }));
 		await expect(canvas.getByText("You")).toBeVisible();
 		for (const more of canvas.getAllByRole("button", { name: "Show more" })) {
 			await userEvent.click(more);

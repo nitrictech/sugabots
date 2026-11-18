@@ -16,7 +16,6 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
  */
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000101";
-const POD = "0199a3a0-0000-7000-8000-000000000301";
 const AGENT = "0199a3a0-0000-7000-8000-000000000201";
 const MEMBER = "0199a3a0-0000-7000-8000-000000000002";
 const MODEL = "gpt-4o-mini";
@@ -24,7 +23,6 @@ const MODEL = "gpt-4o-mini";
 const agent: Agent = {
 	id: AGENT,
 	workspaceId: WORKSPACE,
-	podId: POD,
 	name: "Triage",
 	handle: "triage",
 	systemAgentKey: null,
@@ -38,6 +36,20 @@ const agent: Agent = {
 	usesSandbox: false,
 	naturalBrowsing: false,
 	createdById: null,
+	visibility: "public",
+	assistant: false,
+	pinned: false,
+	permissions: {
+		update: true,
+		delete: true,
+		manageConnections: true,
+		manageSandbox: true,
+		useDesktop: true,
+		manageRoutines: true,
+		runRoutines: true,
+		decideApprovals: true,
+		talk: true,
+	},
 	createdAt: "2026-09-10T00:00:00.000Z",
 };
 
@@ -78,7 +90,7 @@ describe("agent routes", () => {
 		expect(await response.json()).toEqual([agent]);
 	});
 
-	it("creates an agent in the pod it is posted to, as the person asking", async () => {
+	it("creates a bot in the workspace it is posted to, as the person asking", async () => {
 		let created: unknown;
 		const response = await app({
 			create: (input) =>
@@ -86,11 +98,11 @@ describe("agent routes", () => {
 					created = { ...input, userId };
 					return agent;
 				}),
-		}).request(`/pods/${POD}/agents`, auth({ name: "Writer", model: MODEL }));
+		}).request(`/workspaces/${WORKSPACE}/agents`, auth({ name: "Writer", model: MODEL }));
 
 		expect(response.status).toBe(201);
 		expect(created).toEqual({
-			podId: POD,
+			workspace: WORKSPACE,
 			agent: { name: "Writer", model: MODEL },
 			userId: MEMBER,
 		});
@@ -100,7 +112,7 @@ describe("agent routes", () => {
 		const response = await app({
 			create: (input) =>
 				Effect.fail(new ModelProviderRepository.ModelNotEnabled({ model: input.agent.model })),
-		}).request(`/pods/${POD}/agents`, auth({ name: "Writer", model: "disabled" }));
+		}).request(`/workspaces/${WORKSPACE}/agents`, auth({ name: "Writer", model: "disabled" }));
 
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
@@ -109,25 +121,55 @@ describe("agent routes", () => {
 		});
 	});
 
-	it("reports a name another agent in the pod has as a conflict", async () => {
+	it("reports a name another bot in the workspace has as a conflict", async () => {
 		const response = await app({
 			create: (input) =>
 				Effect.fail(new AgentRepository.AgentNameTaken({ field: "name", value: input.agent.name })),
-		}).request(`/pods/${POD}/agents`, auth({ name: "Triage", model: MODEL }));
+		}).request(`/workspaces/${WORKSPACE}/agents`, auth({ name: "Triage", model: MODEL }));
 
 		expect(response.status).toBe(409);
 		expect(await response.json()).toEqual({
 			_tag: "Conflict",
-			message: "Another agent in this pod already has that name",
+			message: "Another bot in this workspace already has that name",
 		});
 	});
 
-	it("has no placement endpoint", async () => {
-		const response = await app().request(`/agents/${AGENT}/pods/${POD}`, {
-			...auth(),
-			method: "PUT",
+	it("pins and unpins the bot in the path for the person asking", async () => {
+		const asked: unknown[] = [];
+		const routes = app({
+			setPinned: (input) =>
+				Effect.map(CurrentActor.Service, ({ userId }) => {
+					asked.push({ ...input, userId });
+					return { ...agent, pinned: input.pinned };
+				}),
 		});
-		expect(response.status).toBe(404);
+
+		const pinned = await routes.request(`/agents/${AGENT}/pin`, { ...auth(), method: "PUT" });
+		const unpinned = await routes.request(`/agents/${AGENT}/pin`, { ...auth(), method: "DELETE" });
+
+		expect(pinned.status).toBe(200);
+		expect(await pinned.json()).toMatchObject({ pinned: true });
+		expect(unpinned.status).toBe(200);
+		expect(await unpinned.json()).toMatchObject({ pinned: false });
+		expect(asked).toEqual([
+			{ agentId: AGENT, pinned: true, userId: MEMBER },
+			{ agentId: AGENT, pinned: false, userId: MEMBER },
+		]);
+	});
+
+	it("returns the person's Personal Assistant in the workspace in the path", async () => {
+		let asked: unknown;
+		const response = await app({
+			ensureAssistant: (input) =>
+				Effect.sync(() => {
+					asked = input;
+					return { ...agent, assistant: true, visibility: "private" as const };
+				}),
+		}).request(`/workspaces/${WORKSPACE}/assistant`, auth({ model: MODEL }));
+
+		expect(response.status).toBe(200);
+		expect(asked).toEqual({ workspace: WORKSPACE, model: MODEL });
+		expect(await response.json()).toMatchObject({ assistant: true });
 	});
 
 	it("reads, edits and deletes the agent in the path", async () => {

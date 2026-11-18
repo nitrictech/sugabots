@@ -62,7 +62,9 @@ export function ChatNameDialog({
 				</p>
 				{failure !== undefined && (
 					<Alert>
-						{failureMessage(failure, { Forbidden: "Only someone who runs this pod can do that." })}
+						{failureMessage(failure, {
+							Forbidden: "Only someone who runs this channel can do that.",
+						})}
 					</Alert>
 				)}
 			</DialogFormBody>

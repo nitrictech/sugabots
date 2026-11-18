@@ -23,7 +23,7 @@ const COMPONENT_LINE = /^<([A-Z]\w*)\s*\/>$/gm;
 const COMPONENTS_AS_MARKDOWN: Record<string, string> = { RoleMatrix: rolesMarkdown() };
 
 export interface DocSection {
-	/** The heading as it reads, without Markdown: `Make a routine`. */
+	/** The heading as it reads, without Markdown: `Make an automation`. */
 	heading: string;
 	/** The section's Markdown, starting with its `##` line. */
 	markdown: string;

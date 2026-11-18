@@ -17,6 +17,7 @@ import {
 	type AnyPgColumn,
 	boolean,
 	check,
+	primaryKey as compositePrimaryKey,
 	foreignKey,
 	index,
 	jsonb,
@@ -220,77 +221,45 @@ export const pod = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		// Whose Personal pod this is. Null on a shared pod: a shared pod is
-		// administered by the workspace's admins, so it has no special person.
-		ownerId: uuid("owner_id"),
-		kind: text("kind").$type<"personal" | "shared">().notNull(),
 		name: text("name").notNull(),
 		slug: text("slug").notNull(),
-		// One of the contract's pod colour names, as `agent.color` is a bot's.
-		// Null reads as the default colour; a Personal pod is drawn as its lock
-		// rather than a tile, so its colour is never shown.
+		// One of the contract's channel colour names, as `agent.color` is a bot's.
+		// Null reads as the default colour.
 		color: text("color").$type<PodColor>(),
+		description: text("description"),
+		visibility: text("visibility").$type<"public" | "private">().notNull().default("public"),
 		// Who made it. Kept when they leave, so the record survives the person.
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
-	// Slugs are unique among a workspace's shared pods. Every Personal pod is
-	// `personal`, which only its owner ever sees, so within one person's view
-	// the slug still names one pod.
 	(table) => [
-		check("pod_kind_check", sql`${table.kind} in ('personal', 'shared')`),
-		check(
-			"pod_personal_owner_check",
-			sql`${table.kind} = 'shared' or ${table.ownerId} is not null`,
-		),
-		check(
-			"pod_personal_slug_check",
-			sql`(${table.kind} = 'personal') = (${table.slug} = 'personal')`,
-		),
-		// Composite foreign keys are not enforced when a column is null, so this
-		// binds a Personal pod to its owner's membership and leaves shared pods
-		// alone. Leaving or being removed takes the Personal pod with it.
-		foreignKey({
-			columns: [table.workspaceId, table.ownerId],
-			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
-			name: "pod_owner_workspace_member_fkey",
-		}).onDelete("cascade"),
-		uniqueIndex("pod_slug_idx")
-			.on(table.workspaceId, table.slug)
-			.where(sql`${table.kind} = 'shared'`),
-		uniqueIndex("personal_pod_owner_idx")
-			.on(table.workspaceId, table.ownerId)
-			.where(sql`${table.kind} = 'personal'`),
+		check("pod_visibility_check", sql`${table.visibility} in ('public', 'private')`),
+		uniqueIndex("pod_slug_idx").on(table.workspaceId, table.slug),
 		uniqueIndex("pod_id_workspace_id_idx").on(table.id, table.workspaceId),
-		// Listing a workspace's pods names no kind, so neither partial index above
-		// can answer it.
-		index("pod_workspace_id_idx").on(table.workspaceId),
 	],
 );
 
 /**
- * Who has been added to a pod.
+ * Who is in a channel.
  *
- * These rows are the whole answer to who is in a shared pod. Nobody reaches one
- * without a row: every workspace admin has one in every shared pod, and
- * demoting them leaves their rows as they are.
+ * These rows are the whole answer to who is in a channel. A public channel is
+ * listed to everybody in the workspace, but its conversations are reached only
+ * with a row: joining writes one. Every workspace admin has one in every
+ * channel, and demoting them leaves their rows as they are.
  *
  * There is no role here. What somebody may configure is their workspace role,
  * which lives on `workspace_member`. Adding a column here later is cheaper
  * than pretending to a distinction the product does not yet make.
  *
- * A Personal pod admits its owner and nobody else, and the database enforces
- * that: the `personal_pod_owner_membership` trigger rejects any other row.
- * Drizzle has no way to declare a trigger, so it lives in the migration that
- * added it (`20260922010506_productive_dreadnoughts`) and is named here
- * because this is where somebody checking what constrains these rows looks.
- *
- * The administrators' rows are written by triggers too, added in
- * `20260928141359_admins_in_every_pod` and extended to the owner in
- * `20260929002409_workspace_owner`: `shared_pod_administrators` adds every
- * owner and admin to a new shared pod, and `administrator_shared_pods` adds a
- * new owner or admin to every shared pod. Both take
+ * The administrators' rows are written by triggers, which Drizzle has no way
+ * to declare, so they live in migrations and are named here because this is
+ * where somebody checking what writes these rows looks. Added in
+ * `20260928141359_admins_in_every_pod`, extended to the owner in
+ * `20260929002409_workspace_owner` and made to cover every channel in
+ * `20261118061416_bots_leave_pods_keys`: `shared_pod_administrators` adds every
+ * owner and admin to a new channel, and `administrator_shared_pods` adds a
+ * new owner or admin to every channel. Both take
  * `lock_pod_membership(workspace_id)`, as must anything that removes a row
  * on the strength of somebody's role, so a promotion cannot slip between them.
  */
@@ -321,20 +290,22 @@ export const podMember = pgTable(
 );
 
 /**
- * A configured model: a name, a face, a prompt and the tools it may reach for.
+ * A bot: a name, a face, a prompt and the tools it may reach for.
  *
- * A row is one of two things, and `agent_placement_check` is what keeps it to
- * one of them: a crew agent, which belongs to exactly one pod, or a system
- * agent, which belongs to the workspace and sits in no pod. A crew agent with
- * no pod would be reachable by id and invisible to every pod authorisation
- * path, so the constraint is load-bearing rather than tidiness.
+ * A row is one of three things: a bot people made (`system_agent_key` and
+ * `assistant_of` both null), public or private by `visibility`; somebody's
+ * Personal Assistant (`assistant_of` names them), only ever theirs; or a
+ * system bot (`system_agent_key` names it), which works in the background for
+ * the whole workspace and nobody talks to.
  *
- * Either may have no `model`, which means nobody has chosen one. That is a
- * state the product allows rather than a broken row: a system agent does not
- * run, and a crew agent's turns refuse with a reason naming it.
+ * Any may have no `model`, which means nobody has chosen one. That is a
+ * state the product allows rather than a broken row: a system bot does not
+ * run, and other bots' turns refuse with a reason naming it.
  *
- * `name` is unique per workspace because a name is how a person addresses an
- * agent: `@Linear Handler` in a message has to mean one of them.
+ * `name` is unique per workspace among the bots people make, because a name
+ * is how a person addresses a bot: `@Linear Handler` in a message has to mean
+ * one of them. Every Personal Assistant may share one, as only its person
+ * talks to it.
  *
  * `color`, `face` and `shape` are the whole avatar. Small columns rather than
  * an image, which is what lets an agent created at run time have a face at all.
@@ -346,14 +317,15 @@ export const agent = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		// Null for a system agent, which serves every pod rather than sitting in one.
-		podId: uuid("pod_id"),
 		name: text("name").notNull(),
 		// How the agent is addressed in a message: `@personal-assistant`.
 		// Derived from the name unless an admin sets one; unique per workspace.
 		handle: text("handle").notNull(),
 		systemAgentKey: text("system_agent_key").$type<SystemAgentKey>(),
-		provisionedKey: text("provisioned_key").$type<"personal-assistant">(),
+		// Whether everyone in the workspace sees the bot, or only its creator.
+		visibility: text("visibility").$type<"public" | "private">().notNull().default("public"),
+		// On a Personal Assistant: the one person who sees it and talks to it.
+		assistantOf: uuid("assistant_of"),
 		description: text("description"),
 		// One of the contract's colour names. Not a Postgres enum: the palette is
 		// the contract's to state, and an enum here would be a second place to change it.
@@ -368,8 +340,8 @@ export const agent = pgTable(
 		// The built-in tools switched off for this agent, by key. What is off
 		// rather than what is on, so a new tool reaches every existing agent.
 		disabledTools: jsonb("disabled_tools").$type<string[]>().notNull().default([]),
-		// Whether it may use its pod's sandbox. Off until an admin turns it on:
-		// running commands is a bigger step than the other built-in tools.
+		// Whether it may use its computer. Off until its creator or an admin
+		// turns it on: running commands is a bigger step than the other built-in tools.
 		usesSandbox: boolean("uses_sandbox").notNull().default(false),
 		// Whether it browses so people watching can follow, which is slower.
 		naturalBrowsing: boolean("natural_browsing").notNull().default(false),
@@ -379,38 +351,82 @@ export const agent = pgTable(
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		// A composite foreign key is MATCH SIMPLE, so a system agent's null
-		// `pod_id` is neither checked nor cascaded: deleting a pod leaves the
-		// workspace's system agents alone. Deleting the workspace still takes
-		// them, through the plain `workspace_id` reference above.
+		check("agent_visibility_check", sql`${table.visibility} in ('public', 'private')`),
+		// A Personal Assistant goes with its person's membership.
 		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "agent_pod_workspace_fkey",
+			columns: [table.workspaceId, table.assistantOf],
+			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
+			name: "agent_assistant_workspace_member_fkey",
 		}).onDelete("cascade"),
-		// A row is a crew agent in a pod, or a system agent in none. Without
-		// this, a nullable `pod_id` would also admit a pod-less crew agent,
-		// which no pod permission reaches and no pod listing shows.
-		check(
-			"agent_placement_check",
-			sql`(${table.systemAgentKey} is null) = (${table.podId} is not null)`,
-		),
-		// Scoped by pod, so they cover crew only; a system agent's null `pod_id`
-		// makes every row distinct in them. What keeps there being one of each
-		// system agent is `agent_system_agent_key_idx` below, and what keeps a
-		// pod-less row from being crew is `agent_placement_check` above.
-		uniqueIndex("agent_name_idx").on(table.podId, table.name),
-		uniqueIndex("agent_handle_idx").on(table.podId, table.handle),
-		uniqueIndex("agent_provisioned_key_idx").on(table.podId, table.provisionedKey),
-		// One of each system agent per workspace. Crew never collide here: their
+		// How people address a bot, so one of each per workspace. System bots
+		// and Personal Assistants are never addressed by others.
+		uniqueIndex("agent_name_idx")
+			.on(table.workspaceId, sql`lower(${table.name})`)
+			.where(sql`${table.systemAgentKey} is null and ${table.assistantOf} is null`),
+		uniqueIndex("agent_handle_idx")
+			.on(table.workspaceId, table.handle)
+			.where(sql`${table.systemAgentKey} is null and ${table.assistantOf} is null`),
+		uniqueIndex("agent_assistant_idx")
+			.on(table.workspaceId, table.assistantOf)
+			.where(sql`${table.assistantOf} is not null`),
+		// One of each system bot per workspace. Other bots never collide here: their
 		// `system_agent_key` is null, and nulls are distinct in a btree index.
 		// It is also the workspace-prefixed index "every agent in this workspace"
 		// scans, so a second index on `workspace_id` alone would only cost writes.
 		uniqueIndex("agent_system_agent_key_idx").on(table.workspaceId, table.systemAgentKey),
 		uniqueIndex("agent_id_workspace_id_idx").on(table.id, table.workspaceId),
-		index("agent_pod_id_idx").on(table.podId),
 	],
 );
 
 export type PodRow = typeof pod.$inferSelect;
 export type AgentRow = typeof agent.$inferSelect;
+
+/** A bot in a channel. */
+export const podAgent = pgTable(
+	"pod_agent",
+	{
+		workspaceId: uuid("workspace_id").notNull(),
+		podId: uuid("pod_id").notNull(),
+		agentId: uuid("agent_id").notNull(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		compositePrimaryKey({ columns: [table.podId, table.agentId] }),
+		foreignKey({
+			columns: [table.podId, table.workspaceId],
+			foreignColumns: [pod.id, pod.workspaceId],
+			name: "pod_agent_pod_workspace_fkey",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.agentId, table.workspaceId],
+			foreignColumns: [agent.id, agent.workspaceId],
+			name: "pod_agent_agent_workspace_fkey",
+		}).onDelete("cascade"),
+		index("pod_agent_agent_id_idx").on(table.agentId),
+	],
+);
+
+/** A bot a person pinned to their sidebar. */
+export const pinnedAgent = pgTable(
+	"pinned_agent",
+	{
+		workspaceId: uuid("workspace_id").notNull(),
+		userId: uuid("user_id").notNull(),
+		agentId: uuid("agent_id").notNull(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		compositePrimaryKey({ columns: [table.userId, table.agentId] }),
+		foreignKey({
+			columns: [table.workspaceId, table.userId],
+			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
+			name: "pinned_agent_workspace_member_fkey",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.agentId, table.workspaceId],
+			foreignColumns: [agent.id, agent.workspaceId],
+			name: "pinned_agent_agent_workspace_fkey",
+		}).onDelete("cascade"),
+		index("pinned_agent_agent_id_idx").on(table.agentId),
+	],
+);

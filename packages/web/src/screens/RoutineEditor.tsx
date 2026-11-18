@@ -3,31 +3,20 @@ import {
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
 	MAX_ROUTINE_NAME_CHARACTERS,
 	type NewRoutine,
-	type Pod,
 	type Routine,
-	type RoutineResults,
 	type RoutineTrigger,
 	type RoutineTriggerInput,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Check, ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
-import { useChatList } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import type { TriggerKind } from "@/lib/routine-trigger-words.ts";
 import { useRoutineActions } from "@/lib/routines.ts";
 import { AgentAvatar } from "@/shell/Agent.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuTrigger,
-} from "@/ui/dropdown-menu.tsx";
 import {
 	PageBackLink,
 	SettingsControlRow,
@@ -37,7 +26,6 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
 import {
 	TriggerDialog,
 	type TriggerDraft,
@@ -46,30 +34,18 @@ import {
 	triggerInputOf,
 } from "./RoutineTriggers.tsx";
 
-/** A bot a routine can belong to, with the pod it lives in. */
+/** A bot an automation can belong to. */
 export interface BotChoice {
 	agent: Agent;
-	pod: Pod;
 }
 
-/** A routine with the bot it belongs to and that bot's pod. */
+/** An automation with the bot it belongs to. */
 export interface PlacedRoutine extends BotChoice {
 	routine: Routine;
 }
 
 /** The page a routine shows: its own, or one of the parts that open from it. */
 type RoutineSubpage = "routine" | "instructions";
-
-/**
- * Where a new routine's result goes until someone chooses: a schedule is
- * usually something to read, such as a morning standup, and a webhook or a
- * repository's events usually work handled out of sight.
- */
-const DEFAULT_RESULTS: Record<TriggerKind, RoutineResults> = {
-	cron: "post_to_chat",
-	webhook: "keep_in_run",
-	github: "keep_in_run",
-};
 
 /**
  * A routine being made. Nothing is saved until Create, which opens the new
@@ -96,10 +72,6 @@ export function NewRoutinePage({
 	const [triggers, setTriggers] = useState<readonly DraftedTrigger[]>([]);
 	// The dialog open on a trigger, by its key, or on adding one.
 	const [open, setOpen] = useState<string | "adding">();
-	// Unset until chosen, so the result follows the first trigger's default.
-	const [chosenResults, setChosenResults] = useState<RoutineResults>();
-	// Null for the pod's first chat.
-	const [chatId, setChatId] = useState<string | null>(null);
 	const [page, setPage] = useState<RoutineSubpage>("routine");
 	const actions = useRoutineActions();
 	const bot = choices.find((choice) => choice.agent.id === agentId);
@@ -107,7 +79,6 @@ export function NewRoutinePage({
 		const written = triggerInputOf(draft);
 		return "input" in written ? [written.input] : [];
 	});
-	const results = chosenResults ?? DEFAULT_RESULTS[inputs[0]?.kind ?? "cron"];
 	const ready = bot !== undefined && name.trim() !== "" && instructions.trim() !== "";
 	// Begun from one bot's routines, it can only be that bot's.
 	const botFixed = choices.some((choice) => choice.agent.id === initialAgentId);
@@ -121,8 +92,6 @@ export function NewRoutinePage({
 				json: {
 					name,
 					instructions,
-					results,
-					...(results === "post_to_chat" && chatId !== null && { chatId }),
 					triggers: inputs,
 				},
 			});
@@ -191,12 +160,6 @@ export function NewRoutinePage({
 				onOpen={setOpen}
 				onAdd={() => setOpen("adding")}
 			/>
-			<SettingsGroup>
-				<ResultsRow results={results} onChange={setChosenResults} />
-				{results === "post_to_chat" && bot && (
-					<ChatRow pod={bot.pod} chatId={chatId} onChange={setChatId} />
-				)}
-			</SettingsGroup>
 			{actions.create.error && <Alert>{failureMessage(actions.create.error)}</Alert>}
 			{/* At the foot, once it has been set up, where a form ends. */}
 			<div className="flex justify-end gap-2">
@@ -210,7 +173,7 @@ export function NewRoutinePage({
 			<Dialog open={open !== undefined} onOpenChange={(opened) => !opened && setOpen(undefined)}>
 				{open !== undefined && (
 					<TriggerDialog
-						pod={bot?.pod}
+						bot={bot}
 						editing={editing?.draft}
 						onSave={async (input) => {
 							const draft = triggerDraftOf(input);
@@ -251,7 +214,6 @@ export function copyOf(routine: Routine, siblingNames: readonly string[]): NewRo
 	const fields = {
 		name: copyName(routine.name, siblingNames),
 		instructions: routine.instructions,
-		results: routine.results,
 		state: "paused" as const,
 	};
 	return { ...fields, triggers: routine.triggers.map(copiedTrigger) };
@@ -308,8 +270,8 @@ function NameInputRow({ value, onChange }: { value: string; onChange: (value: st
 }
 
 /**
- * The routine's bot. Given `choices`, it opens in place to the bots it may be
- * made for, under their pods' names; without them it only shows the bot.
+ * The automation's bot. Given `choices`, it opens in place to the bots it may
+ * be made for; without them it only shows the bot.
  */
 function BotRow({
 	chosen,
@@ -322,7 +284,6 @@ function BotRow({
 }) {
 	const [open, setOpen] = useState(false);
 	const choosable = choices && onChoose && choices.length > 1;
-	const pods = [...new Map(choices?.map((choice) => [choice.pod.id, choice.pod])).values()];
 	const summary = chosen ? (
 		<span className="flex min-w-0 flex-1 items-center gap-2.5">
 			<AgentAvatar
@@ -332,7 +293,6 @@ function BotRow({
 				size={24}
 			/>
 			<span className="truncate text-xs text-foreground">{chosen.agent.name}</span>
-			<span className="truncate text-muted-foreground text-xs">{chosen.pod.name}</span>
 		</span>
 	) : (
 		<span className="flex-1 text-xs text-muted-foreground">Choose a bot</span>
@@ -361,44 +321,31 @@ function BotRow({
 					)}
 				/>
 			</button>
-			{open &&
-				pods.map((pod) => (
-					<section key={pod.id} aria-label={pod.name} className="pb-1.5 pl-29">
-						<h3 className="m-0 px-1 pt-1 pb-1 font-medium text-xs text-subtle-foreground">
-							{pod.name}
-						</h3>
-						<ul className="m-0 flex list-none flex-col p-0 pr-2">
-							{choices
-								.filter((choice) => choice.pod.id === pod.id)
-								.map(({ agent }) => (
-									<li key={agent.id}>
-										<button
-											type="button"
-											aria-pressed={agent.id === chosen?.agent.id}
-											onClick={() => {
-												onChoose(agent.id);
-												setOpen(false);
-											}}
-											className="focus-ring flex w-full items-center gap-2.5 rounded-xl px-1 py-1.5 text-left transition-colors hover:bg-row-hover"
-										>
-											<AgentAvatar
-												color={agent.color}
-												face={agent.face}
-												shape={agent.shape}
-												size={24}
-											/>
-											<span className="min-w-0 flex-1 truncate text-xs text-foreground">
-												{agent.name}
-											</span>
-											{agent.id === chosen?.agent.id && (
-												<Check aria-hidden size={16} strokeWidth={2.4} className="text-link" />
-											)}
-										</button>
-									</li>
-								))}
-						</ul>
-					</section>
-				))}
+			{open && (
+				<ul className="m-0 flex list-none flex-col p-0 pr-2 pb-1.5 pl-29">
+					{choices.map(({ agent }) => (
+						<li key={agent.id}>
+							<button
+								type="button"
+								aria-pressed={agent.id === chosen?.agent.id}
+								onClick={() => {
+									onChoose(agent.id);
+									setOpen(false);
+								}}
+								className="focus-ring flex w-full items-center gap-2.5 rounded-xl px-1 py-1.5 text-left transition-colors hover:bg-row-hover"
+							>
+								<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={24} />
+								<span className="min-w-0 flex-1 truncate text-xs text-foreground">
+									{agent.name}
+								</span>
+								{agent.id === chosen?.agent.id && (
+									<Check aria-hidden size={16} strokeWidth={2.4} className="text-link" />
+								)}
+							</button>
+						</li>
+					))}
+				</ul>
+			)}
 		</div>
 	);
 }
@@ -466,94 +413,6 @@ function InstructionsPage({
 			</SettingsGroup>
 			{editable && <div className="flex justify-end">{action}</div>}
 		</SettingsPage>
-	);
-}
-
-function ResultsRow({
-	results,
-	onChange,
-}: {
-	results: RoutineResults;
-	onChange: (results: RoutineResults) => void;
-}) {
-	return (
-		<SwitchRow
-			label="Also post result in the pod's channel"
-			checked={results === "post_to_chat"}
-			onChange={(posted) => onChange(posted ? "post_to_chat" : "keep_in_run")}
-		/>
-	);
-}
-
-/**
- * Which of the pod's chats a routine's results go to, offered once the pod
- * has more than one: its first, which a null `chatId` stands for, or another.
- */
-export function ChatRow({
-	pod,
-	chatId,
-	onChange,
-}: {
-	pod: Pod;
-	chatId: string | null;
-	onChange: (chatId: string | null) => void;
-}) {
-	const chats = useChatList(pod.kind === "shared" ? pod.slug : undefined).data?.chats ?? [];
-	if (chats.length < 2) return null;
-	const chosen =
-		chats.find(({ conversation }) => conversation.id === chatId) ??
-		chats.find(({ conversation }) => conversation.main);
-	const name = chosen?.conversation.title ?? "";
-	return (
-		<SettingsControlRow label="Chat">
-			<DropdownMenu>
-				<DropdownMenuTrigger
-					aria-label={`Chat: ${name}`}
-					className="focus-ring ml-auto flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-chip px-2.5 text-sm text-foreground transition-colors hover:bg-hover"
-				>
-					<span className="truncate">{name}</span>
-					<ChevronDown aria-hidden size={14} className="shrink-0 text-muted-foreground" />
-				</DropdownMenuTrigger>
-				<DropdownMenuContent align="end" className="min-w-48">
-					<DropdownMenuRadioGroup
-						value={chosen?.conversation.id}
-						onValueChange={(id: string) =>
-							onChange(
-								chats.find(({ conversation }) => conversation.id === id)?.conversation.main
-									? null
-									: id,
-							)
-						}
-					>
-						{chats.map(({ conversation }) => (
-							<DropdownMenuRadioItem key={conversation.id} value={conversation.id}>
-								{conversation.title}
-							</DropdownMenuRadioItem>
-						))}
-					</DropdownMenuRadioGroup>
-				</DropdownMenuContent>
-			</DropdownMenu>
-		</SettingsControlRow>
-	);
-}
-
-/** A row that is a switch, named by its label. */
-function SwitchRow({
-	label,
-	checked,
-	disabled,
-	onChange,
-}: {
-	label: string;
-	checked: boolean;
-	disabled?: boolean;
-	onChange: (checked: boolean) => void;
-}) {
-	return (
-		<div className="flex min-h-14 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<span className="flex-1 text-xs text-foreground">{label}</span>
-			<Toggle label={label} checked={checked} disabled={disabled} onChange={onChange} />
-		</div>
 	);
 }
 

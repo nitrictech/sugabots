@@ -13,7 +13,6 @@ import type { UserResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
-const POD = "0199a3a0-0000-7000-8000-000000000002";
 const AGENT = "0199a3a0-0000-7000-8000-000000000003";
 const THREAD = "0199a3a0-0000-7000-8000-000000000004";
 const USER = "0199a3a0-0000-7000-8000-000000000005";
@@ -33,7 +32,7 @@ const resolveUser: UserResolver = async (headers) => {
 const thread = {
 	id: THREAD,
 	workspaceId: WORKSPACE,
-	podId: POD,
+	podId: null,
 	hostAgentId: AGENT,
 	conversationId: null,
 	type: "conversation" as const,
@@ -49,7 +48,6 @@ const thread = {
 const details: ThreadDetails = {
 	thread,
 	routineExecution: null,
-	startedFrom: null,
 	crew: [],
 	members: [],
 	participants: [

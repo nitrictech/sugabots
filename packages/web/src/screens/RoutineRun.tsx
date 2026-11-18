@@ -1,16 +1,14 @@
 import type {
 	AgentParticipant,
 	ChatMessageItem,
-	Pod,
 	RoutineExecution,
 	ThreadDetails,
 	ThreadParticipant,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { useAgentWithPod } from "@/lib/agents.ts";
 import { useRoutineControls } from "@/lib/chats.ts";
-import { podSettingsLink } from "@/lib/links.ts";
+import { agentSettingsPageLink } from "@/lib/links.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { nextRunWords } from "@/lib/routine-schedule.ts";
 import { useRecentRuns, useRoutines } from "@/lib/routines.ts";
@@ -133,7 +131,6 @@ function Divider({ children }: { children: string }) {
 export function RunMessage({
 	item,
 	agent,
-	pod,
 	routine,
 	conversationId,
 	latest,
@@ -141,7 +138,6 @@ export function RunMessage({
 }: {
 	item: RunItem;
 	agent: AgentParticipant;
-	pod: Pod;
 	routine: Pick<NonNullable<ThreadDetails["routine"]>, "id" | "agentId">;
 	conversationId: string;
 	/** The newest failure while the routine is still failing, which may be retried. */
@@ -193,7 +189,7 @@ export function RunMessage({
 							Retry
 						</Button>
 						<Link
-							{...podSettingsLink(pod)}
+							{...agentSettingsPageLink(agent, "connections")}
 							className={buttonStyles({ variant: "secondary", size: "sm" })}
 						>
 							Fix connection
@@ -208,7 +204,7 @@ export function RunMessage({
 /**
  * A failed run, at the top of its own thread, drawn as it is in its routine's
  * thread: its bot's message saying why, offering to run it again while it is
- * the routine's latest run. Nothing until its bot's pod is known.
+ * the automation's latest run.
  */
 export function FailedRunMessage({
 	execution,
@@ -217,11 +213,9 @@ export function FailedRunMessage({
 	execution: RoutineExecution;
 	agent: AgentParticipant;
 }) {
-	const placed = useAgentWithPod(execution.agentId);
 	const routine = { id: execution.routineId, agentId: execution.agentId };
 	const latestRun = useRecentRuns({ agentId: execution.agentId, routineId: execution.routineId })
 		.data?.items[0];
-	if (!placed) return null;
 	return (
 		<RunMessage
 			item={{
@@ -236,7 +230,6 @@ export function FailedRunMessage({
 				createdAt: execution.acceptedAt,
 			}}
 			agent={agent}
-			pod={placed.pod}
 			routine={routine}
 			conversationId={execution.conversationId}
 			latest={latestRun?.id === execution.id}

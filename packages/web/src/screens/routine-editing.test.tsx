@@ -6,23 +6,12 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatTime, today } from "@/lib/routine-schedule.ts";
-import {
-	agents,
-	apiAnswers,
-	channelDetails,
-	linear,
-	mount,
-	open,
-	pods,
-	triager,
-} from "@/test-api.tsx";
+import { agents, apiAnswers, linear, mount, open, taskDetails, triager } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const [suga, sales] = pods;
-if (!suga || !sales) throw new Error("fixture");
-const researcher = agents.find((agent) => agent.podId === sales.id);
+const researcher = agents.find((agent) => agent.handle === "customer-research");
 if (!researcher) throw new Error("fixture");
 
 function routine(id: string, name: string, agentId: string, expression: string): Routine {
@@ -39,8 +28,6 @@ function routine(id: string, name: string, agentId: string, expression: string):
 			nextScheduledAt: null,
 		}),
 		state: "enabled",
-		results: "keep_in_run",
-		chatId: null,
 		createdById: null,
 		createdByAgentId: null,
 		createdAt: "2026-09-18T00:00:00.000Z",
@@ -56,7 +43,6 @@ const morningBrief: WorkspaceRoutine = {
 		"0 8 * * 1-5",
 	),
 	agent: linear,
-	pod: { id: suga.id, slug: suga.slug },
 };
 const churnReport: WorkspaceRoutine = {
 	routine: {
@@ -69,7 +55,6 @@ const churnReport: WorkspaceRoutine = {
 		state: "paused",
 	},
 	agent: researcher,
-	pod: { id: sales.id, slug: sales.slug },
 };
 
 beforeEach(() => {
@@ -84,18 +69,18 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-/** A routine's own thread, where its runs post, with the routine set up in the panel beside it. */
+/** An automation's own thread, where its runs post, with the automation set up in the panel beside it. */
 const threadPage = (one: WorkspaceRoutine) =>
-	`/suga/pods/${one.pod.slug}/routines/${one.routine.id}`;
-/** A routine being made beside Suga-Team's routines. */
-const newPage = `/suga/pods/${suga.slug}/routines/new`;
+	`/suga/bots/${one.agent.handle}/automations/${one.routine.id}`;
+/** An automation being made beside the triager's automations. */
+const newPage = `/suga/bots/${triager.handle}/automations/new`;
 
 /** The id of `one`'s own thread, where its runs post. */
 const feedOf = (one: WorkspaceRoutine) =>
 	`${one.routine.id.slice(0, -4)}f${one.routine.id.slice(-3)}`;
 
 /**
- * Serves `one` as its pod's only routine, with its own thread, and its bot's
+ * Serves `one` as its bot's only automation, with its own thread, and its bot's
  * routines as `one` and `others`: what the routine's page reads to show it.
  */
 function serveRoutine(one: WorkspaceRoutine, others: readonly Routine[] = []) {
@@ -106,11 +91,9 @@ function serveRoutine(one: WorkspaceRoutine, others: readonly Routine[] = []) {
 			[one.routine, ...others].filter((routine) => routine.agentId === params.agentId),
 		),
 	);
-	client.api.chats.list.mockReturnValue(
+	client.api.chats.botTasks.mockReturnValue(
 		Effect.succeed({
-			chats: [],
-			channels: [],
-			threads: [],
+			tasks: [],
 			routines: [
 				{
 					routine: {
@@ -118,13 +101,13 @@ function serveRoutine(one: WorkspaceRoutine, others: readonly Routine[] = []) {
 						name: one.routine.name,
 						state: one.routine.state,
 						failed: false,
+						pausedAfterFailures: false,
 					},
 					agent: one.agent,
 					conversation: {
 						kind: "routine_feed",
 						id: feed,
 						workspaceId: one.agent.workspaceId,
-						podId: one.agent.podId,
 						title: one.routine.name,
 						createdAt: "2026-09-18T00:00:00.000Z",
 						updatedAt: "2026-09-18T00:00:00.000Z",
@@ -136,7 +119,7 @@ function serveRoutine(one: WorkspaceRoutine, others: readonly Routine[] = []) {
 			],
 		}),
 	);
-	const details = channelDetails(one.agent);
+	const details = taskDetails(one.agent);
 	client.api.threads.get.mockReturnValue(
 		Effect.succeed({
 			...details,
@@ -223,18 +206,16 @@ async function pickTime(chip: number, minutesPastMidnight: number) {
 	await waitFor(() => expect(trigger.textContent).toBe(formatTime(minutesPastMidnight)));
 }
 
-describe("a pod's routines", () => {
-	it("makes a routine for the bot chosen from the pod's own, then opens its thread", async () => {
+describe("a bot's automations", () => {
+	it("makes an automation for the bot it was begun from, then opens its thread", async () => {
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		client.api.routines.create.mockReturnValue(
 			Effect.succeed({ routine: morningBrief.routine, secrets: [] }),
 		);
 		const router = mount(newPage);
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Triage sweep" } });
-		fireEvent.click(screen.getByRole("button", { name: /^Bot(?!s\b)/ }));
-		// Only this pod's bots: a routine is kept beside its bot's pod.
-		expect(screen.queryByRole("button", { name: researcher.name })).toBeNull();
-		fireEvent.click(screen.getByRole("button", { name: triager.name }));
+		// Begun from the bot's own automations, it is for that bot, with no other to choose.
+		expect(screen.queryByRole("button", { name: /^Bot(?!s\b)/ })).toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {
 			target: { value: "Sweep the queue." },
@@ -258,7 +239,6 @@ describe("a pod's routines", () => {
 				payload: {
 					name: "Triage sweep",
 					instructions: "Sweep the queue.",
-					results: "post_to_chat",
 					triggers: [
 						{
 							kind: "cron",
@@ -275,7 +255,11 @@ describe("a pod's routines", () => {
 				},
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(threadPage(morningBrief)));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				`/suga/bots/${triager.handle}/automations/${morningBrief.routine.id}`,
+			),
+		);
 	});
 
 	it("makes a routine that runs at several times on the last day of every third month", async () => {
@@ -333,7 +317,7 @@ describe("a pod's routines", () => {
 		client.api.routines.create.mockReturnValue(
 			Effect.succeed({ routine: churnReport.routine, secrets: [] }),
 		);
-		mount(`/suga/pods/${sales.slug}/routines/new?bot=${researcher.handle}`);
+		mount(`/suga/bots/${researcher.handle}/automations/new`);
 
 		expect(await screen.findByText(researcher.name, { selector: "main *" })).toBeDefined();
 		expect(screen.queryByRole("button", { name: /^Bot(?!s\b)/ })).toBeNull();
@@ -353,14 +337,13 @@ describe("a pod's routines", () => {
 	});
 
 	it("goes back to the bot's routines when a routine being made is cancelled", async () => {
-		const router = mount(`/suga/pods/${sales.slug}/routines/new?bot=${researcher.handle}`);
+		const router = mount(`/suga/bots/${researcher.handle}/automations/new`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(`/suga/pods/${sales.slug}/routines`),
+			expect(router.state.location.pathname).toBe(`/suga/bots/${researcher.handle}/automations`),
 		);
-		expect(router.state.location.search).toEqual({ bot: researcher.handle });
 		expect(client.api.routines.create).not.toHaveBeenCalled();
 	});
 
@@ -373,7 +356,7 @@ describe("a pod's routines", () => {
 			Effect.succeed({ routine: webhook.routine, secrets: [] }),
 		);
 		serveRoutine(webhook);
-		const router = mount(newPage);
+		const router = mount(`/suga/bots/${linear.handle}/automations/new`);
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Sentry issues" } });
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {
@@ -389,8 +372,6 @@ describe("a pod's routines", () => {
 		});
 		fireEvent.click(within(adding).getByRole("button", { name: "Add trigger" }));
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-		const posted = screen.getByRole("switch", { name: "Also post result in the pod's channel" });
-		expect(posted.getAttribute("aria-checked")).toBe("false");
 		fireEvent.click(screen.getByRole("button", { name: "Create routine" }));
 
 		await waitFor(() =>
@@ -405,7 +386,6 @@ describe("a pod's routines", () => {
 								secret: "whsec_0123456789abcdefghijklmnop",
 							},
 						],
-						results: "keep_in_run",
 					}),
 				}),
 			),
@@ -776,7 +756,6 @@ describe("a pod's routines", () => {
 				payload: {
 					name: "Morning brief copy 2",
 					instructions: morningBrief.routine.instructions,
-					results: morningBrief.routine.results,
 					state: "paused",
 					triggers: [
 						{
@@ -956,13 +935,9 @@ describe("a pod's routines", () => {
 		);
 		const { panel } = await openPanel(webhook);
 
-		// Pausing goes through the thread's controls, a change through the panel's own: both say why.
+		// Pausing goes through the thread's controls, which say why it failed.
 		fireEvent.click(within(panel).getByRole("switch", { name: "Routine on" }));
 		expect((await within(panel).findByRole("alert")).textContent).toContain("Update unavailable");
-		fireEvent.click(
-			within(panel).getByRole("switch", { name: "Also post result in the pod's channel" }),
-		);
-		await waitFor(() => expect(within(panel).getAllByRole("alert")).toHaveLength(2));
 
 		await openTrigger(/^Webhook/);
 		const token = await screen.findByLabelText("Token");
@@ -994,17 +969,16 @@ describe("a pod's routines", () => {
 			}),
 		);
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(`/suga/pods/${suga.slug}/routines`),
+			expect(router.state.location.pathname).toBe(`/suga/bots/${linear.handle}/automations`),
 		);
-		expect(router.state.location.search).toEqual({ bot: linear.handle });
 	});
 
 	it("shows a routine its viewer may not manage without a way to change it", async () => {
-		client.api.pods.list.mockReturnValue(
+		client.api.agents.list.mockReturnValue(
 			Effect.succeed(
-				pods.map((pod) => ({
-					...pod,
-					permissions: { ...pod.permissions, manageRoutines: false, runRoutines: false },
+				agents.map((agent) => ({
+					...agent,
+					permissions: { ...agent.permissions, manageRoutines: false, runRoutines: false },
 				})),
 			),
 		);

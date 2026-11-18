@@ -1,5 +1,5 @@
 import type RFB from "@novnc/novnc";
-import type { Agent, Pod } from "@sugabots/contracts";
+import type { Agent } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Keyboard, Monitor, X } from "lucide-react";
@@ -30,13 +30,11 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 export function DesktopStage({
 	threadId,
 	agent,
-	pod,
 	mayUse,
 	onClose,
 }: {
 	threadId: string;
 	agent: Agent;
-	pod: Pod;
 	/** Whether the person holds the pod's `useDesktops`, and so may take over. */
 	mayUse: boolean;
 	onClose: () => void;
@@ -85,12 +83,8 @@ export function DesktopStage({
 			) : missing === "bot" ? (
 				<EmptyState icon={<Monitor strokeWidth={1.75} />} title={`${agent.name} has no computer`}>
 					Give it one in its settings, so it can run commands, open websites and edit files.{" "}
-					{pod.permissions.updateAgents && (
-						<Link
-							{...agentSettingsLink({ pod, agent })}
-							state={backToChat}
-							className="text-link underline"
-						>
+					{agent.permissions.update && (
+						<Link {...agentSettingsLink(agent)} state={backToChat} className="text-link underline">
 							Open {agent.name}'s settings.
 						</Link>
 					)}

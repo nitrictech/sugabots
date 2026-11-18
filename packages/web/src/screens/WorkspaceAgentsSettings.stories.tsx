@@ -24,7 +24,7 @@ import {
  */
 
 const API = import.meta.env.VITE_API_URL as string;
-const cardPath = `/nitric/settings/pods/${revenue.slug}/agents/${growthDesk.handle}`;
+const cardPath = `/nitric/settings/bots/${growthDesk.handle}`;
 
 /** The workspace's switched-on models across three providers, so the Model page groups them. */
 const models = [
@@ -70,7 +70,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		podId: revenue.id,
+		agentId: "0199a3a0-0000-7000-8000-00000000b071",
 		name,
 		handle,
 		url,
@@ -116,8 +116,6 @@ function routine(
 		instructions: "Work the overnight replies and tell me what needs me.",
 		triggers: routineTriggers(id, trigger),
 		state,
-		results: "keep_in_run",
-		chatId: null,
 		createdById: null,
 		createdByAgentId: null,
 		createdAt: "2026-09-01T00:00:00.000Z",

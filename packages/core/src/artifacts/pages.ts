@@ -56,7 +56,6 @@ export const make = Effect.gen(function* () {
 					}
 					const now = yield* DateTime.nowAsDate;
 					const sealed: SealedPage = {
-						podId: at.podId,
 						artifactId: at.artifactId,
 						version: at.version,
 						expiresAt: now.getTime() + ADDRESS_LIFETIME_MS,
@@ -79,8 +78,8 @@ export const make = Effect.gen(function* () {
 					});
 					const now = yield* DateTime.nowAsDate;
 					if (sealed.expiresAt <= now.getTime()) return yield* new PageUnavailable();
-					const shown = yield* readVersion(sealed.podId, sealed.artifactId, sealed.version);
-					if (!shown || shown.kind !== "html") return yield* new PageUnavailable();
+					const shown = yield* readVersion(sealed.artifactId, sealed.version);
+					if (shown?.kind !== "html") return yield* new PageUnavailable();
 					return { title: shown.title, html: shown.content };
 				}),
 			),
@@ -106,7 +105,6 @@ export interface Page {
 export const SEALED_FOR = "artifact-page-address";
 
 const sealedPageSchema = Schema.Struct({
-	podId: Schema.String,
 	artifactId: Schema.String,
 	version: Schema.Int,
 	/** In milliseconds since the epoch. */

@@ -27,9 +27,9 @@ export const handler =
  */
 function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 	return ConversationEvent.$match(event, {
-		MessagePosted: ({ threadId, workspaceId, podId, message }) => [
+		MessagePosted: ({ threadId, workspaceId, message }) => [
 			onThread(threadId, streamEvent("message.created", { threadId, message })),
-			listedThreadChanged(workspaceId, podId, threadId),
+			listedThreadChanged(workspaceId, threadId),
 		],
 		ReactionsChanged: ({ threadId, messageId, reactions }) => [
 			onThread(
@@ -54,18 +54,16 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 			onThread(threadId, streamEvent("turn.started", { threadId, turnId, agentId })),
 			onThread(threadId, streamEvent("message.created", { threadId, message: reply })),
 		],
-		TurnCompleted: ({ threadId, workspaceId, podId, turnId, messageId, content }) => [
+		TurnCompleted: ({ threadId, workspaceId, turnId, messageId, content }) => [
 			onThread(
 				threadId,
 				streamEvent("message.completed", { threadId, messageId, content, status: "complete" }),
 			),
 			onThread(threadId, streamEvent("turn.completed", { threadId, turnId, status: "done" })),
-			listedThreadChanged(workspaceId, podId, threadId),
+			listedThreadChanged(workspaceId, threadId),
 		],
-		TurnSuspended: ({ threadId, workspaceId, podId }) => [
-			listedThreadChanged(workspaceId, podId, threadId),
-		],
-		TurnFailed: ({ threadId, workspaceId, podId, turnId, messageId, userMessage, willRetry }) => [
+		TurnSuspended: ({ threadId, workspaceId }) => [listedThreadChanged(workspaceId, threadId)],
+		TurnFailed: ({ threadId, workspaceId, turnId, messageId, userMessage, willRetry }) => [
 			onThread(
 				threadId,
 				streamEvent("message.failed", {
@@ -77,15 +75,15 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				}),
 			),
 			// The thread stops working only once nobody runs the turn again.
-			...(willRetry ? [] : [listedThreadChanged(workspaceId, podId, threadId)]),
+			...(willRetry ? [] : [listedThreadChanged(workspaceId, threadId)]),
 		],
-		TurnCancelled: ({ threadId, workspaceId, podId, turnId, messageId, content }) => [
+		TurnCancelled: ({ threadId, workspaceId, turnId, messageId, content }) => [
 			onThread(
 				threadId,
 				streamEvent("message.completed", { threadId, messageId, content, status: "cancelled" }),
 			),
 			onThread(threadId, streamEvent("turn.completed", { threadId, turnId, status: "cancelled" })),
-			listedThreadChanged(workspaceId, podId, threadId),
+			listedThreadChanged(workspaceId, threadId),
 		],
 		TurnQueued: ({ threadId }) => [onThread(threadId, streamEvent("thread.changed", { threadId }))],
 		TurnCancelRequested: ({ threadId, turnId }) => [
@@ -106,23 +104,13 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		ToolCallStarted: (change) => [toolCallEvent("tool_call.started", change)],
 		ToolCallDecided: (change) => [
 			toolCallEvent("tool_call.updated", change),
-			listedThreadChanged(change.workspaceId, change.podId, change.threadId),
+			listedThreadChanged(change.workspaceId, change.threadId),
 		],
 		ToolCallExecuting: (change) => [toolCallEvent("tool_call.updated", change)],
 		ToolCallFinished: (change) => [toolCallEvent("tool_call.completed", change)],
 		CollaborationOpened: (opened) => [
 			collaborationUpdated(opened),
-			listedThreadChanged(opened.workspaceId, opened.podId, opened.collaboration.threadId),
-			...(opened.collaboratorChannelId
-				? [
-						conversationThreadChanged(
-							opened.workspaceId,
-							opened.podId,
-							opened.collaboratorChannelId,
-							opened.collaboration.threadId,
-						),
-					]
-				: []),
+			listedThreadChanged(opened.workspaceId, opened.collaboration.threadId),
 		],
 		CollaborationStoppedWaiting: (change) => [collaborationUpdated(change)],
 		CollaborationAnswered: (change) => [collaborationUpdated(change)],
@@ -138,28 +126,21 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				}),
 			),
 		],
-		ThreadOpened: ({ workspaceId, podId, parentThreadId, threadId }) => [
-			listedThreadChanged(workspaceId, podId, threadId),
-			conversationThreadChanged(workspaceId, podId, parentThreadId, threadId),
+		TaskStarted: ({ workspaceId, threadId }) => [listedThreadChanged(workspaceId, threadId)],
+		BriefedThreadStarted: ({ workspaceId, threadId }) => [
+			listedThreadChanged(workspaceId, threadId),
 		],
-		BriefedThreadStarted: ({ workspaceId, podId, threadId }) => [
-			listedThreadChanged(workspaceId, podId, threadId),
+		ConversationDoneChanged: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
+		PodChatChanged: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
+		ThreadSummarised: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
+		ThreadCompacted: ({ workspaceId, threadId }) => threadChanged(workspaceId, threadId),
+		RoutineExecutionAccepted: ({ workspaceId, conversationId, threadId }) => [
+			conversationThreadChanged(workspaceId, conversationId, threadId),
 		],
-		ConversationDoneChanged: ({ workspaceId, podId, threadId }) =>
-			threadChanged(workspaceId, podId, threadId),
-		PodChatChanged: ({ workspaceId, podId, threadId }) =>
-			threadChanged(workspaceId, podId, threadId),
-		ThreadSummarised: ({ workspaceId, podId, threadId }) =>
-			threadChanged(workspaceId, podId, threadId),
-		ThreadCompacted: ({ workspaceId, podId, threadId }) =>
-			threadChanged(workspaceId, podId, threadId),
-		RoutineExecutionAccepted: ({ workspaceId, podId, conversationId, threadId }) => [
-			conversationThreadChanged(workspaceId, podId, conversationId, threadId),
-		],
-		RoutineWorkCancelled: ({ workspaceId, podId, threadIds }) =>
-			threadIds.flatMap((threadId) => threadChanged(workspaceId, podId, threadId)),
-		RoutineExecutionSettled: ({ workspaceId, podId, conversationId, threadId }) => [
-			conversationThreadChanged(workspaceId, podId, conversationId, threadId),
+		RoutineWorkCancelled: ({ workspaceId, threadIds }) =>
+			threadIds.flatMap((threadId) => threadChanged(workspaceId, threadId)),
+		RoutineExecutionSettled: ({ workspaceId, conversationId, threadId }) => [
+			conversationThreadChanged(workspaceId, conversationId, threadId),
 		],
 	});
 }
@@ -174,38 +155,31 @@ function notice(threadId: string, userMessage: UserText): PendingEvent {
 }
 
 /** For a change no more specific event on the thread's channel describes. */
-function threadChanged(workspaceId: string, podId: string, threadId: string): PendingEvent[] {
+function threadChanged(workspaceId: string, threadId: string): PendingEvent[] {
 	return [
 		onThread(threadId, streamEvent("thread.changed", { threadId })),
-		listedThreadChanged(workspaceId, podId, threadId),
+		listedThreadChanged(workspaceId, threadId),
 	];
 }
 
-/** `podId` is null for a direct message between people, which is in no pod. */
-function listedThreadChanged(
-	workspaceId: string,
-	podId: string | null,
-	threadId: string,
-): PendingEvent {
-	const event = streamEvent("thread.changed", { threadId });
+/** Tells the lists showing the thread, for those who reach it, that it changed. */
+function listedThreadChanged(workspaceId: string, threadId: string): PendingEvent {
 	return {
 		channel: workspaceChannel(workspaceId),
-		event:
-			podId === null ? Audience.forDirectMessage(threadId, event) : Audience.forPod(podId, event),
+		event: Audience.forThread(threadId, streamEvent("thread.changed", { threadId })),
 	};
 }
 
 /** Tells the conversation `conversationId`'s watchers that it now shows, or shows differently, the thread `threadId`. */
 function conversationThreadChanged(
 	workspaceId: string,
-	podId: string,
 	conversationId: string,
 	threadId: string,
 ): PendingEvent {
 	return {
 		channel: workspaceChannel(workspaceId),
-		event: Audience.forPod(
-			podId,
+		event: Audience.forThread(
+			conversationId,
 			streamEvent("conversation.thread_changed", { conversationId, threadId }),
 		),
 	};

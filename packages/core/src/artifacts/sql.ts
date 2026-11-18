@@ -1,21 +1,13 @@
 import type { ArtifactKind } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
-import {
-	check,
-	foreignKey,
-	index,
-	integer,
-	pgTable,
-	text,
-	uniqueIndex,
-	uuid,
-} from "drizzle-orm/pg-core";
+import { check, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { thread } from "../conversations/sql.ts";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { agent, pod, workspace } from "../workspaces/sql.ts";
+import { agent, workspace } from "../workspaces/sql.ts";
 
 /**
- * Something an agent made for a pod to keep: a document or an HTML page.
+ * A file a bot made, such as a document or an HTML page, in the conversation
+ * it was made in, through which it is reached.
  * Its content is in `artifact_version`; `currentVersion` is the number of the
  * latest one, and a write names the version it started from so a stale write
  * is refused rather than overwriting a newer one.
@@ -27,28 +19,23 @@ export const artifact = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		podId: uuid("pod_id").notNull(),
 		kind: text("kind").$type<ArtifactKind>().notNull(),
 		title: text("title").notNull(),
 		currentVersion: integer("current_version").notNull().default(1),
-		// Kept when the agent or thread goes, so the artifact survives them.
+		// Kept when the bot goes, so the file survives it.
 		createdByAgentId: uuid("created_by_agent_id").references(() => agent.id, {
 			onDelete: "set null",
 		}),
-		createdInThreadId: uuid("created_in_thread_id").references(() => thread.id, {
-			onDelete: "set null",
-		}),
+		// The conversation it was made in, which it goes with.
+		createdInThreadId: uuid("created_in_thread_id")
+			.notNull()
+			.references(() => thread.id, { onDelete: "cascade" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		check("artifact_kind_valid", sql`${table.kind} in ('document', 'html')`),
-		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "artifact_pod_workspace_fkey",
-		}).onDelete("cascade"),
-		index("artifact_pod_updated_at_idx").on(table.podId, table.updatedAt),
+		index("artifact_thread_updated_at_idx").on(table.createdInThreadId, table.updatedAt),
 	],
 );
 

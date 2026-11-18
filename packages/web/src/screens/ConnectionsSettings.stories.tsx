@@ -14,7 +14,7 @@ import { appHandlers, connectionHandlers, StoryApp, storyPods } from "../story-a
  */
 
 const API = import.meta.env.VITE_API_URL as string;
-const podPath = `/nitric/settings/pods/${revenue.slug}/connections`;
+const podPath = `/nitric/settings/channels/${revenue.slug}/connections`;
 
 /** A connection whose tools are all at `access`. */
 function connection(
@@ -35,7 +35,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000008${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		podId: revenue.id,
+		agentId: "0199a3a0-0000-7000-8000-00000000b071",
 		kind: "mcp",
 		auth: "header",
 		signedIn: true,
@@ -275,7 +275,7 @@ async function openConnectByUrl(canvas: ReturnType<typeof within>) {
 /** None yet: the group holds only Add connection. */
 export const Empty = meta.story({
 	beforeEach({ msw }) {
-		msw.use(http.get(`${API}/pods/:podId/connections`, () => HttpResponse.json([])));
+		msw.use(http.get(`${API}/agents/:agentId/connections`, () => HttpResponse.json([])));
 	},
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("button", { name: "Add connection" })).toBeInTheDocument();

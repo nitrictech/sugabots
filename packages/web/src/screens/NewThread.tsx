@@ -1,201 +1,89 @@
-import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
-import type { AgentParticipant, Pod } from "@sugabots/contracts";
+import type { Agent } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useRef, useState } from "react";
-import { useAgents, useModelName } from "@/lib/agents.ts";
-import {
-	THREAD_NOT_STARTED,
-	useOpenBotChannel,
-	useOpenPodChat,
-	useThreadStarter,
-} from "@/lib/chats.ts";
+import { useState } from "react";
+import { useModelName } from "@/lib/agents.ts";
+import { TASK_NOT_STARTED, useTaskStarter } from "@/lib/chats.ts";
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
 import { conversationLink } from "@/lib/links.ts";
-import { useThread } from "@/lib/threads.ts";
-import { TurnTakingAvatar, WatchingAvatar } from "@/shell/Agent.tsx";
+import { WatchingAvatar } from "@/shell/Agent.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { PeopleChatHeader } from "./ChatHeader.tsx";
-import { firstBotNamed, groupMentionsBy, mentionableIn } from "./mentions.tsx";
+import { groupMentionsBy } from "./mentions.tsx";
 
 /**
- * Starting a thread in a pod from its first message. Opened from a bot, it
- * asks what the bot should work on, in the middle of the page, and the thread
- * is with that bot whatever the message says. Otherwise it is with the bot the
- * message names, which a chip puts in it, or between people when it names
- * none. Sending starts the thread and opens it. A Personal pod has no chat,
- * so there the thread starts from the bot's channel instead.
+ * Starting a task with a bot from its first message: what the bot should work
+ * on, asked in the middle of the page, with the box to answer it in. Sending
+ * starts the task and opens it. Files are added once it has started.
  */
-export function NewThread({
-	pod,
-	userId,
-	agentHandle,
-}: {
-	pod: Pod;
-	userId: string;
-	agentHandle?: string;
-}) {
-	// The bot it was opened from, from the roster the sidebar has already loaded.
-	const { agents } = useAgents();
-	const chosen = agentHandle
-		? agents?.find((agent) => agent.podId === pod.id && agent.handle === agentHandle)
-		: undefined;
-	const personal = pod.kind === "personal";
-	const podChat = useOpenPodChat(pod);
-	const botChannel = useOpenBotChannel(pod, personal ? chosen?.id : undefined);
-	const startsFrom = personal ? botChannel : podChat;
-	const details = useThread(startsFrom.data?.id).data;
-	// Files are uploaded to where the thread starts from, and move to the thread when it starts.
-	const attachments = useComposerAttachments(startsFrom.data?.id);
-	const threads = useThreadStarter(startsFrom.data?.id, attachments);
+export function NewTask({ agent, userId }: { agent: Agent; userId: string }) {
+	// A task has nowhere to upload to until it starts.
+	const attachments = useComposerAttachments(undefined);
+	const tasks = useTaskStarter(agent.id);
 	const navigate = useNavigate();
 	const [draft, setDraft] = useState("");
 	const [failed, setFailed] = useState(false);
-	const threadWith = chosen ?? (details ? firstBotNamed(draft, details.crew) : undefined);
-	// The model that answers: the chosen bot's, or the named one's, from the roster.
-	const threadWithModel = useModelName(
-		agents?.find((agent) => agent.id === threadWith?.id)?.model ?? null,
-	);
-	const title = agentHandle ? "New thread" : `New thread in ${pod.name}`;
+	const modelName = useModelName(agent.model);
 	// The page names itself in its middle; the header is kept on a phone for its Back.
 	const header = (
 		<div className="md:hidden">
-			<PeopleChatHeader title={title} back={{ to: "pod", pod }} />
+			<PeopleChatHeader title="New task" back={{ to: "bot", agent }} />
 		</div>
 	);
-
-	if (startsFrom.isError) {
-		return (
-			<div className="flex min-w-0 flex-1 flex-col">
-				{header}
-				<EmptyState title="Could not start a thread here">
-					The API did not answer. Reload this page to try again.
-				</EmptyState>
-			</div>
-		);
-	}
-
-	// What is sent here starts a conversation, so `@here` and `@channel` are offered as in one.
-	const mentionable = details
-		? [
-				...mentionableIn(details).filter((candidate) => candidate.id !== userId),
-				...groupMentionsBy({ kind: "person", id: userId }, details.members, "conversation"),
-			]
-		: [];
-	const bots = details?.crew.filter(
-		(member): member is AgentParticipant => member.kind === "agent",
-	);
+	const mentionable = groupMentionsBy({ kind: "person", id: userId }, [], "conversation");
 
 	async function submit() {
 		setFailed(false);
-		const started = await threads.start(draft, { hostAgentId: threadWith?.id });
+		const started = await tasks.start(draft);
 		if (started.outcome === "refused") setFailed(true);
 		if (started.outcome !== "started") return;
-		await navigate(conversationLink({ pod, conversationId: started.thread.conversation.id }));
-	}
-
-	const composer = (
-		<ChatComposer
-			label={threadWith ? `Message ${threadWith.name}` : `Message ${pod.name}`}
-			placeholder={chosen ? "Describe the task, paste a link or drop a file" : undefined}
-			model={threadWithModel ?? undefined}
-			value={draft}
-			onValueChange={setDraft}
-			onSubmit={submit}
-			submitLabel="Start thread"
-			sending={threads.isPending}
-			needsText
-			error={failed ? THREAD_NOT_STARTED : undefined}
-			className="w-full"
-			mentionable={mentionable}
-			attachments={attachments}
-		/>
-	);
-
-	// Opened from a bot: a question for it, with the box to answer it in, in the middle of the page.
-	if (agentHandle) {
-		return (
-			<div className="flex min-w-0 flex-1 flex-col">
-				{header}
-				<div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 pb-24">
-					{chosen && (
-						<div className="flex w-full max-w-160 flex-col items-center gap-6">
-							<div className="flex flex-col items-center gap-2 text-center">
-								{/* It watches the question being written, and thinks while the thread starts. */}
-								<WatchingAvatar
-									bot={chosen}
-									size={64}
-									busy={threads.isPending}
-									watching
-									className="mb-3"
-								/>
-								<h2 className="m-0 font-semibold text-lg text-foreground">
-									What should {chosen.name} work on?
-								</h2>
-								{chosen.description && (
-									<p className="m-0 text-xs text-muted-foreground">{chosen.description}</p>
-								)}
-							</div>
-							{composer}
-						</div>
-					)}
-				</div>
-			</div>
-		);
+		await navigate(conversationLink({ agent, conversationId: started.task.conversation.id }));
 	}
 
 	return (
 		<div className="flex min-w-0 flex-1 flex-col">
 			{header}
-			<div className="flex min-h-0 flex-1 flex-col justify-end gap-4 overflow-y-auto px-5 pt-6 pb-4">
-				<div className="flex flex-col gap-1.5">
-					<h2 className="m-0 font-bold text-xl text-foreground leading-tight">{title}</h2>
-					<p className="m-0 text-sm text-muted-foreground">
-						Name a bot to start the thread with it, or write to the people here.
-					</p>
-				</div>
-				{bots && bots.length > 0 && (
-					// The bots' faces take turns to move, so the row never fidgets all at once.
-					<LivelyGroup>
-						<ul aria-label="Bots" className="m-0 flex list-none flex-wrap gap-2 p-0">
-							{bots.map((bot) => (
-								<li key={bot.id}>
-									<BotChip
-										bot={bot}
-										onClick={() => setDraft((current) => `@${bot.handle} ${current.trimStart()}`)}
-									/>
-								</li>
-							))}
-						</ul>
-					</LivelyGroup>
-				)}
-			</div>
-			<div className="shrink-0 px-4 max-md:pb-tab-bar md:px-5">
-				{composer}
-				<div className="flex h-6.5 items-center">
-					<p className="m-0 px-1 text-xs text-muted-foreground">
-						{threadWith
-							? `Sending starts a thread with ${threadWith.name}.`
-							: "Sending starts a thread with the people here."}
-					</p>
+			<div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-5 pb-24">
+				<div className="flex w-full max-w-160 flex-col items-center gap-6">
+					<div className="flex flex-col items-center gap-2 text-center">
+						{/* It watches the question being written, and thinks while the task starts. */}
+						<WatchingAvatar
+							bot={agent}
+							size={64}
+							busy={tasks.isPending}
+							watching
+							className="mb-3"
+						/>
+						<h2 className="m-0 font-semibold text-lg text-foreground">
+							What should {agent.name} work on?
+						</h2>
+						{agent.description && (
+							<p className="m-0 text-xs text-muted-foreground">{agent.description}</p>
+						)}
+					</div>
+					{agent.model === null ? (
+						<EmptyState title={`${agent.name} has no model yet`}>
+							Somebody who can change {agent.name} chooses its model in its settings.
+						</EmptyState>
+					) : (
+						<ChatComposer
+							label={`Message ${agent.name}`}
+							placeholder="Describe the task or paste a link"
+							model={modelName ?? undefined}
+							value={draft}
+							onValueChange={setDraft}
+							onSubmit={submit}
+							submitLabel="Start task"
+							sending={tasks.isPending}
+							needsText
+							error={failed ? TASK_NOT_STARTED : undefined}
+							className="w-full"
+							mentionable={mentionable}
+							attachments={attachments}
+						/>
+					)}
 				</div>
 			</div>
 		</div>
-	);
-}
-
-/** A bot to name in the thread, its face hopping as the pointer comes onto it. */
-function BotChip({ bot, onClick }: { bot: AgentParticipant; onClick: () => void }) {
-	const face = useRef<LivelyFace>(null);
-	return (
-		<button
-			type="button"
-			onClick={onClick}
-			onPointerEnter={() => face.current?.play("hop")}
-			className="focus-ring flex h-8 items-center gap-2 rounded-md border border-border-strong pr-3 pl-1.5 font-medium text-xs text-foreground transition-colors hover:bg-row-hover"
-		>
-			<TurnTakingAvatar bot={bot} size={20} faceRef={face} />
-			{bot.name}
-		</button>
 	);
 }

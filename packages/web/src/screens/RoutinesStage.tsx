@@ -1,7 +1,7 @@
-import type { Agent, Pod, SessionUser } from "@sugabots/contracts";
+import type { Agent, SessionUser } from "@sugabots/contracts";
 import { Plus, RefreshCcw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { useChatList, useOpenRoutineFeed } from "@/lib/chats.ts";
+import { useBotTasks, useOpenRoutineFeed } from "@/lib/chats.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { useWorkspaceRoutines } from "@/lib/routines.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -14,7 +14,6 @@ import { NewRoutinePage } from "./RoutineEditor.tsx";
 
 interface RoutinesStageProps {
 	agent: Agent;
-	pod: Pod;
 	user: SessionUser;
 	view: RoutinesView;
 	onViewChange: (view: RoutinesView) => void;
@@ -38,20 +37,18 @@ export type RoutinesView =
  */
 export function RoutinesStage({
 	agent,
-	pod,
 	user,
 	view,
 	onViewChange,
 	onStagedChange,
 	onClose,
 }: RoutinesStageProps) {
-	const title = `${agent.name}'s routines`;
+	const title = `${agent.name}'s automations`;
 	const parent = { name: title, onBack: () => onViewChange({ kind: "list" }) };
 	if (view.kind === "routine") {
 		return (
 			<RoutineThread
 				key={view.routineId}
-				pod={pod}
 				agent={agent}
 				user={user}
 				routineId={view.routineId}
@@ -70,15 +67,15 @@ export function RoutinesStage({
 		return (
 			<Stage
 				key="new"
-				label="New routine"
+				label="New automation"
 				icon={mark}
-				title="New routine"
+				title="New automation"
 				parent={parent}
 				onClose={onClose}
 			>
 				<div className="-mx-6 min-h-0 flex-1 overflow-y-auto max-md:-mx-3">
 					<NewRoutinePage
-						choices={[{ agent, pod }]}
+						choices={[{ agent }]}
 						initialAgentId={agent.id}
 						onCancel={() => onViewChange({ kind: "list" })}
 						onCreated={(routine) => onViewChange({ kind: "routine", routineId: routine.id })}
@@ -95,9 +92,9 @@ export function RoutinesStage({
 			icon={mark}
 			title={title}
 			actions={
-				pod.permissions.manageRoutines && (
+				agent.permissions.manageRoutines && (
 					<IconButton
-						label="New routine"
+						label="New automation"
 						variant="bar"
 						onClick={() => onViewChange({ kind: "new" })}
 					>
@@ -109,7 +106,6 @@ export function RoutinesStage({
 		>
 			<RoutineList
 				agent={agent}
-				pod={pod}
 				onOpen={(routineId) => onViewChange({ kind: "routine", routineId })}
 				onNew={() => onViewChange({ kind: "new" })}
 			/>
@@ -120,23 +116,21 @@ export function RoutinesStage({
 /** The bot's routines, each with how it stands, which opens it; with none, how one is made. */
 function RoutineList({
 	agent,
-	pod,
 	onOpen,
 	onNew,
 }: {
 	agent: Agent;
-	pod: Pod;
 	onOpen: (routineId: string) => void;
 	onNew: () => void;
 }) {
-	const list = useChatList(pod.slug);
+	const list = useBotTasks(agent.id);
 	const { workspace } = useWorkspace();
 	const full = useWorkspaceRoutines(workspace?.id);
 	const routineById = new Map(full.data?.items.map((item) => [item.routine.id, item.routine]));
-	const routines = list.data?.routines.filter((row) => row.agent.id === agent.id) ?? [];
+	const routines = list.data?.routines ?? [];
 	if (list.isError) {
 		return (
-			<EmptyState title="Could not load these routines">
+			<EmptyState title="Could not load these automations">
 				The API did not answer. Reload this page to try again.
 			</EmptyState>
 		);
@@ -144,10 +138,10 @@ function RoutineList({
 	if (list.isSuccess && routines.length === 0) {
 		return (
 			<NoRoutines
-				title={`No routines for ${agent.name} yet`}
-				pod={pod}
+				title={`No automations for ${agent.name} yet`}
+				owner={agent.name}
 				create={
-					pod.permissions.manageRoutines
+					agent.permissions.manageRoutines
 						? {
 								newRoutine: <button type="button" onClick={onNew} />,
 								// Not linked: the bot's chat is already open beside this panel.
@@ -163,7 +157,6 @@ function RoutineList({
 			{routines.map((row) => (
 				<li key={row.routine.id}>
 					<RoutineRow
-						pod={pod}
 						row={row}
 						routine={routineById.get(row.routine.id)}
 						selected={false}
@@ -181,7 +174,6 @@ function RoutineList({
  * `trailing` at the right of its header.
  */
 function RoutineThread({
-	pod,
 	agent,
 	user,
 	routineId,
@@ -189,7 +181,6 @@ function RoutineThread({
 	parent,
 	trailing,
 }: {
-	pod: Pod;
 	agent: Agent;
 	user: SessionUser;
 	routineId: string;
@@ -198,7 +189,7 @@ function RoutineThread({
 	parent: StageParent;
 	trailing: ReactNode;
 }) {
-	const opened = useOpenRoutineFeed(pod, routineId);
+	const opened = useOpenRoutineFeed(agent.id, routineId);
 	const keys = usePanelKeys<HTMLElement>(parent.onBack);
 	const [threadId, setThreadId] = useState<string>();
 	const [detailsOpen, setDetailsOpen] = useState(false);
@@ -211,14 +202,14 @@ function RoutineThread({
 			className="flex min-h-0 min-w-0 flex-1 bg-background outline-none max-md:absolute max-md:inset-0 max-md:z-40"
 		>
 			{opened.isError ? (
-				<EmptyState title="Could not open this routine">
+				<EmptyState title="Could not open this automation">
 					It may have been removed. Reload this page to try again.
 				</EmptyState>
 			) : (
 				opened.data && (
 					<ConversationChat
 						conversation={{ kind: "botThread", agent }}
-						pod={pod}
+						pod={null}
 						conversationId={opened.data.id}
 						user={user}
 						threadId={threadId}

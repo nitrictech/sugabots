@@ -8,6 +8,7 @@ import {
 	artifactVersion,
 	blobDeletion,
 	pod,
+	podAgent,
 	podMember,
 	thread,
 	user,
@@ -28,7 +29,13 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 	let memberId: string;
 	let outsiderId: string;
 	let adminId: string;
-	let otherPodAgent: Artifacts.AgentInPod;
+	let podId: string;
+	/** A bot outside the channel, working in a task of its own. */
+	let botElsewhere: Artifacts.AgentInThread;
+	/** The channel's bot, asked by the bot outside it from that bot's task. */
+	let writerAskedFromTask: Artifacts.AgentInThread;
+	/** The bot outside the channel, asked from the channel's main chat. */
+	let strangerAskedFromChannel: Artifacts.AgentInThread;
 
 	const authoring = async () => ({
 		service: await runOnPostgres(Effect.provide(Artifacts.Authoring, Artifacts.authoringLayer)),
@@ -108,11 +115,11 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 			);
 		};
 
-		it("gives the pod's people an address on the content origin that opens the page", async () => {
+		it("gives the channel's people an address on the content origin that opens the page", async () => {
 			const made = await aPage();
 			const pages = (await pagesAt("https://pages.example-content.com"))(memberId);
 
-			const address = await pages.address({ podId: by.podId, artifactId: made.id, version: 1 });
+			const address = await pages.address({ artifactId: made.id, version: 1 });
 
 			expect(address).toMatch(/^https:\/\/pages\.example-content\.com\/pages\/.+/);
 			const token = address?.split("/pages/")[1] ?? "";
@@ -129,30 +136,26 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 			const unset = (await pagesAt(undefined))(memberId);
 			const set = (await pagesAt("https://pages.example-content.com"))(memberId);
 
-			expect(
-				await unset.address({ podId: by.podId, artifactId: made.id, version: 1 }),
-			).toBeUndefined();
-			expect(
-				await set.address({ podId: by.podId, artifactId: notes.id, version: 1 }),
-			).toBeUndefined();
+			expect(await unset.address({ artifactId: made.id, version: 1 })).toBeUndefined();
+			expect(await set.address({ artifactId: notes.id, version: 1 })).toBeUndefined();
 		});
 
 		it("gives no address for a version the page doesn't have", async () => {
 			const made = await aPage();
 			const pages = (await pagesAt("https://pages.example-content.com"))(memberId);
 
-			await expect(
-				pages.address({ podId: by.podId, artifactId: made.id, version: 2 }),
-			).rejects.toMatchObject({ _tag: "ResourceHidden" });
+			await expect(pages.address({ artifactId: made.id, version: 2 })).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+			});
 		});
 
-		it("hides a page from people outside its pod", async () => {
+		it("hides a page from people outside its channel", async () => {
 			const made = await aPage();
 			const pages = (await pagesAt("https://pages.example-content.com"))(outsiderId);
 
-			await expect(
-				pages.address({ podId: by.podId, artifactId: made.id, version: 1 }),
-			).rejects.toMatchObject({ _tag: "ResourceHidden" });
+			await expect(pages.address({ artifactId: made.id, version: 1 })).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+			});
 		});
 
 		it("refuses a tampered or expired token, and a value sealed for something else", async () => {
@@ -160,7 +163,7 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 			const pages = (await pagesAt("https://pages.example-content.com"))(memberId);
 			const sealed = (expiresAt: number, purpose?: string) =>
 				testCredentials.encrypt(
-					JSON.stringify({ podId: by.podId, artifactId: made.id, version: 1, expiresAt }),
+					JSON.stringify({ artifactId: made.id, version: 1, expiresAt }),
 					purpose,
 				);
 
@@ -215,30 +218,23 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 				{ workspaceId, userId: adminId, role: "admin" },
 			]),
 		);
-		const [room, elsewhere] = await onDatabase((db) =>
+		const [room] = await onDatabase((db) =>
 			db
 				.insert(pod)
-				.values([
-					{ workspaceId, kind: "shared", name: "Planning", slug: `planning-${stamp}` },
-					{ workspaceId, kind: "shared", name: "Elsewhere", slug: `elsewhere-${stamp}` },
-				])
+				.values({ workspaceId, name: "Planning", slug: `planning-${stamp}` })
 				.returning(),
 		);
-		if (!room || !elsewhere) throw new Error("fixture");
-		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId, podId: room.id, userId: memberId }),
-		);
+		if (!room) throw new Error("fixture");
+		podId = room.id;
+		await onDatabase((db) => db.insert(podMember).values({ workspaceId, podId, userId: memberId }));
 		const [writer, stranger] = await onDatabase((db) =>
 			db
 				.insert(agent)
 				.values(
-					[
-						{ podId: room.id, name: "Scribe" },
-						{ podId: elsewhere.id, name: "Stranger" },
-					].map((made) => ({
+					["Scribe", "Stranger"].map((name) => ({
 						workspaceId,
-						...made,
-						handle: `${made.name.toLowerCase()}-${stamp}`,
+						name,
+						handle: `${name.toLowerCase()}-${stamp}`,
 						color: "green" as const,
 						face: "pill" as const,
 						model: "claude-opus-4-1-20250805",
@@ -248,24 +244,51 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 				.returning(),
 		);
 		if (!writer || !stranger) throw new Error("fixture");
-		const [where] = await onDatabase((db) =>
+		await onDatabase((db) =>
+			db.insert(podAgent).values({ workspaceId, podId, agentId: writer.id }),
+		);
+		const [mainChat, strangersTask] = await onDatabase((db) =>
 			db
 				.insert(thread)
-				.values({
-					workspaceId,
-					podId: room.id,
-					hostAgentId: writer.id,
-					type: "collaboration",
-					title: "Planning",
-				})
+				.values([
+					{ workspaceId, podId, type: "pod_chat", main: true, title: "Planning" },
+					{ workspaceId, hostAgentId: stranger.id, type: "conversation", title: "Elsewhere" },
+				])
 				.returning(),
 		);
-		if (!where) throw new Error("fixture");
-		by = { workspaceId, podId: room.id, agentId: writer.id, threadId: where.id };
-		otherPodAgent = { workspaceId, podId: elsewhere.id, agentId: stranger.id };
+		if (!mainChat || !strangersTask) throw new Error("fixture");
+		by = { workspaceId, agentId: writer.id, threadId: mainChat.id };
+		botElsewhere = { workspaceId, agentId: stranger.id, threadId: strangersTask.id };
+		// The channel's bot asked from the other bot's task, and the other bot from the channel.
+		const [askedFromTask, askedFromChannel] = await onDatabase((db) =>
+			db
+				.insert(thread)
+				.values([
+					{
+						workspaceId,
+						hostAgentId: writer.id,
+						conversationId: strangersTask.id,
+						parentThreadId: strangersTask.id,
+						type: "collaboration",
+						title: "Asked from the task",
+					},
+					{
+						workspaceId,
+						hostAgentId: stranger.id,
+						conversationId: mainChat.id,
+						parentThreadId: mainChat.id,
+						type: "collaboration",
+						title: "Asked from the channel",
+					},
+				])
+				.returning(),
+		);
+		if (!askedFromTask || !askedFromChannel) throw new Error("fixture");
+		writerAskedFromTask = { workspaceId, agentId: writer.id, threadId: askedFromTask.id };
+		strangerAskedFromChannel = { workspaceId, agentId: stranger.id, threadId: askedFromChannel.id };
 	});
 
-	it("keeps every version of a document an agent writes, for people in its pod to read", async () => {
+	it("keeps every version of a document a bot writes, for people in its channel to read", async () => {
 		const { service } = await authoring();
 		const made = await runOnPostgres(
 			service.create(by, {
@@ -284,7 +307,7 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 		);
 
 		const reader = (await servedOnPostgresAs(Artifacts.Service, Artifacts.layer))(memberId);
-		const at = { podId: by.podId, artifactId: made.id };
+		const at = { artifactId: made.id };
 		expect(await reader.get(at)).toMatchObject({
 			version: 2,
 			createdBy: { name: "Scribe" },
@@ -359,22 +382,22 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 		).toMatchObject({ _tag: "ArtifactTooLarge", maxCharacters: MAX_ARTIFACT_CONTENT_CHARACTERS });
 	});
 
-	it("hides a pod's artifacts from people outside it and from other pods' agents", async () => {
+	it("hides a channel's files from people outside it and from bots outside it", async () => {
 		const { service, failureOf } = await authoring();
 		const made = await runOnPostgres(
 			service.create(by, { kind: "document", title: "Private", content: "# Private" }),
 		);
 
 		const outsider = (await servedOnPostgresAs(Artifacts.Service, Artifacts.layer))(outsiderId);
-		await expect(outsider.get({ podId: by.podId, artifactId: made.id })).rejects.toMatchObject({
+		await expect(outsider.get({ artifactId: made.id })).rejects.toMatchObject({
 			_tag: "ResourceHidden",
 		});
-		expect(await failureOf(service.read(otherPodAgent, made.id))).toMatchObject({
+		expect(await failureOf(service.read(botElsewhere, made.id))).toMatchObject({
 			_tag: "ArtifactNotFound",
 		});
 	});
 
-	it("lets the pod's managers delete an artifact with its versions, and refuses its members", async () => {
+	it("lets an admin delete a channel's file with its versions, and refuses its members", async () => {
 		const { service } = await authoring();
 		const made = await runOnPostgres(
 			service.create(by, { kind: "document", title: "Draft", content: "# One" }),
@@ -383,16 +406,72 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 			service.replace(by, { artifactId: made.id, baseVersion: 1, content: "# Two" }),
 		);
 		const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
-		const at = { podId: by.podId, artifactId: made.id };
+		const at = { artifactId: made.id };
 
 		await expect(as(memberId).remove(at)).rejects.toMatchObject({ _tag: "ActionForbidden" });
 		await as(adminId).remove(at);
 
 		await expect(as(memberId).get(at)).rejects.toMatchObject({ _tag: "ResourceHidden" });
-		expect(await as(memberId).list({ podId: by.podId })).toEqual([]);
+		expect(await as(memberId).listInPod({ podId })).toEqual([]);
 		const versionsLeft = await onDatabase((db) =>
 			db.select().from(artifactVersion).where(eq(artifactVersion.artifactId, made.id)),
 		);
 		expect(versionsLeft).toEqual([]);
+	});
+
+	it("shows the files a bot made in its tasks to whoever reaches the bot, and to nobody else", async () => {
+		const { service } = await authoring();
+		await onDatabase((db) =>
+			db.update(agent).set({ visibility: "private" }).where(eq(agent.id, botElsewhere.agentId)),
+		);
+		const made = await runOnPostgres(
+			service.create(botElsewhere, { kind: "document", title: "Diary", content: "# Diary" }),
+		);
+		const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+
+		expect(await as(memberId).get({ artifactId: made.id })).toMatchObject({ title: "Diary" });
+		expect(
+			(await as(memberId).listForAgent({ agentId: botElsewhere.agentId })).map(({ id }) => id),
+		).toEqual([made.id]);
+		for (const somebodyElse of [outsiderId, adminId]) {
+			await expect(as(somebodyElse).get({ artifactId: made.id })).rejects.toMatchObject({
+				_tag: "ResourceHidden",
+			});
+		}
+		await expect(as(memberId).listInPod({ podId })).resolves.toEqual([]);
+	});
+
+	it("keeps a bot's files with the conversation it made them in, wherever else it works", async () => {
+		const { service, failureOf } = await authoring();
+		const inChannel = await runOnPostgres(
+			service.create(by, { kind: "document", title: "Channel plan", content: "# Plan" }),
+		);
+		const forTheTask = await runOnPostgres(
+			service.create(writerAskedFromTask, { kind: "document", title: "Answer", content: "# A" }),
+		);
+		const forTheChannel = await runOnPostgres(
+			service.create(strangerAskedFromChannel, { kind: "document", title: "Help", content: "# H" }),
+		);
+		const ids = (summaries: { id: string }[]) => summaries.map(({ id }) => id).sort();
+
+		// Asked from another bot's task, the channel's bot can't bring the channel's files.
+		expect(await failureOf(service.read(writerAskedFromTask, inChannel.id))).toMatchObject({
+			_tag: "ArtifactNotFound",
+		});
+		expect(ids(await runOnPostgres(service.list(writerAskedFromTask)))).toEqual([forTheTask.id]);
+		// What it made there belongs to the task that asked, and the channel sees what it asked for.
+		expect(ids(await runOnPostgres(service.list(botElsewhere)))).toEqual([forTheTask.id]);
+		expect(ids(await runOnPostgres(service.list(by)))).toEqual(
+			[inChannel.id, forTheChannel.id].sort(),
+		);
+
+		const as = await servedOnPostgresAs(Artifacts.Service, Artifacts.layer);
+		expect(ids(await as(memberId).listInPod({ podId }))).toEqual(
+			[inChannel.id, forTheChannel.id].sort(),
+		);
+		expect(ids(await as(memberId).listForAgent({ agentId: by.agentId }))).toEqual([]);
+		expect(ids(await as(memberId).listForAgent({ agentId: botElsewhere.agentId }))).toEqual([
+			forTheTask.id,
+		]);
 	});
 });

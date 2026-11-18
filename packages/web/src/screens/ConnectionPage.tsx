@@ -1,11 +1,11 @@
 import {
+	type Agent,
 	type Connection,
 	type ConnectionAccess,
 	type ConnectionToolSetting,
 	connectionMarkFor,
 	connectionPresetFor,
 	connectionToolMutating,
-	type Pod,
 } from "@sugabots/contracts";
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { useNavigate } from "@tanstack/react-router";
@@ -19,7 +19,7 @@ import {
 } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useInstallGitHubApp } from "@/lib/github-connections.ts";
-import { podSettingsPageLink } from "@/lib/links.ts";
+import { agentSettingsPageLink } from "@/lib/links.ts";
 import { TOOL_ACCESS_LABELS } from "@/lib/tool-access-labels.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
@@ -43,7 +43,7 @@ import { GitHubRepositoriesGroup } from "./GitHubConnect.tsx";
 import { AccessToggle } from "./tool-access.tsx";
 
 /*
- * One connection, on a page of its own under its pod: who connected it and
+ * One connection, on a page of its own under its bot: who connected it and
  * what keeps it working (signing in again, its secret, a check that it
  * answers), then its tools as two settings, one for those that only read and
  * one for those that make changes, with any tool set apart from its group on
@@ -55,18 +55,18 @@ const TROUBLESHOOTING_URL = `${projectLinks.documentation}/connections#troublesh
 
 export function ConnectionPage({
 	connection,
-	pod,
+	agent,
 	back,
 }: {
 	connection: Connection;
-	pod: Pod;
-	/** The link back to the pod's connections, or to wherever the page was opened from: a `PageBackLink`. */
+	agent: Agent;
+	/** The link back to the bot's connections, or to wherever the page was opened from: a `PageBackLink`. */
 	back: ReactNode;
 }) {
 	const [page, setPage] = useState<"connection" | "tools">("connection");
-	const canManage = pod.permissions.manageConnections;
-	const actions = useConnectionActions(pod.id);
-	const detail = useConnectionWithTools(pod.id, connection.id);
+	const canManage = agent.permissions.manageConnections;
+	const actions = useConnectionActions(agent.id);
+	const detail = useConnectionWithTools(agent.id, connection.id);
 	const setToolAccess = (toolAccess: Record<string, ConnectionAccess>) =>
 		actions.update.mutate({ connectionId: connection.id, json: { toolAccess } });
 
@@ -90,7 +90,7 @@ export function ConnectionPage({
 	return (
 		<ConnectionCard
 			connection={connection}
-			pod={pod}
+			agent={agent}
 			back={back}
 			tools={detail}
 			setToolAccess={setToolAccess}
@@ -103,22 +103,22 @@ type ToolsQuery = ReturnType<typeof useConnectionWithTools>;
 
 function ConnectionCard({
 	connection,
-	pod,
+	agent,
 	back,
 	tools,
 	setToolAccess,
 	onOpenTools,
 }: {
 	connection: Connection;
-	pod: Pod;
+	agent: Agent;
 	back: ReactNode;
 	tools: ToolsQuery;
 	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
 	onOpenTools: () => void;
 }) {
-	const canManage = pod.permissions.manageConnections;
-	const actions = useConnectionActions(pod.id);
-	const installApp = useInstallGitHubApp(pod.id);
+	const canManage = agent.permissions.manageConnections;
+	const actions = useConnectionActions(agent.id);
+	const installApp = useInstallGitHubApp(agent.id);
 	const navigate = useNavigate();
 	const [removing, setRemoving] = useState(false);
 	const [replacingSecret, setReplacingSecret] = useState(false);
@@ -137,7 +137,7 @@ function ConnectionCard({
 			return;
 		}
 		setRemoving(false);
-		await navigate({ ...podSettingsPageLink(pod, "connections"), replace: true });
+		await navigate({ ...agentSettingsPageLink(agent, "connections"), replace: true });
 	}
 
 	return (
@@ -148,14 +148,14 @@ function ConnectionCard({
 			hero={<ConnectionPageMark connection={connection} />}
 			title={connection.name}
 			description={
-				connection.connectedBy ? `Connected by ${connection.connectedBy}` : `In ${pod.name}`
+				connection.connectedBy ? `Connected by ${connection.connectedBy}` : `For ${agent.name}`
 			}
 		>
 			{error && <Alert>{failureMessage(error)}</Alert>}
 			<SettingsGroup
 				label={connection.auth === "oauth" || !isServer ? "Account" : "Connection"}
 				// A test is a button under the group, with how it went beside it, so it never moves the page.
-				note={isServer && <TestConnection connection={connection} podId={pod.id} />}
+				note={isServer && <TestConnection connection={connection} agentId={agent.id} />}
 			>
 				{(connection.auth === "oauth" || !isServer) && (
 					<SettingsRow
@@ -230,14 +230,14 @@ function ConnectionCard({
 				{replacingSecret && (
 					<SecretForm
 						connection={connection}
-						podId={pod.id}
+						agentId={agent.id}
 						done={() => setReplacingSecret(false)}
 					/>
 				)}
 			</SettingsGroup>
 			{connection.kind === "github" && (
 				<GitHubRepositoriesGroup
-					podId={pod.id}
+					agentId={agent.id}
 					connectionId={connection.id}
 					appSettingsUrl={connection.appSettingsUrl ?? connection.url}
 					canManage={canManage}
@@ -252,7 +252,7 @@ function ConnectionCard({
 			{canManage && (
 				<SettingsDanger
 					label={`Disconnect ${connection.name}`}
-					description="Bots in this pod lose access straight away."
+					description={`${agent.name} loses access straight away.`}
 					action="Disconnect"
 					onClick={() => setRemoving(true)}
 				/>
@@ -264,8 +264,8 @@ function ConnectionCard({
 				description={
 					connection.kind === "github" ? (
 						<>
-							Bots in this pod can no longer use its tools or its repositories. The pod's app stays
-							on GitHub until you delete it there:{" "}
+							{agent.name} can no longer use its tools or its repositories. Its app stays on GitHub
+							until you delete it there:{" "}
 							<a
 								href={`${connection.appSettingsUrl ?? connection.url}/advanced`}
 								target="_blank"
@@ -277,7 +277,7 @@ function ConnectionCard({
 							in its advanced settings.
 						</>
 					) : (
-						"Bots in this pod can no longer use its tools. Connecting it again means signing in or entering its details again."
+						`${agent.name} can no longer use its tools. Connecting it again means signing in or entering its details again.`
 					)
 				}
 				confirmLabel="Disconnect"
@@ -294,8 +294,8 @@ function ConnectionCard({
  * it, so a check never moves the page. A failure says why in a line, with the
  * way to fix it next to that.
  */
-function TestConnection({ connection, podId }: { connection: Connection; podId: string }) {
-	const actions = useConnectionActions(podId);
+function TestConnection({ connection, agentId }: { connection: Connection; agentId: string }) {
+	const actions = useConnectionActions(agentId);
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
 	const reachable = checked ? checked.reachable : connection.status === "error" ? false : undefined;
@@ -363,7 +363,7 @@ function SignedInPerson({ name }: { name: string | null }) {
 function accountRowNote(connection: Connection): string | undefined {
 	if (connection.signedIn) return undefined;
 	if (connection.kind === "github") {
-		return "Bots can't use GitHub until the pod's app is installed on the account it works on.";
+		return "The bot can't use GitHub until its app is installed on the account it works on.";
 	}
 	if (connection.signInExpired) {
 		return `${connection.name} refused the last sign-in. Bots can't use it until someone signs in again.`;
@@ -379,14 +379,14 @@ function secretActionLabel(connection: Connection): string {
 /** A new secret for a header connection, or its first access token, in a row of its own group. */
 function SecretForm({
 	connection,
-	podId,
+	agentId,
 	done,
 }: {
 	connection: Connection;
-	podId: string;
+	agentId: string;
 	done: () => void;
 }) {
-	const actions = useConnectionActions(podId);
+	const actions = useConnectionActions(agentId);
 	const [secret, setSecret] = useState("");
 	const needsToken = connection.secretHeader === null;
 

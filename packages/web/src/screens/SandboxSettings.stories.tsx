@@ -1,5 +1,5 @@
 import type {
-	PodSandboxDisk,
+	AgentSandboxDisk,
 	SandboxNetworkSettings,
 	SandboxProvider,
 	SandboxProviderUpdate,
@@ -7,7 +7,7 @@ import type {
 import { HttpResponse, http } from "msw";
 import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyBots, storyPods, storyWorkspace } from "../story-app.tsx";
+import { appHandlers, StoryApp, storyBots, storyWorkspace } from "../story-app.tsx";
 
 /*
  * Computers, as the app shows them in settings: the switch for whether bots
@@ -314,9 +314,9 @@ export const E2bCustomSize = meta.story({
 
 const GB = 1024 ** 3;
 
-/** A pod's 20 GB disk with `usedGB` of it used. */
-const podDisk = (podId: string, usedGB: number): PodSandboxDisk => ({
-	podId,
+/** A bot's 20 GB disk with `usedGB` of it used. */
+const botDisk = (agentId: string, usedGB: number): AgentSandboxDisk => ({
+	agentId,
 	disk: {
 		usedBytes: Math.round(usedGB * GB),
 		totalBytes: 20 * GB,
@@ -325,20 +325,20 @@ const podDisk = (podId: string, usedGB: number): PodSandboxDisk => ({
 	},
 });
 
-/** How full each pod's computer's disk is, fullest first, each opening the pod's Computer page. */
-export const DiskUseByPod = meta.story({
+/** How full each bot's computer's disk is, fullest first, each opening the bot's Computer page. */
+export const DiskUseByBot = meta.story({
 	beforeEach({ msw }) {
-		const [first, second] = storyPods;
+		const [first, second] = storyBots;
 		msw.use(
 			answers([{ ...openSandbox, enabled: true, hasApiKey: true, status: "connected" }]),
 			http.get(disksUrl, () =>
-				HttpResponse.json([podDisk(first?.id ?? "", 4.1), podDisk(second?.id ?? "", 18.6)]),
+				HttpResponse.json([botDisk(first?.id ?? "", 4.1), botDisk(second?.id ?? "", 18.6)]),
 			),
 		);
 	},
 	play: async ({ canvas }) => {
-		const disks = await canvas.findByRole("region", { name: "Disk use by pod" });
-		const [first, second] = storyPods;
+		const disks = await canvas.findByRole("region", { name: "Disk use by bot" });
+		const [first, second] = storyBots;
 		const rows = within(disks).getAllByRole("link");
 		await expect(rows).toHaveLength(2);
 		await expect(rows[0]).toHaveTextContent(second?.name ?? "");
@@ -346,7 +346,7 @@ export const DiskUseByPod = meta.story({
 		await expect(rows[1]).toHaveTextContent(first?.name ?? "");
 		await expect(rows[0]).toHaveAttribute(
 			"href",
-			expect.stringMatching(/\/settings\/pods\/.+\/computer$/),
+			expect.stringMatching(/\/settings\/pods\/.+\/agents\/.+\/computer$/),
 		);
 	},
 });

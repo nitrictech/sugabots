@@ -2,22 +2,23 @@ import { ARTIFACT_WRITING_TOOLS, type CollaborationPart } from "@sugabots/contra
 import { docPages } from "@sugabots/docs";
 import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
-import { Effect } from "effect";
+import type { Effect } from "effect";
 import type { Artifacts } from "../../artifacts/artifacts.ts";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
 import type { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import type { AssistantGuide } from "../assistant/assistant-guide.ts";
 import type { BotThreads } from "../chats/bot-threads.ts";
 import type { BotRoutines } from "../routines/bot-routines.ts";
 import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
 import { artifactTools } from "../tools/artifacts/tool.ts";
+import { WORKSPACE_GUIDE_TOOL, workspaceGuideTool } from "../tools/assistant/tool.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
 import { collaborateTool } from "../tools/collaborate/tool.ts";
 import type { OfferedTool } from "../tools/connections.ts";
 import { MARK_DONE_TOOL, markDoneTool } from "../tools/mark-done/tool.ts";
-import { podThreadTools } from "../tools/pod-threads/tool.ts";
 import { READ_DOCS_TOOL, readDocsTool } from "../tools/read-docs/tool.ts";
 import { READ_THREAD_FILE_TOOL, readThreadFileTool } from "../tools/read-thread-file/tool.ts";
 import {
@@ -27,7 +28,7 @@ import {
 	routineTools,
 } from "../tools/routines/tool.ts";
 import { READ_FILE_TOOL, SHARE_FILE_TOOL } from "../tools/sandbox/tools.ts";
-import type { SandboxTools } from "../tools/sandbox.ts";
+import type { Request, SandboxTools } from "../tools/sandbox.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import { START_THREAD_TOOL, startThreadTool } from "../tools/start-thread/tool.ts";
@@ -35,7 +36,7 @@ import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
 import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
 import type { ApprovedToolCalls } from "./approvals/approved-calls.ts";
-import type { PreparedTurn, TurnContext } from "./execution.ts";
+import type { PreparedTurn } from "./execution.ts";
 import type { TurnRepository } from "./repository.ts";
 import { type RecordingOptions, recorded, refused } from "./tool-calls/recorded.ts";
 import type { ToolCallRepository } from "./tool-calls/repository.ts";
@@ -104,10 +105,19 @@ export interface ToolDependencies {
 	};
 	/** The turn's own abort signal, so a cancelled turn stops its tools too. */
 	signal: AbortSignal;
+	/**
+	 * On a Personal Assistant's turn answering its person: what it knows of
+	 * their workspace, and what it does there for them once they approve.
+	 */
+	assistant?: {
+		guide: Pick<AssistantGuide.Interface, "guide">;
+		person: AssistantGuide.Person;
+		requests: Readonly<Record<string, Request>>;
+	};
 }
 
 /** What people, and the model, are told of a call to a tool the pod has turned off. */
-const TOOL_TURNED_OFF = userText`This tool is turned off for bots in this pod.`;
+const TOOL_TURNED_OFF = userText`This tool is turned off for this bot.`;
 
 const TOOL_UNAVAILABLE = userText`This tool is switched off for this bot.`;
 
@@ -210,7 +220,6 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	const artifacts = artifactTools({
 		by: {
 			workspaceId: prepared.context.thread.workspaceId,
-			podId: prepared.context.agent.podId,
 			agentId: prepared.context.agent.id,
 			threadId: prepared.context.thread.id,
 		},
@@ -238,53 +247,48 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		}),
 		recording,
 	);
-	const podThreads = podThreadTools({
-		podId: prepared.context.agent.podId,
-		threadId: prepared.context.thread.id,
-		run: deps.run,
-	});
-	for (const [key, tool] of Object.entries(podThreads)) {
-		tools[key] = recorded(key, tool, recording);
-	}
 	tools[READ_THREAD_FILE_TOOL] = recorded(
 		READ_THREAD_FILE_TOOL,
 		readThreadFileTool({
 			threadId: prepared.context.thread.id,
-			files: withStartingFiles(deps.files, prepared.context),
+			files: deps.files,
 			acceptsImages: prepared.context.agent.acceptsImages,
 			run: deps.run,
 		}),
 		recording,
 	);
-	const routinesOff = prepared.context.agent.disabledTools.includes(ROUTINES_KEY);
-	const ownRoutines = routineTools({
-		bot: { agentId: prepared.context.agent.id, askedBy: prepared.context.askedBy },
-		timeZone: prepared.context.workspaceTimeZone,
-		routines: deps.routines,
-		run: deps.run,
-	});
-	for (const key of ROUTINE_TOOLS) {
-		tools[key] = routinesOff
-			? refused(key, ownRoutines[key], TOOL_UNAVAILABLE, recording)
-			: recorded(key, ownRoutines[key], { ...recording, mutating: ROUTINE_TOOL_MUTATES[key] });
+	// Sugabots manages a Personal Assistant, which has no automations of its own.
+	if (prepared.context.agent.assistantOf === null) {
+		const routinesOff = prepared.context.agent.disabledTools.includes(ROUTINES_KEY);
+		const ownRoutines = routineTools({
+			bot: { agentId: prepared.context.agent.id, askedBy: prepared.context.askedBy },
+			timeZone: prepared.context.workspaceTimeZone,
+			routines: deps.routines,
+			run: deps.run,
+		});
+		for (const key of ROUTINE_TOOLS) {
+			tools[key] = routinesOff
+				? refused(key, ownRoutines[key], TOOL_UNAVAILABLE, recording)
+				: recorded(key, ownRoutines[key], { ...recording, mutating: ROUTINE_TOOL_MUTATES[key] });
+		}
 	}
 	const threadsBot: BotThreads.Bot = {
 		agentId: prepared.context.agent.id,
 		workspaceId: prepared.context.thread.workspaceId,
-		podId: prepared.context.agent.podId,
 		askedBy: prepared.context.askedBy,
 	};
 	// Offered only when a person asked: a turn answering a bot, a brief or a
 	// routine could only be refused, and a briefed bot starting threads of its
-	// own would let bots brief each other without end.
-	if (prepared.context.askedBy) {
+	// own would let bots brief each other without end. A Personal Assistant's
+	// is among its requests, which wait for its person to allow them.
+	if (prepared.context.askedBy && !deps.assistant) {
 		tools[START_THREAD_TOOL] = recorded(
 			START_THREAD_TOOL,
 			startThreadTool({ bot: threadsBot, threads: deps.threads, run: deps.run }),
 			{ ...recording, mutating: true },
 		);
 	}
-	// Only a thread is ever done; a channel, a pod's chat or a routine's thread is not.
+	// Only a task is ever done; a channel's conversation or an automation's thread is not.
 	if (prepared.context.thread.type === "conversation") {
 		tools[MARK_DONE_TOOL] = recorded(
 			MARK_DONE_TOOL,
@@ -300,17 +304,35 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 			{ ...recording, mutating: true },
 		);
 	}
-	tools[SAVE_INSTRUCTIONS_TOOL] = recorded(
-		SAVE_INSTRUCTIONS_TOOL,
-		saveInstructionsTool({
-			agentId: prepared.context.agent.id,
-			askedBy: prepared.context.askedBy,
-			agents: deps.agents,
-			settingsUrl: `${deps.webAppUrl}/${prepared.context.workspaceSlug}/settings/pods/${prepared.context.podSlug}/agents/${prepared.context.agent.handle}`,
-			run: deps.run,
-		}),
-		{ ...recording, mutating: true },
-	);
+	if (deps.assistant) {
+		tools[WORKSPACE_GUIDE_TOOL] = recorded(
+			WORKSPACE_GUIDE_TOOL,
+			workspaceGuideTool({ ...deps.assistant, run: deps.run }),
+			recording,
+		);
+		// Each changes the workspace for the person, so each waits for them to allow it.
+		for (const [key, request] of Object.entries(deps.assistant.requests)) {
+			tools[key] = recorded(key, request.tool, {
+				...recording,
+				mutating: true,
+				approval: { approvals: deps.approvals, binding: { kind: "built-in" } },
+			});
+		}
+	}
+	// A Personal Assistant's instructions are Sugabots', so it has none of its own to save.
+	if (prepared.context.agent.assistantOf === null) {
+		tools[SAVE_INSTRUCTIONS_TOOL] = recorded(
+			SAVE_INSTRUCTIONS_TOOL,
+			saveInstructionsTool({
+				agentId: prepared.context.agent.id,
+				askedBy: prepared.context.askedBy,
+				agents: deps.agents,
+				settingsUrl: `${deps.webAppUrl}/${prepared.context.workspaceSlug}/settings/bots/${prepared.context.agent.handle}`,
+				run: deps.run,
+			}),
+			{ ...recording, mutating: true },
+		);
+	}
 	tools.collaborate = collaborateTool({
 		from: {
 			threadId: prepared.context.thread.id,
@@ -335,30 +357,5 @@ export function bindingOf(offered: OfferedTool): ToolCallRepository.ApprovalBind
 		connectionId: offered.connectionId,
 		connectionRevision: offered.connectionRevision,
 		remoteToolName: offered.remoteToolName,
-	};
-}
-
-/**
- * `files`, reading as well the files on the message in a pod's chat that the
- * thread was started from, which stay in the chat with the message.
- */
-export function withStartingFiles(
-	files: Pick<ThreadFiles.Interface, "read" | "readMessageFile">,
-	{ startedFrom }: Pick<TurnContext, "startedFrom">,
-): Pick<ThreadFiles.Interface, "read"> {
-	const startingFiles = new Set(
-		startedFrom?.parts.flatMap((part) => (part.type === "file" ? [part.id] : [])),
-	);
-	return {
-		read: (file) =>
-			files
-				.read(file)
-				.pipe(
-					Effect.catchTag("ThreadFileNotFound", (notFound) =>
-						startedFrom && startingFiles.has(file.fileId)
-							? files.readMessageFile({ threadId: startedFrom.threadId, fileId: file.fileId })
-							: Effect.fail(notFound),
-					),
-				),
 	};
 }

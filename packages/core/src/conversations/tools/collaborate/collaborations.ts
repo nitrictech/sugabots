@@ -10,9 +10,8 @@ import type * as schema from "../../../database/schema.ts";
 import { agent, collaboration, thread } from "../../../database/schema.ts";
 import type { ConversationEvent } from "../../events.ts";
 import { toCollaborationPart } from "../../threads/collaboration-parts.ts";
-import { crewOf } from "../../threads/participants.ts";
+import { crewAgent } from "../../threads/participants.ts";
 import { ThreadRepository } from "../../threads/repository.ts";
-import { threadPodId } from "../../threads/rooms.ts";
 import { lineageOf } from "../../threads/tree.ts";
 import { makeRecords, type WaitOutcome } from "./repository.ts";
 
@@ -98,7 +97,7 @@ export const make = Effect.gen(function* () {
 						const collaborator = yield* crewNamed(parent, to);
 						if (!collaborator) {
 							return yield* new CollaborationRefused({
-								reason: `No crew agent called "${to}" is in this pod`,
+								reason: `No bot in this workspace is called "${to}"`,
 							});
 						}
 						if (collaborator.id === from.agentId) {
@@ -201,7 +200,7 @@ export class CollaborationRefused extends Data.TaggedError("CollaborationRefused
 	}
 }
 
-/** A crew agent placed in the thread's pod, by the name the model used. */
+/** A bot in the workspace, by the name the model used. Any bot may ask any other, private ones included. */
 const crewNamed = (parent: schema.ThreadRow, name: string) =>
 	Effect.map(
 		query((db) =>
@@ -210,7 +209,7 @@ const crewNamed = (parent: schema.ThreadRow, name: string) =>
 				.from(agent)
 				.where(
 					and(
-						crewOf(threadPodId(parent.id, parent.podId)),
+						crewAgent,
 						eq(agent.workspaceId, parent.workspaceId),
 						sql`lower(${agent.name}) = lower(${name.trim()})`,
 					),

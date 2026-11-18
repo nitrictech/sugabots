@@ -85,7 +85,7 @@ function DocsHome() {
 						</motion.h1>
 						<motion.p variants={riseIn} className={pageIntro}>
 							Everything you need to set up a workspace, fill it with <Emphasis>people</Emphasis>{" "}
-							and <Emphasis>agents</Emphasis>, and keep it running.
+							and <Emphasis>bots</Emphasis>, and keep it running.
 						</motion.p>
 						{firstPage && (
 							<RevealItem className="flex flex-wrap gap-3">

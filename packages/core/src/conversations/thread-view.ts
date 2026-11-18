@@ -14,13 +14,15 @@ import { userText } from "@sugabots/errors";
 import { and, desc, eq, isNull, type SQLWrapper, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import {
+	type AgentStanding,
 	type AuthorizationDenied,
-	mayDecideApprovals,
+	agentStandingFor,
+	mayDecideToolCall,
 	ResourceHidden,
 	type ThreadStanding,
 } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
-import type { CurrentActor } from "../authorization/current-actor.ts";
+import { CurrentActor } from "../authorization/current-actor.ts";
 import { Visibility } from "../authorization/visibility.ts";
 import { type Executor, query, serviceOperations } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
@@ -125,7 +127,9 @@ export const make = Effect.gen(function* () {
 						loadConversation(db, standing.thread, history.limit, before),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "thread" });
-					const details = toThreadDetails(row, standing, history.limit);
+					const host = yield* hostStandingOf(standing);
+					const computerDeciders = yield* computerRequestDecidersIn(row);
+					const details = toThreadDetails(row, standing, host, computerDeciders, history.limit);
 					const { routineId } = row;
 					if (!routineId) return details;
 					const [owned] = yield* query((db) =>
@@ -251,7 +255,6 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 				with: { user: personColumns },
 			},
 			routineExecution: { extras: { posted: (row) => resultPosted(sql`${row.id}`) } },
-			origin: { with: messageRelations },
 			messages: {
 				// One more than the page, so an older page is known to exist without a count.
 				limit: limit + 1,
@@ -273,11 +276,51 @@ const loadConversation = Effect.fn("ThreadView.loadConversation")(function* (
 
 type Conversation = NonNullable<Effect.Success<ReturnType<typeof loadConversation>>>;
 
+/**
+ * The caller's standing towards the bot a thread is with, whose computer its
+ * requests are about: the thread's own standing, except on a collaboration,
+ * which is reached through the conversation it was opened from.
+ */
+const hostStandingOf = Effect.fn("ThreadView.hostStandingOf")(function* (standing: ThreadStanding) {
+	if (standing.kind === "agent" && standing.thread.type !== "collaboration") {
+		return standing.standing;
+	}
+	const hostAgentId = standing.thread.hostAgentId;
+	if (!hostAgentId) return undefined;
+	const { userId } = yield* CurrentActor.Service;
+	return yield* query((db) => agentStandingFor(db, hostAgentId, userId));
+});
+
+/**
+ * The bots that speak in the thread, its own and any taking part, whose
+ * requests to change their computers the caller may decide: each bot's
+ * creator or an admin, so in a channel it differs from bot to bot.
+ */
+const computerRequestDecidersIn = Effect.fn("ThreadView.computerRequestDecidersIn")(function* (
+	row: Conversation,
+) {
+	const speakers = new Set(
+		[row.hostAgentId, ...row.participants.map(({ agent: participant }) => participant?.id)].filter(
+			(id): id is string => typeof id === "string",
+		),
+	);
+	const { userId } = yield* CurrentActor.Service;
+	const deciding: string[] = [];
+	for (const agentId of speakers) {
+		const standing = yield* query((db) => agentStandingFor(db, agentId, userId));
+		if (standing?.may("sandbox.request.decide")) deciding.push(agentId);
+	}
+	return deciding;
+});
+
 function toThreadDetails(
 	row: Conversation,
 	standing: ThreadStanding,
+	host: AgentStanding | undefined,
+	computerDeciders: readonly string[],
 	limit: number,
 ): ThreadDetails {
+	const inRoutine = row.routineExecutionId !== null;
 	const page = row.messages.slice(0, limit).reverse();
 	const oldest = page[0];
 	return {
@@ -285,20 +328,14 @@ function toThreadDetails(
 		// What this person may do with the approvals this thread raises, decided
 		// once here so the conversation does not have to work it out from a role.
 		capabilities: {
-			// Only a thread in a pod raises approvals: a direct message has no bots.
-			approveToolCalls:
-				standing.kind === "pod" &&
-				mayDecideApprovals(standing.standing, row.routineExecutionId !== null, "pod"),
-			approveSandboxRequests:
-				standing.kind === "pod" &&
-				mayDecideApprovals(standing.standing, row.routineExecutionId !== null, "sandbox-managers"),
+			approveToolCalls: mayDecideToolCall(standing, host, inRoutine, "pod"),
+			approveSandboxRequestsOf: computerDeciders,
 		},
 		// A run's thread is always opened in a conversation.
 		routineExecution:
 			row.routineExecution && row.conversationId
 				? toRoutineExecution(row.routineExecution, row.conversationId, row.routineExecution.posted)
 				: null,
-		startedFrom: row.origin && messageFromRelations(row.origin),
 		participants: row.participants.map(({ user: person, agent: participant }) =>
 			toParticipant(authorRow(person, participant)),
 		),

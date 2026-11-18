@@ -6,19 +6,18 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browser } from "@/lib/connections.ts";
-import { apiAnswers, linear, mount, pods, serveConnections } from "@/test-api.tsx";
+import { apiAnswers, linear, mount, pods, serveConnections, triager } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
 const pod = pods[0] as (typeof pods)[number];
-const page = `/suga/settings/pods/${pod.slug}`;
 const route = client.api.connections;
 
 const wiki: TestConnection = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
 	workspaceId: linear.workspaceId,
-	podId: pod.id,
+	agentId: "0199a3a0-0000-7000-8000-00000000b071",
 	name: "Wiki",
 	handle: "wiki",
 	url: "https://wiki.wikimple.com/mcp",
@@ -65,8 +64,8 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-/** The pod's Connections, a page of its own beside the pod's General. */
-const connectionsPage = `${page}/connections`;
+/** The bot's Connections, a page of its own beside the bot's General. */
+const connectionsPage = `/suga/settings/bots/${linear.handle}/connections`;
 const wikiPage = `${connectionsPage}/${wiki.id}`;
 
 /** The connection's own page, once it and its tools have loaded. */
@@ -81,7 +80,7 @@ async function openIndividualTools() {
 	await screen.findByRole("heading", { name: "Individual tools", level: 2 });
 }
 
-/** The pod's Connections page, once it has loaded. */
+/** The bot's Connections page, once it has loaded. */
 async function showConnections() {
 	await screen.findByRole("heading", { name: "Connections" });
 }
@@ -89,7 +88,7 @@ async function showConnections() {
 /** Opens Add connection, and the dialog it opens. */
 async function openAdd() {
 	fireEvent.click(await screen.findByRole("button", { name: "Add connection" }));
-	return screen.findByRole("dialog", { name: `Add to ${pod.name}` });
+	return screen.findByRole("dialog", { name: `Add to ${linear.name}` });
 }
 
 describe("the Connections settings", () => {
@@ -139,7 +138,7 @@ describe("the Connections settings", () => {
 
 	it("says on a connection's page who it is signed in as, or offers to sign it in", async () => {
 		serveConnections({ ...wiki, auth: "oauth", signedIn: true, secretHeader: null });
-		mount(`${page}/connections/${wiki.id}`);
+		mount(wikiPage);
 
 		const account = await screen.findByRole("region", { name: "Account" });
 		expect(within(account).getByText("Signed in as")).toBeDefined();
@@ -148,7 +147,7 @@ describe("the Connections settings", () => {
 		cleanup();
 
 		serveConnections({ ...wiki, auth: "oauth", signedIn: false, secretHeader: null });
-		mount(`${page}/connections/${wiki.id}`);
+		mount(wikiPage);
 
 		const notYet = await screen.findByRole("region", { name: "Account" });
 		expect(within(notYet).getByRole("button", { name: "Sign in" })).toBeDefined();
@@ -294,7 +293,7 @@ describe("the Connections settings", () => {
 		);
 		await openedWiki();
 
-		expect(router.state.location.pathname).toBe(`${page}/connections/${wiki.id}`);
+		expect(router.state.location.pathname).toBe(wikiPage);
 		expect(screen.getByText("Connected by Sam")).toBeDefined();
 		const reading = screen.getByRole("region", { name: "Tools that read" });
 		expect(within(reading).getByText("All 1 read tool")).toBeDefined();
@@ -317,7 +316,7 @@ describe("the Connections settings", () => {
 		await showConnections();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
-		// What its tools may do is set inside it, not from the pod's list.
+		// What its tools may do is set inside it, not from the bot's list.
 		expect(within(row).queryByRole("button")).toBeNull();
 
 		fireEvent.click(within(row).getByRole("link", { name: /^Wiki, / }));
@@ -337,7 +336,7 @@ describe("the Connections settings", () => {
 
 		await waitFor(() =>
 			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-				params: { podId: pod.id, connectionId: wiki.id },
+				params: { agentId: linear.id, connectionId: wiki.id },
 				payload: { toolAccess: { wipe: "off" } },
 			}),
 		);
@@ -456,7 +455,7 @@ describe("the Connections settings", () => {
 		expect(await screen.findByRole("heading", { name: "Wiki", level: 2 })).toBeDefined();
 	});
 
-	it("sums up on the pod's list what a connection's tools are set to", async () => {
+	it("sums up on the bot's list what a connection's tools are set to", async () => {
 		const [search, wipe] = wiki.tools;
 		if (!search || !wipe) throw new Error("fixture");
 		serveConnections({
@@ -533,7 +532,7 @@ describe("the Connections settings", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
 		await waitFor(() =>
 			expect(route.update).toHaveBeenCalledWith({
-				params: { podId: pod.id, connectionId: wiki.id },
+				params: { agentId: linear.id, connectionId: wiki.id },
 				payload: { secret: "new-secret" },
 			}),
 		);
@@ -543,20 +542,20 @@ describe("the Connections settings", () => {
 		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
 		await waitFor(() =>
 			expect(route.remove).toHaveBeenCalledWith({
-				params: { podId: pod.id, connectionId: wiki.id },
+				params: { agentId: linear.id, connectionId: wiki.id },
 			}),
 		);
 		await waitFor(() => expect(router.state.location.pathname).toBe(connectionsPage));
 	});
 
-	it("says so when the connection asked for is not in the pod", async () => {
+	it("says so when the connection asked for is not the bot's", async () => {
 		serveConnections();
 		mount(wikiPage);
 
 		expect(await screen.findByText("No such connection here")).toBeDefined();
 	});
 
-	it("lets a pod member see connections and their tools, with nothing to change", async () => {
+	it("lets a member see connections and their tools, with nothing to change", async () => {
 		apiAnswers({ role: "member" });
 		serveConnections(wiki);
 		mount(connectionsPage);
@@ -580,18 +579,20 @@ describe("the Connections settings", () => {
 });
 
 describe("coming back from a connection sign-in", () => {
-	it("opens the Connections of the pod the sign-in was for", async () => {
+	it("opens the Connections of the bot the sign-in was for", async () => {
 		serveConnections(wiki);
-		const router = mount(`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}`);
+		const router = mount(
+			`/connections/oauth/return?workspace=${pod.workspaceId}&agent=${linear.id}`,
+		);
 
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
 		expect(router.state.location.href).toBe(connectionsPage);
 	});
 
-	it("says once why a sign-in for a pod did not finish", async () => {
+	it("says once why a sign-in for a bot did not finish", async () => {
 		serveConnections(wiki);
 		const router = mount(
-			`/connections/oauth/return?workspace=${pod.workspaceId}&pod=${pod.id}&oauth_error=refused`,
+			`/connections/oauth/return?workspace=${pod.workspaceId}&agent=${linear.id}&oauth_error=refused`,
 		);
 
 		expect(
@@ -601,16 +602,17 @@ describe("coming back from a connection sign-in", () => {
 		).toBeDefined();
 		await waitFor(() => expect(router.state.location.href).toBe(connectionsPage));
 
-		const other = pods[1] as (typeof pods)[number];
 		await router.navigate({
-			to: "/$workspace/settings/pods/$pod/$page",
-			params: { workspace: "suga", pod: other.slug, page: "connections" },
+			to: "/$workspace/settings/bots/$bot/$page",
+			params: { workspace: "suga", bot: triager.handle, page: "connections" },
 		});
-		expect(await screen.findByText(`Shared by every bot in ${other.name}.`)).toBeDefined();
+		expect(
+			await screen.findByText(`The services ${triager.name} uses, as whoever connected each one.`),
+		).toBeDefined();
 		expect(screen.queryByText(/Signing in did not finish/)).toBeNull();
 	});
 
-	it("says what went wrong when the sign-in never reached a pod", async () => {
+	it("says what went wrong when the sign-in never reached a bot", async () => {
 		mount("/connections/oauth/return?oauth_error=unknown_state");
 
 		expect(await screen.findByText("The sign-in does not match any connection.")).toBeDefined();

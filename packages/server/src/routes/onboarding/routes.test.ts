@@ -35,7 +35,7 @@ describe("onboarding routes", () => {
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
-			message: "Finish creating your pod and agent first",
+			message: "Finish creating your bot first",
 		});
 	});
 });

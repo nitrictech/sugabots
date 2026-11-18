@@ -3,7 +3,6 @@ export * as BotRoutines from "./bot-routines.ts";
 import type {
 	RepositoryEvent,
 	Routine,
-	RoutineResults,
 	RoutineSchedule,
 	RoutineTrigger,
 } from "@sugabots/contracts";
@@ -18,9 +17,8 @@ import { Installation } from "../../installation/installation.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type { RoutineRepository } from "./repository.ts";
 import type {
-	RoutineChatNotFound,
 	RoutineNotFound,
-	RoutineRepositoryNotInPod,
+	RoutineRepositoryNotConnected,
 	RoutineTriggerKindChanged,
 	RoutineTriggerNotFound,
 	WebhookDeliveryIdHeaderRejected,
@@ -58,7 +56,7 @@ export const make = Effect.gen(function* () {
 	const routines = yield* Routines.Service;
 	const installation = yield* Installation.Service;
 
-	/** Where the bot lives: its workspace's timezone, and where its routines' settings pages are. */
+	/** Where the bot lives: its workspace's timezone, and where its automations' pages are. */
 	const placeOf = (agentId: string) =>
 		Effect.flatMap(
 			query((db) =>
@@ -66,6 +64,7 @@ export const make = Effect.gen(function* () {
 					.select({
 						timeZone: workspace.timeZone,
 						workspaceSlug: workspace.slug,
+						handle: agent.handle,
 					})
 					.from(agent)
 					.innerJoin(workspace, eq(workspace.id, agent.workspaceId))
@@ -76,7 +75,7 @@ export const make = Effect.gen(function* () {
 				row
 					? Effect.succeed({
 							timeZone: row.timeZone,
-							routinesUrl: `${installation.webAppUrl}/${row.workspaceSlug}/settings/routines`,
+							routinesUrl: `${installation.webAppUrl}/${row.workspaceSlug}/bots/${row.handle}/automations`,
 						})
 					: Effect.die(new Error("A bot with routines is not in a workspace")),
 		);
@@ -121,7 +120,6 @@ export const make = Effect.gen(function* () {
 							{
 								name: input.name,
 								instructions: input.instructions,
-								results: input.results,
 								triggers: [
 									{
 										kind: "cron",
@@ -152,7 +150,6 @@ export const make = Effect.gen(function* () {
 						routines.update(addressed, {
 							name: changes.name,
 							instructions: changes.instructions,
-							results: changes.results,
 							state:
 								changes.paused === undefined ? undefined : changes.paused ? "paused" : "enabled",
 						}),
@@ -209,7 +206,6 @@ export interface BotRoutine {
 		| { kind: "github"; repository: string; events: readonly RepositoryEvent[] }
 	>;
 	paused: boolean;
-	results: RoutineResults;
 	/** The routine's own settings page, for a link in the bot's reply. */
 	settingsUrl: string;
 }
@@ -219,14 +215,12 @@ export interface NewBotRoutine {
 	instructions: string;
 	/** A five-field cron expression, in the workspace's timezone. */
 	schedule: string;
-	results: RoutineResults;
 }
 
 export interface BotRoutineChanges {
 	name?: string;
 	instructions?: string;
 	schedule?: string;
-	results?: RoutineResults;
 	paused?: boolean;
 }
 
@@ -253,7 +247,6 @@ function toBotRoutine(routine: Routine, routinesUrl: string): BotRoutine {
 		instructions: routine.instructions,
 		when: routine.triggers.map(whenOf),
 		paused: routine.state === "paused",
-		results: routine.results,
 		settingsUrl: `${routinesUrl}/${routine.id}`,
 	};
 }
@@ -264,12 +257,11 @@ export type Refused =
 	| MayNotManageRoutines
 	| TriggerSetInSettings
 	| RoutineNotFound
-	| RoutineChatNotFound
 	| RoutineRepository.RoutineNameTaken
 	| InvalidRoutineSchedule
 	| WebhookSecretTooShort
 	| WebhookDeliveryIdHeaderRejected
-	| RoutineRepositoryNotInPod
+	| RoutineRepositoryNotConnected
 	| RoutineTriggerNotFound
 	| RoutineTriggerKindChanged;
 
@@ -284,7 +276,7 @@ export class MayNotManageRoutines
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`The person asking may not do that: only an admin of this pod can have a bot set up or change its routines.`;
+		return userText`The person asking may not do that: only the bot's creator or an admin can have it set up or change its automations.`;
 	}
 }
 
@@ -293,6 +285,6 @@ export class TriggerSetInSettings
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`That routine has triggers other than one schedule, which only its settings can change. Its name, instructions, results and whether it is paused can still be changed here.`;
+		return userText`That routine has triggers other than one schedule, which only its settings can change. Its name, instructions and whether it is paused can still be changed here.`;
 	}
 }

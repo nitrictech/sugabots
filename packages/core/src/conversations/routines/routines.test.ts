@@ -14,8 +14,6 @@ import {
 	agent,
 	connection,
 	message,
-	pod,
-	podMember,
 	routineExecution,
 	routineTrigger,
 	thread,
@@ -87,9 +85,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		body: new TextEncoder().encode(JSON.stringify(payload)),
 		payload,
 	});
-	let podId: string;
 	let agentId: string;
 	let userId: string;
+	/** Makes the bot private, so only its creator reaches it. */
+	const makePrivate = (id: string) =>
+		onDatabase((db) => db.update(agent).set({ visibility: "private" }).where(eq(agent.id, id)));
 	/** The routine's first trigger, addressed, and the secret this write made for it, if any. */
 	const firstTriggerOf = (defined: Routines.Defined) => {
 		const [trigger] = defined.routine.triggers;
@@ -131,7 +131,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, podId, agentId, userId } = await aRoutineOwner());
+		({ workspaceId, agentId, userId } = await aRoutineOwner());
 		routines = routinesAs(userId);
 		view = onPostgresAs(userId)(Context.get(conversations, Routines.Service));
 	});
@@ -159,40 +159,23 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(await runsIn()).toEqual([]);
 	});
 
-	it("lists the workspace's routines on bots in pods the person reaches, by name", async () => {
+	it("lists the workspace's routines on bots the person reaches, by name", async () => {
 		const [member] = await onDatabase((db) =>
 			db
 				.insert(user)
-				.values({ name: "Pod member", email: `member-${crypto.randomUUID()}@example.com` })
+				.values({ name: "Member", email: `member-${crypto.randomUUID()}@example.com` })
 				.returning(),
 		);
 		if (!member) throw new Error("Could not create the member");
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId, userId: member.id, role: "member" }),
 		);
-		const [joined] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId,
-					ownerId: userId,
-					kind: "shared",
-					name: "Joined pod",
-					slug: `joined-${crypto.randomUUID()}`,
-					createdById: userId,
-				})
-				.returning(),
-		);
-		if (!joined) throw new Error("Could not create the joined pod");
-		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId, podId: joined.id, userId: member.id }),
-		);
+		await makePrivate(agentId);
 		const [helper] = await onDatabase((db) =>
 			db
 				.insert(agent)
 				.values({
 					workspaceId,
-					podId: joined.id,
 					name: "Joined Agent",
 					handle: handleFromName(`Joined Agent ${crypto.randomUUID()}`),
 					color: "sky",
@@ -208,7 +191,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			{ agentId },
 			{
 				name: "Unreached",
-				instructions: "In a pod this member is not in.",
+				instructions: "On a private bot this member did not make.",
 				triggers: [webhook],
 			},
 		);
@@ -244,7 +227,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 
 		expect(listed.map((item) => item.routine.id)).toEqual([sooner.routine.id, later.routine.id]);
 		expect(listed[0]?.agent).toMatchObject({ id: helper.id, name: "Joined Agent", color: "sky" });
-		expect(listed[0]?.pod).toEqual({ id: joined.id, slug: joined.slug });
 	});
 
 	it("creates scoped cron and webhook definitions, and admits a webhook's callers by its secret", async () => {
@@ -838,48 +820,50 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		expect(await routines.getSecret(addressed)).toEqual({ kind: "set", secret });
 	});
 
-	it("refuses a member who may not manage routines a run, a removal or the secret, whoever asks", async () => {
+	it("refuses a viewer a run, and anyone who did not make the bot a removal or the secret, whoever asks", async () => {
 		// Called directly, with no route in front: what a new entry point that
 		// forgot to check would reach.
 		const created = await routines.create(
 			{ agentId },
 			{ name: "Nightly", instructions: "Run nightly.", triggers: [{ kind: "webhook" }] },
 		);
-		const [member] = await onDatabase((db) =>
+		const [member, viewer] = await onDatabase((db) =>
 			db
 				.insert(user)
-				.values({ name: "Pod member", email: `member-${crypto.randomUUID()}@example.com` })
+				.values([
+					{ name: "Member", email: `member-${crypto.randomUUID()}@example.com` },
+					{ name: "Viewer", email: `viewer-${crypto.randomUUID()}@example.com` },
+				])
 				.returning(),
 		);
-		if (!member) throw new Error("Could not create the member");
+		if (!member || !viewer) throw new Error("Could not create the people");
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values({ workspaceId, userId: member.id, role: "member" }),
-		);
-		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId, podId, userId: member.id }),
+			db.insert(workspaceMember).values([
+				{ workspaceId, userId: member.id, role: "member" },
+				{ workspaceId, userId: viewer.id, role: "viewer" },
+			]),
 		);
 		const routine = { agentId, routineId: created.routine.id };
 
 		await expect(
-			routinesAs(member.id).run({ ...routine, requestId: crypto.randomUUID() }),
+			routinesAs(viewer.id).run({ ...routine, requestId: crypto.randomUUID() }),
 		).rejects.toThrow(ActionForbidden);
-		await expect(routinesAs(member.id).remove(routine)).rejects.toThrow(ActionForbidden);
-		await expect(
-			routinesAs(member.id).getSecret(firstTriggerOf(created).addressed),
-		).rejects.toThrow(ActionForbidden);
+		for (const personId of [member.id, viewer.id]) {
+			await expect(routinesAs(personId).remove(routine)).rejects.toThrow(ActionForbidden);
+			await expect(
+				routinesAs(personId).getSecret(firstTriggerOf(created).addressed),
+			).rejects.toThrow(ActionForbidden);
+		}
 		expect((await view.listExecutions(routine))?.items).toEqual([]);
 	});
 
-	it("hides a system agent, which sits in no pod, from a Routine", async () => {
+	it("hides a system bot from an automation", async () => {
 		const suffix = crypto.randomUUID();
-		// A system agent belongs to the workspace and sits in no pod, which is
-		// itself why a Routine cannot name one: a Routine runs in a pod.
 		const [systemAgent] = await onDatabase((db) =>
 			db
 				.insert(agent)
 				.values({
 					workspaceId,
-					podId: null,
 					name: `Summariser ${suffix}`,
 					handle: handleFromName(`Summariser ${suffix}`),
 					color: "rose",
@@ -935,34 +919,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		const [execution] =
 			(await view.listExecutions({ agentId, routineId: created.routine.id }))?.items ?? [];
 		expect(execution?.instructions).toBe("Use the original instructions.");
-	});
-
-	it("keeps a run's result where the routine sent it when the run was accepted", async () => {
-		const created = await routines.create(
-			{ agentId },
-			{
-				name: "Morning standup",
-				instructions: "Ask the team what they are working on.",
-				triggers: [{ kind: "webhook" }],
-			},
-		);
-		expect(created.routine.results).toBe("keep_in_run");
-		const routine = { agentId, routineId: created.routine.id };
-		const changed = await routines.update(routine, { results: "post_to_chat" });
-		expect(changed.routine.results).toBe("post_to_chat");
-		const accepted = await routines.run({ ...routine, requestId: crypto.randomUUID() });
-
-		const renamed = await routines.update(routine, { name: "Daily standup" });
-		await routines.update(routine, { results: "keep_in_run" });
-
-		expect(renamed.routine.results).toBe("post_to_chat");
-		const [execution] = await onDatabase((db) =>
-			db
-				.select({ results: routineExecution.results })
-				.from(routineExecution)
-				.where(eq(routineExecution.id, accepted.executionId)),
-		);
-		expect(execution?.results).toBe("post_to_chat");
 	});
 
 	it("bounds execution titles derived from maximum-length Routine names", async () => {
@@ -1334,8 +1290,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 	});
 
 	describe("who reaches a routine", () => {
-		/** A person with `role` in the workspace, and in the routine's pod if `inPod`. */
-		const somebody = async (role: "admin" | "member", inPod: boolean) => {
+		/** A person with `role` in the workspace. */
+		const somebody = async (role: "admin" | "member") => {
 			const [person] = await onDatabase((db) =>
 				db
 					.insert(user)
@@ -1346,11 +1302,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			await onDatabase((db) =>
 				db.insert(workspaceMember).values({ workspaceId, userId: person.id, role }),
 			);
-			if (inPod) {
-				await onDatabase((db) =>
-					db.insert(podMember).values({ workspaceId, podId, userId: person.id }),
-				);
-			}
 			return person.id;
 		};
 		const aRoutineWithARun = async () => {
@@ -1365,18 +1316,19 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		const viewAs = (personId: string) =>
 			onPostgresAs(personId)(Context.get(conversations, Routines.Service));
 
-		it("lets an administrator read a routine and its history in a pod they are not in", async () => {
+		it("lets an administrator read a routine and its history on a bot they did not make", async () => {
 			const routine = await aRoutineWithARun();
-			const admin = viewAs(await somebody("admin", false));
+			const admin = viewAs(await somebody("admin"));
 
 			expect((await admin.listExecutions(routine)).items).toHaveLength(1);
 			expect(await admin.get(routine)).toMatchObject({ id: routine.routineId });
 			expect(await admin.list({ agentId })).toHaveLength(1);
 		});
 
-		it("hides a routine and its history from a member outside its pod", async () => {
+		it("hides a private bot's routine and its history from a member who did not make it", async () => {
 			const routine = await aRoutineWithARun();
-			const outsider = viewAs(await somebody("member", false));
+			await makePrivate(agentId);
+			const outsider = viewAs(await somebody("member"));
 
 			await expect(outsider.listExecutions(routine)).rejects.toThrow(ResourceHidden);
 			await expect(outsider.get(routine)).rejects.toThrow(ResourceHidden);
@@ -1397,13 +1349,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 			if (!run) throw new Error("The run asked for no turn");
 			const prepared = await prepareRunnable(execution, run);
 			const pending = await parkForApproval(prepared);
-			const decision = { podId, toolCallId: pending.id, decision: "allow_once" as const };
+			const decision = { toolCallId: pending.id, decision: "allow_once" as const };
 			const approvalsAs = (personId: string) =>
 				onPostgresAs(personId)(Context.get(conversations, Turns.Controls));
 
-			await expect(
-				approvalsAs(await somebody("member", true)).decide(decision),
-			).rejects.toBeInstanceOf(Turns.ToolApprovalForbidden);
+			await expect(approvalsAs(await somebody("member")).decide(decision)).rejects.toBeInstanceOf(
+				Turns.ToolApprovalForbidden,
+			);
 			const [undecided] = await onDatabase((db) =>
 				db.select().from(toolCall).where(eq(toolCall.id, pending.id)),
 			);
@@ -1447,7 +1399,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 
 			const decided = await Promise.race([
 				onPostgresAs(userId)(Context.get(conversations, Turns.Controls))
-					.decide({ podId, toolCallId: pending.id, decision: "allow_once" })
+					.decide({ toolCallId: pending.id, decision: "allow_once" })
 					.then(() => "decided"),
 				new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000)),
 			]);
@@ -1474,14 +1426,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Routines, against Postgres", async (
 		throw new Error("Nothing waited on a lock");
 	}
 
-	/** Parks one call to a new connection in the pod for approval, as the turn's reply. */
+	/** Parks one call to a new connection of the bot's for approval, as the turn's reply. */
 	async function parkForApproval(prepared: PreparedTurn) {
 		const [connected] = await onDatabase((db) =>
 			db
 				.insert(connection)
 				.values({
 					workspaceId,
-					podId,
+					agentId: prepared.context.agent.id,
 					name: `Linear ${crypto.randomUUID()}`,
 					handle: `linear-${crypto.randomUUID().slice(0, 8)}`,
 					url: "https://linear.example.com/mcp",

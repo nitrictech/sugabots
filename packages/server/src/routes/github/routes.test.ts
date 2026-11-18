@@ -12,10 +12,10 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const CONNECTION_ID = "0199a3a0-0000-7000-8000-000000000001";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000002";
-const POD_ID = "0199a3a0-0000-7000-8000-000000000003";
+const AGENT_ID = "0199a3a0-0000-7000-8000-000000000003";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000004";
 const GOOD_SIGNATURE = "sha256=good";
-const inPod = { workspaceId: WORKSPACE_ID, podId: POD_ID };
+const ofAgent = { workspaceId: WORKSPACE_ID, agentId: AGENT_ID };
 
 const opened: RepositoryActivity = {
 	event: "pull_request_opened",
@@ -125,7 +125,7 @@ const setupApp = (gitHubApps: Partial<GitHubApps.Interface>) =>
 
 const signedIn = { headers: { authorization: "Bearer good-token" } };
 
-describe("Setting up a pod's GitHub App", () => {
+describe("Setting up a bot's GitHub App", () => {
 	it("sends the browser on to GitHub's next page", async () => {
 		const response = await setupApp({
 			made: () =>
@@ -136,9 +136,9 @@ describe("Setting up a pod's GitHub App", () => {
 		expect(response.headers.get("location")).toBe("https://github.com/apps/acme/installations/new");
 	});
 
-	it("sends the browser back to the pod's new connection once the app is installed", async () => {
+	it("sends the browser back to the bot's new connection once the app is installed", async () => {
 		const installed = vi.fn<GitHubApps.Interface["installed"]>(() =>
-			Effect.succeed({ kind: "done", pod: inPod, connectionId: CONNECTION_ID }),
+			Effect.succeed({ kind: "done", agent: ofAgent, connectionId: CONNECTION_ID }),
 		);
 
 		const response = await setupApp({ installed }).request(
@@ -149,20 +149,20 @@ describe("Setting up a pod's GitHub App", () => {
 		expect(installed).toHaveBeenCalledWith({ installationId: 7, state: "s-1" });
 		expect(response.status).toBe(302);
 		expect(response.headers.get("location")).toBe(
-			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&pod=${POD_ID}&connection=${CONNECTION_ID}`,
+			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&agent=${AGENT_ID}&connection=${CONNECTION_ID}`,
 		);
 	});
 
-	it("sends the browser back with why setup stopped, naming the pod only when the step was the caller's", async () => {
+	it("sends the browser back with why setup stopped, naming the bot only when the step was the caller's", async () => {
 		const back = (outcome: GitHubApps.SetupOutcome) =>
 			setupApp({ made: () => Effect.succeed(outcome) })
 				.request("/connections/github/made?state=s-1", signedIn)
 				.then((response) => response.headers.get("location"));
 
-		expect(await back({ kind: "failed", pod: inPod, failure: "cancelled" })).toBe(
-			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&pod=${POD_ID}&github_error=cancelled`,
+		expect(await back({ kind: "failed", agent: ofAgent, failure: "cancelled" })).toBe(
+			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&agent=${AGENT_ID}&github_error=cancelled`,
 		);
-		expect(await back({ kind: "failed", pod: undefined, failure: "expired" })).toBe(
+		expect(await back({ kind: "failed", agent: undefined, failure: "expired" })).toBe(
 			"http://localhost:5173/connections/github/return?github_error=expired",
 		);
 	});

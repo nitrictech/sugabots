@@ -4,12 +4,17 @@ import type { ThreadDetails, ToolCallPart } from "@sugabots/contracts";
 export type ApprovalCapabilities = NonNullable<ThreadDetails["capabilities"]>;
 
 /**
- * Whether the person may answer `call`'s approval: the pod's approvals, or,
- * for a request to change the pod's sandbox, whether they manage it.
+ * Whether the person may answer `call`'s approval, which the bot `agentId`
+ * raised: the thread's approvals, or, for a request to change that bot's
+ * computer, whether they manage the bot.
  */
-export function mayAnswer(call: ToolCallPart, capabilities: ApprovalCapabilities | undefined) {
+export function mayAnswer(
+	call: ToolCallPart,
+	agentId: string,
+	capabilities: ApprovalCapabilities | undefined,
+) {
 	return call.approval?.deciders === "sandbox-managers"
-		? (capabilities?.approveSandboxRequests ?? false)
+		? (capabilities?.approveSandboxRequestsOf?.includes(agentId) ?? false)
 		: (capabilities?.approveToolCalls ?? false);
 }
 

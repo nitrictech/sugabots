@@ -4,17 +4,18 @@ import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
- * Pods: a folder of agents plus the people who can reach into it.
+ * Channels (still `pod` in code): long-running projects where many people
+ * and many bots talk, in a main chat and threads.
  *
- * A shared pod is reached by its members, and every workspace admin is one of
- * them. A Personal pod is reached by its owner and by nobody else, admins
- * included.
+ * A channel is reached by its members, and every workspace admin is one of
+ * them. A public one is listed to everybody in the workspace to join; a
+ * private one only to its members.
  */
 
 /**
- * The stable address for a pod, as it appears in a URL.
+ * The stable address for a channel, as it appears in a URL.
  *
- * A shared pod's is unique within a workspace rather than across the
+ * It is unique within a workspace rather than across the
  * installation: two workspaces may both have a `general`, and neither should
  * have to know about the other.
  */
@@ -28,17 +29,8 @@ export const podSlugSchema = Schema.String.check(
 	}),
 );
 
-/**
- * Every Personal pod's slug. Nobody reaches a Personal pod but its owner, so
- * within what one person can see it names exactly one pod: their own.
- */
-export const PERSONAL_POD_SLUG = "personal";
-
-/** A slug a shared pod may take: any but the one every Personal pod answers to, and not one shaped like an id. */
+/** A slug a channel may take: not one shaped like an id. */
 export const sharedPodSlugSchema = podSlugSchema.check(
-	Schema.makeFilter((slug) => slug !== PERSONAL_POD_SLUG, {
-		message: `"${PERSONAL_POD_SLUG}" is reserved for Personal pods`,
-	}),
 	// An address takes an id or a slug in the same place, so a slug shaped like an id would be read as one.
 	Schema.makeFilter((slug) => !ID_SHAPED.test(slug), { message: "Cannot be shaped like an id" }),
 );
@@ -92,39 +84,38 @@ export function leastUsedPodColor(taken: readonly (PodColor | null)[]): PodColor
  * whether to draw something.
  */
 export const podPermissionsSchema = Schema.Struct({
-	/** Change the pod's name, address and colour. Never on a Personal pod, which keeps all three. */
+	/** Change the channel's name, address, colour, description and visibility. */
 	rename: Schema.Boolean,
-	/** Add and remove members. Never on a Personal pod, which is one person's. */
+	/** Invite and remove people. */
 	manageMembers: Schema.Boolean,
-	/** Take yourself out of the pod. Never for an administrator, who is in every shared pod. */
+	/** Add and remove bots, which must be public. */
+	manageBots: Schema.Boolean,
+	/** Take yourself out of the channel. Never for an administrator, who is in every one. */
 	leave: Schema.Boolean,
-	createAgents: Schema.Boolean,
-	updateAgents: Schema.Boolean,
-	deleteAgents: Schema.Boolean,
-	manageConnections: Schema.Boolean,
-	/** Change what the pod's sandbox may reach and has installed, and allow its agents' requests for more. */
-	manageSandbox: Schema.Boolean,
-	/** Click and type on agents' sandbox desktops, rather than only watch them. */
-	useDesktops: Schema.Boolean,
-	/** Add, change and remove Routines, and rotate their webhook secrets. */
-	manageRoutines: Schema.Boolean,
-	runRoutines: Schema.Boolean,
-	/** Delete what the pod's bots have made: its documents and pages. */
+	/** Join it from the directory: a public channel the person isn't in. */
+	join: Schema.Boolean,
+	delete: Schema.Boolean,
+	/** Delete the files its bots made in it. */
 	deleteArtifacts: Schema.Boolean,
 });
 
 export type PodPermissions = typeof podPermissionsSchema.Type;
 
+/** Whether a channel is listed in the directory for anyone to join, or invitation-only. */
+export const podVisibilitySchema = Schema.Literals(["public", "private"]);
+export type PodVisibility = typeof podVisibilitySchema.Type;
+
 export const podSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	/** Whose Personal pod this is. `null` on a shared pod, which has no owner. */
-	ownerId: Schema.NullOr(uuidSchema),
-	kind: Schema.Literals(["personal", "shared"]),
 	name: Schema.String,
 	slug: podSlugSchema,
-	/** `null` on a Personal pod, which is drawn as a person rather than a coloured tile. */
+	/** `null` for the default colour. */
 	color: Schema.NullOr(podColorSchema),
+	description: Schema.NullOr(Schema.String),
+	visibility: podVisibilitySchema,
+	/** Whether the person asking is in it, rather than seeing it in the directory. */
+	isMember: Schema.Boolean,
 	permissions: podPermissionsSchema,
 	createdAt: isoTimestampSchema,
 });
@@ -133,12 +124,20 @@ export type Pod = typeof podSchema.Type;
 
 export const POD_NAME_MAX_LENGTH = 64;
 
+/** How long a channel's description may be. */
+export const POD_DESCRIPTION_MAX_LENGTH = 280;
+
 export const newPodSchema = Schema.Struct({
 	name: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(POD_NAME_MAX_LENGTH)),
 	/** Derived from the name when it is left out. */
 	slug: Schema.optional(sharedPodSlugSchema),
-	/** The colour fewest of the workspace's pods have when it is left out. */
+	/** The colour fewest of the workspace's channels have when it is left out. */
 	color: Schema.optional(podColorSchema),
+	description: Schema.optional(
+		Schema.NullOr(Schema.Trim.check(Schema.isMaxLength(POD_DESCRIPTION_MAX_LENGTH))),
+	),
+	/** Public when left out. */
+	visibility: Schema.optional(podVisibilitySchema),
 });
 
 export type NewPod = typeof newPodSchema.Type;
@@ -154,10 +153,7 @@ export const podMemberSchema = Schema.Struct({
 	email: emailSchema,
 	image: Schema.NullOr(Schema.String),
 	addedAt: isoTimestampSchema,
-	/**
-	 * Whether they can be taken out of this pod. Never an administrator, who is
-	 * in every shared pod, nor a Personal pod's owner.
-	 */
+	/** Whether they can be taken out of this channel. Never an administrator, who is in every one. */
 	removable: Schema.Boolean,
 });
 

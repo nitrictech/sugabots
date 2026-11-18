@@ -67,7 +67,6 @@ const generate = (
 			...compactionPrompt(prepared),
 			activity: {
 				purpose: "compaction",
-				podId: prepared.podId,
 				threadId: prepared.threadId,
 				turnId,
 			},

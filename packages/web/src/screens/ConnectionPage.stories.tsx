@@ -32,7 +32,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		podId: revenue.id,
+		agentId: "0199a3a0-0000-7000-8000-00000000b071",
 		kind: "mcp",
 		auth: "header",
 		signedIn: true,
@@ -190,7 +190,7 @@ const alerts = connection(8, {
 });
 
 const appRepositories = (account: string | null) =>
-	http.get(`${API}/pods/:podId/connections/:connectionId/repositories`, () =>
+	http.get(`${API}/agents/:agentId/connections/:connectionId/repositories`, () =>
 		HttpResponse.json({
 			account,
 			repositories:
@@ -205,7 +205,7 @@ const appRepositories = (account: string | null) =>
 	);
 
 const pagePath = (one: TestConnection) =>
-	`/nitric/settings/pods/${revenue.slug}/connections/${one.id}`;
+	`/nitric/settings/channels/${revenue.slug}/connections/${one.id}`;
 
 const meta = preview.meta({
 	title: "Views/Connection",
@@ -226,7 +226,7 @@ const meta = preview.meta({
 			alerts,
 		];
 		msw.use(
-			http.patch(`${API}/pods/:podId/connections/:connectionId`, async ({ request }) => {
+			http.patch(`${API}/agents/:agentId/connections/:connectionId`, async ({ request }) => {
 				const change = (await request.json()) as ConnectionUpdate;
 				current = {
 					...current,
@@ -363,7 +363,7 @@ export const AddingARepository = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			appRepositories("acme"),
-			http.get(`${API}/pods/:podId/connections/:connectionId/github/reachable`, async () => {
+			http.get(`${API}/agents/:agentId/connections/:connectionId/github/reachable`, async () => {
 				await delay(300);
 				return HttpResponse.json(
 					["acme/web", "acme/infra", "acme/docs"].map((repository) => ({
@@ -467,7 +467,7 @@ export const HundredsOfTools = meta.story({
 export const LoadingTools = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/pods/:podId/connections/:connectionId`, () => delay("infinite")),
+			http.get(`${API}/agents/:agentId/connections/:connectionId`, () => delay("infinite")),
 			...connectionHandlers([linearCustom]),
 			...appHandlers(),
 		);

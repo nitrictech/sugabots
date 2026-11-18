@@ -21,26 +21,19 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 			{ id: scout, handle: "scout" },
 		],
 		peopleHandles: new Set(["sam"]),
-		agentParticipantIds: new Set([host]),
-		lastAgentSpeakerId: undefined,
 		repliedToAgentId: undefined,
 		...overrides,
 	};
 }
 
 describe("a person's message", () => {
-	it("goes to the agents mentioned, whether or not they are in the thread yet", () => {
+	it("goes to an automation's own bot in its thread, not to the bots mentioned", () => {
+		// Another bot, a private one too, is reached by the automation's bot collaborating.
 		expect(
 			decideFloor(
 				input({ threadType: "routine_feed", content: "@reviewer and @scout, thoughts?" }),
 			),
-		).toEqual({
-			kind: "turns",
-			agents: [
-				{ agentId: reviewer, reason: "mention" },
-				{ agentId: scout, reason: "mention" },
-			],
-		});
+		).toEqual({ kind: "turns", agents: [{ agentId: host, reason: "default" }] });
 	});
 
 	it("goes to nobody when only people are mentioned", () => {
@@ -72,7 +65,7 @@ describe("a person's message", () => {
 		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({ kind: "nobody" });
 	});
 
-	it.each(["conversation", "bot_channel", "routine_feed"] as const)(
+	it.each(["conversation", "routine_feed"] as const)(
 		"goes to the bot in a %s when it mentions a handle that is nobody's",
 		(threadType) => {
 			expect(decideFloor(input({ threadType, content: "Raise it with @Backlog Manager" }))).toEqual(
@@ -81,7 +74,7 @@ describe("a person's message", () => {
 		},
 	);
 
-	it("goes to the bot a pod's chat message replies to, though it mentions a handle that is nobody's", () => {
+	it("goes to the bot a channel message replies to, though it mentions a handle that is nobody's", () => {
 		expect(
 			decideFloor(
 				input({
@@ -101,25 +94,6 @@ describe("a person's message", () => {
 		});
 	});
 
-	it("goes to the conversation's bot when several bots are in it", () => {
-		expect(decideFloor(input({ agentParticipantIds: new Set([host, reviewer]) }))).toEqual({
-			kind: "turns",
-			agents: [{ agentId: host, reason: "default" }],
-		});
-	});
-
-	it("falls to the agent that spoke last when nobody is mentioned", () => {
-		expect(
-			decideFloor(
-				input({
-					threadType: "routine_feed",
-					agentParticipantIds: new Set([host, reviewer]),
-					lastAgentSpeakerId: reviewer,
-				}),
-			),
-		).toEqual({ kind: "turns", agents: [{ agentId: reviewer, reason: "default" }] });
-	});
-
 	it("goes to the bots a pod's chat message mentions, and otherwise to nobody there", () => {
 		const podChat = { threadType: "pod_chat", hostAgentId: null } as const;
 		expect(decideFloor(input({ ...podChat, content: "@reviewer and @scout, thoughts?" }))).toEqual({
@@ -132,7 +106,7 @@ describe("a person's message", () => {
 		expect(decideFloor(input({ ...podChat, content: "Morning all" }))).toEqual({ kind: "nobody" });
 	});
 
-	it("goes to the bot a pod's chat message replies to, unless it mentions someone", () => {
+	it("goes to the bot a channel message replies to, unless it mentions someone", () => {
 		const replyToScout = {
 			threadType: "pod_chat",
 			hostAgentId: null,
@@ -148,23 +122,6 @@ describe("a person's message", () => {
 		});
 		expect(decideFloor(input({ ...replyToScout, content: "@sam what do you think?" }))).toEqual({
 			kind: "nobody",
-		});
-	});
-
-	it("goes to the bots a conversation between people names, and otherwise to nobody there", () => {
-		expect(decideFloor(input({ hostAgentId: null, content: "@reviewer?" }))).toEqual({
-			kind: "turns",
-			agents: [{ agentId: reviewer, reason: "mention" }],
-		});
-		expect(decideFloor(input({ hostAgentId: null, content: "Lunch?" }))).toEqual({
-			kind: "nobody",
-		});
-	});
-
-	it("ignores a last speaker who has since left the thread", () => {
-		expect(decideFloor(input({ threadType: "routine_feed", lastAgentSpeakerId: scout }))).toEqual({
-			kind: "turns",
-			agents: [{ agentId: host, reason: "default" }],
 		});
 	});
 });

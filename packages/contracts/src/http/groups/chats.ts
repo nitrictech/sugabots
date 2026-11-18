@@ -4,7 +4,7 @@ import { uploadAttachmentQuerySchema, uploadedAttachmentSchema } from "../../att
 import {
 	activityFeedSchema,
 	approvalInboxSchema,
-	botChannelSchema,
+	botTaskListSchema,
 	chatHistoryPageSchema,
 	chatListQuerySchema,
 	chatListSchema,
@@ -16,7 +16,6 @@ import {
 	newChatSchema,
 	newDirectMessageSchema,
 	newThreadSchema,
-	openBotChannelSchema,
 	podChatMarkersSchema,
 	podChatSchema,
 	routineFeedSchema,
@@ -51,11 +50,26 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: approvalInboxSchema,
 			error: refused,
 		}),
-		/** The bot's channel in the pod, opened on first use. */
-		HttpApiEndpoint.post("openBotChannel", "/workspaces/:workspace/bot-channels", {
-			params: { workspace: workspaceIdOrSlugSchema },
-			payload: openBotChannelSchema,
-			success: botChannelSchema,
+		/** A bot's tasks and automations. */
+		HttpApiEndpoint.get("botTasks", "/agents/:agentId/tasks", {
+			params: { agentId: Schema.String },
+			success: botTaskListSchema,
+			error: refused,
+		}),
+		/** Starts a task with a bot, with its first message. */
+		HttpApiEndpoint.post("startTask", "/agents/:agentId/tasks", {
+			params: { agentId: Schema.String },
+			payload: newThreadSchema,
+			success: startedThreadSchema.pipe(HttpApiSchema.status(201)),
+			error: [BadRequest, Conflict, ...refused],
+		}),
+		/**
+		 * Starts the task in which a bot the caller just made interviews them to
+		 * write its own instructions. Null when the bot is not due one.
+		 */
+		HttpApiEndpoint.post("startInterview", "/agents/:agentId/interview", {
+			params: { agentId: Schema.String },
+			success: Schema.NullOr(conversationThreadSchema),
 			error: refused,
 		}),
 		/** The caller's direct messages with other people, the most recent first. */
@@ -86,44 +100,31 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: routineFeedSchema,
 			error: refused,
 		}),
-		/** The shared pod's first chat, opened on first use. */
+		/** The channel's main chat, opened on first use. */
 		HttpApiEndpoint.post("openPodChat", "/workspaces/:workspace/pods/:podId/chat", {
 			params: { workspace: workspaceIdOrSlugSchema, podId: Schema.String },
 			success: podChatSchema,
 			error: refused,
 		}),
-		/** Starts another chat in the pod, for everyone in it. */
+		/** Starts another thread in the channel, for everyone in it. */
 		HttpApiEndpoint.post("startChat", "/pods/:podId/chats", {
 			params: { podId: Schema.String },
 			payload: newChatSchema,
 			success: podChatSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, ...refused],
 		}),
-		/** Renames one of the pod's chats that is not archived. */
+		/** Renames one of the channel's conversations that is not archived. */
 		HttpApiEndpoint.put("renameChat", "/conversations/:conversationId/name", {
 			params: { conversationId: Schema.String },
 			payload: newChatSchema,
 			success: HttpApiSchema.Empty(204),
 			error: [BadRequest, Conflict, ...refused],
 		}),
-		/** Archives one of the pod's chats other than its first, which hides it from the pod's list. */
+		/** Archives one of the channel's threads, which hides it from the channel's list. */
 		HttpApiEndpoint.put("archiveChat", "/conversations/:conversationId/archived", {
 			params: { conversationId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: [Conflict, ...refused],
-		}),
-		/** Starts a thread from a pod's chat or a bot's channel, `conversationId`, with its first message. */
-		HttpApiEndpoint.post("startThread", "/conversations/:conversationId/threads", {
-			params: { conversationId: Schema.String },
-			payload: newThreadSchema,
-			success: startedThreadSchema.pipe(HttpApiSchema.status(201)),
-			error: [BadRequest, Conflict, ...refused],
-		}),
-		/** Starts a thread between people from a message in a pod's chat, or finds the one it has. */
-		HttpApiEndpoint.post("threadFrom", "/messages/:messageId/thread", {
-			params: { messageId: Schema.String },
-			success: conversationThreadSchema,
-			error: refused,
 		}),
 		HttpApiEndpoint.get("messages", "/conversations/:conversationId/messages", {
 			params: { conversationId: Schema.String },

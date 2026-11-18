@@ -1,6 +1,6 @@
-import type { ArtifactPart, RoutineResults } from "@sugabots/contracts";
+import type { ArtifactPart } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { beforeCommit, type Database, query, transaction } from "../../database/database.ts";
@@ -25,7 +25,6 @@ import {
 } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatView } from "../chats/chat-view.ts";
-import { Chats } from "../chats/chats.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { conversationsForTests } from "../testing.ts";
@@ -84,7 +83,6 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		return row;
 	};
 	let workspaceId: string;
-	let podId: string;
 	let agentId: string;
 	let userId: string;
 
@@ -94,20 +92,18 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 
 	beforeEach(async () => {
 		delivered = [];
-		({ workspaceId, podId, agentId, userId } = await aRoutineOwner());
+		({ workspaceId, agentId, userId } = await aRoutineOwner());
 		routines = onPostgresAs(userId)(Context.get(conversations, Routines.Service));
 	});
 
 	/** A routine with one accepted manual trigger, whose run has started and asked for its turn. */
-	async function aRunningRun(results?: RoutineResults, chatId?: string) {
+	async function aRunningRun() {
 		const created = await routines.create(
 			{ agentId },
 			{
 				name: `Settlement ${crypto.randomUUID()}`,
 				instructions: "Complete the delegated work.",
 				triggers: [{ kind: "webhook" }],
-				results,
-				chatId,
 			},
 		);
 		const requestId = crypto.randomUUID();
@@ -165,7 +161,6 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 				.insert(thread)
 				.values({
 					workspaceId,
-					podId,
 					hostAgentId: agentId,
 					type: "collaboration",
 					title: "Delegated work",
@@ -309,20 +304,6 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		);
 	}
 
-	/** The messages in a pod's chat that say `content`. */
-	const podChatPosts = (content: string) =>
-		onDatabase((db) =>
-			db
-				.select({
-					id: message.id,
-					routineExecutionId: message.routineExecutionId,
-					chatId: message.threadId,
-				})
-				.from(message)
-				.innerJoin(thread, eq(thread.id, message.threadId))
-				.where(and(eq(thread.type, "pod_chat"), eq(message.content, content))),
-		);
-
 	/** The messages posted as the run's result, which open the run. */
 	const resultsOf = (executionId: string) =>
 		onDatabase((db) =>
@@ -449,7 +430,6 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 				.insert(thread)
 				.values({
 					workspaceId,
-					podId,
 					hostAgentId: agentId,
 					type: "system_agent",
 					systemAgentKey: "summarise",
@@ -764,16 +744,15 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
 	});
 
-	it("posts a completed run's last reply in the routine's thread, and in the pod's chat when its results go there", async () => {
-		const { accepted, run } = await aRunningRun("post_to_chat");
+	it("posts a completed run's last reply in the automation's thread", async () => {
+		const { accepted, run } = await aRunningRun();
 		delivered = [];
 
 		await replyAndFinish(accepted.threadId, "Morning! Two PRs merged overnight.");
 
 		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
 		const posted = await resultsOf(run.executionId);
-		// The result in the routine's thread, and its copy in the pod's chat, both linked to the run.
-		expect(posted.map((row) => row.threadType).sort()).toEqual(["pod_chat", "routine_feed"]);
+		expect(posted.map((row) => row.threadType)).toEqual(["routine_feed"]);
 		const inFeed = posted.find((row) => row.threadType === "routine_feed");
 		const conversationId = inFeed?.conversationId;
 		if (!conversationId) throw new Error("The result was posted outside a conversation");
@@ -792,9 +771,6 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 				},
 			}),
 		});
-		expect(await podChatPosts("Morning! Two PRs merged overnight.")).toEqual([
-			{ id: expect.any(String), routineExecutionId: run.executionId, chatId: expect.any(String) },
-		]);
 		expect(inFeed).toMatchObject({
 			message: {
 				authorAgentId: agentId,
@@ -818,56 +794,18 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		);
 	});
 
-	it("posts a run's result in the pod's chat the routine chose, and in its first once that one is archived", async () => {
-		const chats = Context.get(conversations, Chats.Service);
-		const pricing = await onPostgresAs(userId)(chats).startChat({ podId, name: "Pricing" });
-		const first = await onPostgresAs(userId)(chats).openPodChat({ workspace: workspaceId, podId });
-
-		const chosen = await aRunningRun("post_to_chat", pricing.id);
-		await replyAndFinish(chosen.accepted.threadId, "Prices checked.");
-		expect(await podChatPosts("Prices checked.")).toEqual([
-			expect.objectContaining({ chatId: pricing.id }),
-		]);
-
-		await onDatabase((db) =>
-			db.update(thread).set({ archivedAt: new Date() }).where(eq(thread.id, pricing.id)),
-		);
-		const routineId = chosen.run.routineId;
-		await runOnPostgres(releaseRun(chosen.run));
-		const again = await routines.run({ agentId, routineId, requestId: crypto.randomUUID() });
-		await startRunning(runner, routineId);
-		await replyAndFinish(again.threadId, "Prices checked again.");
-		expect(await podChatPosts("Prices checked again.")).toEqual([
-			expect.objectContaining({ chatId: first.id }),
-		]);
-	});
-
-	it("tells the agent its last reply goes to the chat", async () => {
-		const { accepted } = await aRunningRun("post_to_chat");
+	it("tells the bot its last reply goes to the automation's thread", async () => {
+		const { accepted } = await aRunningRun();
 
 		const [trigger] = await onDatabase((db) =>
 			db.select().from(message).where(eq(message.threadId, accepted.threadId)),
 		);
 
-		expect(trigger?.content).toContain(
-			"your last reply is posted in this routine's thread and in the pod's chat",
-		);
-	});
-
-	it("posts a run's result in the routine's thread only, when its results are not for the pod's chat", async () => {
-		const { accepted, run } = await aRunningRun();
-
-		await replyAndFinish(accepted.threadId, "Triaged and assigned.");
-
-		expect(await executionOf(run.executionId)).toMatchObject({ state: "completed" });
-		expect(await resultsOf(run.executionId)).toEqual([
-			expect.objectContaining({ threadType: "routine_feed" }),
-		]);
-		expect(await podChatPosts("Triaged and assigned.")).toEqual([]);
+		expect(trigger?.content).toContain("your last reply is posted in this automation's thread");
 	});
 
 	it("posts each artifact a run wrote with its result, at the last version any of its turns wrote", async () => {
-		const { accepted, run } = await aRunningRun("post_to_chat");
+		const { accepted, run } = await aRunningRun();
 		const dashboard = {
 			artifactId: crypto.randomUUID(),
 			kind: "html" as const,
@@ -884,7 +822,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 		await replyAndFinish(accepted.threadId, "Dashboard updated.", [{ ...dashboard, version: 8 }]);
 
 		const posted = await resultsOf(run.executionId);
-		expect(posted.map((row) => row.threadType).sort()).toEqual(["pod_chat", "routine_feed"]);
+		expect(posted.map((row) => row.threadType)).toEqual(["routine_feed"]);
 		for (const { message: result } of posted) {
 			expect(result.parts).toEqual([
 				{ type: "text", text: "Dashboard updated." },
@@ -916,7 +854,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	});
 
 	it("posts nothing when the run's last reply has no text and it wrote no artifact", async () => {
-		const { accepted, run } = await aRunningRun("post_to_chat");
+		const { accepted, run } = await aRunningRun();
 
 		await replyAndFinish(accepted.threadId, "  ");
 
@@ -963,7 +901,7 @@ describe.skipIf(!process.env.DATABASE_URL)("routine settlement, against Postgres
 	});
 
 	it("posts nothing for a run that failed", async () => {
-		const { accepted, run } = await aRunningRun("post_to_chat");
+		const { accepted, run } = await aRunningRun();
 
 		await announce(ended(accepted.threadId, failed(userText`Model failed`)));
 		await finishTurnsIn(accepted.threadId);

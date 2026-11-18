@@ -12,7 +12,7 @@
  * reader can tell.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 interface RetiredWord {
 	/** The singular in lower case, as it starts an identifier. */
@@ -103,7 +103,11 @@ function areaOf(path: string): string {
 function trackedFiles(): Map<string, string> {
 	const paths = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
 		.split("\0")
-		.filter((path) => path !== "" && !SKIPPED_PATHS.some((skipped) => skipped.test(path)));
+		// A tracked file deleted in the working tree has nothing left to check.
+		.filter(
+			(path) =>
+				path !== "" && !SKIPPED_PATHS.some((skipped) => skipped.test(path)) && existsSync(path),
+		);
 	return new Map(paths.map((path) => [path, readFileSync(path, "utf8")]));
 }
 

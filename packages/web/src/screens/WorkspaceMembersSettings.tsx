@@ -10,10 +10,9 @@ import {
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
-import { useAgents } from "@/lib/agents.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { formatTimeAfterVerb } from "@/lib/list-time.ts";
-import { usePlacePodMember, usePodMembers, usePods } from "@/lib/pods.ts";
+import { usePlacePodMember, usePodBots, usePodMembers, usePods } from "@/lib/pods.ts";
 import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import {
 	useCancelWorkspaceInvitation,
@@ -145,7 +144,7 @@ function Roster({
 	return (
 		<SettingsPage
 			title="People"
-			description="Everyone in the workspace. Add them to pods to give them bots."
+			description="Everyone in the workspace. Add them to channels to work together there."
 			headerAction={
 				canManage && (
 					<SettingsAddButton onClick={() => setInviting(true)}>Invite people</SettingsAddButton>
@@ -315,7 +314,7 @@ function MemberPage({
 	});
 	const role = member.role;
 	const isOwner = role === "owner";
-	const sharedPods = pods.data?.filter((pod) => pod.kind === "shared") ?? [];
+	const sharedPods = pods.data?.filter((pod) => pod.isMember || pod.visibility === "public") ?? [];
 	// Your own role is not yours to change: demoting yourself takes away the
 	// control you would need to undo it. Leaving stays, behind a confirmation.
 	// The owner's role and place change only by their handing ownership on.
@@ -384,11 +383,11 @@ function MemberPage({
 			</SettingsGroup>
 			{sharedPods.length > 0 && (
 				<SettingsGroup
-					label="Pods"
+					label="Channels"
 					note={
 						administersWorkspace(role)
-							? "Administrators are in every shared pod."
-							: "They can talk to every bot in the pods they are in."
+							? "Administrators are in every channel."
+							: "The channels they are in, and the public ones they could join."
 					}
 				>
 					{sharedPods.map((pod) => (
@@ -425,8 +424,8 @@ function MemberPage({
 					label={isYou ? "Leave workspace" : "Remove from workspace"}
 					description={
 						isYou
-							? "You lose access to every pod in the workspace."
-							: "They lose access to every pod straight away."
+							? "You lose access to every channel and bot in the workspace."
+							: "They lose access to every channel and bot straight away."
 					}
 					action={isYou ? "Leave" : "Remove"}
 					onClick={() => setConfirming(true)}
@@ -453,8 +452,8 @@ function MemberPage({
 				title={isYou ? "Leave this workspace?" : `Remove ${member.user.name}?`}
 				description={
 					isYou
-						? "You lose every pod in it, and your Personal pod and its conversations are deleted. Getting back in means somebody inviting you again."
-						: "They lose this workspace and every pod in it, and their Personal pod and its conversations are deleted. Pods they made stay."
+						? "You leave every channel in it, and your Personal Assistant and its tasks are deleted. Getting back in means somebody inviting you again."
+						: "They leave this workspace and every channel in it, and their Personal Assistant and its tasks are deleted. Channels and bots they made stay."
 				}
 				confirmLabel={isYou ? "Leave" : "Remove"}
 				pending={ending.isPending}
@@ -487,9 +486,7 @@ function PodMembershipRow({
 }) {
 	const members = usePodMembers(pod.id);
 	const place = usePlacePodMember(pod.id);
-	const { agents } = useAgents();
-	const bots =
-		agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null) ?? [];
+	const bots = usePodBots(pod.id).data ?? [];
 	const people = members.data?.length;
 	const inPod = members.data?.some((member) => member.userId === userId) ?? false;
 	const counts = [

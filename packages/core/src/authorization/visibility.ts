@@ -10,27 +10,32 @@ import {
 	type PodStanding,
 	ResourceHidden,
 	reachedPodStandingsFor,
+	reachesAgentFor,
 	reachesPodFor,
 	reachesThreadFor,
+	type ThreadReachColumns,
 	type ThreadStanding,
 	threadStandingFor,
 } from "./access.ts";
 import { CurrentActor } from "./current-actor.ts";
 
 /**
- * What the current actor can see. A pod is seen by whoever reaches it, and
- * everything inside it, its conversations and threads included, by whoever sees the
- * pod. A direct message between people is in no pod, and is seen by the
- * people in it. Lists are scoped by `reachesPodFor` and `reachesThreadFor`,
- * the rules `Authorization` checks for one pod or thread written as SQL, so a
+ * What the current actor can see. A channel's conversations are seen by the
+ * people in it; a bot, and its tasks and automations, by whoever reaches the
+ * bot; a collaboration by whoever sees the conversation it was opened from;
+ * a direct message by the people in it. Lists are scoped by
+ * `reachesPodFor`, `reachesAgentFor` and `reachesThreadFor`, the rules
+ * `Authorization` checks for one channel, bot or thread written as SQL, so a
  * list holds what reading each one directly would allow.
  */
 export interface Interface {
-	/** The rule for the pods the actor reaches, for queries that scope a list. */
+	/** The rule for the channels the actor is in, for queries that scope a list. */
 	readonly reachesPod: Effect.Effect<ReachesPod, never, CurrentActor.Service>;
-	/** The rule for the threads the actor reaches, in a pod or in none, for queries that scope a list. */
+	/** The rule for the bots the actor reaches, for queries that scope a list. */
+	readonly reachesAgent: Effect.Effect<ReachesAgent, never, CurrentActor.Service>;
+	/** The rule for the threads the actor reaches, for queries that scope a list. */
 	readonly reachesThread: Effect.Effect<ReachesThread, never, CurrentActor.Service>;
-	/** The pods the actor reaches in the workspace, by name, with their standing in each. */
+	/** The channels the actor is in, by name, with their standing in each. */
 	readonly pods: (workspaceId: string) => Effect.Effect<PodStanding[], never, CurrentActor.Service>;
 	/** The thread, with the actor's standing towards it. */
 	readonly thread: (
@@ -44,21 +49,17 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Visibility") {}
 
-/**
- * SQL for "somebody reaches this pod", given the column naming the pod:
- * `thread.podId`, `agent.podId`, `pod.id`.
- */
+/** SQL for "somebody is in this channel", given the column naming it: `thread.podId`, `pod.id`. */
 export type ReachesPod = (podId: SQLWrapper) => SQL<boolean>;
+
+/** SQL for "somebody reaches this bot", given the column naming it: `agent.id`, `thread.hostAgentId`. */
+export type ReachesAgent = (agentId: SQLWrapper) => SQL<boolean>;
 
 /**
  * SQL for "somebody reaches this thread", given the columns naming it, its
- * workspace and its pod: `thread`, or an alias of it.
+ * workspace, type, conversation, channel and bot: `thread`, or an alias of it.
  */
-export type ReachesThread = (row: {
-	id: SQLWrapper;
-	workspaceId: SQLWrapper;
-	podId: SQLWrapper;
-}) => SQL<boolean>;
+export type ReachesThread = (row: ThreadReachColumns) => SQL<boolean>;
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Visibility");
@@ -68,6 +69,13 @@ export const make = Effect.gen(function* () {
 			({ userId }) =>
 				(podId) =>
 					reachesPodFor(podId, userId),
+		),
+
+		reachesAgent: Effect.map(
+			CurrentActor.Service,
+			({ userId }) =>
+				(agentId) =>
+					reachesAgentFor(agentId, userId),
 		),
 
 		reachesThread: Effect.map(

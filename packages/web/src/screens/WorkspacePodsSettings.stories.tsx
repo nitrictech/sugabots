@@ -3,7 +3,7 @@ import { listedConnection, type TestConnection } from "@sugabots/contracts/testi
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { revenue } from "@/shell/story-fixtures.ts";
+import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, StoryApp, storyPods, storyUser, storyWorkspace } from "../story-app.tsx";
 
 /*
@@ -13,8 +13,9 @@ import { appHandlers, StoryApp, storyPods, storyUser, storyWorkspace } from "../
  */
 
 const API = import.meta.env.VITE_API_URL as string;
-const pods = `/${storyWorkspace.slug}/settings/pods`;
-const revenuePage = (page: "connections" | "people" | "bots") => `${pods}/${revenue.slug}/${page}`;
+const pods = `/${storyWorkspace.slug}/settings/channels`;
+const revenuePage = (page: "people" | "bots") => `${pods}/${revenue.slug}/${page}`;
+const growthDeskConnections = `${pods}/${revenue.slug}/agents/${growthDesk.handle}/connections`;
 const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 
 const people = [
@@ -47,7 +48,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		podId: revenue.id,
+		agentId: "0199a3a0-0000-7000-8000-00000000b071",
 		name,
 		handle: name.toLowerCase(),
 		url,
@@ -88,8 +89,8 @@ const revenueHandlers = [
 	http.get(`${API}/pods/:podId/members`, ({ params }) =>
 		HttpResponse.json(params.podId === revenue.id ? people : people.slice(0, 1)),
 	),
-	http.get(`${API}/pods/:podId/connections`, ({ params }) =>
-		HttpResponse.json(params.podId === revenue.id ? connections.map(listedConnection) : []),
+	http.get(`${API}/agents/:agentId/connections`, ({ params }) =>
+		HttpResponse.json(params.agentId === growthDesk.id ? connections.map(listedConnection) : []),
 	),
 ];
 
@@ -112,9 +113,7 @@ export const Navigation = meta.story({
 			"true",
 		);
 		await expect(within(nav).getByRole("heading", { name: "Personal pods" })).toBeInTheDocument();
-		await expect(
-			await within(nav).findByRole("link", { name: "Connections, 2" }),
-		).toBeInTheDocument();
+		await expect(await within(nav).findByRole("link", { name: /^Bots/ })).toBeInTheDocument();
 		await expect(within(nav).getByRole("button", { name: "New pod" })).toBeInTheDocument();
 	},
 });
@@ -128,9 +127,9 @@ export const SharedPod = meta.story({
 	},
 });
 
-/** The apps every bot in the pod shares, each with what its tools may do. */
+/** The apps a bot is connected to, each with what its tools may do. */
 export const Connections = meta.story({
-	render: () => <StoryApp path={revenuePage("connections")} />,
+	render: () => <StoryApp path={growthDeskConnections} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Connections" })).toBeInTheDocument();
 		await expect(await canvas.findByRole("article", { name: "HubSpot" })).toBeInTheDocument();
@@ -173,13 +172,13 @@ export const Bots = meta.story({
 
 /**
  * Personal: only you, so it has no People, and nothing to rename or delete,
- * so no General. Its settings open on its Connections.
+ * so no General. Its settings open on its Bots.
  */
 export const PersonalPod = meta.story({
 	render: () => <StoryApp path={`${pods}/personal`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Connections", level: 2 }),
+			await canvas.findByRole("heading", { name: "Bots", level: 2 }),
 		).toBeInTheDocument();
 		const personal = canvas.getByRole("group", { name: "Personal pods" });
 		await expect(within(personal).queryByRole("link", { name: "General" })).toBeNull();
@@ -198,10 +197,9 @@ export const AsAMember = meta.story({
 				...pod.permissions,
 				rename: false,
 				manageMembers: false,
-				manageConnections: false,
-				manageSandbox: false,
-				deleteAgents: false,
-				leave: pod.kind === "shared",
+				manageBots: false,
+				delete: false,
+				leave: true,
 			},
 		}));
 		msw.use(...revenueHandlers, ...appHandlers({ role: "member", pods: asMember }));

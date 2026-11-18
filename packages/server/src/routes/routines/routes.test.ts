@@ -355,8 +355,6 @@ function aRoutine(): Routine {
 		instructions: "Handle input.",
 		triggers: [{ id: TRIGGER_ID, kind: "webhook", auth: { kind: "bearer" } }],
 		state: "enabled",
-		results: "keep_in_run",
-		chatId: null,
 		createdById: USER_ID,
 		createdByAgentId: null,
 		createdAt: "2026-10-15T00:00:00.000Z",

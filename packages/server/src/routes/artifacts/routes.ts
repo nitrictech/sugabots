@@ -11,8 +11,11 @@ export const artifactRoutes = HttpApiBuilder.group(ServerApi, "artifacts", (hand
 		const artifacts = yield* Artifacts.Service;
 		const pages = yield* ArtifactPages.Service;
 		return handlers
-			.handle("list", ({ params }) =>
-				artifacts.list(params).pipe(asSessionUser, asHttpError(refusals)),
+			.handle("listInPod", ({ params }) =>
+				artifacts.listInPod(params).pipe(asSessionUser, asHttpError(refusals)),
+			)
+			.handle("listForAgent", ({ params }) =>
+				artifacts.listForAgent(params).pipe(asSessionUser, asHttpError(refusals)),
 			)
 			.handle("get", ({ params }) =>
 				artifacts.get(params).pipe(asSessionUser, asHttpError(refusals)),

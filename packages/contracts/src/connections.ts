@@ -10,12 +10,12 @@ import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
- * Connections: MCP servers a pod owner has configured for every agent in the pod.
+ * Connections: the MCP servers, HTTP endpoints and GitHub app a bot uses.
  *
- * A connection is the workspace's: a URL, a secret entered once and sealed or
- * an OAuth sign-in, and the tools the server was found to offer. Every bot in
- * the pod gets those tools, as far as each tool's `access` allows. Remote
- * servers over Streamable HTTP only; nothing here spawns a process.
+ * A connection is one bot's: a URL, a secret entered once and sealed or an
+ * OAuth sign-in, and the tools the server was found to offer. The bot gets
+ * those tools, as far as each tool's `access` allows. Remote servers over
+ * Streamable HTTP only; nothing here spawns a process.
  */
 
 /** A tool as the server described it when last asked. The text is the server's. */
@@ -46,7 +46,7 @@ export const connectionAuthSchema = Schema.Literals(["header", "oauth"]);
 export type ConnectionAuth = typeof connectionAuthSchema.Type;
 
 /**
- * What the pod's bots may do with one of a connection's tools.
+ * What the bot may do with one of a connection's tools.
  *
  * - `allow`: each call runs straight away.
  * - `ask`: each call waits for a person to allow it.
@@ -56,7 +56,7 @@ export const connectionAccesses = ["off", "ask", "allow"] as const;
 export const connectionAccessSchema = Schema.Literals(connectionAccesses);
 export type ConnectionAccess = typeof connectionAccessSchema.Type;
 
-/** A connection's tool as the server described it, with what the pod's bots may do with it. */
+/** A connection's tool as the server described it, with what the bot may do with it. */
 export const connectionToolWithAccessSchema = Schema.Struct({
 	...connectionToolSchema.fields,
 	access: connectionAccessSchema,
@@ -64,7 +64,7 @@ export const connectionToolWithAccessSchema = Schema.Struct({
 export type ConnectionToolWithAccess = typeof connectionToolWithAccessSchema.Type;
 
 /**
- * A connection's tool as its settings show it: what the pod's bots may do with
+ * A connection's tool as its settings show it: what the bot may do with
  * it, without the server's description, which can run to many kilobytes.
  */
 export const connectionToolSettingSchema = connectionToolWithAccessSchema.mapFields(
@@ -96,7 +96,7 @@ export function toolAccessCountsOf(
 export const CONNECTION_SIGN_IN_CALLBACK_PATH = "/connections/oauth/callback";
 
 /**
- * The web page a connection's OAuth sign-in returns to, with the pod's ids
+ * The web page a connection's OAuth sign-in returns to, with the bot's ids
  * and, when it did not finish, an `oauth_error` code from
  * {@link connectionSignInFailures}.
  */
@@ -108,7 +108,7 @@ export const CONNECTION_SIGN_IN_RETURN_PATH = "/connections/oauth/return";
  *
  * - `missing_state`: the callback carried no `state`.
  * - `unknown_state`: no connection is waiting on that `state`.
- * - `not_allowed`: the person may no longer manage the pod's connections.
+ * - `not_allowed`: the person may no longer manage the bot's connections.
  * - `refused`: the authorization server refused, or sent no code.
  * - `not_completed`: exchanging the code for tokens failed.
  */
@@ -125,7 +125,7 @@ export type ConnectionSignInFailure = typeof connectionSignInFailureSchema.Type;
 export const connectionSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	podId: uuidSchema,
+	agentId: uuidSchema,
 	name: Schema.String,
 	/** Prefixes the server's tool names for the model: `exa.web_search_exa`. */
 	handle: handleSchema,
@@ -163,7 +163,7 @@ export const connectionSchema = Schema.Struct({
 
 export type Connection = typeof connectionSchema.Type;
 
-/** One connection with its tools, each with what the pod's bots may do with it. */
+/** One connection with its tools, each with what the bot may do with it. */
 export const connectionWithToolsSchema = Schema.Struct({
 	...connectionSchema.fields,
 	tools: Schema.Array(connectionToolSettingSchema),

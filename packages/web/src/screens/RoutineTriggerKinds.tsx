@@ -1,9 +1,9 @@
-import type { Pod } from "@sugabots/contracts";
+import type { Agent } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Search } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { useConnections } from "@/lib/connections.ts";
-import { podSettingsLink } from "@/lib/links.ts";
+import { agentSettingsPageLink } from "@/lib/links.ts";
 import {
 	TRIGGER_KINDS,
 	type TriggerKind,
@@ -16,7 +16,7 @@ import { RoutineTriggerIcon } from "./ChatActivityRow.tsx";
 
 /*
  * The kinds of trigger a routine may have: Sugabots' own, and those of the
- * integrations its bot's pod connects to. There may be many, so the
+ * integrations its bot connects to. There may be many, so the
  * first step of adding one is a searchable list of only those the pod can use.
  */
 
@@ -40,20 +40,20 @@ export function TriggerKindMark({ choice }: { choice: TriggerKindChoice }) {
 
 /**
  * The first step of adding a trigger: choosing its kind, found by typing part
- * of its name, from Sugabots' own and those of the integrations `pod` is
+ * of its name, from Sugabots' own and those of the integrations `bot` is
  * connected to, with a way to connect it to more.
  */
 export function TriggerKindStep({
-	pod,
+	bot,
 	onChoose,
 	done,
 }: {
-	/** The bot's pod; undefined while no bot is chosen, which leaves only Sugabots' own. */
-	pod: Pod | undefined;
+	/** The bot; undefined while none is chosen, which leaves only Sugabots' own. */
+	bot: { agent: Agent } | undefined;
 	onChoose: (kind: TriggerKind) => void;
 	done: () => void;
 }) {
-	const connections = useConnections(pod?.id);
+	const connections = useConnections(bot?.agent.id);
 	const connected = new Set(connections.data?.map((one) => one.kind));
 	const [query, setQuery] = useState("");
 	const needle = useDeferredValue(query.trim().toLowerCase());
@@ -92,8 +92,8 @@ export function TriggerKindStep({
 				</label>
 				<div className="-mx-1 flex max-h-picker flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 					{own.length > 0 && <SettingsGroup label="Built in">{own.map(row)}</SettingsGroup>}
-					{pod && (
-						<SettingsGroup label="From this pod's connections">
+					{bot && (
+						<SettingsGroup label="From this bot's connections">
 							{integrations.map(row)}
 							{/* Set as the kinds above are, a name and a line under it, so the dialog keeps to their two styles. */}
 							<SettingsRow
@@ -106,13 +106,13 @@ export function TriggerKindStep({
 								}
 								sub={
 									integrations.length > 0
-										? `In ${pod.name}'s settings`
-										: `Connect an app in ${pod.name}'s settings`
+										? `In ${bot.agent.name}'s settings`
+										: `Connect an app in ${bot.agent.name}'s settings`
 								}
 								trailing={
 									<ArrowUpRight aria-hidden size={15} className="shrink-0 text-subtle-foreground" />
 								}
-								render={<Link {...podSettingsLink(pod)} />}
+								render={<Link {...agentSettingsPageLink(bot.agent, "connections")} />}
 							/>
 						</SettingsGroup>
 					)}

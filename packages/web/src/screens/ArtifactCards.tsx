@@ -22,13 +22,11 @@ export type WrittenArtifact = Omit<ArtifactPart, "type">;
  */
 export function ArtifactCards({
 	parts,
-	podId,
 	botName,
 	onOpen,
 	className,
 }: {
 	parts: readonly MessagePart[];
-	podId: string;
 	/** The bot that wrote the reply, whom each card names as its maker. */
 	botName: string;
 	onOpen: (artifactId: string) => void;
@@ -43,7 +41,6 @@ export function ArtifactCards({
 			{written.map((artifact) => (
 				<li key={artifact.artifactId} className="w-full">
 					<ArtifactCard
-						podId={podId}
 						artifact={artifact}
 						botName={botName}
 						onOpen={() => onOpen(artifact.artifactId)}
@@ -55,30 +52,22 @@ export function ArtifactCards({
 }
 
 function ArtifactCard({
-	podId,
 	artifact,
 	botName,
 	onOpen,
 }: {
-	podId: string;
 	artifact: WrittenArtifact;
 	botName: string;
 	onOpen: () => void;
 }) {
-	const query = useArtifact(podId, artifact.artifactId, artifact.version);
+	const query = useArtifact(artifact.artifactId, artifact.version);
 	const content = !query.isError
 		? query.data?.content
 		: isApiFailure(query.error) && query.error._tag === "NotFound"
 			? "deleted"
 			: "failed";
 	return (
-		<ArtifactCardView
-			podId={podId}
-			artifact={artifact}
-			botName={botName}
-			content={content}
-			onOpen={onOpen}
-		/>
+		<ArtifactCardView artifact={artifact} botName={botName} content={content} onOpen={onOpen} />
 	);
 }
 
@@ -92,13 +81,11 @@ const COLLAPSED_WIDTH = "max-w-140";
  * shows it in place, and has a way to open it large.
  */
 export function ArtifactCardView({
-	podId,
 	artifact,
 	botName,
 	content,
 	onOpen,
 }: {
-	podId: string;
 	artifact: WrittenArtifact;
 	botName: string;
 	/**
@@ -190,7 +177,7 @@ export function ArtifactCardView({
 				<kind.Inline
 					title={artifact.title}
 					content={content}
-					at={{ podId, artifactId: artifact.artifactId, version: artifact.version }}
+					at={{ artifactId: artifact.artifactId, version: artifact.version }}
 					onOpen={onOpen}
 				/>
 			)}

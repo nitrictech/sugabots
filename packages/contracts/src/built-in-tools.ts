@@ -1,12 +1,12 @@
 import { Schema } from "effect";
 
 /**
- * The built-in tools the product ships: tools that do work for an agent,
- * offered to every crew agent unless an admin switches one off for it (ADR
- * 005). A key is what an agent's `disabledTools` lists; for every tool but
+ * The built-in tools the product ships: tools that do work for a bot,
+ * offered to every bot unless its creator or an admin switches one off for it
+ * (ADR 005). A key is what a bot's `disabledTools` lists; for every tool but
  * `routines` it is also what the model calls and what a `tool_call` records,
- * and `routines` covers the tools a bot reads and changes its own routines
- * with. The names and descriptions are for the agent's settings page.
+ * and `routines` covers the tools a bot reads and changes its own automations
+ * with. The names and descriptions are for the bot's settings page.
  */
 export const builtInToolKeySchema = Schema.Literals([
 	"web_fetch",
@@ -43,31 +43,31 @@ export const builtInToolCatalog: readonly BuiltInToolEntry[] = [
 	},
 	{
 		key: "routines",
-		name: "Manage its routines",
-		description: "Lists, sets up and changes its own schedules when a pod admin asks it to.",
+		name: "Manage its automations",
+		description: "Lists, sets up and changes its own automations when someone who manages it asks.",
 		usesWeb: false,
 	},
 	{
 		key: "artifact_list",
-		name: "List artifacts",
-		description: "Lists the documents and HTML pages kept in the bot's pod.",
+		name: "List files",
+		description: "Lists the files it made, and those made in the channel it is in.",
 		usesWeb: false,
 	},
 	{
 		key: "artifact_read",
-		name: "Read artifacts",
-		description: "Reads a document or HTML page kept in the bot's pod.",
+		name: "Read files",
+		description: "Reads a file it made, or one made in the channel it is in.",
 		usesWeb: false,
 	},
 	{
 		key: "artifact_write",
-		name: "Write artifacts",
-		description: "Makes a document or HTML page the pod keeps, or saves a new version of one.",
+		name: "Write files",
+		description: "Makes a document or HTML page, or saves a new version of one.",
 		usesWeb: false,
 	},
 	{
 		key: "artifact_edit",
-		name: "Edit artifacts",
+		name: "Edit files",
 		description: "Changes part of a document or HTML page, as a new version.",
 		usesWeb: false,
 	},

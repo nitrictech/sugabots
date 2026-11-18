@@ -81,7 +81,7 @@ export function SandboxNetworkGroups({
 			) : (
 				<SettingsGroup
 					label="Network"
-					note="Every pod's computer connects to these hosts, and each pod adds its own under Computer in its settings. Blocked hosts still apply. When a bot needs another, it asks in its thread, and the pod decides."
+					note="Every bot's computer connects to these hosts, and each bot adds its own under Computer in its settings. Blocked hosts still apply. When a bot needs another, it asks in its task, and someone who manages the bot decides."
 				>
 					{modeRow}
 					{settings.addedHosts.map((added) => (
@@ -110,8 +110,8 @@ export function SandboxNetworkGroups({
 					label="Blocked hosts"
 					note={
 						open
-							? "No pod's computer connects to these, or to their subdomains."
-							: "No pod's computer connects to these, whatever it allows, and bots' requests for them are refused. Blocking a host also keeps out any wildcard that covers it."
+							? "No bot's computer connects to these, or to their subdomains."
+							: "No bot's computer connects to these, whatever it allows, and bots' requests for them are refused. Blocking a host also keeps out any wildcard that covers it."
 					}
 				>
 					{settings.blockedHosts.map((blocked) => (

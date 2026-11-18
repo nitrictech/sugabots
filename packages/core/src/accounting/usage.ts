@@ -6,7 +6,7 @@ import {
 	type UsageQuery,
 	type WorkspaceUsage,
 } from "@sugabots/contracts";
-import { and, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
@@ -16,7 +16,6 @@ import {
 	agent,
 	modelProvider,
 	modelRequest,
-	pod,
 	providerModel,
 	workspace,
 } from "../database/schema.ts";
@@ -25,8 +24,9 @@ import {
 export interface Interface {
 	/**
 	 * One month's spend in a workspace named by its id or its slug, with the
-	 * month and its days in the workspace's time zone. It shows every pod's and every bot's
-	 * spend, so it takes the current actor's `workspace.usage.manage`.
+	 * month and its days in the workspace's time zone. It shows every bot's
+	 * spend, so it takes the current actor's `workspace.usage.manage`; the
+	 * Personal Assistants', each its own person's, only together.
 	 */
 	readonly month: (
 		input: UsageQuery & { workspace: string },
@@ -85,6 +85,10 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 	);
 	const byBots = eq(modelRequest.purpose, "agent-turn");
 	const bySystemAgents = ne(modelRequest.purpose, "agent-turn");
+	const byPersonalAssistants = sql`exists (
+		select 1 from ${agent}
+		where ${agent.id} = ${modelRequest.agentId} and ${agent.assistantOf} is not null
+	)`;
 	const spend = {
 		usd: sql<number>`coalesce(sum(${modelRequest.costUsd}), 0)`.mapWith(Number),
 		// A failed request answered nothing, which providers don't charge for.
@@ -103,6 +107,7 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 	// which runs them one after another anyway.
 	const total = yield* spendWhere(inMonth);
 	const systemAgents = yield* spendWhere(and(inMonth, bySystemAgents));
+	const personalAssistants = yield* spendWhere(and(inMonth, byBots, byPersonalAssistants));
 	const dayRows = yield* query((db) =>
 		db
 			.select({
@@ -123,14 +128,12 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 				color: agent.color,
 				face: agent.face,
 				shape: agent.shape,
-				podName: pod.name,
 				...spend,
 			})
 			.from(modelRequest)
 			.leftJoin(agent, eq(agent.id, modelRequest.agentId))
-			.leftJoin(pod, eq(pod.id, agent.podId))
-			.where(and(inMonth, byBots))
-			.groupBy(modelRequest.agentId, agent.name, agent.color, agent.face, agent.shape, pod.name),
+			.where(and(inMonth, byBots, isNull(agent.assistantOf)))
+			.groupBy(modelRequest.agentId, agent.name, agent.color, agent.face, agent.shape),
 	);
 	const models = yield* query((db) =>
 		db
@@ -159,28 +162,7 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 				providerModel.displayName,
 			),
 	);
-	const pods = yield* query((db) =>
-		db
-			.select({ podId: modelRequest.podId, name: pod.name, color: pod.color, ...spend })
-			.from(modelRequest)
-			.leftJoin(pod, eq(pod.id, modelRequest.podId))
-			.where(and(inMonth, byBots))
-			.groupBy(modelRequest.podId, pod.name, pod.color),
-	);
-	const podIds = pods.flatMap(({ podId }) => (podId ? [podId] : []));
-	const botCounts =
-		podIds.length === 0
-			? []
-			: yield* query((db) =>
-					db
-						.select({ podId: agent.podId, bots: sql<number>`count(*)`.mapWith(Number) })
-						.from(agent)
-						.where(and(inArray(agent.podId, podIds), isNull(agent.systemAgentKey)))
-						.groupBy(agent.podId),
-				);
-
 	const spentByDay = new Map(dayRows.map((row) => [row.date, row.usd]));
-	const botsIn = new Map(botCounts.map((row) => [row.podId, row.bots]));
 	return {
 		month,
 		timeZone,
@@ -190,12 +172,8 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 			bots.flatMap(({ agentId, ...rest }) => (agentId ? [{ agentId, ...rest }] : [])),
 		),
 		models: mostExpensiveFirst(models),
-		pods: mostExpensiveFirst(
-			pods.flatMap(({ podId, ...rest }) =>
-				podId ? [{ podId, ...rest, botCount: botsIn.get(podId) ?? 0 }] : [],
-			),
-		),
 		systemAgents,
+		personalAssistants,
 	} satisfies WorkspaceUsage;
 });
 

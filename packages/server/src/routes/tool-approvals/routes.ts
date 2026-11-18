@@ -12,7 +12,6 @@ export const toolApprovalRoutes = HttpApiBuilder.group(ServerApi, "toolApprovals
 		return handlers.handle("decide", ({ params, payload }) =>
 			turns
 				.decide({
-					podId: params.podId,
 					toolCallId: params.toolCallId,
 					decision: payload.decision,
 				})

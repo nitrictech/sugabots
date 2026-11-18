@@ -38,13 +38,13 @@ import { httpTools } from "./http/tools.ts";
 import type { UploadSide } from "./signed-upload/tool.ts";
 
 /**
- * The tools an agent inherits from its pod for one turn.
+ * The tools a bot has through its connections for one turn.
  *
  * A connection's tool list is kept between turns while fresh and unedited;
  * its session opens when a turn first needs it. Each tool is keyed by
  * the connection's handle and its own name, `linear__list_issues`, and
  * carries whether it may change something, which decides how a failed turn
- * after it is treated, and what the pod's bots may do with it. A call to a
+ * after it is treated, and what the bot may do with it. A call to a
  * tool set to `off` is refused. A tool nobody has chosen for is treated as
  * `toolAccessOf` says.
  * A connection whose every tool is off is not opened at all.
@@ -84,16 +84,16 @@ export interface ConnectionToolSet {
 	signInExpired: string[];
 	/** What each connection's server says about using its tools, by handle. */
 	instructions: Record<string, string>;
-	/** Catalog servers the pod has not added. */
+	/** Catalog servers the bot has not added. */
 	addable: readonly ConnectionPreset[];
 	/** Ends every session behind these tools. */
 	close(): Promise<void>;
 }
 
 export interface Interface {
-	forPod(
+	forAgent(
 		workspaceId: string,
-		podId: string,
+		agentId: string,
 		turn: TurnSide,
 	): Effect.Effect<ConnectionToolSet, never, Database>;
 }
@@ -105,7 +105,7 @@ export interface TurnSide {
 	readonly threadId: string;
 	/** The thread's files, which a connection's upload tool sends from. */
 	readonly files: Pick<ThreadFiles.Interface, "read">;
-	/** The pod's sandbox, while the turn may use it. */
+	/** The bot's computer, while the turn may use it. */
 	readonly workspace: Workspace | undefined;
 	/** Whether the sandbox's provider signs its requests in, outside it. */
 	readonly sandboxSignsIn: boolean;
@@ -150,7 +150,7 @@ interface KeptListing {
 }
 
 export interface Parts {
-	connections: Pick<ConnectionRepository.Interface, "targetsForPod">;
+	connections: Pick<ConnectionRepository.Interface, "targetsForAgent">;
 	/** Bound egress clients, so a session goes only to the connection's own address. */
 	httpClients: EgressHttpClients;
 	/** Opens a session with a server; the real one speaks MCP. */
@@ -160,8 +160,8 @@ export interface Parts {
 	 * read once per turn, and the client their calls go through.
 	 */
 	oauth?: { clients: Effect.Effect<OAuthProviders>; fetch: EgressHttpClient };
-	/** The pod's GitHub connection; a case without one offers no GitHub tools. */
-	github?: Pick<GitHubConnections.Interface, "forPod">;
+	/** The bot's GitHub app; a case without one offers no GitHub tools. */
+	github?: Pick<GitHubConnections.Interface, "forAgent">;
 }
 
 /** The tools built from `parts`, for `make` and for a case that supplies its own. */
@@ -175,10 +175,10 @@ export function from({
 	const kept = new Map<string, KeptListing>();
 	const failedAt = new Map<string, number>();
 
-	/** The pod's GitHub connection's tools, and what the model is told of them. */
-	const gitHubOffered = (workspaceId: string, podId: string, turn: TurnSide) =>
+	/** The bot's GitHub app's tools, and what the model is told of them. */
+	const gitHubOffered = (workspaceId: string, agentId: string, turn: TurnSide) =>
 		Effect.gen(function* () {
-			const connected = github ? yield* github.forPod({ workspaceId, podId }) : undefined;
+			const connected = github ? yield* github.forAgent({ workspaceId, agentId }) : undefined;
 			if (!connected || everyToolOff(connected.connection)) {
 				return { tools: {}, instructions: {} };
 			}
@@ -194,19 +194,19 @@ export function from({
 		});
 
 	return {
-		forPod: (workspaceId, podId, turn) =>
+		forAgent: (workspaceId, agentId, turn) =>
 			Effect.gen(function* () {
-				const { targets: reached, signInExpired: expired } = yield* connections.targetsForPod(
+				const { targets: reached, signInExpired: expired } = yield* connections.targetsForAgent(
 					workspaceId,
-					podId,
+					agentId,
 				);
-				// One waiting on a sign-in is still the pod's, so it isn't offered to be added again.
+				// One waiting on a sign-in is still the bot's, so it isn't offered to be added again.
 				const addable = presetsAddableTo([...reached, ...expired]);
 				const signInExpired = expired.map((connection) => connection.handle);
 				const endpointTools = reached
 					.filter((target) => target.kind === "http")
 					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
-				const gitHub = yield* gitHubOffered(workspaceId, podId, turn);
+				const gitHub = yield* gitHubOffered(workspaceId, agentId, turn);
 				const ownTools = {
 					tools: Object.assign({}, ...endpointTools, gitHub.tools),
 					instructions: gitHub.instructions,
@@ -341,7 +341,7 @@ export function from({
 	};
 }
 
-/** Catalog servers whose host does not match any of the pod's `connections`. */
+/** Catalog servers whose host does not match any of the bot's `connections`. */
 function presetsAddableTo(connections: readonly { url: string }[]): readonly ConnectionPreset[] {
 	const installed = new Set(
 		connections.flatMap((connection) => {
@@ -392,5 +392,5 @@ const nothingOffered: ConnectionToolSet = {
 
 /** No connections at all, for a case that offers a turn none. */
 export const none: Interface = {
-	forPod: () => Effect.succeed(nothingOffered),
+	forAgent: () => Effect.succeed(nothingOffered),
 };

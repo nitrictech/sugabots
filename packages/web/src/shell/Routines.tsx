@@ -1,12 +1,11 @@
 import { useRender } from "@base-ui/react/use-render";
-import type { ListedRoutine, Pod, Routine } from "@sugabots/contracts";
+import type { Agent, ListedRoutine, Routine } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Plus, RefreshCcw } from "lucide-react";
 import type { ReactNode } from "react";
-import { useAgents } from "@/lib/agents.ts";
-import { useChatList } from "@/lib/chats.ts";
-import { agentChatLink, newRoutineLink, routineThreadLink } from "@/lib/links.ts";
+import { useBotTasks } from "@/lib/chats.ts";
+import { botLink, newRoutineLink, routineThreadLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { scheduleLabel } from "@/lib/routine-schedule.ts";
 import { useRecentRuns, useWorkspaceRoutines } from "@/lib/routines.ts";
@@ -19,48 +18,37 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 
 /**
- * A bot's routines down the left, the bot whose routine is chosen, each with
- * how it stands, and the one chosen beside them as `children`: its own
- * thread, where its runs post. On a phone the list is the page until one is chosen. With no
- * routines, the page says how one is made.
+ * A bot's automations down the left, each with how it stands, and the one
+ * chosen beside them as `children`: its own thread, where its runs post. On a
+ * phone the list is the page until one is chosen. With no automations, the
+ * page says how one is made.
  */
 export function RoutinesPage({
-	pod,
+	agent,
 	selectedRoutineId,
-	botHandle,
 	making = false,
 	children,
 }: {
-	pod: Pod;
+	agent: Agent;
 	selectedRoutineId: string | undefined;
-	/** The bot whose routines these are, by its handle, when none of them is open. */
-	botHandle?: string;
-	/** Whether a routine is being made beside the list, which on a phone covers it as an open one does. */
+	/** Whether an automation is being made beside the list, which on a phone covers it as an open one does. */
 	making?: boolean;
 	children: ReactNode;
 }) {
-	const list = useChatList(pod.slug);
+	const list = useBotTasks(agent.id);
 	const { workspace } = useWorkspace();
 	const full = useWorkspaceRoutines(workspace?.id);
 	const routineById = new Map(full.data?.items.map((item) => [item.routine.id, item.routine]));
-	const all = list.data?.routines ?? [];
-	const { agents } = useAgents();
-	// The page is one bot's: the bot that runs the routine open, or the one it was opened for.
-	const bot =
-		all.find((row) => row.routine.id === selectedRoutineId)?.agent ??
-		(botHandle === undefined
-			? undefined
-			: agents?.find((agent) => agent.podId === pod.id && agent.handle === botHandle));
-	const routines = bot ? all.filter((row) => row.agent.id === bot.id) : all;
-	const title = bot ? `${bot.name}'s routines` : "Routines";
+	const routines = list.data?.routines ?? [];
+	const title = `${agent.name}'s automations`;
 	const chosen = selectedRoutineId !== undefined || making;
-	const newRoutine = pod.permissions.manageRoutines && (
+	const newRoutine = agent.permissions.manageRoutines && (
 		<IconButton
-			label="New routine"
+			label="New automation"
 			variant="bar"
 			// A link, so it says it is the page open rather than pressed.
 			aria-current={making ? "page" : undefined}
-			render={<Link {...newRoutineLink(pod, bot)} />}
+			render={<Link {...newRoutineLink(agent)} />}
 			className={cn(
 				"aria-[current=page]:bg-chip aria-[current=page]:text-foreground",
 				FLOATING_ON_PHONE,
@@ -76,21 +64,16 @@ export function RoutinesPage({
 	const noneYet = (
 		<div className="flex h-full pb-20">
 			<NoRoutines
-				title={bot ? `No routines for ${bot.name} yet` : `No routines in ${pod.name} yet`}
-				pod={pod}
+				title={`No automations for ${agent.name} yet`}
+				owner={agent.name}
 				create={
-					pod.permissions.manageRoutines
+					agent.permissions.manageRoutines
 						? {
-								newRoutine: <Link {...newRoutineLink(pod, bot)} />,
-								whoToAsk: bot ? (
-									<Link
-										{...agentChatLink({ pod, agent: bot })}
-										className="focus-ring rounded-sm text-link underline"
-									>
-										{bot.name}
+								newRoutine: <Link {...newRoutineLink(agent)} />,
+								whoToAsk: (
+									<Link {...botLink(agent)} className="focus-ring rounded-sm text-link underline">
+										{agent.name}
 									</Link>
-								) : (
-									"a bot"
 								),
 							}
 						: undefined
@@ -101,14 +84,14 @@ export function RoutinesPage({
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
 			<section
-				aria-label="Routines"
+				aria-label="Automations"
 				className={cn(
 					// `min-w-0`: a long bot's name in the title is cut short rather than widening the page.
 					"flex min-h-0 min-w-0 flex-col border-border border-r max-md:flex-1 md:w-70 md:shrink-0",
 					chosen && "max-md:hidden",
 				)}
 			>
-				<PageHeader title={title} place={{ kind: "pod", pod }} actions={newRoutine} />
+				<PageHeader title={title} place={{ kind: "bot", agent }} actions={newRoutine} />
 				{none && phone && !chosen && <div className="flex min-h-0 flex-1 flex-col">{noneYet}</div>}
 				<ul
 					className={cn(
@@ -118,19 +101,18 @@ export function RoutinesPage({
 				>
 					{list.isError && (
 						<li className="px-2.5 py-2 text-xs text-muted-foreground">
-							Routines could not be loaded.
+							Automations could not be loaded.
 						</li>
 					)}
 					{none && !phone && (
 						// Quiet and in the middle, as Inbox's empty list is; the way to make one is in the space beside it.
 						<li className="m-auto px-6 py-16 text-center text-xs text-muted-foreground">
-							No routines yet
+							No automations yet
 						</li>
 					)}
 					{routines.map((row) => (
 						<li key={row.routine.id}>
 							<RoutineRow
-								pod={pod}
 								row={row}
 								routine={routineById.get(row.routine.id)}
 								selected={row.routine.id === selectedRoutineId}
@@ -147,29 +129,30 @@ export function RoutinesPage({
 }
 
 /**
- * No routines yet, and how one is made: for someone who may make one, New
- * routine, with asking a bot instead under it. Anyone else is sent to whoever
- * manages the pod's routines, as a bot makes them only for someone who may.
+ * No automations yet, and how one is made: for someone who may make one, New
+ * automation, with asking the bot instead under it. Anyone else is sent to
+ * whoever manages the bot, as a bot makes them only for someone who may.
  */
 export function NoRoutines({
 	title,
-	pod,
+	owner,
 	create,
 }: {
 	title: string;
-	pod: Pick<Pod, "name">;
-	/** For a viewer who may manage the pod's routines; omitted for anyone else. */
+	/** The bot's name, whose managers make its automations. */
+	owner: string;
+	/** For a viewer who may manage the bot's automations; omitted for anyone else. */
 	create?: {
-		/** The element New routine is, such as a link to the form or a button that opens it. */
+		/** The element New automation is, such as a link to the form or a button that opens it. */
 		newRoutine: useRender.RenderProp;
-		/** Who could set one up instead, such as the bot, linked to its chat. */
+		/** Who could set one up instead, such as the bot, linked to it. */
 		whoToAsk: ReactNode;
 	};
 }) {
 	const newRoutine = useRender({
 		enabled: create !== undefined,
 		render: create?.newRoutine,
-		props: { className: buttonStyles({ size: "sm" }), children: "New routine" },
+		props: { className: buttonStyles({ size: "sm" }), children: "New automation" },
 	});
 	return (
 		<EmptyState title={title} icon={<RefreshCcw strokeWidth={1.75} />}>
@@ -179,7 +162,7 @@ export function NoRoutines({
 					<span>Or ask {create.whoToAsk} to set one up.</span>
 				</span>
 			) : (
-				<>Ask someone who manages {pod.name}'s routines to set one up.</>
+				<>Ask someone who manages {owner} to set one up.</>
 			)}
 		</EmptyState>
 	);
@@ -192,13 +175,11 @@ export function NoRoutines({
  * It opens the routine's own thread, or does what `render` does instead.
  */
 export function RoutineRow({
-	pod,
 	row,
 	routine,
 	selected,
 	render,
 }: {
-	pod: Pod;
 	row: ListedRoutine;
 	/** The routine in full, for when it runs, once the workspace's routines are loaded. */
 	routine: Routine | undefined;
@@ -216,7 +197,7 @@ export function RoutineRow({
 		: lastRun && outcomeOf(lastRun.state, lastRun.posted);
 	const schedule = routine && scheduleLabel(routine);
 	return useRender({
-		render: render ?? <Link {...routineThreadLink(pod, row.routine.id)} />,
+		render: render ?? <Link {...routineThreadLink(row.agent, row.routine.id)} />,
 		props: {
 			"aria-current": selected ? "page" : undefined,
 			className: cn(

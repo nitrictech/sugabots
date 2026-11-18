@@ -2,7 +2,6 @@ import {
 	type Agent,
 	MAX_ROUTINE_INSTRUCTIONS_CHARACTERS,
 	MAX_ROUTINE_NAME_CHARACTERS,
-	type Pod,
 	type Routine,
 	type ThreadDetails,
 } from "@sugabots/contracts";
@@ -30,7 +29,7 @@ import { MoreMenu } from "@/ui/more-menu.tsx";
 import { SettingsAddMark, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
-import { ChatRow, copyOf, DeleteRoutine, instructionsNote } from "./RoutineEditor.tsx";
+import { copyOf, DeleteRoutine, instructionsNote } from "./RoutineEditor.tsx";
 import { TriggerKindMark, triggerKindChoice } from "./RoutineTriggerKinds.tsx";
 import { TriggerDialog, triggerDraftOf } from "./RoutineTriggers.tsx";
 import { WebhookGroups } from "./RoutineWebhook.tsx";
@@ -51,13 +50,11 @@ type PanelDialog =
  */
 export function RoutinePanel({
 	agent,
-	pod,
 	conversationId,
 	standing,
 	onClose,
 }: {
 	agent: Agent;
-	pod: Pod;
 	conversationId: string;
 	/** How the routine stands, as its thread knows it. */
 	standing: NonNullable<ThreadDetails["routine"]>;
@@ -71,7 +68,7 @@ export function RoutinePanel({
 	const [dialog, setDialog] = useState<PanelDialog>();
 	// Pausing and Run now go through the thread's own controls, so why they failed is kept here.
 	const [controlFailure, setControlFailure] = useState<unknown>();
-	const mayManage = pod.permissions.manageRoutines;
+	const mayManage = agent.permissions.manageRoutines;
 	const active = standing.state === "enabled";
 	const close = () => setDialog(undefined);
 
@@ -91,7 +88,7 @@ export function RoutinePanel({
 				agentId: agent.id,
 				json: copyOf(original, siblingNames),
 			});
-			await navigate(routineThreadLink(pod, created.routine.id));
+			await navigate(routineThreadLink(agent, created.routine.id));
 		} catch {
 			// The panel shows the error.
 		}
@@ -174,43 +171,9 @@ export function RoutinePanel({
 								editable={mayManage}
 								onOpen={(triggerId) => setDialog({ kind: "trigger", triggerId })}
 							/>
-							<PanelCard>
-								<fieldset disabled={!mayManage} className="contents">
-									{/* Ruled off from the chat picker under it, which a pod with one chat doesn't show. */}
-									<div className="flex min-h-12 items-center gap-3 border-border border-b px-3.5 py-2.5 last:border-b-0">
-										<span className="flex-1 text-xs text-foreground">
-											Also post result in the pod's channel
-										</span>
-										<Toggle
-											label="Also post result in the pod's channel"
-											checked={routine.results === "post_to_chat"}
-											onChange={(posted) =>
-												actions.update.mutate({
-													agentId: agent.id,
-													routineId: routine.id,
-													json: { results: posted ? "post_to_chat" : "keep_in_run" },
-												})
-											}
-										/>
-									</div>
-									{routine.results === "post_to_chat" && (
-										<ChatRow
-											pod={pod}
-											chatId={routine.chatId}
-											onChange={(chatId) =>
-												actions.update.mutate({
-													agentId: agent.id,
-													routineId: routine.id,
-													json: { chatId },
-												})
-											}
-										/>
-									)}
-								</fieldset>
-							</PanelCard>
 						</>
 					)}
-					{pod.permissions.runRoutines && (
+					{agent.permissions.runRoutines && (
 						<Button
 							variant="outline"
 							disabled={controls.pending}
@@ -257,17 +220,17 @@ export function RoutinePanel({
 					<Dialog open={dialog?.kind === "trigger"} onOpenChange={(opened) => !opened && close()}>
 						{dialog?.kind === "trigger" && (
 							<RoutineTriggerDialog
-								placed={{ routine, agent, pod }}
+								placed={{ routine, agent }}
 								triggerId={dialog.triggerId}
 								done={close}
 							/>
 						)}
 					</Dialog>
 					<DeleteRoutine
-						placed={{ routine, agent, pod }}
+						placed={{ routine, agent }}
 						open={dialog?.kind === "delete"}
 						onOpenChange={(opened) => setDialog(opened ? { kind: "delete" } : undefined)}
-						onDeleted={() => void navigate({ ...routinesLink(pod, agent), replace: true })}
+						onDeleted={() => void navigate({ ...routinesLink(agent), replace: true })}
 					/>
 				</>
 			)}
@@ -462,17 +425,17 @@ function RoutineTriggerDialog({
 	triggerId,
 	done,
 }: {
-	placed: { routine: Routine; agent: Agent; pod: Pod };
+	placed: { routine: Routine; agent: Agent };
 	triggerId: string | undefined;
 	done: () => void;
 }) {
-	const { routine, agent, pod } = placed;
+	const { routine, agent } = placed;
 	const actions = useRoutineActions();
 	const addressed = { agentId: agent.id, routineId: routine.id };
 	const editing = routine.triggers.find((trigger) => trigger.id === triggerId);
 	return (
 		<TriggerDialog
-			pod={pod}
+			bot={{ agent }}
 			editing={editing && triggerDraftOf(editing)}
 			settings={
 				editing?.kind === "webhook" ? (

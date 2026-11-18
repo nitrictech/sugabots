@@ -31,7 +31,6 @@ const NEVER_FULL = 1;
 
 describe.skipIf(!env.DATABASE_URL)("what may be cleared from a sandbox, against Postgres", () => {
 	let workspaceId: string;
-	let podId: string;
 	let agentId: string;
 	let userId: string;
 
@@ -40,7 +39,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a sandbox, against 
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, podId, agentId, userId } = await aRoutineOwner());
+		({ workspaceId, agentId, userId } = await aRoutineOwner());
 	});
 
 	const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
@@ -80,7 +79,6 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a sandbox, against 
 			db.insert(thread).values({
 				id,
 				workspaceId,
-				podId,
 				hostAgentId: agentId,
 				type: "conversation",
 				title: "Conversation",
@@ -99,7 +97,6 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a sandbox, against 
 				.insert(thread)
 				.values({
 					workspaceId,
-					podId,
 					hostAgentId: agentId,
 					type: "collaboration",
 					title: "Collaboration",
@@ -129,7 +126,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a sandbox, against 
 		const [run] = await onDatabase((db) =>
 			db
 				.insert(thread)
-				.values({ workspaceId, podId, hostAgentId: agentId, type: "routine", title: "Checks" })
+				.values({ workspaceId, hostAgentId: agentId, type: "routine", title: "Checks" })
 				.returning(),
 		);
 		if (!defined || !run) throw new Error("Could not create a routine run");
