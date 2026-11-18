@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+		/>
+		<title>Sugabots</title>
+		<script type="module" src="./page.ts"></script>
+	</head>
+	<body>
+		<main>
+			<img class="logo" alt="" width="56" height="56" />
+			<h1>Connect to Sugabots</h1>
+			<p class="lead">Enter the address of your team's Sugabots server.</p>
+			<form id="connect" novalidate>
+				<label for="address">Server address</label>
+				<input
+					id="address"
+					name="address"
+					type="text"
+					inputmode="url"
+					autocomplete="url"
+					autocapitalize="off"
+					spellcheck="false"
+					placeholder="sugabots.example.com"
+					aria-describedby="error"
+					required
+				/>
+				<p id="error" class="error" role="alert"></p>
+				<button type="submit">Connect</button>
+			</form>
+		</main>
+	</body>
+</html>
