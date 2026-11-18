@@ -4,6 +4,7 @@ import {
 	type ProviderModel,
 	type SessionUser,
 	streamEvent,
+	type Workspace,
 } from "@sugabots/contracts";
 import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
 import { UserText, userText } from "@sugabots/errors";
@@ -423,6 +424,40 @@ describe("the workspace choice", () => {
 		expect(screen.getByRole("heading", { name: "Name your workspace" })).toBeDefined();
 		expect(router.state.location.search).toEqual({});
 	});
+
+	it("offers no new workspace once an installation that holds one has it", async () => {
+		mountWhereNoWorkspaceMayBeMade(linearPage, [workspace]);
+
+		await openWorkspaceMenu();
+
+		await screen.findByRole("menuitem", { name: "Invite people" });
+		expect(screen.queryByRole("menuitem", { name: "New workspace" })).toBeNull();
+	});
+
+	it("tells somebody in no workspace, where no more may be made, that only an invitation gets them in", async () => {
+		mountWhereNoWorkspaceMayBeMade("/", []);
+
+		expect(await screen.findByText("You're not in this server's workspace")).toBeDefined();
+		expect(screen.queryByRole("heading", { name: "Name your workspace" })).toBeNull();
+	});
+
+	/** The app on an installation that holds one workspace, which exists, for somebody in `workspaces`. */
+	function mountWhereNoWorkspaceMayBeMade(path: string, workspaces: Workspace[]) {
+		client.api.workspaces.list.mockReturnValue(Effect.succeed(workspaces));
+		const router = createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) });
+		render(
+			<TestApp
+				router={router}
+				queries={createQueryClient()}
+				session={{
+					user: sam,
+					me: { user: sam, workspaces, mayCreateWorkspace: false },
+					error: undefined,
+					refresh: vi.fn().mockResolvedValue(undefined),
+				}}
+			/>,
+		);
+	}
 
 	async function startNewWorkspace(router: ReturnType<typeof mount>) {
 		await openWorkspaceMenu();

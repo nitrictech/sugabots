@@ -18,6 +18,7 @@ import { Effect, Schema } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
 import { loadFailure } from "@/lib/query.ts";
+import { useSession } from "@/lib/session.ts";
 
 /**
  * Which workspace is being looked at, and what the caller may do in it.
@@ -56,8 +57,10 @@ export function useWorkspaceMembers(workspaceId: string | undefined) {
 	});
 }
 
+/** Asks `/me` again afterwards, since on an installation that holds one workspace, making it is the last. */
 export function useCreateWorkspace() {
 	const queries = useQueryClient();
+	const session = useSession();
 	return useMutation({
 		mutationFn: ({ name, slug }: { name: string; slug: string }) =>
 			Effect.runPromise(
@@ -66,20 +69,24 @@ export function useCreateWorkspace() {
 		onSuccess: async (workspace) => {
 			chooseWorkspace(workspace.id);
 			await queries.invalidateQueries({ queryKey: ["workspaces"] });
+			void session.refresh().catch(() => {});
 		},
 	});
 }
 
 /**
  * Deletes a workspace for good. It leaves the list at once, so `/` opens
- * another one, or onboarding when there is none.
+ * another one, or onboarding when there is none. Asks `/me` again, since
+ * on an installation that holds one workspace, deleting it lets another be made.
  */
 export function useDeleteWorkspace() {
 	const queries = useQueryClient();
+	const session = useSession();
 	return useMutation({
 		mutationFn: (workspaceId: string) =>
 			Effect.runPromise(client.api.workspaces.delete({ params: { workspace: workspaceId } })),
 		onSuccess: async (_, workspaceId) => {
+			void session.refresh().catch(() => {});
 			queries.setQueryData(workspacesQuery.queryKey, (workspaces) =>
 				workspaces?.filter((workspace) => workspace.id !== workspaceId),
 			);

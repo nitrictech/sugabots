@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Plus } from "lucide-react";
 import { podSettingsPageLink } from "@/lib/links.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
-import { useSignOut } from "@/lib/session.ts";
+import { useSession, useSignOut } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { chooseWorkspace, useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { podSettingsPagesOf } from "@/lib/workspace-settings.ts";
@@ -22,11 +22,13 @@ import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.ts
  */
 export function You() {
 	const signOut = useSignOut();
+	const session = useSession();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
 	const settingsBack = useBackToHere("Settings");
 	if (!workspace) return null;
 	const others = (workspaces ?? []).filter((one) => one.id !== workspace.id);
+	const mayCreateWorkspace = session.me?.mayCreateWorkspace !== false;
 
 	return (
 		<section aria-label="Settings" className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -41,36 +43,43 @@ export function You() {
 						<Link from="/$workspace" to="./you/pods/$pod" params={{ pod: pod.slug }} />
 					)}
 				/>
-				<SettingsGroup label={others.length > 0 ? "Other workspaces" : undefined} headingLevel={2}>
-					{others.map((other) => (
-						<SettingsRow
-							key={other.id}
-							icon={<LetterTile letter={other.name} />}
-							label={other.name}
-							chevron
-							render={
-								<Link
-									to="/$workspace/agents"
-									params={{ workspace: other.slug }}
-									onClick={() => chooseWorkspace(other.id)}
-								/>
-							}
-						/>
-					))}
-					<SettingsRow
-						icon={
-							<span
-								aria-hidden
-								className="grid size-6 shrink-0 place-items-center rounded-md border border-border-dashed border-dashed text-muted-foreground"
-							>
-								<Plus size={14} strokeWidth={2.25} />
-							</span>
-						}
-						label="New workspace"
-						chevron
-						render={<Link to="/onboarding" />}
-					/>
-				</SettingsGroup>
+				{(others.length > 0 || mayCreateWorkspace) && (
+					<SettingsGroup
+						label={others.length > 0 ? "Other workspaces" : undefined}
+						headingLevel={2}
+					>
+						{others.map((other) => (
+							<SettingsRow
+								key={other.id}
+								icon={<LetterTile letter={other.name} />}
+								label={other.name}
+								chevron
+								render={
+									<Link
+										to="/$workspace/agents"
+										params={{ workspace: other.slug }}
+										onClick={() => chooseWorkspace(other.id)}
+									/>
+								}
+							/>
+						))}
+						{mayCreateWorkspace && (
+							<SettingsRow
+								icon={
+									<span
+										aria-hidden
+										className="grid size-6 shrink-0 place-items-center rounded-md border border-border-dashed border-dashed text-muted-foreground"
+									>
+										<Plus size={14} strokeWidth={2.25} />
+									</span>
+								}
+								label="New workspace"
+								chevron
+								render={<Link to="/onboarding" />}
+							/>
+						)}
+					</SettingsGroup>
+				)}
 				<SettingsGroup>
 					<SettingsRow
 						label="Help and docs"

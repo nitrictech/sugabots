@@ -21,6 +21,7 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 						SlugTaken: Conflict,
 						SlugShapedLikeUuid: BadRequest,
 						TimeZoneUnknown: BadRequest,
+						SingleWorkspaceExists: Forbidden,
 					}),
 				),
 			)

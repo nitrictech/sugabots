@@ -109,7 +109,10 @@ export function installationWithWebAppAt(webAppUrl: string): Layer.Layer<Install
 const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Accounts.Service),
 	// `/me` answers with these beside the user; a case about them supplies its own.
-	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
+	unimplemented(Membership.Service, {
+		workspaces: Effect.succeed([]),
+		mayCreate: Effect.succeed(true),
+	}),
 	unimplemented(PodAdministration.Service),
 	unimplemented(WorkspaceTimeZone.Service),
 	unimplemented(Artifacts.Service),

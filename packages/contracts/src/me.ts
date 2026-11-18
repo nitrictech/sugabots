@@ -10,6 +10,8 @@ import { workspaceSchema } from "./membership.ts";
 export const meSchema = Schema.Struct({
 	user: sessionUserSchema,
 	workspaces: Schema.Array(workspaceSchema),
+	/** False on an installation that holds a single workspace, once it exists, so the web app offers no new one. */
+	mayCreateWorkspace: Schema.Boolean,
 });
 
 export type Me = typeof meSchema.Type;

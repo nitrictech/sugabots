@@ -69,6 +69,7 @@ export function Sidebar() {
 			waitingApprovals={waitingApprovals}
 			workspace={workspace}
 			workspaces={workspaces ?? []}
+			mayCreateWorkspace={session.me?.mayCreateWorkspace !== false}
 			user={session.user ?? undefined}
 			settingsBack={place.inSettings ? undefined : backToChat}
 			notificationSettings={notificationSettings}
@@ -164,6 +165,7 @@ export function SidebarView({
 	waitingApprovals = 0,
 	workspace,
 	workspaces = [],
+	mayCreateWorkspace = true,
 	user,
 	settingsBack,
 	notificationSettings,
@@ -190,6 +192,8 @@ export function SidebarView({
 	workspace?: Workspace;
 	/** Every workspace the viewer belongs to, which your menu offers to switch to. */
 	workspaces?: readonly Workspace[];
+	/** Whether your menu offers New workspace, which an installation holding a single workspace stops once it has one. */
+	mayCreateWorkspace?: boolean;
 	user?: { name: string; email: string; image?: string | null };
 	/** History state for settings links, so their Back returns to the page they left. */
 	settingsBack?: ReturnType<typeof useBackToHere>;
@@ -297,6 +301,7 @@ export function SidebarView({
 						user={user}
 						current={workspace}
 						workspaces={workspaces}
+						mayCreateWorkspace={mayCreateWorkspace}
 						settingsBack={settingsBack}
 						onSignOut={onSignOut}
 					/>

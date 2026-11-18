@@ -50,7 +50,7 @@ import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { defaultPod, findPod, podsQuery, usePods } from "@/lib/pods.ts";
 import { loadFailure } from "@/lib/query.ts";
-import { type Session, SessionContext, useSession } from "@/lib/session.ts";
+import { type Session, SessionContext, useSession, useSignOut } from "@/lib/session.ts";
 import {
 	chooseWorkspace,
 	useDeleteWorkspace,
@@ -73,6 +73,7 @@ import { DirectMessagesOverview } from "@/shell/DirectMessages.tsx";
 import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
 import { LoadFailure } from "@/shell/LoadFailure.tsx";
 import { MobileDirectMessages, MobileHome } from "@/shell/MobileHome.tsx";
+import { NotInTheWorkspace } from "@/shell/NotInTheWorkspace.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { RoutinesPage } from "@/shell/Routines.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
@@ -583,6 +584,7 @@ const onboardingRoute = createRoute({
 
 function OnboardingRoute() {
 	const session = useSession();
+	const signOut = useSignOut();
 	const { workspace: madeSlug } = onboardingRoute.useSearch();
 	const { isPending, failure, refetch } = useWorkspace();
 	const workspaces = useWorkspaces();
@@ -591,6 +593,13 @@ function OnboardingRoute() {
 		return <LoadFailure title="Could not start setup" error={failure.error} retry={refetch} />;
 	}
 	if (isPending) return <div className="h-full bg-list" />;
+	if (madeSlug === undefined && session.me?.mayCreateWorkspace === false) {
+		return workspaces.data?.length ? (
+			<Navigate to="/" replace />
+		) : (
+			<NotInTheWorkspace onSignOut={() => void signOut()} />
+		);
+	}
 	return (
 		<WorkspaceSetup
 			session={session}
