@@ -9,26 +9,40 @@ import {
 	nativeImage,
 	Tray,
 } from "electron";
-import { AppWindow, type AppWindowEvents, bringToFront, serverSession } from "./app-window.ts";
+import {
+	AppWindow,
+	type AppWindowEvents,
+	bringToFront,
+	type ServerToShow,
+	savedServerSession,
+} from "./app-window.ts";
 import { loadLocalPage, localPreload } from "./local-page.ts";
 import {
 	loadSavedServers,
+	type SavedServer,
 	type SavedServers,
+	ServerId,
 	saveSavedServers,
+	serverById,
+	serverHost,
 	serverLabel,
+	withAccount,
+	withServerAdded,
 	withServerOpened,
 	withServerRemoved,
 } from "./saved-servers.ts";
 import { findServer } from "./server.ts";
 import { type ConnectResult, setupChannels } from "./setup/bridge.ts";
 
-/** For development: opens this server without asking or saving it. */
-const serverOverride = process.env.SUGABOTS_URL;
+/** For development: opens this server, in a session of its own, without asking or saving it. */
+const serverOverride: ServerToShow | undefined = process.env.SUGABOTS_URL
+	? { id: ServerId.make("sugabots-url"), origin: process.env.SUGABOTS_URL }
+	: undefined;
 
 /** How many servers get a CmdOrCtrl+number shortcut. */
 const SERVER_SHORTCUT_COUNT = 9;
 
-let saved: SavedServers = { origins: [], current: undefined };
+let saved: SavedServers = { servers: [] };
 let appWindow: AppWindow | undefined;
 let setupWindow: BrowserWindow | undefined;
 // Held for the app's lifetime, since a garbage-collected Tray disappears.
@@ -40,29 +54,52 @@ function openApp() {
 		appWindow.bringToFront();
 		return;
 	}
-	const origin = serverOverride ?? saved.current;
-	if (origin) showServer(origin);
+	const server = serverOverride ?? serverById(saved, saved.current);
+	if (server) showServer(server);
 	else openSetup();
 }
 
-/** Opens `origin` and remembers it as the server the app opens. */
-async function openServer(origin: string) {
-	saved = withServerOpened(saved, origin);
-	showServer(origin);
+/** Saves `origin` again, with a session of its own for signing in to another account, and opens it. */
+async function addServer(origin: string) {
+	saved = withServerAdded(saved, origin);
+	showCurrentServer();
 	await saveSavedServers(saved);
 }
 
-function showServer(origin: string) {
-	if (appWindow) appWindow.show(origin);
-	else appWindow = new AppWindow(origin, appWindowEvents);
+/** Opens the saved server `id` and remembers it as the one the app opens. */
+async function openServer(id: ServerId) {
+	saved = withServerOpened(saved, id);
+	showCurrentServer();
+	await saveSavedServers(saved);
+}
+
+function showCurrentServer() {
+	const server = serverById(saved, saved.current);
+	if (server) showServer(server);
+}
+
+function showServer(server: ServerToShow) {
+	if (appWindow) appWindow.show(server);
+	else appWindow = new AppWindow(server, appWindowEvents);
 	appWindow.bringToFront();
 	setupWindow?.close();
 	serversChanged();
 }
 
 const appWindowEvents: AppWindowEvents = {
-	title: (pageTitle, origin) =>
-		saved.origins.length > 1 ? `${pageTitle} — ${serverLabel(origin)}` : pageTitle,
+	title: (pageTitle, id) => {
+		const server = serverById(saved, id);
+		return server && saved.servers.length > 1
+			? `${pageTitle} — ${serverLabel(saved, server)}`
+			: pageTitle;
+	},
+	account: (id, account) => {
+		const updated = withAccount(saved, id, account);
+		if (updated === saved) return;
+		saved = updated;
+		serversChanged();
+		void saveSavedServers(saved);
+	},
 	switchServer: () => {
 		Menu.buildFromTemplate(serverMenuItems()).popup({ window: appWindow?.window });
 	},
@@ -72,19 +109,20 @@ const appWindowEvents: AppWindowEvents = {
 	},
 };
 
-async function removeServer(origin: string) {
+async function removeServer(server: SavedServer) {
 	const { response } = await dialog.showMessageBox({
 		type: "warning",
-		message: `Remove ${serverLabel(origin)}?`,
+		message: `Remove ${serverLabel(saved, server)}?`,
 		detail: "This signs you out of it on this computer. You can add it again later.",
 		buttons: ["Remove", "Cancel"],
 		defaultId: 1,
 		cancelId: 1,
 	});
 	if (response !== 0) return;
-	saved = withServerRemoved(saved, origin);
-	if (appWindow?.origin === origin) {
-		if (saved.current) showServer(saved.current);
+	saved = withServerRemoved(saved, server.id);
+	if (appWindow?.serverId === server.id) {
+		const next = serverById(saved, saved.current);
+		if (next) showServer(next);
 		else {
 			appWindow.window.close();
 			openSetup();
@@ -93,7 +131,7 @@ async function removeServer(origin: string) {
 	serversChanged();
 	await saveSavedServers(saved);
 	// After its page has closed, so the page can't write its sign-in back.
-	const session = serverSession(origin);
+	const session = savedServerSession(server.id);
 	await Promise.all([session.clearStorageData(), session.clearCache()]);
 }
 
@@ -117,7 +155,7 @@ function openSetup() {
 			const found = await findServer(address);
 			if (!found.ok) return found;
 			// After the reply is sent, since opening the server closes this window.
-			setImmediate(() => void openServer(found.origin));
+			setImmediate(() => void addServer(found.origin));
 			return { ok: true };
 		},
 	);
@@ -135,24 +173,30 @@ function serversChanged() {
 }
 
 function serverMenuItems(): MenuItemConstructorOptions[] {
-	const open = appWindow?.origin ?? saved.current;
-	const servers = saved.origins.map(
-		(origin, index): MenuItemConstructorOptions => ({
-			label: serverLabel(origin),
+	const shown = serverById(saved, appWindow?.serverId ?? saved.current);
+	const servers = saved.servers.map(
+		(server, index): MenuItemConstructorOptions => ({
+			label: serverLabel(saved, server),
 			type: "radio",
-			checked: origin === open,
+			checked: server === shown,
 			accelerator: index < SERVER_SHORTCUT_COUNT ? `CommandOrControl+${index + 1}` : undefined,
-			click: () => void openServer(origin),
+			click: () => void openServer(server.id),
 		}),
 	);
-	const removable = saved.origins.find((origin) => origin === open);
+	const shownItems: MenuItemConstructorOptions[] = shown
+		? [
+				{
+					label: `Add another account on ${serverHost(shown.origin)}…`,
+					click: () => void addServer(shown.origin),
+				},
+				{ label: `Remove ${serverLabel(saved, shown)}…`, click: () => void removeServer(shown) },
+			]
+		: [];
 	return [
 		...servers,
 		...(servers.length > 0 ? [{ type: "separator" } as const] : []),
 		{ label: "Add server…", click: openSetup },
-		...(removable
-			? [{ label: `Remove ${serverLabel(removable)}…`, click: () => void removeServer(removable) }]
-			: []),
+		...shownItems,
 	];
 }
 

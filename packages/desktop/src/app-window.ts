@@ -8,24 +8,34 @@ import {
 	WebContentsView,
 	type WindowOpenHandlerResponse,
 } from "electron";
+import { watchAccount } from "./account.ts";
 import { loadLocalPage, localPreload } from "./local-page.ts";
+import type { ServerId } from "./saved-servers.ts";
 import { unreachableChannels } from "./unreachable/bridge.ts";
 
 /** Chromium's error for a load that a newer navigation replaced, which isn't a failure. */
 const ERR_ABORTED = -3;
 
+/** A server to show, signed in with the session of the saved server `id`. */
+export interface ServerToShow {
+	readonly id: ServerId;
+	readonly origin: string;
+}
+
 /** What the app window leaves to the rest of the app. */
 export interface AppWindowEvents {
 	/** The window title for a server's page title. */
-	title(pageTitle: string, origin: string): string;
+	title(pageTitle: string, id: ServerId): string;
+	/** Who the shown server is signed in as, when first found out and whenever it changes. */
+	account(id: ServerId, account: string | undefined): void;
 	/** The person asked to switch servers from the page that says a server can't be reached. */
 	switchServer(): void;
 	closed(): void;
 }
 
-interface ServerView {
-	readonly origin: string;
+interface ServerView extends ServerToShow {
 	readonly view: WebContentsView;
+	readonly stopWatchingAccount: () => void;
 }
 
 interface UnreachableView {
@@ -35,9 +45,9 @@ interface UnreachableView {
 }
 
 /**
- * The window that shows one Sugabots server at a time. Each server's page
+ * The window that shows one saved server at a time. Each saved server's page
  * runs in its own session, so switching back finds the person still signed
- * in, and two servers on one host never share cookies.
+ * in, and two saves of one server stay signed in to two accounts.
  */
 export class AppWindow {
 	readonly window = new BaseWindow({ title: "Sugabots", width: 1280, height: 820 });
@@ -46,29 +56,31 @@ export class AppWindow {
 	#unreachable: UnreachableView | undefined;
 	#pageTitle = "Sugabots";
 
-	constructor(origin: string, events: AppWindowEvents) {
+	constructor(server: ServerToShow, events: AppWindowEvents) {
 		this.#events = events;
-		this.#server = this.#openServerView(origin);
+		this.#server = this.#openServerView(server);
 		this.window.on("resize", () => this.#layout());
 		this.window.on("closed", () => {
 			// A window's views outlive it unless they're closed.
+			this.#server.stopWatchingAccount();
 			this.#server.view.webContents.close();
 			this.#unreachable?.view.webContents.close();
 			this.#events.closed();
 		});
 	}
 
-	/** The server the window shows. */
-	get origin(): string {
-		return this.#server.origin;
+	/** The saved server the window shows. */
+	get serverId(): ServerId {
+		return this.#server.id;
 	}
 
-	show(origin: string): void {
-		if (origin === this.origin) return;
+	show(server: ServerToShow): void {
+		if (server.id === this.serverId) return;
 		const previous = this.#server;
 		this.#closeUnreachable();
 		this.#pageTitle = "Sugabots";
-		this.#server = this.#openServerView(origin);
+		this.#server = this.#openServerView(server);
+		previous.stopWatchingAccount();
 		this.window.contentView.removeChildView(previous.view);
 		previous.view.webContents.close();
 		this.refreshTitle();
@@ -81,7 +93,7 @@ export class AppWindow {
 	}
 
 	refreshTitle(): void {
-		this.window.setTitle(this.#events.title(this.#pageTitle, this.origin));
+		this.window.setTitle(this.#events.title(this.#pageTitle, this.serverId));
 	}
 
 	bringToFront(): void {
@@ -89,9 +101,13 @@ export class AppWindow {
 		(this.#unreachable ?? this.#server).view.webContents.focus();
 	}
 
-	#openServerView(origin: string): ServerView {
-		const view = new WebContentsView({ webPreferences: { session: serverSession(origin) } });
-		const server = { origin, view };
+	#openServerView({ id, origin }: ServerToShow): ServerView {
+		const serverSession = savedServerSession(id);
+		const view = new WebContentsView({ webPreferences: { session: serverSession } });
+		const stopWatchingAccount = watchAccount(serverSession, origin, (account) =>
+			this.#events.account(id, account),
+		);
+		const server = { id, origin, view, stopWatchingAccount };
 		const { webContents } = view;
 		webContents.setWindowOpenHandler(openInBrowser);
 		webContents.on("page-title-updated", (_event, title) => {
@@ -163,10 +179,9 @@ export class AppWindow {
 	}
 }
 
-/** The persistent session that keeps one server's sign-in, cookies and storage. */
-export function serverSession(origin: string): Session {
-	// Encoded, since Electron turns the slashes in a partition's name into nested folders.
-	return session.fromPartition(`persist:${encodeURIComponent(origin)}`);
+/** The persistent session that keeps one saved server's sign-in, cookies and storage. */
+export function savedServerSession(id: ServerId): Session {
+	return session.fromPartition(`persist:server-${id}`);
 }
 
 export function bringToFront(window: BaseWindow): void {
