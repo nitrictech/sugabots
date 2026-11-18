@@ -15,6 +15,9 @@ export const SavedWorkspace = Schema.Struct({
 });
 export type SavedWorkspace = typeof SavedWorkspace.Type;
 
+/** Where the web app sets a workspace up, outside its address, naming it by `?workspace=` once it has one. */
+const WORKSPACE_SETUP_PATH = "/onboarding";
+
 const SavedServer = Schema.Struct({
 	id: ServerId,
 	origin: Schema.String,
@@ -124,10 +127,14 @@ export function workspaceUrl(server: SavedServer, workspace: SavedWorkspace): st
 	return new URL(`/${encodeURIComponent(workspace.slug)}`, server.origin).href;
 }
 
-/** The workspace of `server` that `url` is a page of, if any. */
+/** The workspace of `server` that `url` is a page of, or the setup page of, if any. */
 export function workspaceAt(server: SavedServer, url: string): SavedWorkspace | undefined {
 	const page = URL.parse(url);
 	if (page?.origin !== new URL(server.origin).origin) return undefined;
+	if (page.pathname === WORKSPACE_SETUP_PATH) {
+		const settingUp = page.searchParams.get("workspace");
+		return server.workspaces?.find((workspace) => workspace.slug === settingUp);
+	}
 	const [first] = page.pathname.split("/").filter(Boolean);
 	return server.workspaces?.find((workspace) => encodeURIComponent(workspace.slug) === first);
 }

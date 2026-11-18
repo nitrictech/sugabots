@@ -82,6 +82,8 @@ async function addServer(origin: string) {
 async function openWorkspace(server: SavedServer, workspace: SavedWorkspace) {
 	if (appWindow?.serverId === server.id && shownWorkspace(server)?.slug === workspace.slug) {
 		appWindow.bringToFront();
+		// Clicking its menu item cleared that item's check mark.
+		serversChanged();
 		return;
 	}
 	saved = withWorkspaceOpened(saved, server.id, workspace.slug);
@@ -130,9 +132,11 @@ const appWindowEvents: AppWindowEvents = {
 		shownUrl = url;
 		if (!server) return;
 		const workspace = shownWorkspace(server);
-		// A page outside every workspace known may follow making, renaming or leaving one.
-		if (!workspace) signInWatches.get(id)?.recheck();
-		if (workspace?.slug === before?.slug) return;
+		const moved = workspace?.slug !== before?.slug;
+		// Making, renaming, leaving or deleting a workspace changes no cookie, but moves the page,
+		// such as cancelling a new one's setup, which deletes it and goes back to the one before.
+		if (moved || !workspace) signInWatches.get(id)?.recheck();
+		if (!moved) return;
 		if (workspace) {
 			saved = withWorkspaceOpened(saved, id, workspace.slug);
 			void saveSavedServers(saved);
@@ -242,6 +246,9 @@ function serversChanged() {
  * as, then adding and removing servers. A server with no workspace, such as
  * one signed out, is an entry of its own. With only one place to go, the list
  * is left out.
+ *
+ * The entries are checkboxes, not radio items, because Electron checks the
+ * first of a radio group with none checked, as when the page is in no workspace.
  */
 function workspaceMenuItems(): MenuItemConstructorOptions[] {
 	const shown = serverById(saved, appWindow?.serverId ?? saved.current);
@@ -256,7 +263,7 @@ function workspaceMenuItems(): MenuItemConstructorOptions[] {
 					label: server.account
 						? serverLabel(saved, server)
 						: `Sign in to ${serverHost(server.origin)}…`,
-					type: "radio",
+					type: "checkbox",
 					checked: server === shown,
 					accelerator: nextShortcut(),
 					click: () => void openServer(server.id),
@@ -269,7 +276,7 @@ function workspaceMenuItems(): MenuItemConstructorOptions[] {
 			...workspaces.map(
 				(workspace): MenuItemConstructorOptions => ({
 					label: workspace.name,
-					type: "radio",
+					type: "checkbox",
 					checked: workspace.slug === open?.slug,
 					accelerator: nextShortcut(),
 					click: () => void openWorkspace(server, workspace),
@@ -286,7 +293,7 @@ function workspaceMenuItems(): MenuItemConstructorOptions[] {
 				{ label: `Remove ${serverLabel(saved, shown)}…`, click: () => void removeServer(shown) },
 			]
 		: [];
-	const placeCount = places.filter((item) => item.type === "radio").length;
+	const placeCount = places.filter((item) => item.type === "checkbox").length;
 	return [
 		...(placeCount > 1 ? [...places, { type: "separator" } as const] : []),
 		{ label: "Add server…", click: openSetup },
