@@ -9,11 +9,23 @@ import {
 	type WindowOpenHandlerResponse,
 } from "electron";
 import { loadLocalPage, localPreload } from "./local-page.ts";
-import type { ServerId } from "./saved-servers.ts";
+import { ServerId } from "./saved-servers.ts";
+import { type SwitcherAccount, switcherChannels } from "./switcher/bridge.ts";
 import { unreachableChannels } from "./unreachable/bridge.ts";
 
 /** Chromium's error for a load that a newer navigation replaced, which isn't a failure. */
 const ERR_ABORTED = -3;
+
+/** Lets the page under the switcher show through around its card. */
+const TRANSPARENT = "#00000000";
+
+/** What the workspace switcher shows and does, which the rest of the app provides. */
+export interface SwitcherHandlers {
+	accounts(): SwitcherAccount[];
+	/** Opens workspace `slug` of the saved server `id`, or with no slug, that server where it was left. */
+	open(id: ServerId, slug: string | undefined): void;
+	addAccount(): void;
+}
 
 /** A page of a server to show, signed in with the session of the saved server `id`. */
 export interface ServerToShow {
@@ -53,6 +65,7 @@ export class AppWindow {
 	readonly #events: AppWindowEvents;
 	#server: ServerView;
 	#unreachable: UnreachableView | undefined;
+	#switcher: WebContentsView | undefined;
 	#pageTitle = "Sugabots";
 
 	constructor(server: ServerToShow, events: AppWindowEvents) {
@@ -63,6 +76,7 @@ export class AppWindow {
 			// A window's views outlive it unless they're closed.
 			this.#server.view.webContents.close();
 			this.#unreachable?.view.webContents.close();
+			this.#switcher?.webContents.close();
 			this.#events.closed();
 		});
 	}
@@ -74,6 +88,7 @@ export class AppWindow {
 
 	/** Opens `server.url`, in the page already open when it's of the same saved server. */
 	show(server: ServerToShow): void {
+		this.closeSwitcher();
 		if (server.id === this.serverId) {
 			void this.#load(server.url);
 			return;
@@ -99,7 +114,59 @@ export class AppWindow {
 
 	bringToFront(): void {
 		bringToFront(this.window);
-		(this.#unreachable ?? this.#server).view.webContents.focus();
+		this.#focusTopView();
+	}
+
+	/** Shows the workspace switcher over the page, until the person picks a place, presses Esc or clicks outside it. */
+	showSwitcher(handlers: SwitcherHandlers): void {
+		if (this.#switcher) {
+			this.#switcher.webContents.focus();
+			return;
+		}
+		const view = new WebContentsView({ webPreferences: { preload: localPreload("switcher") } });
+		view.setBackgroundColor(TRANSPARENT);
+		const { ipc } = view.webContents;
+		ipc.handle(switcherChannels.accounts, () => handlers.accounts());
+		ipc.handle(switcherChannels.open, (_event, id: unknown, slug: unknown) => {
+			if (typeof id !== "string" || (slug !== undefined && typeof slug !== "string")) return;
+			// After the reply is sent, since closing the switcher closes the page waiting for it.
+			setImmediate(() => {
+				this.closeSwitcher();
+				handlers.open(ServerId.make(id), slug);
+			});
+		});
+		ipc.handle(switcherChannels.addAccount, () => {
+			setImmediate(() => {
+				this.closeSwitcher();
+				handlers.addAccount();
+			});
+		});
+		ipc.handle(switcherChannels.close, () => {
+			setImmediate(() => this.closeSwitcher());
+		});
+		this.#switcher = view;
+		this.window.contentView.addChildView(view);
+		view.setBounds(this.#viewBounds());
+		void loadLocalPage(view.webContents, "switcher");
+		view.webContents.focus();
+	}
+
+	closeSwitcher(): void {
+		if (!this.#switcher) return;
+		const view = this.#switcher;
+		this.#switcher = undefined;
+		this.window.contentView.removeChildView(view);
+		view.webContents.close();
+		this.#focusTopView();
+	}
+
+	/** Tells the switcher, if it's showing, to list the saved accounts again. */
+	switcherAccountsChanged(): void {
+		this.#switcher?.webContents.send(switcherChannels.accountsChanged);
+	}
+
+	#focusTopView(): void {
+		(this.#switcher ?? this.#unreachable?.view ?? this.#server.view).webContents.focus();
 	}
 
 	#openServerView({ id, url }: ServerToShow): ServerView {
@@ -152,10 +219,12 @@ export class AppWindow {
 		});
 		this.#unreachable = { view, url };
 		this.window.contentView.addChildView(view);
+		// Adding a view the window already holds moves it back to the top.
+		if (this.#switcher) this.window.contentView.addChildView(this.#switcher);
 		view.setBounds(this.#viewBounds());
 		const query = { host: new URL(url).host, error: errorDescription };
 		void loadLocalPage(view.webContents, "unreachable", query);
-		view.webContents.focus();
+		this.#focusTopView();
 	}
 
 	#closeUnreachable(): void {
@@ -164,13 +233,14 @@ export class AppWindow {
 		this.#unreachable = undefined;
 		this.window.contentView.removeChildView(view);
 		view.webContents.close();
-		this.#server.view.webContents.focus();
+		this.#focusTopView();
 	}
 
 	#layout(): void {
 		const bounds = this.#viewBounds();
 		this.#server.view.setBounds(bounds);
 		this.#unreachable?.view.setBounds(bounds);
+		this.#switcher?.setBounds(bounds);
 	}
 
 	/** The whole of the window's content area, which each view fills. */

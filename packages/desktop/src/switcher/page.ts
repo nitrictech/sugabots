@@ -38,6 +38,7 @@ interface Row {
 const filter = element("#filter", HTMLInputElement);
 const list = element("#places", HTMLDivElement);
 const empty = element("#empty", HTMLParagraphElement);
+const card = element(".switcher", HTMLDivElement);
 
 let places: readonly Place[] = [];
 let rows: Row[] = [];
@@ -220,7 +221,7 @@ filter.addEventListener("keydown", (event) => {
 			break;
 		case "Escape":
 			if (filter.value === "") {
-				window.close();
+				void window.switcher.close();
 				break;
 			}
 			filter.value = "";
@@ -230,6 +231,11 @@ filter.addEventListener("keydown", (event) => {
 			return;
 	}
 	event.preventDefault();
+});
+
+// Outside the card is the page beneath, dimmed, which clicking returns to.
+document.addEventListener("mousedown", (event) => {
+	if (event.target instanceof Node && !card.contains(event.target)) void window.switcher.close();
 });
 
 filter.focus();

@@ -25,6 +25,7 @@ export interface SwitcherBridge {
 	open(id: string, slug: string | undefined): Promise<void>;
 	/** Closes the switcher and asks for another account's server. */
 	addAccount(): Promise<void>;
+	close(): Promise<void>;
 	/** Calls `listener` whenever the accounts change, as when a sign-in reports its workspaces. */
 	onAccountsChanged(listener: () => void): void;
 }
@@ -33,5 +34,6 @@ export const switcherChannels = {
 	accounts: "switcher:accounts",
 	open: "switcher:open",
 	addAccount: "switcher:add-account",
+	close: "switcher:close",
 	accountsChanged: "switcher:accounts-changed",
 } as const;

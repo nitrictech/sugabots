@@ -15,6 +15,7 @@ import {
 	type AppWindowEvents,
 	bringToFront,
 	type ServerToShow,
+	type SwitcherHandlers,
 	savedServerSession,
 } from "./app-window.ts";
 import { loadLocalPage, localPreload } from "./local-page.ts";
@@ -41,7 +42,7 @@ import {
 } from "./saved-servers.ts";
 import { findServer, typedAddress } from "./server.ts";
 import { type ConnectResult, setupChannels } from "./setup/bridge.ts";
-import { type SwitcherAccount, switcherChannels } from "./switcher/bridge.ts";
+import type { SwitcherAccount } from "./switcher/bridge.ts";
 
 /** For development: opens this server, in a session of its own, without asking or saving it. */
 const serverOverride: ServerToShow | undefined = process.env.SUGABOTS_URL
@@ -56,7 +57,6 @@ let appWindow: AppWindow | undefined;
 /** The page the app window shows, which says which workspace is open. */
 let shownUrl: string | undefined;
 let setupWindow: BrowserWindow | undefined;
-let switcherWindow: BrowserWindow | undefined;
 // Held for the app's lifetime, since a garbage-collected Tray disappears.
 let tray: Tray | undefined;
 /** One per saved server, so the menus list the workspaces of every account, not only the one open. */
@@ -242,7 +242,7 @@ function serversChanged() {
 	Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu()));
 	tray?.setContextMenu(Menu.buildFromTemplate(trayMenu()));
 	appWindow?.refreshTitle();
-	switcherWindow?.webContents.send(switcherChannels.accountsChanged);
+	appWindow?.switcherAccountsChanged();
 }
 
 /** The saved server the app window shows, or the one it opens when it's closed. */
@@ -250,51 +250,22 @@ function shownServer(): SavedServer | undefined {
 	return serverById(saved, appWindow?.serverId ?? saved.current);
 }
 
-/** A dialog listing every saved account's workspaces, over the app window when it's open. */
+/** Shows the workspace switcher over the app window, opening the window first if it's closed. */
 function openSwitcher() {
-	if (switcherWindow) {
-		bringToFront(switcherWindow);
-		return;
-	}
-	const switcher = new BrowserWindow({
-		title: "Switch workspace",
-		width: 440,
-		height: 520,
-		parent: appWindow?.window,
-		modal: appWindow !== undefined,
-		show: false,
-		resizable: false,
-		minimizable: false,
-		maximizable: false,
-		fullscreenable: false,
-		webPreferences: { preload: localPreload("switcher") },
-	});
-	switcherWindow = switcher;
-	switcher.removeMenu();
-	const { ipc } = switcher.webContents;
-	ipc.handle(switcherChannels.accounts, switcherAccounts);
-	ipc.handle(switcherChannels.open, (_event, id: unknown, slug: unknown) => {
-		const server = typeof id === "string" ? serverById(saved, ServerId.make(id)) : undefined;
-		const workspace = server?.workspaces?.find((one) => one.slug === slug);
-		// After the reply is sent, since this closes the switcher.
-		setImmediate(() => {
-			switcher.close();
-			if (server && workspace) void openWorkspace(server, workspace);
-			else if (server) void openServer(server.id);
-		});
-	});
-	ipc.handle(switcherChannels.addAccount, () => {
-		setImmediate(() => {
-			switcher.close();
-			openSetup(shownServer()?.origin);
-		});
-	});
-	switcher.once("ready-to-show", () => switcher.show());
-	switcher.on("closed", () => {
-		switcherWindow = undefined;
-	});
-	void loadLocalPage(switcher.webContents, "switcher");
+	if (!appWindow) openApp();
+	appWindow?.showSwitcher(switcherHandlers);
 }
+
+const switcherHandlers: SwitcherHandlers = {
+	accounts: switcherAccounts,
+	open: (id, slug) => {
+		const server = serverById(saved, id);
+		const workspace = server?.workspaces?.find((one) => one.slug === slug);
+		if (server && workspace) void openWorkspace(server, workspace);
+		else if (server) void openServer(server.id);
+	},
+	addAccount: () => openSetup(shownServer()?.origin),
+};
 
 function switcherAccounts(): SwitcherAccount[] {
 	const shown = shownServer();

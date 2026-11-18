@@ -1,12 +1,23 @@
+/* The page fills the app window over the server's page, dimming it around a card. */
 body {
 	display: block;
 	min-height: 0;
+	height: 100vh;
+	padding-top: 12vh;
+	background: rgb(0 0 0 / 40%);
 }
 
 .switcher {
-	height: 100vh;
+	width: min(440px, 100% - 32px);
+	max-height: calc(88vh - 32px);
+	margin: 0 auto;
 	display: flex;
 	flex-direction: column;
+	overflow: hidden;
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	background: var(--panel);
+	box-shadow: 0 24px 64px rgb(0 0 0 / 35%);
 }
 
 .search {
@@ -15,7 +26,7 @@ body {
 }
 
 #places {
-	flex: 1;
+	min-height: 0;
 	padding: 8px;
 	overflow-y: auto;
 }
@@ -49,7 +60,7 @@ body {
 /* A ring around the open workspace's tile, set off from it by a gap. */
 .tile.open {
 	box-shadow:
-		0 0 0 2px var(--background),
+		0 0 0 2px var(--panel),
 		0 0 0 4px var(--foreground);
 }
 
