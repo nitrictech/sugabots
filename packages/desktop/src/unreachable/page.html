@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+		/>
+		<title>Sugabots</title>
+		<script type="module" src="./page.ts"></script>
+	</head>
+	<body>
+		<main>
+			<img class="logo" alt="" width="56" height="56" />
+			<h1>Can't reach <span id="host">the server</span></h1>
+			<p class="lead">Check your connection and try again, or switch to another server.</p>
+			<div class="actions">
+				<button id="retry" type="button">Try again</button>
+				<button id="switch" type="button" class="secondary">Switch server…</button>
+			</div>
+			<p id="status" class="error" role="status"></p>
+			<p id="error" class="detail"></p>
+		</main>
+	</body>
+</html>

@@ -3,13 +3,21 @@
 The Sugabots desktop app, built with [Electron](https://www.electronjs.org/) and
 [electron-vite](https://electron-vite.org/). On first launch it asks for the
 address of a Sugabots server, checks that `/api/health` answers as one, saves
-it, and opens that server's web app in a window. The tray menu's Change server…
-asks again. Closing the window leaves the app running in the tray; launching it
-again reopens the window, and the tray's Quit ends it.
+it, and opens that server's web app in a window.
+
+The Server menu, in the window and the tray, lists every server added with Add
+server…, and switches between them, with Ctrl/⌘+1 to 9 for the first nine. Each
+server keeps its own session, so switching back finds you still signed in.
+Removing a server deletes its session. When a server can't be reached, the
+window says so and offers to try again or switch.
+
+Closing the window leaves the app running in the tray; launching it again
+reopens the window, and the tray's Quit ends it.
 
 For development, `SUGABOTS_URL` opens that server without asking or saving it,
 for example `SUGABOTS_URL=https://sugabots.localhost`. A development build keeps
-its settings in a `Sugabots Development` folder, apart from an installed copy's.
+its servers and sessions in a `Sugabots Development` folder, apart from an
+installed copy's.
 
 With `bun run dev` running, start it from the repository root with
 `bun run dev:desktop`, or from this directory with `bun run start`. It rebuilds

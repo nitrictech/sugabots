@@ -7,6 +7,9 @@
 	--muted-foreground: light-dark(#52525b, #a1a1aa);
 	--border: light-dark(#e4e4e7, #1c1c1f);
 	--ring: light-dark(#71717a, #a1a1aa);
+	--subtle-foreground: light-dark(#6b6b73, #808089);
+	--chip: light-dark(#f1f1f3, #17171a);
+	--hover: light-dark(#e4e4e7, #1f1f23);
 	--primary: light-dark(#111113, #ededed);
 	--primary-hover: light-dark(#26262a, #d4d4d8);
 	--primary-foreground: light-dark(#ffffff, #0a0a0a);
@@ -110,4 +113,27 @@ button:hover {
 button:disabled {
 	opacity: 0.6;
 	cursor: progress;
+}
+
+.actions {
+	width: 100%;
+	margin-bottom: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+button.secondary {
+	background: var(--chip);
+	color: var(--foreground);
+}
+
+button.secondary:hover {
+	background: var(--hover);
+}
+
+.detail {
+	margin: 0;
+	color: var(--subtle-foreground);
+	font-size: 12px;
 }

@@ -1,6 +1,7 @@
 import "@fontsource-variable/rubik";
-import "./page.css";
+import "../page.css";
 import logoUrl from "@sugabots/avatars/sugabots-logo.svg";
+import { element } from "../element.ts";
 import type { SetupBridge } from "./bridge.ts";
 
 declare global {
@@ -9,18 +10,14 @@ declare global {
 	}
 }
 
-const logo = element(".logo", HTMLImageElement);
 const form = element("#connect", HTMLFormElement);
 const address = element("#address", HTMLInputElement);
 const error = element("#error", HTMLParagraphElement);
 const submit = element("#connect button", HTMLButtonElement);
 
-logo.src = logoUrl;
-
-window.setup.currentServer().then((server) => {
-	address.value = server ?? "";
-	address.select();
-});
+element(".logo", HTMLImageElement).src = logoUrl;
+// The window exists to take this one field.
+address.focus();
 
 form.addEventListener("submit", async (event) => {
 	event.preventDefault();
@@ -39,9 +36,3 @@ address.addEventListener("input", () => {
 	error.textContent = "";
 	address.removeAttribute("aria-invalid");
 });
-
-function element<T extends Element>(selector: string, type: new () => T): T {
-	const found = document.querySelector(selector);
-	if (!(found instanceof type)) throw new Error(`page.html has no ${selector}`);
-	return found;
-}
