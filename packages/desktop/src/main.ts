@@ -29,6 +29,7 @@ import {
 	serverById,
 	serverHost,
 	serverLabel,
+	serversGroupedByOrigin,
 	serverUrl,
 	withServerAdded,
 	withServerOpened,
@@ -255,7 +256,7 @@ function workspaceMenuItems(): MenuItemConstructorOptions[] {
 	let shortcuts = 0;
 	const nextShortcut = () =>
 		++shortcuts <= WORKSPACE_SHORTCUT_COUNT ? `CommandOrControl+${shortcuts}` : undefined;
-	const places = saved.servers.flatMap((server): MenuItemConstructorOptions[] => {
+	const places = serversGroupedByOrigin(saved).flatMap((server): MenuItemConstructorOptions[] => {
 		const workspaces = server.workspaces ?? [];
 		if (workspaces.length === 0) {
 			return [

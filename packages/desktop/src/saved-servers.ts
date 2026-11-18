@@ -62,6 +62,14 @@ export function serverById(saved: SavedServers, id: ServerId | undefined): Saved
 	return saved.servers.find((server) => server.id === id);
 }
 
+/** The saved servers in the order added, except that each server's saves follow its first, so its accounts sit together. */
+export function serversGroupedByOrigin(saved: SavedServers): SavedServer[] {
+	const origins = new Set(saved.servers.map((server) => server.origin));
+	return [...origins].flatMap((origin) =>
+		saved.servers.filter((server) => server.origin === origin),
+	);
+}
+
 /** Saves `origin` again with a session of its own, and makes it the one the app opens. */
 export function withServerAdded(saved: SavedServers, origin: string): SavedServers {
 	const server = { id: ServerId.make(randomUUID()), origin };
@@ -102,10 +110,10 @@ export function withSignIn(
 	return unchanged ? saved : withServer(saved, id, { account: signIn?.account, workspaces });
 }
 
-/** How menus and titles name a saved server: who it's signed in as and its host. */
+/** How menus and titles name a saved server: its host and who it's signed in as. */
 export function serverLabel(saved: SavedServers, server: SavedServer): string {
 	const host = serverHost(server.origin);
-	if (server.account) return `${server.account} on ${host}`;
+	if (server.account) return `${host} · ${server.account}`;
 	const savedTwice = saved.servers.some(
 		(other) => other !== server && other.origin === server.origin,
 	);
