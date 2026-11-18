@@ -39,7 +39,7 @@ import {
 	workspaceAt,
 	workspaceUrl,
 } from "./saved-servers.ts";
-import { findServer } from "./server.ts";
+import { findServer, typedAddress } from "./server.ts";
 import { type ConnectResult, setupChannels } from "./setup/bridge.ts";
 
 /** For development: opens this server, in a session of its own, without asking or saving it. */
@@ -205,7 +205,8 @@ async function removeServer(server: SavedServer) {
 	await Promise.all([session.clearStorageData(), session.clearCache()]);
 }
 
-function openSetup() {
+/** Asks for a server's address, filled in with the open server's, `openOrigin`, when adding another account. */
+function openSetup(openOrigin?: string) {
 	if (setupWindow) {
 		bringToFront(setupWindow);
 		return;
@@ -232,7 +233,8 @@ function openSetup() {
 	setupWindow.on("closed", () => {
 		setupWindow = undefined;
 	});
-	void loadLocalPage(setupWindow.webContents, "setup");
+	const query: Record<string, string> = openOrigin ? { address: typedAddress(openOrigin) } : {};
+	void loadLocalPage(setupWindow.webContents, "setup", query);
 }
 
 /** Menus list the saved servers' workspaces, so they're rebuilt whenever those or the one open change. */
@@ -244,7 +246,7 @@ function serversChanged() {
 
 /**
  * Every workspace on every saved server, under who that server is signed in
- * as, then adding and removing servers. A server with no workspace, such as
+ * as, then adding an account and removing the open one. A server with no workspace, such as
  * one signed out, is an entry of its own. With only one place to go, the list
  * is left out.
  *
@@ -285,20 +287,14 @@ function workspaceMenuItems(): MenuItemConstructorOptions[] {
 			),
 		];
 	});
-	const shownItems: MenuItemConstructorOptions[] = shown
-		? [
-				{
-					label: `Add another account on ${serverHost(shown.origin)}…`,
-					click: () => void addServer(shown.origin),
-				},
-				{ label: `Remove ${serverLabel(saved, shown)}…`, click: () => void removeServer(shown) },
-			]
+	const removeShown: MenuItemConstructorOptions[] = shown
+		? [{ label: `Remove ${serverLabel(saved, shown)}…`, click: () => void removeServer(shown) }]
 		: [];
 	const placeCount = places.filter((item) => item.type === "checkbox").length;
 	return [
 		...(placeCount > 1 ? [...places, { type: "separator" } as const] : []),
-		{ label: "Add server…", click: openSetup },
-		...shownItems,
+		{ label: "Add another account…", click: () => openSetup(shown?.origin) },
+		...removeShown,
 	];
 }
 

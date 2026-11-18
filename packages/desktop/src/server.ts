@@ -42,6 +42,12 @@ export async function findServer(address: string): Promise<FoundServer> {
 	return { ok: true, origin: url.origin };
 }
 
+/** `origin` as a person would type it, leaving out the HTTPS that an address without a scheme is taken to be. */
+export function typedAddress(origin: string): string {
+	const url = new URL(origin);
+	return url.protocol === "https:" ? url.host : origin;
+}
+
 function parseAddress(address: string): URL | undefined {
 	const trimmed = address.trim();
 	if (trimmed === "") return undefined;

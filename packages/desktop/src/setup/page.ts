@@ -15,7 +15,17 @@ const address = element("#address", HTMLInputElement);
 const error = element("#error", HTMLParagraphElement);
 const submit = element("#connect button", HTMLButtonElement);
 
+/** The open server's address when adding another account, which typing over replaces with another server's. */
+const openServerAddress = new URLSearchParams(location.search).get("address");
+
 element(".logo", HTMLImageElement).src = logoUrl;
+if (openServerAddress) {
+	element("h1", HTMLHeadingElement).textContent = "Add another account";
+	element(".lead", HTMLParagraphElement).textContent =
+		"Keep this address for another account on the same server, or enter a different server's.";
+	address.value = openServerAddress;
+	address.select();
+}
 // The window exists to take this one field.
 address.focus();
 
