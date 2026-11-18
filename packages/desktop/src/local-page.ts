@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { WebContents } from "electron";
 
 /** The app's own pages, each built from `src/<page>/` with its own preload. */
-export type LocalPage = "setup" | "unreachable";
+export type LocalPage = "setup" | "switcher" | "unreachable";
 
 export function localPreload(page: LocalPage): string {
 	return join(import.meta.dirname, `../preload/${page}-preload.cjs`);

@@ -10,6 +10,7 @@ export default defineConfig({
 			rolldownOptions: {
 				input: {
 					"setup-preload": "src/setup/preload.ts",
+					"switcher-preload": "src/switcher/preload.ts",
 					"unreachable-preload": "src/unreachable/preload.ts",
 				},
 				// Electron runs a sandboxed preload as a classic script, never as an ES module.
@@ -23,6 +24,7 @@ export default defineConfig({
 			rolldownOptions: {
 				input: {
 					setup: resolve(import.meta.dirname, "src/setup/page.html"),
+					switcher: resolve(import.meta.dirname, "src/switcher/page.html"),
 					unreachable: resolve(import.meta.dirname, "src/unreachable/page.html"),
 				},
 			},

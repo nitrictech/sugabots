@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+		/>
+		<title>Switch workspace</title>
+		<script type="module" src="./page.ts"></script>
+	</head>
+	<body>
+		<div class="switcher">
+			<div class="search">
+				<input
+					id="filter"
+					type="text"
+					role="combobox"
+					aria-label="Find a workspace"
+					aria-controls="places"
+					aria-expanded="true"
+					aria-autocomplete="list"
+					autocomplete="off"
+					spellcheck="false"
+					placeholder="Find a workspace"
+				/>
+			</div>
+			<div id="places" role="listbox" aria-label="Workspaces"></div>
+			<p id="empty" class="detail" hidden>No workspace matches.</p>
+			<footer>
+				<button id="add" type="button" class="secondary">Add another account…</button>
+				<span class="detail">↑↓ move · Enter open · Esc close</span>
+			</footer>
+		</div>
+	</body>
+</html>

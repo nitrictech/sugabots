@@ -2,7 +2,7 @@
 export interface UnreachableBridge {
 	/** Loads the server again, resolving to whether it answered. When it did, this page closes. */
 	retry(): Promise<boolean>;
-	/** Opens the menu of workspaces on the saved servers. */
+	/** Opens the dialog listing the workspaces of every saved account. */
 	switchWorkspace(): Promise<void>;
 }
 

@@ -1,0 +1,111 @@
+body {
+	display: block;
+	min-height: 0;
+}
+
+.switcher {
+	height: 100vh;
+	display: flex;
+	flex-direction: column;
+}
+
+.search {
+	padding: 12px;
+	border-bottom: 1px solid var(--border);
+}
+
+#places {
+	flex: 1;
+	padding: 6px 8px 8px;
+	overflow-y: auto;
+}
+
+.group + .group {
+	margin-top: 6px;
+}
+
+.group-heading {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	padding: 8px 8px 4px;
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+.group-heading .host {
+	font-weight: 600;
+}
+
+.group-heading .account {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--subtle-foreground);
+}
+
+.place {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 8px;
+	border-radius: 8px;
+	cursor: pointer;
+}
+
+.place[aria-selected="true"] {
+	background: var(--hover);
+}
+
+.tile {
+	flex: none;
+	width: 28px;
+	height: 28px;
+	display: grid;
+	place-items: center;
+	border-radius: 7px;
+	background: hsl(var(--hue) 55% 45%);
+	color: #ffffff;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.current {
+	padding: 1px 8px;
+	border-radius: 999px;
+	background: var(--chip);
+	color: var(--muted-foreground);
+	font-size: 12px;
+}
+
+kbd {
+	color: var(--subtle-foreground);
+	font: inherit;
+	font-size: 12px;
+}
+
+#empty {
+	padding: 16px;
+	text-align: center;
+}
+
+footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 10px 12px;
+	border-top: 1px solid var(--border);
+}
+
+footer button {
+	padding: 6px 12px;
+}
