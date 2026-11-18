@@ -43,13 +43,20 @@ let places: readonly Place[] = [];
 let rows: Row[] = [];
 let active = 0;
 
-/** Every saved account's places, numbered in order, as the Workspace menu numbers them. */
+/**
+ * Every saved account's places, numbered in order, as the Workspace menu
+ * numbers them. Their addresses name the account only where its server has
+ * another saved, since the host alone tells the rest apart.
+ */
 function placesOf(accounts: readonly SwitcherAccount[]): Place[] {
+	const hosts = accounts.map((account) => account.host);
+	const sharedHosts = new Set(hosts.filter((host, index) => hosts.indexOf(host) !== index));
 	let count = 0;
 	const nextShortcut = () => (++count <= SHORTCUT_COUNT ? count : undefined);
 	return accounts.flatMap((account): Place[] => {
+		const named = sharedHosts.has(account.host) ? account.account : undefined;
 		if (account.workspaces.length === 0) {
-			const address = account.account ?? "Not signed in";
+			const address = account.account ? (named ?? "No workspace yet") : "Not signed in";
 			return [
 				{
 					id: account.id,
@@ -62,7 +69,7 @@ function placesOf(accounts: readonly SwitcherAccount[]): Place[] {
 				},
 			];
 		}
-		const address = `${account.host} · ${account.account ?? ""}`;
+		const address = named ? `${account.host} · ${named}` : account.host;
 		return account.workspaces.map((workspace) => ({
 			id: account.id,
 			slug: workspace.slug,
