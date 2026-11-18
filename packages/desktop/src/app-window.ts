@@ -8,7 +8,6 @@ import {
 	WebContentsView,
 	type WindowOpenHandlerResponse,
 } from "electron";
-import { watchAccount } from "./account.ts";
 import { loadLocalPage, localPreload } from "./local-page.ts";
 import type { ServerId } from "./saved-servers.ts";
 import { unreachableChannels } from "./unreachable/bridge.ts";
@@ -16,26 +15,26 @@ import { unreachableChannels } from "./unreachable/bridge.ts";
 /** Chromium's error for a load that a newer navigation replaced, which isn't a failure. */
 const ERR_ABORTED = -3;
 
-/** A server to show, signed in with the session of the saved server `id`. */
+/** A page of a server to show, signed in with the session of the saved server `id`. */
 export interface ServerToShow {
 	readonly id: ServerId;
-	readonly origin: string;
+	readonly url: string;
 }
 
 /** What the app window leaves to the rest of the app. */
 export interface AppWindowEvents {
 	/** The window title for a server's page title. */
 	title(pageTitle: string, id: ServerId): string;
-	/** Who the shown server is signed in as, when first found out and whenever it changes. */
-	account(id: ServerId, account: string | undefined): void;
-	/** The person asked to switch servers from the page that says a server can't be reached. */
-	switchServer(): void;
+	/** The shown server's page moved to `url`, by a link or by its own script. */
+	navigated(id: ServerId, url: string): void;
+	/** The person asked to switch workspaces from the page that says a server can't be reached. */
+	switchWorkspace(): void;
 	closed(): void;
 }
 
-interface ServerView extends ServerToShow {
+interface ServerView {
+	readonly id: ServerId;
 	readonly view: WebContentsView;
-	readonly stopWatchingAccount: () => void;
 }
 
 interface UnreachableView {
@@ -62,7 +61,6 @@ export class AppWindow {
 		this.window.on("resize", () => this.#layout());
 		this.window.on("closed", () => {
 			// A window's views outlive it unless they're closed.
-			this.#server.stopWatchingAccount();
 			this.#server.view.webContents.close();
 			this.#unreachable?.view.webContents.close();
 			this.#events.closed();
@@ -74,13 +72,16 @@ export class AppWindow {
 		return this.#server.id;
 	}
 
+	/** Opens `server.url`, in the page already open when it's of the same saved server. */
 	show(server: ServerToShow): void {
-		if (server.id === this.serverId) return;
+		if (server.id === this.serverId) {
+			void this.#load(server.url);
+			return;
+		}
 		const previous = this.#server;
 		this.#closeUnreachable();
 		this.#pageTitle = "Sugabots";
 		this.#server = this.#openServerView(server);
-		previous.stopWatchingAccount();
 		this.window.contentView.removeChildView(previous.view);
 		previous.view.webContents.close();
 		this.refreshTitle();
@@ -101,18 +102,18 @@ export class AppWindow {
 		(this.#unreachable ?? this.#server).view.webContents.focus();
 	}
 
-	#openServerView({ id, origin }: ServerToShow): ServerView {
-		const serverSession = savedServerSession(id);
-		const view = new WebContentsView({ webPreferences: { session: serverSession } });
-		const stopWatchingAccount = watchAccount(serverSession, origin, (account) =>
-			this.#events.account(id, account),
-		);
-		const server = { id, origin, view, stopWatchingAccount };
+	#openServerView({ id, url }: ServerToShow): ServerView {
+		const view = new WebContentsView({ webPreferences: { session: savedServerSession(id) } });
+		const server = { id, view };
 		const { webContents } = view;
 		webContents.setWindowOpenHandler(openInBrowser);
 		webContents.on("page-title-updated", (_event, title) => {
 			this.#pageTitle = title;
 			this.refreshTitle();
+		});
+		webContents.on("did-navigate", (_event, page) => this.#events.navigated(id, page));
+		webContents.on("did-navigate-in-page", (_event, page, isMainFrame) => {
+			if (isMainFrame) this.#events.navigated(id, page);
 		});
 		webContents.on("did-fail-load", (_event, errorCode, errorDescription, url, isMainFrame) => {
 			if (isMainFrame && errorCode !== ERR_ABORTED && server === this.#server) {
@@ -121,7 +122,7 @@ export class AppWindow {
 		});
 		this.window.contentView.addChildView(view);
 		view.setBounds(this.#viewBounds());
-		void this.#load(origin, server);
+		void this.#load(url, server);
 		return server;
 	}
 
@@ -146,8 +147,8 @@ export class AppWindow {
 		const view = new WebContentsView({ webPreferences: { preload: localPreload("unreachable") } });
 		const { ipc } = view.webContents;
 		ipc.handle(unreachableChannels.retry, () => this.#load(this.#unreachable?.url ?? url));
-		ipc.handle(unreachableChannels.switchServer, () => {
-			this.#events.switchServer();
+		ipc.handle(unreachableChannels.switchWorkspace, () => {
+			this.#events.switchWorkspace();
 		});
 		this.#unreachable = { view, url };
 		this.window.contentView.addChildView(view);

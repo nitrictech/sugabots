@@ -9,6 +9,7 @@ import {
 	nativeImage,
 	Tray,
 } from "electron";
+import { type SignInWatch, watchSignIn } from "./account.ts";
 import {
 	AppWindow,
 	type AppWindowEvents,
@@ -21,32 +22,42 @@ import {
 	loadSavedServers,
 	type SavedServer,
 	type SavedServers,
+	type SavedWorkspace,
 	ServerId,
+	type SignIn,
 	saveSavedServers,
 	serverById,
 	serverHost,
 	serverLabel,
-	withAccount,
+	serverUrl,
 	withServerAdded,
 	withServerOpened,
 	withServerRemoved,
+	withSignIn,
+	withWorkspaceOpened,
+	workspaceAt,
+	workspaceUrl,
 } from "./saved-servers.ts";
 import { findServer } from "./server.ts";
 import { type ConnectResult, setupChannels } from "./setup/bridge.ts";
 
 /** For development: opens this server, in a session of its own, without asking or saving it. */
 const serverOverride: ServerToShow | undefined = process.env.SUGABOTS_URL
-	? { id: ServerId.make("sugabots-url"), origin: process.env.SUGABOTS_URL }
+	? { id: ServerId.make("sugabots-url"), url: process.env.SUGABOTS_URL }
 	: undefined;
 
-/** How many servers get a CmdOrCtrl+number shortcut. */
-const SERVER_SHORTCUT_COUNT = 9;
+/** How many workspaces get a CmdOrCtrl+number shortcut. */
+const WORKSPACE_SHORTCUT_COUNT = 9;
 
 let saved: SavedServers = { servers: [] };
 let appWindow: AppWindow | undefined;
+/** The page the app window shows, which says which workspace is open. */
+let shownUrl: string | undefined;
 let setupWindow: BrowserWindow | undefined;
 // Held for the app's lifetime, since a garbage-collected Tray disappears.
 let tray: Tray | undefined;
+/** One per saved server, so the menus list the workspaces of every account, not only the one open. */
+const signInWatches = new Map<ServerId, SignInWatch>();
 
 /** The app window, or the picker when no server has been added yet. */
 function openApp() {
@@ -54,36 +65,56 @@ function openApp() {
 		appWindow.bringToFront();
 		return;
 	}
-	const server = serverOverride ?? serverById(saved, saved.current);
-	if (server) showServer(server);
+	const server = serverById(saved, saved.current);
+	if (serverOverride) showServer(serverOverride);
+	else if (server) showServer({ id: server.id, url: serverUrl(server) });
 	else openSetup();
 }
 
 /** Saves `origin` again, with a session of its own for signing in to another account, and opens it. */
 async function addServer(origin: string) {
 	saved = withServerAdded(saved, origin);
-	showCurrentServer();
+	watchSignIns();
+	openCurrentServer();
 	await saveSavedServers(saved);
 }
 
-/** Opens the saved server `id` and remembers it as the one the app opens. */
+async function openWorkspace(server: SavedServer, workspace: SavedWorkspace) {
+	if (appWindow?.serverId === server.id && shownWorkspace(server)?.slug === workspace.slug) {
+		appWindow.bringToFront();
+		return;
+	}
+	saved = withWorkspaceOpened(saved, server.id, workspace.slug);
+	showServer({ id: server.id, url: workspaceUrl(server, workspace) });
+	await saveSavedServers(saved);
+}
+
+/** Opens the saved server `id` where it was left, for one with no workspace to open, such as one signed out. */
 async function openServer(id: ServerId) {
 	saved = withServerOpened(saved, id);
-	showCurrentServer();
+	openCurrentServer();
 	await saveSavedServers(saved);
 }
 
-function showCurrentServer() {
+function openCurrentServer() {
 	const server = serverById(saved, saved.current);
-	if (server) showServer(server);
+	if (server) showServer({ id: server.id, url: serverUrl(server) });
 }
 
 function showServer(server: ServerToShow) {
+	// Two saves of one server share its addresses, so the last page would name a workspace of the other.
+	if (appWindow?.serverId !== server.id) shownUrl = undefined;
 	if (appWindow) appWindow.show(server);
 	else appWindow = new AppWindow(server, appWindowEvents);
 	appWindow.bringToFront();
 	setupWindow?.close();
 	serversChanged();
+}
+
+/** The workspace the app window shows of `server`, if it shows one. */
+function shownWorkspace(server: SavedServer): SavedWorkspace | undefined {
+	if (appWindow?.serverId !== server.id || !shownUrl) return undefined;
+	return workspaceAt(server, shownUrl);
 }
 
 const appWindowEvents: AppWindowEvents = {
@@ -93,21 +124,54 @@ const appWindowEvents: AppWindowEvents = {
 			? `${pageTitle} — ${serverLabel(saved, server)}`
 			: pageTitle;
 	},
-	account: (id, account) => {
-		const updated = withAccount(saved, id, account);
-		if (updated === saved) return;
-		saved = updated;
+	navigated: (id, url) => {
+		const server = serverById(saved, id);
+		const before = server && shownWorkspace(server);
+		shownUrl = url;
+		if (!server) return;
+		const workspace = shownWorkspace(server);
+		// A page outside every workspace known may follow making, renaming or leaving one.
+		if (!workspace) signInWatches.get(id)?.recheck();
+		if (workspace?.slug === before?.slug) return;
+		if (workspace) {
+			saved = withWorkspaceOpened(saved, id, workspace.slug);
+			void saveSavedServers(saved);
+		}
 		serversChanged();
-		void saveSavedServers(saved);
 	},
-	switchServer: () => {
-		Menu.buildFromTemplate(serverMenuItems()).popup({ window: appWindow?.window });
+	switchWorkspace: () => {
+		Menu.buildFromTemplate(workspaceMenuItems()).popup({ window: appWindow?.window });
 	},
 	closed: () => {
 		appWindow = undefined;
+		shownUrl = undefined;
 		serversChanged();
 	},
 };
+
+/** Starts watching who each saved server is signed in as, and stops for those removed. */
+function watchSignIns() {
+	for (const server of saved.servers) {
+		if (signInWatches.has(server.id)) continue;
+		const watch = watchSignIn(savedServerSession(server.id), server.origin, (signIn) =>
+			signedIn(server.id, signIn),
+		);
+		signInWatches.set(server.id, watch);
+	}
+	for (const [id, watch] of signInWatches) {
+		if (serverById(saved, id)) continue;
+		watch.stop();
+		signInWatches.delete(id);
+	}
+}
+
+function signedIn(id: ServerId, signIn: SignIn | undefined) {
+	const updated = withSignIn(saved, id, signIn);
+	if (updated === saved) return;
+	saved = updated;
+	serversChanged();
+	void saveSavedServers(saved);
+}
 
 async function removeServer(server: SavedServer) {
 	const { response } = await dialog.showMessageBox({
@@ -120,9 +184,10 @@ async function removeServer(server: SavedServer) {
 	});
 	if (response !== 0) return;
 	saved = withServerRemoved(saved, server.id);
+	watchSignIns();
 	if (appWindow?.serverId === server.id) {
 		const next = serverById(saved, saved.current);
-		if (next) showServer(next);
+		if (next) showServer({ id: next.id, url: serverUrl(next) });
 		else {
 			appWindow.window.close();
 			openSetup();
@@ -165,24 +230,53 @@ function openSetup() {
 	void loadLocalPage(setupWindow.webContents, "setup");
 }
 
-/** Menus list the saved servers, so they're rebuilt whenever the list or the open server changes. */
+/** Menus list the saved servers' workspaces, so they're rebuilt whenever those or the one open change. */
 function serversChanged() {
 	Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenu()));
 	tray?.setContextMenu(Menu.buildFromTemplate(trayMenu()));
 	appWindow?.refreshTitle();
 }
 
-function serverMenuItems(): MenuItemConstructorOptions[] {
+/**
+ * Every workspace on every saved server, under who that server is signed in
+ * as, then adding and removing servers. A server with no workspace, such as
+ * one signed out, is an entry of its own. With only one place to go, the list
+ * is left out.
+ */
+function workspaceMenuItems(): MenuItemConstructorOptions[] {
 	const shown = serverById(saved, appWindow?.serverId ?? saved.current);
-	const servers = saved.servers.map(
-		(server, index): MenuItemConstructorOptions => ({
-			label: serverLabel(saved, server),
-			type: "radio",
-			checked: server === shown,
-			accelerator: index < SERVER_SHORTCUT_COUNT ? `CommandOrControl+${index + 1}` : undefined,
-			click: () => void openServer(server.id),
-		}),
-	);
+	let shortcuts = 0;
+	const nextShortcut = () =>
+		++shortcuts <= WORKSPACE_SHORTCUT_COUNT ? `CommandOrControl+${shortcuts}` : undefined;
+	const places = saved.servers.flatMap((server): MenuItemConstructorOptions[] => {
+		const workspaces = server.workspaces ?? [];
+		if (workspaces.length === 0) {
+			return [
+				{
+					label: server.account
+						? serverLabel(saved, server)
+						: `Sign in to ${serverHost(server.origin)}…`,
+					type: "radio",
+					checked: server === shown,
+					accelerator: nextShortcut(),
+					click: () => void openServer(server.id),
+				},
+			];
+		}
+		const open = server === shown ? shownWorkspace(server) : undefined;
+		return [
+			{ label: serverLabel(saved, server), enabled: false },
+			...workspaces.map(
+				(workspace): MenuItemConstructorOptions => ({
+					label: workspace.name,
+					type: "radio",
+					checked: workspace.slug === open?.slug,
+					accelerator: nextShortcut(),
+					click: () => void openWorkspace(server, workspace),
+				}),
+			),
+		];
+	});
 	const shownItems: MenuItemConstructorOptions[] = shown
 		? [
 				{
@@ -192,9 +286,9 @@ function serverMenuItems(): MenuItemConstructorOptions[] {
 				{ label: `Remove ${serverLabel(saved, shown)}…`, click: () => void removeServer(shown) },
 			]
 		: [];
+	const placeCount = places.filter((item) => item.type === "radio").length;
 	return [
-		...servers,
-		...(servers.length > 0 ? [{ type: "separator" } as const] : []),
+		...(placeCount > 1 ? [...places, { type: "separator" } as const] : []),
 		{ label: "Add server…", click: openSetup },
 		...shownItems,
 	];
@@ -220,7 +314,7 @@ function applicationMenu(): MenuItemConstructorOptions[] {
 				{ role: "togglefullscreen" },
 			],
 		},
-		{ label: "Server", submenu: serverMenuItems() },
+		{ label: "Workspace", submenu: workspaceMenuItems() },
 		{ role: "windowMenu" },
 	];
 }
@@ -229,7 +323,7 @@ function trayMenu(): MenuItemConstructorOptions[] {
 	return [
 		{ label: "Open Sugabots", click: openApp },
 		{ type: "separator" },
-		...serverMenuItems(),
+		...workspaceMenuItems(),
 		{ type: "separator" },
 		{ label: "Quit Sugabots", click: () => app.quit() },
 	];
@@ -259,6 +353,7 @@ if (app.requestSingleInstanceLock()) {
 	// Not awaited: Electron emits `ready` only once this module has finished evaluating.
 	void app.whenReady().then(async () => {
 		saved = await loadSavedServers();
+		watchSignIns();
 		tray = createTray();
 		app.on("quit", () => tray?.destroy());
 		serversChanged();

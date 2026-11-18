@@ -8,11 +8,22 @@ import { app } from "electron";
 export const ServerId = Schema.String.pipe(Schema.brand("ServerId"));
 export type ServerId = typeof ServerId.Type;
 
+export const SavedWorkspace = Schema.Struct({
+	/** The first segment of the workspace's address on its server. */
+	slug: Schema.String,
+	name: Schema.String,
+});
+export type SavedWorkspace = typeof SavedWorkspace.Type;
+
 const SavedServer = Schema.Struct({
 	id: ServerId,
 	origin: Schema.String,
 	/** The email it was last signed in as, which tells two saves of one server apart. */
 	account: Schema.optional(Schema.String),
+	/** The workspaces that account was last in, so menus list them before the server is asked again. */
+	workspaces: Schema.optional(Schema.Array(SavedWorkspace)),
+	/** The slug of the workspace last open in it, which opening it again returns to. */
+	lastWorkspace: Schema.optional(Schema.String),
 });
 export type SavedServer = typeof SavedServer.Type;
 
@@ -23,6 +34,12 @@ const SavedServers = Schema.Struct({
 	current: Schema.optional(ServerId),
 });
 export type SavedServers = typeof SavedServers.Type;
+
+/** Who a saved server's session is signed in as, and the workspaces they're in there. */
+export interface SignIn {
+	readonly account: string;
+	readonly workspaces: readonly SavedWorkspace[];
+}
 
 const decodeSettings = Schema.decodeUnknownOption(Schema.fromJsonString(SavedServers));
 
@@ -53,22 +70,33 @@ export function withServerOpened(saved: SavedServers, id: ServerId | undefined):
 	return { ...saved, current: serverById(saved, id)?.id ?? saved.servers[0]?.id };
 }
 
+/** Makes `id` the server the app opens, at its workspace `slug`. */
+export function withWorkspaceOpened(saved: SavedServers, id: ServerId, slug: string): SavedServers {
+	return withServerOpened(withServer(saved, id, { lastWorkspace: slug }), id);
+}
+
 /** Removes `id`; when the app opened it, the app opens the first remaining server instead. */
 export function withServerRemoved(saved: SavedServers, id: ServerId): SavedServers {
 	const servers = saved.servers.filter((server) => server.id !== id);
 	return withServerOpened({ servers }, saved.current === id ? undefined : saved.current);
 }
 
-/** Records who `id` is signed in as, returning `saved` itself when that hasn't changed. */
-export function withAccount(
+/**
+ * Records who `id` is signed in as and their workspaces, with `undefined`
+ * once it's signed out. Returns `saved` itself when that hasn't changed.
+ */
+export function withSignIn(
 	saved: SavedServers,
 	id: ServerId,
-	account: string | undefined,
+	signIn: SignIn | undefined,
 ): SavedServers {
 	const server = serverById(saved, id);
-	if (!server || server.account === account) return saved;
-	const servers = saved.servers.map((other) => (other === server ? { ...server, account } : other));
-	return { ...saved, servers };
+	if (!server) return saved;
+	const workspaces = signIn?.workspaces ?? [];
+	const unchanged =
+		server.account === signIn?.account &&
+		JSON.stringify(server.workspaces ?? []) === JSON.stringify(workspaces);
+	return unchanged ? saved : withServer(saved, id, { account: signIn?.account, workspaces });
 }
 
 /** How menus and titles name a saved server: who it's signed in as and its host. */
@@ -84,6 +112,35 @@ export function serverLabel(saved: SavedServers, server: SavedServer): string {
 /** A server's host, with the port when it has one. */
 export function serverHost(origin: string): string {
 	return new URL(origin).host;
+}
+
+/** The page opening `server` shows: the workspace last open in it while it's still in that one, or else its home page, which picks one. */
+export function serverUrl(server: SavedServer): string {
+	const last = server.workspaces?.find((workspace) => workspace.slug === server.lastWorkspace);
+	return last ? workspaceUrl(server, last) : server.origin;
+}
+
+export function workspaceUrl(server: SavedServer, workspace: SavedWorkspace): string {
+	return new URL(`/${encodeURIComponent(workspace.slug)}`, server.origin).href;
+}
+
+/** The workspace of `server` that `url` is a page of, if any. */
+export function workspaceAt(server: SavedServer, url: string): SavedWorkspace | undefined {
+	const page = URL.parse(url);
+	if (page?.origin !== new URL(server.origin).origin) return undefined;
+	const [first] = page.pathname.split("/").filter(Boolean);
+	return server.workspaces?.find((workspace) => encodeURIComponent(workspace.slug) === first);
+}
+
+function withServer(
+	saved: SavedServers,
+	id: ServerId,
+	changes: Partial<Omit<SavedServer, "id" | "origin">>,
+): SavedServers {
+	const servers = saved.servers.map((server) =>
+		server.id === id ? { ...server, ...changes } : server,
+	);
+	return { ...saved, servers };
 }
 
 function settingsPath(): string {

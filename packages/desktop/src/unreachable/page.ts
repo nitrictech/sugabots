@@ -29,5 +29,5 @@ retry.addEventListener("click", async () => {
 });
 
 element("#switch", HTMLButtonElement).addEventListener("click", () => {
-	void window.unreachable.switchServer();
+	void window.unreachable.switchWorkspace();
 });

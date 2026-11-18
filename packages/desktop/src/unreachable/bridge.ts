@@ -2,11 +2,11 @@
 export interface UnreachableBridge {
 	/** Loads the server again, resolving to whether it answered. When it did, this page closes. */
 	retry(): Promise<boolean>;
-	/** Opens the menu of saved servers. */
-	switchServer(): Promise<void>;
+	/** Opens the menu of workspaces on the saved servers. */
+	switchWorkspace(): Promise<void>;
 }
 
 export const unreachableChannels = {
 	retry: "unreachable:retry",
-	switchServer: "unreachable:switch-server",
+	switchWorkspace: "unreachable:switch-workspace",
 } as const;
