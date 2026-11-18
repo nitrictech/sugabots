@@ -1,4 +1,4 @@
-import { type Channel, EVENT_VERSION } from "@sugabots/contracts";
+import { EVENT_VERSION, type StreamChannel } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,7 +26,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 	const { publish } = Effect.runSync(
 		EventOutbox.make.pipe(Effect.provideService(EventBus.Service, bus)),
 	);
-	let channel: Channel;
+	let channel: StreamChannel;
 
 	afterAll(closeDatabase);
 
@@ -34,7 +34,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 		bus.publishCommitted.mockClear();
 		// Per test, so a shared Postgres and whatever a previous run left in it
 		// cannot affect the result.
-		channel = `thread:${crypto.randomUUID()}`;
+		channel = `conversation:${crypto.randomUUID()}`;
 	});
 
 	/** A durable event carrying a marker, so a delivery can be told from another. */
@@ -150,8 +150,8 @@ describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 	});
 
 	it("stores what a transaction publishes in several batches together, so crossed channels cannot deadlock", async () => {
-		const other: Channel = `thread:${crypto.randomUUID()}`;
-		const on = (to: Channel, n: number): PendingEvent => ({ ...marked(n), channel: to });
+		const other: StreamChannel = `conversation:${crypto.randomUUID()}`;
+		const on = (to: StreamChannel, n: number): PendingEvent => ({ ...marked(n), channel: to });
 		let firstPublished = () => {};
 		const firstHasPublished = new Promise<void>((resolve) => {
 			firstPublished = resolve;

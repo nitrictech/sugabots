@@ -3,11 +3,12 @@ import { ConfigProvider, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import { Accounts } from "../../accounts/accounts.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
+import { noComputers } from "../../computers/testing.ts";
 import {
-	agent,
+	bot,
+	channel,
+	channelMember,
 	modelProvider,
-	pod,
-	podMember,
 	providerModel,
 	searchProvider,
 	user,
@@ -18,7 +19,6 @@ import {
 import { closeDatabase, onDatabase, testInfrastructure } from "../../database/testing.ts";
 import { Email } from "../../email/email.ts";
 import { Installation } from "../../installation/installation.ts";
-import { noComputers } from "../../sandboxes/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { Membership } from "./membership.ts";
 
@@ -158,17 +158,17 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ id: agent.id })
-					.from(agent)
-					.where(and(eq(agent.workspaceId, workspace.id), isNotNull(agent.systemAgentKey))),
+					.select({ id: bot.id })
+					.from(bot)
+					.where(and(eq(bot.workspaceId, workspace.id), isNotNull(bot.systemBotKey))),
 			),
 		).not.toEqual([]);
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ assistantOf: agent.assistantOf })
-					.from(agent)
-					.where(and(eq(agent.workspaceId, workspace.id), isNotNull(agent.assistantOf))),
+					.select({ assistantOf: bot.assistantOf })
+					.from(bot)
+					.where(and(eq(bot.workspaceId, workspace.id), isNotNull(bot.assistantOf))),
 			),
 		).toEqual([{ assistantOf: ada.id }]);
 		expect(await run(ada.id, (m) => m.workspaces)).toEqual([workspace]);
@@ -259,9 +259,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ id: agent.id })
-					.from(agent)
-					.where(and(eq(agent.workspaceId, workspace.id), eq(agent.assistantOf, bob.id))),
+					.select({ id: bot.id })
+					.from(bot)
+					.where(and(eq(bot.workspaceId, workspace.id), eq(bot.assistantOf, bob.id))),
 			),
 		).toHaveLength(1);
 	});
@@ -337,9 +337,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 		const [assistant] = await onDatabase((db) =>
 			db
-				.select({ model: agent.model })
-				.from(agent)
-				.where(and(eq(agent.workspaceId, workspace.id), eq(agent.assistantOf, bob.id))),
+				.select({ model: bot.model })
+				.from(bot)
+				.where(and(eq(bot.workspaceId, workspace.id), eq(bot.assistantOf, bob.id))),
 		);
 		expect(assistant?.model).toBe("offered");
 	});
@@ -541,7 +541,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const kim = await person("Kim");
 		const [shared] = await onDatabase((db) =>
 			db
-				.insert(pod)
+				.insert(channel)
 				.values({
 					workspaceId: workspace.id,
 					name: "Launch",
@@ -553,9 +553,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const inShared = () =>
 			onDatabase((db) =>
 				db
-					.select({ userId: podMember.userId })
-					.from(podMember)
-					.where(eq(podMember.podId, shared.id)),
+					.select({ userId: channelMember.userId })
+					.from(channelMember)
+					.where(eq(channelMember.channelId, shared.id)),
 			).then((rows) => rows.map((row) => row.userId).toSorted());
 
 		const bobMember = await join(workspace.id, ada.id, bob);
@@ -654,7 +654,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const bobMember = await join(workspace.id, ada.id, bob, "viewer");
 		const [shared] = await onDatabase((db) =>
 			db
-				.insert(pod)
+				.insert(channel)
 				.values({
 					workspaceId: workspace.id,
 					name: "Launch",
@@ -675,9 +675,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ userId: podMember.userId })
-					.from(podMember)
-					.where(eq(podMember.podId, shared.id)),
+					.select({ userId: channelMember.userId })
+					.from(channelMember)
+					.where(eq(channelMember.channelId, shared.id)),
 			).then((rows) => rows.map((row) => row.userId).toSorted()),
 		).toEqual([ada.id, bob.id].toSorted());
 		// Ada holds nothing of the owner's now, and Bob can leave nothing behind.
@@ -739,7 +739,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const bobMember = await join(workspace.id, ada.id, bob);
 		const [shared] = await onDatabase((db) =>
 			db
-				.insert(pod)
+				.insert(channel)
 				.values({
 					workspaceId: workspace.id,
 					name: "Private",
@@ -749,7 +749,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		);
 		if (!shared) throw new Error("The channel was not created");
 		await onDatabase((db) =>
-			db.insert(podMember).values({ workspaceId: workspace.id, podId: shared.id, userId: bob.id }),
+			db
+				.insert(channelMember)
+				.values({ workspaceId: workspace.id, channelId: shared.id, userId: bob.id }),
 		);
 
 		await run(ada.id, (m) => m.remove({ workspace: workspace.id, memberId: bobMember.id }));
@@ -759,16 +761,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			await onDatabase((db) =>
 				db
 					.select()
-					.from(podMember)
-					.where(and(eq(podMember.podId, shared.id), eq(podMember.userId, bob.id))),
+					.from(channelMember)
+					.where(and(eq(channelMember.channelId, shared.id), eq(channelMember.userId, bob.id))),
 			),
 		).toEqual([]);
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ id: agent.id })
-					.from(agent)
-					.where(and(eq(agent.workspaceId, workspace.id), eq(agent.assistantOf, bob.id))),
+					.select({ id: bot.id })
+					.from(bot)
+					.where(and(eq(bot.workspaceId, workspace.id), eq(bot.assistantOf, bob.id))),
 			),
 		).toHaveLength(1);
 	});
@@ -779,7 +781,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		await join(workspace.id, ada.id, bob);
 		const [shared] = await onDatabase((db) =>
 			db
-				.insert(pod)
+				.insert(channel)
 				.values({
 					workspaceId: workspace.id,
 					name: "Launch",
@@ -792,7 +794,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
 		expect(
-			await onDatabase((db) => db.select().from(pod).where(eq(pod.id, shared.id))),
+			await onDatabase((db) => db.select().from(channel).where(eq(channel.id, shared.id))),
 		).toHaveLength(1);
 	});
 
@@ -830,7 +832,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			role: "owner",
 			permissions: {
 				manageMembers: true,
-				createPods: true,
+				createChannels: true,
 				manageAdmins: true,
 				transferOwnership: true,
 			},
@@ -839,7 +841,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			role: "viewer",
 			permissions: {
 				manageMembers: false,
-				createPods: false,
+				createChannels: false,
 				manageAdmins: false,
 				transferOwnership: false,
 			},

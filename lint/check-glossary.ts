@@ -9,7 +9,8 @@
  *
  * Words whose meaning changed rather than ended, such as "thread", aren't
  * checked: whether one is right depends on what it means there, which only a
- * reader can tell.
+ * reader can tell. Nor is "activity", the inbox's old name, which is also the
+ * workflow engine's word for a step and plain English for what goes on.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -23,20 +24,91 @@ interface RetiredWord {
 	readonly failing: boolean;
 	/** Uses of the word that mean something else, removed before matching. */
 	readonly otherMeanings?: RegExp;
+	/** Files where the word is only ever someone else's, so it isn't checked there. */
+	readonly keptIn?: readonly RegExp[];
 }
 
 const RETIRED_WORDS: readonly RetiredWord[] = [
-	{ word: "pod", plural: "pods", replacement: "channel, or the bot", failing: false },
-	{ word: "crew", plural: "crews", replacement: "the channel's bots", failing: false },
-	{ word: "artifact", plural: "artifacts", replacement: "file", failing: false },
-	{ word: "sandbox", plural: "sandboxes", replacement: "computer", failing: false },
-	{ word: "scribe", plural: "scribes", replacement: "summariser", failing: false },
+	{
+		word: "pod",
+		plural: "pods",
+		replacement: "channel, or the bot",
+		failing: true,
+		// Names stored or run from outside, which keep their old words: the
+		// audience field of events stored before, the browser's key for settings
+		// it remembers, the script that destroys the computers bots used to share,
+		// and migrations by their names. And Apple's iPod.
+		otherMeanings:
+			/audiencePodId|sugabots-settings-open-pods|destroy-pod-computers|\b\d{14}_[a-z0-9_]+|iPod/g,
+		keptIn: [
+			// Run against a database from before channels had their name.
+			/^packages\/core\/src\/computers\/destroy-pod-computers\.ts$/,
+		],
+	},
+	{ word: "crew", plural: "crews", replacement: "the channel's bots", failing: true },
+	{
+		word: "artifact",
+		plural: "artifacts",
+		replacement: "file",
+		failing: true,
+		// The blob store's folder for the files bots write, `artifacts/<fileId>`,
+		// which keeps the name their content was first stored under.
+		otherMeanings: /`artifacts\/(?:<fileId>|\$\{)[^`]*`|BlobStore\.key\("artifacts"/g,
+	},
+	{
+		word: "sandbox",
+		plural: "sandboxes",
+		replacement: "computer",
+		failing: true,
+		// Others' names: the OpenSandbox provider, its server's setting, SDK and
+		// container names; E2B's `sandboxUrl`; Chromium's and an iframe's
+		// sandbox. And names kept because something outside the code holds
+		// them: the published image and E2B template `sugabots-sandbox`, the
+		// certificate name in computers' homes, the tool name earlier calls
+		// record, and the tables as a database not yet migrated has them.
+		otherMeanings:
+			/OpenSandbox|SANDBOX_CONFIG_PATH|SandboxManager|listSandboxInfos|`sandbox-\$\{|sandboxUrl|E2B_SANDBOX_URL|--no-sandbox|chromium_sandbox_flags|Chromium's flags for its own sandbox|sugabots-sandbox|PROVIDER_AUTHORITY=sandbox-provider|copy_file_to_sandbox|DELETE FROM sandbox WHERE provider_sandbox_id|toHaveAttribute\("sandbox"/g,
+		keptIn: [
+			// Talking to each provider in its own words.
+			/^packages\/core\/src\/computers\/implementations\//,
+			// Run against a database from before computers had their name.
+			/^packages\/core\/src\/computers\/destroy-pod-computers\.ts$/,
+			// Nix's build sandbox.
+			/^docker\/computer\/nix\/nix\.conf$/,
+			// The browser's: an iframe's `sandbox` and Content-Security-Policy's.
+			/^packages\/web\/src\/screens\/HtmlFrame\.tsx$/,
+			/^packages\/server\/src\/http\/content-pages(\.test)?\.ts$/,
+			/^packages\/server\/src\/routes\/chats\/(file-response|files\.test)\.ts$/,
+		],
+	},
+	{ word: "scribe", plural: "scribes", replacement: "summariser", failing: true },
 	{
 		word: "agent",
 		plural: "agents",
 		replacement: "bot",
-		failing: false,
-		otherMeanings: /user[-_ ]?agent|AGENTS\.md/gi,
+		failing: true,
+		// Others' agents: the HTTP user agent, coding agents and their
+		// AGENTS.md, crawlers and AI agents generally, SSH's and GPG's, and the
+		// repository's address. And names stored or run from outside, which keep
+		// their old words: the key workflow payloads store the bot's id under, and
+		// the user and folder bots' homes are in on the computers made before.
+		otherMeanings:
+			/user[-_ ]?agents?|AGENTS\.md|AI agents?|your[- ]agent|(?:ssh|gpg)-agent|SSH and GPG agents|nitrictech\/agents|\bagentId(?=: (?:Schema\.String|botId|crypto\.randomUUID\(\)))|\{ agentId,|: agentId\b|stored\.agentId|name: "agent"|\/home\/agent|WORKSPACE_DIRECTORY\}\/agents/gi,
+		keptIn: [
+			// undici's Agent, the connection pool requests are sent through.
+			/^packages\/core\/src\/providers\/network\/egress(\.test)?\.ts$/,
+		],
+	},
+	{
+		word: "routine",
+		plural: "routines",
+		replacement: "automation",
+		failing: true,
+		// Names stored or called from outside, which keep their old words: the
+		// turn reason and workflow name "routine", the workflow payload's
+		// `routineId` and its lane keys, and the webhook address other systems
+		// were given.
+		otherMeanings: /(["'])routine\1|`routine:|\broutineId\b|\/hooks\/routines\//g,
 	},
 ];
 
@@ -52,7 +124,7 @@ const SKIPPED_PATHS: readonly RegExp[] = [
 
 /**
  * The word as a whole word or as one part of an identifier: `pod`, `pods`,
- * `podId`, `isPod`, `PodSandboxes`, `pod_id` and `POD_ID`, but not `tripod`
+ * `podId`, `isPod`, `PodComputers`, `pod_id` and `POD_ID`, but not `tripod`
  * or `podcast`.
  */
 function wordPattern({ word, plural }: RetiredWord): RegExp {
@@ -83,6 +155,7 @@ function findingsOf(retired: RetiredWord, files: ReadonlyMap<string, string>): F
 	const pattern = wordPattern(retired);
 	const findings: Finding[] = [];
 	for (const [path, contents] of files) {
+		if (retired.keptIn?.some((kept) => kept.test(path))) continue;
 		contents.split("\n").forEach((text, index) => {
 			const checked = retired.otherMeanings ? text.replace(retired.otherMeanings, "") : text;
 			for (const _match of checked.matchAll(pattern)) {

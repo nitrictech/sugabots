@@ -83,11 +83,11 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 async function toolsFor(connection: ConnectionTarget) {
 	const offered = ConnectionTools.from({
 		connections: {
-			targetsForAgent: () => Effect.succeed({ targets: [connection], signInExpired: [] }),
+			targetsForBot: () => Effect.succeed({ targets: [connection], signInExpired: [] }),
 		},
 		httpClients: clients,
 	});
-	return (await run(offered.forAgent("w", "p", NO_TURN))).tools;
+	return (await run(offered.forBot("w", "p", NO_TURN))).tools;
 }
 
 async function call(connection: ConnectionTarget, method: string, input: unknown) {
@@ -184,9 +184,9 @@ describe("an HTTP connection's tools", () => {
 
 const NO_TURN = {
 	turnId: "t",
-	agentId: "a",
-	threadId: "0199a3a0-0000-7000-8000-000000000001",
-	files: { read: () => Effect.die(new Error("No thread files in this test")) },
+	botId: "a",
+	conversationId: "0199a3a0-0000-7000-8000-000000000001",
+	files: { read: () => Effect.die(new Error("No conversation files in this test")) },
 	workspace: undefined,
-	sandboxSignsIn: false,
+	computerSignsIn: false,
 };

@@ -2,7 +2,7 @@ import type { NotificationPreferences, NotificationSettings } from "@sugabots/co
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyPods, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyChannels, storyWorkspace } from "@/story-app.tsx";
 
 const API = import.meta.env.VITE_API_URL as string;
 
@@ -11,24 +11,24 @@ const nothingChosen: NotificationSettings = {
 	pausedUntil: null,
 	quietHours: null,
 	turnFailures: true,
-	routineRuns: "failures",
-	pods: {},
+	automationRuns: "failures",
+	channels: {},
 	bots: {},
-	mutedUntil: { pods: {}, bots: {} },
+	mutedUntil: { channels: {}, bots: {} },
 };
 
-const [firstPod, secondPod] = storyPods;
+const [firstChannel, secondChannel] = storyChannels;
 
-/** Somebody who hears of everything, but not from one pod, and not overnight. */
+/** Somebody who hears of everything, but not from one channel, and not overnight. */
 const chosen: NotificationSettings = {
 	level: "all",
 	pausedUntil: null,
 	quietHours: { from: "22:00", to: "07:30", timeZone: "Pacific/Auckland" },
 	turnFailures: false,
-	routineRuns: "all",
-	pods: secondPod ? { [secondPod.id]: "nothing" } : {},
+	automationRuns: "all",
+	channels: secondChannel ? { [secondChannel.id]: "nothing" } : {},
 	bots: {},
-	mutedUntil: { pods: {}, bots: {} },
+	mutedUntil: { channels: {}, bots: {} },
 };
 
 /** Answers with `settings`, and with each change as the server would save it. */
@@ -50,7 +50,7 @@ const meta = preview.meta({
 
 const page = () => <StoryApp path={`/${storyWorkspace.slug}/settings/notifications`} />;
 
-/** NothingChosen is where everybody starts: mentions, replies and approvals, in every pod. */
+/** NothingChosen is where everybody starts: mentions, replies and approvals, in every channel. */
 export const NothingChosen = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...settingsHandlers(nothingChosen), ...appHandlers());
@@ -60,9 +60,9 @@ export const NothingChosen = meta.story({
 		const level = await canvas.findByRole("group", { name: "Notify me about" });
 		await expect(within(level).getByRole("radio", { name: "Mentions and replies" })).toBeChecked();
 		await expect(canvas.getByText(/replies in conversations you're part of/)).toBeInTheDocument();
-		if (firstPod) {
+		if (firstChannel) {
 			await expect(
-				canvas.getByRole("button", { name: `Notifications for ${firstPod.name}` }),
+				canvas.getByRole("button", { name: `Notifications for ${firstChannel.name}` }),
 			).toHaveTextContent("Default");
 		}
 	},
@@ -84,7 +84,7 @@ export const ChoosingEverything = meta.story({
 	},
 });
 
-/** Chosen shows a pod turned off and quiet hours overnight. */
+/** Chosen shows a channel turned off and quiet hours overnight. */
 export const Chosen = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...settingsHandlers(chosen), ...appHandlers());
@@ -93,9 +93,9 @@ export const Chosen = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByLabelText("From", undefined)).toHaveValue("22:00");
 		await expect(canvas.getByLabelText("To")).toHaveValue("07:30");
-		if (secondPod) {
+		if (secondChannel) {
 			await expect(
-				canvas.getByRole("button", { name: `Notifications for ${secondPod.name}` }),
+				canvas.getByRole("button", { name: `Notifications for ${secondChannel.name}` }),
 			).toHaveTextContent("Nothing");
 		}
 	},
@@ -120,7 +120,7 @@ export const Paused = meta.story({
 	},
 });
 
-/** Besides messages, failed replies are on and only failed routine runs notify, until changed. */
+/** Besides messages, failed replies are on and only failed automation runs notify, until changed. */
 export const ChoosingWhatElseNotifies = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...settingsHandlers(nothingChosen), ...appHandlers());
@@ -134,11 +134,11 @@ export const ChoosingWhatElseNotifies = meta.story({
 		await userEvent.click(failedReplies);
 		await waitFor(() => expect(failedReplies).not.toBeChecked());
 
-		const routineRuns = canvas.getByRole("group", { name: "My routines run" });
-		await expect(within(routineRuns).getByRole("radio", { name: "Failed" })).toBeChecked();
-		await userEvent.click(within(routineRuns).getByRole("radio", { name: "Every run" }));
+		const automationRuns = canvas.getByRole("group", { name: "My automations run" });
+		await expect(within(automationRuns).getByRole("radio", { name: "Failed" })).toBeChecked();
+		await userEvent.click(within(automationRuns).getByRole("radio", { name: "Every run" }));
 		await waitFor(() =>
-			expect(within(routineRuns).getByRole("radio", { name: "Every run" })).toBeChecked(),
+			expect(within(automationRuns).getByRole("radio", { name: "Every run" })).toBeChecked(),
 		);
 	},
 });

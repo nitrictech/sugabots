@@ -6,19 +6,18 @@ import { Lanes } from "../../workflows/lanes.ts";
 import { TurnSignals } from "./signals.ts";
 import {
 	type SegmentOutcome,
+	type StoredTurn,
 	Turn,
-	type TurnRequest,
 	TurnSteps,
 	turnLane,
+	turnOfStored,
 	turnWorkflow,
 } from "./turn.workflow.ts";
 
-const segment = vi.fn((_request: TurnRequest) =>
-	Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
-);
-const cancelWaiting = vi.fn((_request: TurnRequest) => Effect.void);
-const abandon = vi.fn((_request: TurnRequest) => Effect.void);
-const announceReleased = vi.fn((_request: TurnRequest) => Effect.void);
+const segment = vi.fn((_turn: StoredTurn) => Effect.succeed<SegmentOutcome>({ _tag: "Finished" }));
+const cancelWaiting = vi.fn((_turn: StoredTurn) => Effect.void);
+const abandon = vi.fn((_turn: StoredTurn) => Effect.void);
+const announceReleased = vi.fn((_turn: StoredTurn) => Effect.void);
 const release = vi.fn((_execution: { key: string; executionId: string }) => Effect.void);
 
 const runtime = ManagedRuntime.make(
@@ -45,7 +44,7 @@ const signals = await runtime.runPromise(TurnSignals.make);
 
 afterAll(() => runtime.dispose());
 
-const request = (): TurnRequest => ({
+const request = (): StoredTurn => ({
 	threadId: crypto.randomUUID(),
 	agentId: crypto.randomUUID(),
 	triggerMessageId: crypto.randomUUID(),
@@ -124,7 +123,7 @@ describe("the turn workflow", () => {
 		);
 
 		await vi.waitFor(() =>
-			expect(release).toHaveBeenCalledWith({ key: turnLane(asked), executionId }),
+			expect(release).toHaveBeenCalledWith({ key: turnLane(turnOfStored(asked)), executionId }),
 		);
 		expect(segment).toHaveBeenCalledTimes(2);
 		expect(announceReleased).toHaveBeenCalledWith(asked);
@@ -139,7 +138,7 @@ describe("the turn workflow", () => {
 		await runtime.runPromise(signals.cancel(executionId));
 
 		await vi.waitFor(() =>
-			expect(release).toHaveBeenCalledWith({ key: turnLane(asked), executionId }),
+			expect(release).toHaveBeenCalledWith({ key: turnLane(turnOfStored(asked)), executionId }),
 		);
 		expect(cancelWaiting).toHaveBeenCalledWith(asked);
 		expect(segment).toHaveBeenCalledTimes(1);

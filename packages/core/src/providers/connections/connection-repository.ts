@@ -43,7 +43,7 @@ import { toolAccessOf } from "./tool-access.ts";
 export interface Interface {
 	readonly create: (
 		workspaceId: string,
-		agentId: string,
+		botId: string,
 		userId: string,
 		input: NewConnection,
 	) => Effect.Effect<ConnectionRow, ConnectionNameTaken>;
@@ -53,7 +53,7 @@ export interface Interface {
 	 */
 	readonly createGitHub: (
 		workspaceId: string,
-		agentId: string,
+		botId: string,
 		userId: string,
 		input: {
 			id: string;
@@ -88,13 +88,13 @@ export interface Interface {
 	readonly reconfigured: (workspaceId: string, connectionId: string) => Effect.Effect<void>;
 	readonly update: (
 		workspaceId: string,
-		agentId: string,
+		botId: string,
 		connectionId: string,
 		changes: ConnectionUpdate,
 	) => Effect.Effect<ConnectionRow | undefined, ConnectionNameTaken | UnknownConnectionTool>;
 	readonly remove: (
 		workspaceId: string,
-		agentId: string,
+		botId: string,
 		connectionId: string,
 	) => Effect.Effect<boolean>;
 	/**
@@ -109,7 +109,7 @@ export interface Interface {
 	) => Effect.Effect<void>;
 	readonly target: (
 		workspaceId: string,
-		agentId: string,
+		botId: string,
 		connectionId: string,
 	) => Effect.Effect<ConnectionTarget | undefined>;
 	/**
@@ -117,7 +117,7 @@ export interface Interface {
 	 * waiting on its sign-in offers nothing, and neither does one whose every
 	 * listed tool is off, so a turn does not reach its server at all.
 	 */
-	readonly targetsForAgent: (workspaceId: string, agentId: string) => Effect.Effect<AgentTargets>;
+	readonly targetsForBot: (workspaceId: string, botId: string) => Effect.Effect<BotTargets>;
 	/** What the OAuth client has learnt and been issued, unsealed. */
 	readonly oauthRecord: (
 		workspaceId: string,
@@ -136,7 +136,7 @@ export interface Interface {
 	readonly byOauthState: (state: string) => Effect.Effect<
 		| {
 				workspaceId: string;
-				agentId: string;
+				botId: string;
 				connectionId: string;
 				startedByUserId: string | undefined;
 		  }
@@ -171,7 +171,7 @@ export const make = Effect.gen(function* () {
 	};
 
 	return Service.of({
-		create: (workspaceId, agentId, userId, input) =>
+		create: (workspaceId, botId, userId, input) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
@@ -190,7 +190,7 @@ export const make = Effect.gen(function* () {
 								.insert(connection)
 								.values({
 									workspaceId,
-									agentId,
+									botId,
 									createdById: userId,
 									handle: handleFromName(values.name),
 									...values,
@@ -205,7 +205,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		createGitHub: (workspaceId, agentId, userId, input) =>
+		createGitHub: (workspaceId, botId, userId, input) =>
 			operation(
 				"createGitHub",
 				Effect.gen(function* () {
@@ -217,7 +217,7 @@ export const make = Effect.gen(function* () {
 								.insert(connection)
 								.values({
 									workspaceId,
-									agentId,
+									botId,
 									createdById: userId,
 									kind: "github",
 									name,
@@ -324,15 +324,15 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		update: (workspaceId, agentId, connectionId, changes) =>
+		update: (workspaceId, botId, connectionId, changes) =>
 			operation(
 				"update",
 				transaction(
 					Effect.gen(function* () {
-						const ofAgent = and(
+						const ofBot = and(
 							eq(connection.id, connectionId),
 							eq(connection.workspaceId, workspaceId),
-							eq(connection.agentId, agentId),
+							eq(connection.botId, botId),
 						);
 						const connectionChanged =
 							changes.url !== undefined ||
@@ -347,7 +347,7 @@ export const make = Effect.gen(function* () {
 								db
 									.select({ kind: connection.kind, url: connection.url, names: listedToolNames })
 									.from(connection)
-									.where(ofAgent)
+									.where(ofBot)
 									.limit(1)
 									.for("update"),
 							);
@@ -389,7 +389,7 @@ export const make = Effect.gen(function* () {
 										lastTestedAt: connectionChanged ? null : undefined,
 										lastTestError: connectionChanged ? null : undefined,
 									})
-									.where(ofAgent)
+									.where(ofBot)
 									.returning(),
 							(failure) => (isUniqueViolation(failure) ? new ConnectionNameTaken() : undefined),
 						);
@@ -398,7 +398,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		remove: (workspaceId, agentId, connectionId) =>
+		remove: (workspaceId, botId, connectionId) =>
 			operation(
 				"remove",
 				query((db) =>
@@ -408,7 +408,7 @@ export const make = Effect.gen(function* () {
 							and(
 								eq(connection.id, connectionId),
 								eq(connection.workspaceId, workspaceId),
-								eq(connection.agentId, agentId),
+								eq(connection.botId, botId),
 							),
 						)
 						.returning({ id: connection.id }),
@@ -439,7 +439,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		target: (workspaceId, agentId, connectionId) =>
+		target: (workspaceId, botId, connectionId) =>
 			operation(
 				"target",
 				query((db) =>
@@ -450,16 +450,16 @@ export const make = Effect.gen(function* () {
 							and(
 								eq(connection.id, connectionId),
 								eq(connection.workspaceId, workspaceId),
-								eq(connection.agentId, agentId),
+								eq(connection.botId, botId),
 							),
 						)
 						.limit(1),
 				).pipe(Effect.map(([row]) => row && toTarget(row))),
 			),
 
-		targetsForAgent: (workspaceId, agentId) =>
+		targetsForBot: (workspaceId, botId) =>
 			operation(
-				"targetsForAgent",
+				"targetsForBot",
 				query((db) =>
 					db
 						.select()
@@ -467,7 +467,7 @@ export const make = Effect.gen(function* () {
 						.where(
 							and(
 								eq(connection.workspaceId, workspaceId),
-								eq(connection.agentId, agentId),
+								eq(connection.botId, botId),
 								// GitHub's tools work through its app, with no address of its own to reach.
 								inArray(connection.kind, ["mcp", "http"]),
 							),
@@ -525,7 +525,7 @@ export const make = Effect.gen(function* () {
 						([row]) =>
 							row && {
 								workspaceId: row.workspaceId,
-								agentId: row.agentId,
+								botId: row.botId,
 								connectionId: row.id,
 								startedByUserId: unsealOauthRecord(row, cipher)?.startedByUserId,
 							},
@@ -538,7 +538,7 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /** A bot's connections as a turn sees them. */
-export interface AgentTargets {
+export interface BotTargets {
 	targets: ConnectionTarget[];
 	/**
 	 * Connections that offer nothing until someone signs in again, by handle,

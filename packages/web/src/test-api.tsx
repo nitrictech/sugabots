@@ -1,15 +1,15 @@
 import {
-	type Agent,
-	type AgentPermissions,
 	administersWorkspace,
-	type ConversationThread,
+	type Bot,
+	type BotPermissions,
+	type Channel,
+	type ChannelPermissions,
+	type ConversationDetails,
 	type ModelProvider,
-	type Pod,
-	type PodPermissions,
 	type SessionUser,
 	type StreamEvent,
-	type SystemAgent,
-	type ThreadDetails,
+	type SystemBot,
+	type Task,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
 import { NotFound } from "@sugabots/contracts/http";
@@ -77,57 +77,57 @@ export const workspace = {
 };
 
 /** Every channel permission, as an admin gets them. */
-const ADMIN_IN_POD: PodPermissions = {
+const ADMIN_IN_CHANNEL: ChannelPermissions = {
 	rename: true,
 	manageMembers: true,
 	manageBots: true,
 	leave: false,
 	join: false,
 	delete: true,
-	deleteArtifacts: true,
+	deleteFiles: true,
 };
 
 /** What a member gets in a channel they are in. */
-const MEMBER_IN_POD: PodPermissions = {
-	...ADMIN_IN_POD,
+const MEMBER_IN_CHANNEL: ChannelPermissions = {
+	...ADMIN_IN_CHANNEL,
 	rename: false,
 	leave: true,
 	delete: false,
-	deleteArtifacts: false,
+	deleteFiles: false,
 };
 
 /** What a viewer gets there: nothing they could change. */
-export const VIEWER_IN_POD: PodPermissions = {
-	...MEMBER_IN_POD,
+export const VIEWER_IN_CHANNEL: ChannelPermissions = {
+	...MEMBER_IN_CHANNEL,
 	manageMembers: false,
 	manageBots: false,
 };
 
 /** Every bot permission, as its creator or an administrator gets them. */
-export const MANAGER_OF_BOT: AgentPermissions = {
+export const MANAGER_OF_BOT: BotPermissions = {
 	update: true,
 	delete: true,
 	manageConnections: true,
-	manageSandbox: true,
+	manageComputer: true,
 	useDesktop: true,
-	manageRoutines: true,
-	runRoutines: true,
+	manageAutomations: true,
+	runAutomations: true,
 	decideApprovals: true,
 	talk: true,
 };
 
 /** What anyone else in the workspace gets with a public bot: talking to it, and running its automations. */
-export const USER_OF_BOT: AgentPermissions = {
+export const USER_OF_BOT: BotPermissions = {
 	...MANAGER_OF_BOT,
 	update: false,
 	delete: false,
 	manageConnections: false,
-	manageSandbox: false,
-	manageRoutines: false,
+	manageComputer: false,
+	manageAutomations: false,
 };
 
 /** The two channels the dev seed makes. */
-export const pods: Pod[] = [
+export const channels: Channel[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000a1",
 		workspaceId: WORKSPACE,
@@ -137,7 +137,7 @@ export const pods: Pod[] = [
 		description: null,
 		visibility: "public",
 		isMember: true,
-		permissions: ADMIN_IN_POD,
+		permissions: ADMIN_IN_CHANNEL,
 		createdAt: "2026-09-09T00:00:00.000Z",
 	},
 	{
@@ -149,7 +149,7 @@ export const pods: Pod[] = [
 		description: null,
 		visibility: "public",
 		isMember: true,
-		permissions: ADMIN_IN_POD,
+		permissions: ADMIN_IN_CHANNEL,
 		createdAt: "2026-09-09T00:00:00.000Z",
 	},
 ];
@@ -221,11 +221,11 @@ export const modelProviders: ModelProvider[] = [
 	},
 ];
 
-export const agents: Agent[] = [
+export const bots: Bot[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000b1",
 		workspaceId: WORKSPACE,
-		systemAgentKey: null,
+		systemBotKey: null,
 		name: "Customer Research",
 		handle: "customer-research",
 		description: "Digs through calls and notes for what customers asked for.",
@@ -235,7 +235,7 @@ export const agents: Agent[] = [
 		model: MODELS[1] as string,
 		prompt: "",
 		disabledTools: [],
-		usesSandbox: false,
+		usesComputer: false,
 		naturalBrowsing: false,
 		createdById: null,
 		visibility: "public",
@@ -247,7 +247,7 @@ export const agents: Agent[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000b2",
 		workspaceId: WORKSPACE,
-		systemAgentKey: null,
+		systemBotKey: null,
 		name: "Issue Triager",
 		handle: "issue-triager",
 		description: "Sorts incoming issues every weekday morning.",
@@ -257,7 +257,7 @@ export const agents: Agent[] = [
 		model: MODELS[0] as string,
 		prompt: "",
 		disabledTools: [],
-		usesSandbox: false,
+		usesComputer: false,
 		naturalBrowsing: false,
 		createdById: null,
 		visibility: "public",
@@ -269,7 +269,7 @@ export const agents: Agent[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000b3",
 		workspaceId: WORKSPACE,
-		systemAgentKey: null,
+		systemBotKey: null,
 		name: "Linear Handler",
 		handle: "linear-handler",
 		description: "Reads and writes Linear on the team's behalf.",
@@ -279,7 +279,7 @@ export const agents: Agent[] = [
 		model: MODELS[0] as string,
 		prompt: "Be brief.",
 		disabledTools: [],
-		usesSandbox: false,
+		usesComputer: false,
 		naturalBrowsing: false,
 		createdById: sam.id,
 		visibility: "public",
@@ -290,14 +290,14 @@ export const agents: Agent[] = [
 	},
 ];
 
-export const linear = agents[2] as Agent;
-export const triager = agents[1] as Agent;
+export const linear = bots[2] as Bot;
+export const triager = bots[1] as Bot;
 
-/** Sam's Personal Assistant, which the default `agents` answer includes. */
-export const personalAssistant: Agent = {
+/** Sam's Personal Assistant, which the default `bots` answer includes. */
+export const personalAssistant: Bot = {
 	id: "0199a3a0-0000-7000-8000-0000000000bf",
 	workspaceId: WORKSPACE,
-	systemAgentKey: null,
+	systemBotKey: null,
 	name: "Personal Assistant",
 	handle: "personal-assistant",
 	description: "Your private assistant.",
@@ -307,7 +307,7 @@ export const personalAssistant: Agent = {
 	model: MODELS[1] as string,
 	prompt: "",
 	disabledTools: [],
-	usesSandbox: false,
+	usesComputer: false,
 	naturalBrowsing: false,
 	createdById: sam.id,
 	visibility: "private",
@@ -324,10 +324,10 @@ export const personalAssistant: Agent = {
  * not-set-up state overrides one with `model: null`, so that state does not
  * become the ambient condition of every summary assertion in the suite.
  */
-export const builtInAgents: SystemAgent[] = [
+export const builtInBots: SystemBot[] = [
 	{
 		key: "summarise",
-		name: "Scribe",
+		name: "Summariser",
 		description: "Keeps concise summaries of ongoing conversations.",
 		color: "orange",
 		face: "arc",
@@ -345,60 +345,58 @@ export const builtInAgents: SystemAgent[] = [
 	},
 ];
 
-export const scribe = builtInAgents[0] as SystemAgent;
-export const compaction = builtInAgents[1] as SystemAgent;
+export const summariser = builtInBots[0] as SystemBot;
+export const compaction = builtInBots[1] as SystemBot;
 
-/** The first task with `agent`, one per bot, by the bot's id. */
-export function taskWith(agent: Agent): ConversationThread {
+/** The first task with `bot`, one per bot, by the bot's id. */
+export function taskWith(bot: Bot): Task {
 	return {
-		kind: "thread",
-		id: `${agent.id.slice(0, -4)}c${agent.id.slice(-3)}`,
-		workspaceId: agent.workspaceId,
-		hostAgentId: agent.id,
-		title: `Working with ${agent.name}`,
+		kind: "task",
+		id: `${bot.id.slice(0, -4)}c${bot.id.slice(-3)}`,
+		workspaceId: bot.workspaceId,
+		botId: bot.id,
+		title: `Working with ${bot.name}`,
 		doneAt: null,
 		createdAt: "2026-09-18T08:00:00.000Z",
 		updatedAt: "2026-09-18T08:00:00.000Z",
 	};
 }
 
-/** Another task with `agent`, nothing said in it yet. */
-export function threadWith(agent: Agent): ConversationThread {
+/** Another task with `bot`, nothing said in it yet. */
+export function conversationWith(bot: Bot): Task {
 	return {
-		...taskWith(agent),
-		id: `${agent.id.slice(0, -4)}d${agent.id.slice(-3)}`,
-		title: `Thread with ${agent.name}`,
+		...taskWith(bot),
+		id: `${bot.id.slice(0, -4)}d${bot.id.slice(-3)}`,
+		title: `Task with ${bot.name}`,
 	};
 }
 
-/** `task`, a task of `agent`'s, as the thread API returns it, with nothing said yet. */
-export function taskDetails(
-	agent: Agent,
-	task: ConversationThread = taskWith(agent),
-): ThreadDetails {
+/** `task`, a task of `bot`'s, as the conversations API returns it, with nothing said yet. */
+export function taskDetails(bot: Bot, task: Task = taskWith(bot)): ConversationDetails {
 	const participant = {
-		kind: "agent" as const,
-		id: agent.id,
-		name: agent.name,
-		handle: agent.handle,
-		color: agent.color,
-		face: agent.face,
-		shape: agent.shape,
+		kind: "bot" as const,
+		id: bot.id,
+		name: bot.name,
+		handle: bot.handle,
+		color: bot.color,
+		face: bot.face,
+		shape: bot.shape,
 	};
-	const { kind: _kind, ...thread } = task;
+	const { kind: _kind, botId, ...conversation } = task;
 	return {
-		thread: {
-			...thread,
-			podId: null,
-			conversationId: task.id,
-			type: "conversation",
+		conversation: {
+			...conversation,
+			botId: botId,
+			channelId: null,
+			rootConversationId: task.id,
+			kind: "task",
 			status: "done",
-			parentThreadId: null,
-			initiatorUserId: null,
+			parentConversationId: null,
+			startedById: null,
 		},
-		routineExecution: null,
+		automationRun: null,
 		participants: [participant],
-		crew: [participant],
+		channelBots: [participant],
 		members: [],
 		messages: [],
 		olderMessagesCursor: null,
@@ -407,10 +405,10 @@ export function taskDetails(
 	};
 }
 
-/** `agent`'s first task as its list shows it. */
-export function taskItem(agent: Agent, task: ConversationThread = taskWith(agent)) {
+/** `bot`'s first task as its list shows it. */
+export function taskItem(bot: Bot, task: Task = taskWith(bot)) {
 	return {
-		agent,
+		bot,
 		conversation: task,
 		lastMessage: null,
 		participants: [],
@@ -423,11 +421,11 @@ export function taskItem(agent: Agent, task: ConversationThread = taskWith(agent
 
 /** What the mocked API answers before a test says otherwise. */
 export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): void {
-	client.events.thread.mockImplementation(() => quietEventStream());
+	client.events.conversation.mockImplementation(() => quietEventStream());
 	client.events.workspace.mockImplementation(() => quietEventStream());
-	client.api.chats.podMarkers.mockReturnValue(Effect.succeed({ pods: {}, agents: {} }));
+	client.api.chats.channelMarkers.mockReturnValue(Effect.succeed({ channels: {}, bots: {} }));
 	client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
-	client.api.chats.activity.mockReturnValue(Effect.succeed({ items: [] }));
+	client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.chats.directMessages.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.chats.markRead.mockReturnValue(Effect.succeed(undefined));
 	client.api.chats.markItemRead.mockReturnValue(Effect.succeed(undefined));
@@ -439,10 +437,10 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			pausedUntil: null,
 			quietHours: null,
 			turnFailures: true,
-			routineRuns: "failures",
-			pods: {},
+			automationRuns: "failures",
+			channels: {},
 			bots: {},
-			mutedUntil: { pods: {}, bots: {} },
+			mutedUntil: { channels: {}, bots: {} },
 		}),
 	);
 	client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace]));
@@ -480,72 +478,80 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.workspaces.acceptInvitation.mockReturnValue(
 		Effect.succeed({ workspaceId: WORKSPACE }),
 	);
-	const inPod = administersWorkspace(role)
-		? ADMIN_IN_POD
+	const inChannel = administersWorkspace(role)
+		? ADMIN_IN_CHANNEL
 		: role === "member"
-			? MEMBER_IN_POD
-			: VIEWER_IN_POD;
-	client.api.pods.list.mockReturnValue(
-		Effect.succeed(pods.map((pod) => ({ ...pod, permissions: inPod }) satisfies Pod)),
+			? MEMBER_IN_CHANNEL
+			: VIEWER_IN_CHANNEL;
+	client.api.channels.list.mockReturnValue(
+		Effect.succeed(
+			channels.map((channel) => ({ ...channel, permissions: inChannel }) satisfies Channel),
+		),
 	);
-	client.api.pods.listMembers.mockReturnValue(Effect.succeed([]));
+	client.api.channels.listMembers.mockReturnValue(Effect.succeed([]));
 	// Both of the seed's Suga-Team bots are in each channel.
-	client.api.pods.listBots.mockReturnValue(Effect.succeed([triager, linear]));
+	client.api.channels.listBots.mockReturnValue(Effect.succeed([triager, linear]));
 	// An administrator manages every bot; anyone else only uses the seed's, which they did not make.
 	const onBot = administersWorkspace(role)
 		? MANAGER_OF_BOT
 		: role === "viewer"
-			? { ...USER_OF_BOT, runRoutines: false, decideApprovals: false, useDesktop: false }
+			? { ...USER_OF_BOT, runAutomations: false, decideApprovals: false, useDesktop: false }
 			: USER_OF_BOT;
-	client.api.agents.list.mockReturnValue(
+	client.api.bots.list.mockReturnValue(
 		Effect.succeed([
-			...agents.map((agent) => ({ ...agent, permissions: onBot }) satisfies Agent),
+			...bots.map((bot) => ({ ...bot, permissions: onBot }) satisfies Bot),
 			personalAssistant,
 		]),
 	);
-	client.api.agents.ensureAssistant.mockReturnValue(Effect.succeed(personalAssistant));
-	client.api.systemAgents.list.mockReturnValue(Effect.succeed(builtInAgents));
+	client.api.bots.ensureAssistant.mockReturnValue(Effect.succeed(personalAssistant));
+	client.api.systemBots.list.mockReturnValue(Effect.succeed(builtInBots));
 	serveConnections();
-	client.api.threads.list.mockReturnValue(Effect.succeed([]));
-	client.api.routines.list.mockReturnValue(Effect.succeed([]));
-	client.api.routines.listInWorkspace.mockReturnValue(Effect.succeed({ items: [] }));
-	client.api.routines.executions.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
-	client.api.routines.getSecret.mockReturnValue(
+	client.api.conversations.list.mockReturnValue(Effect.succeed([]));
+	client.api.automations.list.mockReturnValue(Effect.succeed([]));
+	client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [] }));
+	client.api.automations.runs.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
+	client.api.automations.getSecret.mockReturnValue(
 		Effect.succeed({ kind: "set", secret: "whsec_0123456789abcdefghijklmnop" }),
 	);
 	// A channel has nothing in it until a case says so.
 	client.api.chats.list.mockReturnValue(Effect.succeed({ chats: [] }));
-	const crew = [...agents, personalAssistant];
+	const reachable = [...bots, personalAssistant];
 	// Each bot has one task, nothing said in it yet.
-	client.api.chats.botTasks.mockImplementation(({ params }: { params: { agentId: string } }) => {
-		const agent = crew.find((one) => one.id === params.agentId);
-		return Effect.succeed({ tasks: agent ? [taskItem(agent)] : [], routines: [], summary: null });
+	client.api.chats.botTasks.mockImplementation(({ params }: { params: { botId: string } }) => {
+		const bot = reachable.find((one) => one.id === params.botId);
+		return Effect.succeed({
+			tasks: bot ? [taskItem(bot)] : [],
+			automations: [],
+			summary: null,
+		});
 	});
 	client.api.chats.startInterview.mockReturnValue(Effect.succeed(null));
-	client.api.chats.openPodChat.mockReturnValue(
+	client.api.chats.openMainChat.mockReturnValue(
 		Effect.fail(new NotFound({ message: userText`No channel fixture` })),
 	);
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
-	client.api.threads.get.mockImplementation(({ params }: { params: { threadId: string } }) => {
-		const agent = crew.find((one) => taskWith(one).id === params.threadId);
-		return agent
-			? Effect.succeed(taskDetails(agent))
-			: Effect.fail(new NotFound({ message: userText`No such thread` }));
-	});
-	client.api.threads.activity.mockReturnValue(
-		Effect.fail(new NotFound({ message: userText`No such thread` })),
+	client.api.conversations.get.mockImplementation(
+		({ params }: { params: { conversationId: string } }) => {
+			const bot = reachable.find((one) => taskWith(one).id === params.conversationId);
+			return bot
+				? Effect.succeed(taskDetails(bot))
+				: Effect.fail(new NotFound({ message: userText`No such conversation` }));
+		},
+	);
+	client.api.conversations.activity.mockReturnValue(
+		Effect.fail(new NotFound({ message: userText`No such conversation` })),
 	);
 	client.api.workspaceAccess.mockReturnValue(
 		Effect.succeed({
 			role,
 			permissions: {
-				createPods: role !== "viewer",
-				createAgents: role !== "viewer",
+				createChannels: role !== "viewer",
+				createBots: role !== "viewer",
 				updateWorkspace: administersWorkspace(role),
 				manageProviders: administersWorkspace(role),
 				manageMembers: administersWorkspace(role),
-				configureBuiltInAgents: administersWorkspace(role),
+				configureBuiltInBots: administersWorkspace(role),
 				manageUsage: administersWorkspace(role),
 				manageAdmins: role === "owner",
 				transferOwnership: role === "owner",
@@ -556,7 +562,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.modelProviders.list.mockReturnValue(Effect.succeed(modelProviders));
 	client.api.searchProviders.webAccess.mockReturnValue(Effect.succeed({ enabled: true }));
 	// No computers, unless a case sets one up.
-	client.api.sandboxProviders.access.mockReturnValue(Effect.succeed({ enabled: false }));
+	client.api.computerProviders.access.mockReturnValue(Effect.succeed({ enabled: false }));
 	client.api.modelProviders.listEnabledModels.mockReturnValue(
 		Effect.succeed({
 			models: MODELS.map((modelId) => ({
@@ -672,7 +678,7 @@ export function mount(
 	});
 
 	render(
-		// A fresh cache per case, so one test's pods cannot answer another's.
+		// A fresh cache per case, so one test's channels cannot answer another's.
 		<TestApp
 			router={router}
 			queries={createQueryClient()}

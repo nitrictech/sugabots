@@ -11,7 +11,7 @@
 			"!**/dist",
 			"!**/node_modules",
 			"!**/*.svg",
-			"!docker/sandbox/theme",
+			"!docker/computer/theme",
 			"!packages/core/drizzle",
 			"!packages/web/.storybook/public/mockServiceWorker.js",
 			"!packages/website/src/routeTree.gen.ts",
@@ -155,12 +155,12 @@
 		},
 		{
 			"includes": [
-				"packages/web/src/lib/artifact-kind-catalog.ts",
+				"packages/web/src/lib/file-kind-catalog.ts",
 				"packages/web/src/lib/model-makers.ts",
 				"packages/web/src/lib/notification-choices.ts",
 				"packages/web/src/lib/page-frame.ts",
 				"packages/web/src/lib/provider-hues.ts",
-				"packages/web/src/lib/routine-trigger-words.ts",
+				"packages/web/src/lib/automation-trigger-words.ts",
 				"packages/web/src/lib/screen-limits.ts",
 				"packages/web/src/lib/tool-access-labels.ts"
 			],

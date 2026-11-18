@@ -1,13 +1,8 @@
-import type { AgentColor } from "@sugabots/contracts";
-import { botColors } from "./bot-colors.ts";
+import type { BotColor } from "@sugabots/contracts";
+import { botPalettes } from "./bot-colors.ts";
 
-const tint: AgentColor = "purple";
-const bots: readonly [AgentColor, AgentColor, AgentColor, AgentColor] = [
-	"green",
-	"ice",
-	"rose",
-	"orange",
-];
+const tint: BotColor = "purple";
+const bots: readonly [BotColor, BotColor, BotColor, BotColor] = ["green", "ice", "rose", "orange"];
 
 /* A 40-unit rounded tile with 6 units of padding and a 2-unit gap around a 2×2 grid of 13-unit dots. */
 export const LOGO_SIZE = 40;
@@ -29,12 +24,12 @@ export const sugabotsLogo = {
 	tile: {
 		radius: TILE_RADIUS,
 		// The tint's eye colour: solid and dark, so the dots stand out on light and dark backgrounds.
-		fill: botColors[tint].eyes,
+		fill: botPalettes[tint].eyes,
 	},
 	dots: bots.map((color, index) => ({
 		cx: dotCentre(index % 2),
 		cy: dotCentre(Math.floor(index / 2)),
 		r: DOT_SIZE / 2,
-		fill: botColors[color].face,
+		fill: botPalettes[color].face,
 	})),
 };

@@ -1,10 +1,10 @@
-import type { RepositoryEvent, RoutineExecutionTrigger } from "@sugabots/contracts";
+import type { RepositoryEvent, RunTrigger } from "@sugabots/contracts";
 import { Option, Schema } from "effect";
 import * as GitHub from "./github.ts";
 
-/** Something that happened at one of a GitHub account's repositories, as a routine's run is told of it. */
+/** Something that happened at one of a GitHub account's repositories, as an automation's run is told of it. */
 export type RepositoryActivity = Omit<
-	Extract<RoutineExecutionTrigger, { kind: "github" }>,
+	Extract<RunTrigger, { kind: "github" }>,
 	"kind" | "connectionId" | "receivedAt" | "deliveryId"
 >;
 
@@ -15,8 +15,8 @@ const MAX_PUSHED_COMMITS = 20;
 
 /**
  * What GitHub's delivery of `event` with `payload` says happened, or
- * `undefined` for one no routine is run by. Events the app caused itself,
- * such as a bot's push, are left out, so a routine can't run itself in a loop.
+ * `undefined` for one no automation is run by. Events the app caused itself,
+ * such as a bot's push, are left out, so an automation can't run itself in a loop.
  */
 export function activityOf(
 	event: string | undefined,

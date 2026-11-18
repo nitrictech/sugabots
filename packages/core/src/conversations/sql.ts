@@ -1,19 +1,19 @@
 import type {
-	ArtifactKind,
+	AutomationState,
+	AutomationTrigger,
+	AutomationTriggerAuthor,
+	AutomationTriggerKind,
 	CollaborationStatus,
+	ConversationKind,
 	JsonValue,
 	MessageStatus,
-	RoutineExecutionState,
-	RoutineExecutionTrigger,
-	RoutineExecutionTriggerKind,
-	RoutineState,
-	RoutineTrigger,
-	RoutineTriggerAuthor,
-	RoutineTriggerKind,
-	SystemAgentKey,
-	ThreadType,
+	RunState,
+	RunTrigger,
+	RunTriggerKind,
+	SystemBotKey,
 	ToolApprovalStatus,
 	ToolCallStatus,
+	WrittenFileKind,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
 import { sql } from "drizzle-orm";
@@ -26,77 +26,78 @@ import {
 	integer,
 	jsonb,
 	pgTable,
+	pgView,
 	text,
 	timestamp,
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { agent, pod, user, workspace } from "../workspaces/sql.ts";
+import { bot, channel, user, workspace } from "../workspaces/sql.ts";
 
-export const routine = pgTable(
-	"routine",
+export const automation = pgTable(
+	"automation",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		agentId: uuid("agent_id").notNull(),
+		botId: uuid("bot_id").notNull(),
 		name: text("name").notNull(),
 		instructions: text("instructions").notNull(),
-		state: text("state").$type<RoutineState>().notNull().default("enabled"),
+		state: text("state").$type<AutomationState>().notNull().default("enabled"),
 		/**
-		 * When the routine paused itself after two failed runs in a row, until
+		 * When the automation paused itself after two failed runs in a row, until
 		 * somebody turns it on again or pauses it by hand.
 		 */
 		pausedAfterFailuresAt: timestamp("paused_after_failures_at", { withTimezone: true }),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
-		/** Set when the routine's own agent made it, at `createdById`'s request. */
-		createdByAgentId: uuid("created_by_agent_id"),
+		/** Set when the automation's own bot made it, at `createdById`'s request. */
+		createdByBotId: uuid("created_by_bot_id"),
 		deletedAt: timestamp("deleted_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.agentId, table.workspaceId],
-			foreignColumns: [agent.id, agent.workspaceId],
-			name: "routine_agent_workspace_fkey",
+			columns: [table.botId, table.workspaceId],
+			foreignColumns: [bot.id, bot.workspaceId],
+			name: "automation_bot_workspace_fkey",
 		}).onDelete("cascade"),
-		check("routine_state_valid", sql`${table.state} in ('enabled', 'paused')`),
+		check("automation_state_valid", sql`${table.state} in ('enabled', 'paused')`),
 		check(
-			"routine_paused_after_failures_valid",
+			"automation_paused_after_failures_valid",
 			sql`${table.pausedAfterFailuresAt} is null or ${table.state} = 'paused'`,
 		),
 		check(
-			"routine_created_by_agent_valid",
-			sql`${table.createdByAgentId} is null or ${table.createdByAgentId} = ${table.agentId}`,
+			"automation_created_by_bot_valid",
+			sql`${table.createdByBotId} is null or ${table.createdByBotId} = ${table.botId}`,
 		),
-		uniqueIndex("routine_agent_name_idx")
-			.on(table.agentId, table.name)
+		uniqueIndex("automation_bot_name_idx")
+			.on(table.botId, table.name)
 			.where(sql`${table.deletedAt} is null`),
-		uniqueIndex("routine_id_workspace_id_idx").on(table.id, table.workspaceId),
+		uniqueIndex("automation_id_workspace_id_idx").on(table.id, table.workspaceId),
 	],
 );
 
 /**
- * One of the things that start a routine; a routine may have several, of any
+ * One of the things that start an automation; an automation may have several, of any
  * kinds, or none and run only when someone runs it. `settings` holds what
  * each kind is, with the kind; a webhook keeps its secret in its own column,
- * and a schedule its next time, while its routine is enabled.
+ * and a schedule its next time, while its automation is enabled.
  */
-export const routineTrigger = pgTable(
-	"routine_trigger",
+export const automationTrigger = pgTable(
+	"automation_trigger",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id").notNull(),
-		routineId: uuid("routine_id").notNull(),
+		automationId: uuid("automation_id").notNull(),
 		/** Follows `settings`, so the kind and its settings can't disagree. */
 		kind: text("kind")
-			.$type<RoutineTriggerKind>()
+			.$type<AutomationTriggerKind>()
 			.generatedAlwaysAs(sql`settings->>'kind'`)
 			.notNull(),
-		settings: jsonb("settings").$type<RoutineTriggerSettings>().notNull(),
+		settings: jsonb("settings").$type<AutomationTriggerSettings>().notNull(),
 		/** A webhook's secret, sealed with `Credentials`: checking a signature needs the secret itself. */
 		secretEncrypted: text("secret_encrypted"),
 		/**
@@ -104,192 +105,267 @@ export const routineTrigger = pgTable(
 		 * kept sealed. It still admits callers until the secret is replaced.
 		 */
 		secretDigest: text("secret_digest"),
-		/** When a schedule next runs its routine; null while the routine is paused. */
+		/** When a schedule next runs its automation; null while the automation is paused. */
 		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.routineId, table.workspaceId],
-			foreignColumns: [routine.id, routine.workspaceId],
-			name: "routine_trigger_routine_workspace_fkey",
+			columns: [table.automationId, table.workspaceId],
+			foreignColumns: [automation.id, automation.workspaceId],
+			name: "automation_trigger_automation_workspace_fkey",
 		}).onDelete("cascade"),
 		check(
-			"routine_trigger_secret_valid",
+			"automation_trigger_secret_valid",
 			sql`(${table.secretEncrypted} is null and ${table.secretDigest} is null)
 				or (${table.kind} = 'webhook' and (${table.secretEncrypted} is null or ${table.secretDigest} is null))`,
 		),
 		check(
-			"routine_trigger_digest_valid",
+			"automation_trigger_digest_valid",
 			sql`${table.secretDigest} is null or ${table.settings}->'auth'->>'kind' = 'bearer'`,
 		),
 		check(
-			"routine_trigger_schedule_valid",
-			sql`${table.kind} = 'cron' or ${table.nextScheduledAt} is null`,
+			"automation_trigger_schedule_valid",
+			sql`${table.kind} = 'schedule' or ${table.nextScheduledAt} is null`,
 		),
-		index("routine_trigger_routine_idx").on(table.routineId, table.createdAt),
-		index("routine_trigger_due_idx")
+		index("automation_trigger_automation_idx").on(table.automationId, table.createdAt),
+		index("automation_trigger_due_idx")
 			.on(table.nextScheduledAt, table.id)
 			.where(sql`${table.nextScheduledAt} is not null`),
 	],
 );
 
 /**
- * The thread types people open and post in, each one a conversation of its
- * own: a thread with a bot or between people (`conversation`), a pod's chat,
- * a bot's channel, a routine's thread, and a direct message between people.
- * The others are opened under one of these.
+ * The kinds of conversation people open and post in: a task with a bot, a
+ * channel's main chat or thread, an automation's feed, and a direct message
+ * between people. The others are opened from one of these.
  */
-export const CONVERSATION_TYPES = [
-	"conversation",
-	"pod_chat",
-	"routine_feed",
-	"direct",
-] as const satisfies readonly ThreadType[];
+export const OPENABLE_CONVERSATION_KINDS = [
+	"task",
+	"channel_conversation",
+	"automation_feed",
+	"direct_message",
+] as const satisfies readonly ConversationKind[];
 
 /**
- * Deleting a thread, by any route including its workspace's, pod's or host
- * agent's cascade, queues its blobs for deletion: see `blob_deletion`.
+ * A main chat, thread, task, direct message, collaboration, automation run,
+ * automation feed or system bot's conversation: what every kind has. What
+ * makes each kind what it is lives in the kind's own table, keyed by the same
+ * id (`task`, `channel_conversation`, `direct_message`, `collaboration`,
+ * `run`, `automation_feed`, `system_conversation`), and `placedConversation`
+ * reads them back together.
+ *
+ * Every conversation has exactly the kind row its kind says. A kind row can
+ * only name a conversation of its kind (each references `(id, kind)`), the
+ * `conversation_has_kind_row` trigger refuses, at commit, a conversation left
+ * without one, and deleting a kind row deletes its conversation.
+ *
+ * Deleting a conversation, by any route including its workspace's, channel's
+ * or bot's cascade, queues its blobs for deletion: see `blob_deletion`.
  */
-export const thread = pgTable(
-	"thread",
+export const conversation = pgTable(
+	"conversation",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		/**
-		 * The pod it is in. Null on a direct message between people, which is
-		 * in no pod: its members alone reach it (see `directMember`).
-		 */
-		podId: uuid("pod_id"),
-		/**
-		 * The bot the thread is with. Null on a pod's chat, which is the pod's
-		 * people's, and on a thread between people started from one.
-		 */
-		hostAgentId: uuid("host_agent_id"),
-		/**
-		 * The conversation this thread belongs to: its own id on a conversation,
-		 * a pod's chat or a routine's thread, and the one it was opened from on a
-		 * collaboration or a routine run. Null on a system agent's thread, which
-		 * serves a thread rather than belonging to one.
-		 */
-		conversationId: uuid("conversation_id").references((): AnyPgColumn => thread.id, {
-			onDelete: "cascade",
-		}),
-		type: text("type").$type<ThreadType>().notNull(),
+		kind: text("kind").$type<ConversationKind>().notNull(),
 		title: text("title").notNull(),
-		/**
-		 * Set when this thread belongs to a system agent rather than to people and
-		 * crew. System-agent threads hang off the thread they act on and are hidden
-		 * from a pod's thread list.
-		 */
-		systemAgentKey: text("system_agent_key").$type<SystemAgentKey>(),
-		parentThreadId: uuid("parent_thread_id").references((): AnyPgColumn => thread.id, {
-			onDelete: "cascade",
-		}),
-		initiatorUserId: uuid("initiator_user_id").references(() => user.id, {
-			onDelete: "restrict",
-		}),
-		/** When somebody marked the conversation done, until it is reopened. */
-		doneAt: timestamp("done_at", { withTimezone: true }),
-		/** On a routine's own thread: the routine, each of whose runs posts in it. */
-		routineId: uuid("routine_id").references((): AnyPgColumn => routine.id, {
-			onDelete: "cascade",
-		}),
-		/**
-		 * On a pod's chat: whether it is the pod's first, named for the pod,
-		 * which every pod has once opened and which is never archived.
-		 */
-		main: boolean("main").notNull().default(false),
-		/** When somebody archived the pod's chat, which hides it from the pod's list. */
-		archivedAt: timestamp("archived_at", { withTimezone: true }),
-		/**
-		 * On a direct message: the ids of everybody in it, sorted and joined by
-		 * `:`, so each set of people has one. It still names somebody after they
-		 * have left, which `directMember` does not once their account is gone.
-		 */
-		directKey: text("direct_key"),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		check(
-			"thread_type_valid",
-			sql`${table.type} in ('conversation', 'pod_chat', 'collaboration', 'routine', 'routine_feed', 'system_agent', 'direct')`,
+			"conversation_kind_valid",
+			sql`${table.kind} in ('task', 'channel_conversation', 'direct_message', 'collaboration', 'run', 'automation_feed', 'system')`,
 		),
-		// A channel's conversations and a direct message are people's, and
-		// every other thread is some bot's.
-		check(
-			"thread_host_valid",
-			sql`(${table.type} in ('pod_chat', 'direct')) = (${table.hostAgentId} is null)`,
-		),
-		// Only a channel's conversations are in a channel.
-		check("thread_pod_valid", sql`(${table.type} = 'pod_chat') = (${table.podId} is not null)`),
-		// A direct message is named by its key.
-		check(
-			"thread_direct_valid",
-			sql`(${table.type} = 'direct') = (${table.directKey} is not null)`,
-		),
-		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "thread_pod_workspace_fkey",
-		}).onDelete("cascade"),
-		foreignKey({
-			columns: [table.hostAgentId, table.workspaceId],
-			foreignColumns: [agent.id, agent.workspaceId],
-			name: "thread_host_agent_workspace_fkey",
-		}).onDelete("cascade"),
-		uniqueIndex("thread_system_agent_key_idx").on(table.parentThreadId, table.systemAgentKey),
-		index("thread_workspace_created_at_idx").on(table.workspaceId, table.createdAt),
-		index("thread_pod_updated_at_idx").on(table.podId, table.updatedAt),
-		index("thread_host_updated_at_idx").on(table.hostAgentId, table.updatedAt),
-		index("thread_workspace_updated_at_idx").on(table.workspaceId, table.updatedAt),
-		index("thread_conversation_updated_at_idx").on(table.conversationId, table.updatedAt),
-		check(
-			"thread_routine_valid",
-			sql`(${table.routineId} is not null) = (${table.type} = 'routine_feed')`,
-		),
-		// One thread per routine.
-		uniqueIndex("thread_routine_feed_idx").on(table.routineId),
-		// One direct message per set of people in a workspace.
-		uniqueIndex("thread_direct_key_idx")
-			.on(table.workspaceId, table.directKey)
-			.where(sql`${table.type} = 'direct'`),
-		check("thread_main_valid", sql`not ${table.main} or ${table.type} = 'pod_chat'`),
-		check(
-			"thread_archived_valid",
-			sql`${table.archivedAt} is null or (${table.type} = 'pod_chat' and not ${table.main})`,
-		),
-		// One first chat per pod.
-		uniqueIndex("thread_pod_chat_idx").on(table.podId).where(sql`${table.main}`),
+		// What each kind table points at, so a kind row only names a conversation of its kind.
+		uniqueIndex("conversation_id_kind_idx").on(table.id, table.kind),
+		uniqueIndex("conversation_id_kind_workspace_idx").on(table.id, table.kind, table.workspaceId),
+		index("conversation_workspace_created_at_idx").on(table.workspaceId, table.createdAt),
+		index("conversation_workspace_updated_at_idx").on(table.workspaceId, table.updatedAt),
 	],
 );
 
-export const routineExecution = pgTable(
-	"routine_execution",
+/** A kind table's `kind`: always its own kind, so its row can only name a conversation of that kind. */
+const kindOf = <Kind extends ConversationKind>(kind: Kind) =>
+	text("kind")
+		.$type<Kind>()
+		.notNull()
+		.generatedAlwaysAs(sql.raw(`'${kind}'`));
+
+/** A kind row's conversation, which must be of the row's kind and in the row's workspace. */
+const conversationOfKind = (
+	table: { conversationId: AnyPgColumn; kind: AnyPgColumn; workspaceId: AnyPgColumn },
+	name: string,
+) =>
+	foreignKey({
+		columns: [table.conversationId, table.kind, table.workspaceId],
+		foreignColumns: [conversation.id, conversation.kind, conversation.workspaceId],
+		name,
+	}).onDelete("cascade");
+
+/** A conversation with one bot about one piece of work, which can be marked done. */
+export const task = pgTable(
+	"task",
+	{
+		conversationId: uuid("conversation_id").primaryKey(),
+		kind: kindOf("task"),
+		workspaceId: uuid("workspace_id").notNull(),
+		botId: uuid("bot_id").notNull(),
+		startedById: uuid("started_by_id").references(() => user.id, { onDelete: "restrict" }),
+		/** When somebody marked the task done, until it is reopened. */
+		doneAt: timestamp("done_at", { withTimezone: true }),
+	},
+	(table) => [
+		conversationOfKind(table, "task_conversation_fkey"),
+		foreignKey({
+			columns: [table.botId, table.workspaceId],
+			foreignColumns: [bot.id, bot.workspaceId],
+			name: "task_bot_workspace_fkey",
+		}).onDelete("cascade"),
+		index("task_bot_idx").on(table.botId),
+	],
+);
+
+/** A channel's main chat, or one of its threads. */
+export const channelConversation = pgTable(
+	"channel_conversation",
+	{
+		conversationId: uuid("conversation_id").primaryKey(),
+		kind: kindOf("channel_conversation"),
+		workspaceId: uuid("workspace_id").notNull(),
+		channelId: uuid("channel_id").notNull(),
+		/**
+		 * Whether it is the channel's main chat, named for the channel, which
+		 * every channel has once opened and which is never archived.
+		 */
+		main: boolean("main").notNull().default(false),
+		/** When somebody archived the thread, which hides it from the channel's list. */
+		archivedAt: timestamp("archived_at", { withTimezone: true }),
+		/** Who started it; null on a main chat opened by a bot's work rather than a person. */
+		startedById: uuid("started_by_id").references(() => user.id, { onDelete: "restrict" }),
+	},
+	(table) => [
+		conversationOfKind(table, "channel_conversation_conversation_fkey"),
+		foreignKey({
+			columns: [table.channelId, table.workspaceId],
+			foreignColumns: [channel.id, channel.workspaceId],
+			name: "channel_conversation_channel_workspace_fkey",
+		}).onDelete("cascade"),
+		index("channel_conversation_channel_idx").on(table.channelId),
+		check(
+			"channel_conversation_archived_valid",
+			sql`${table.archivedAt} is null or not ${table.main}`,
+		),
+		// One main chat per channel.
+		uniqueIndex("channel_conversation_main_idx").on(table.channelId).where(sql`${table.main}`),
+	],
+);
+
+/**
+ * A conversation between two or more people, in no channel and with no bots:
+ * its members alone reach it (see `directMessageMember`).
+ */
+export const directMessage = pgTable(
+	"direct_message",
+	{
+		conversationId: uuid("conversation_id").primaryKey(),
+		kind: kindOf("direct_message"),
+		workspaceId: uuid("workspace_id").notNull(),
+		/**
+		 * The ids of everybody in it, sorted and joined by `:`, so each set of
+		 * people has one. It still names somebody after they have left, which
+		 * `directMessageMember` does not once their account is gone.
+		 */
+		directKey: text("direct_key").notNull(),
+		startedById: uuid("started_by_id").references(() => user.id, { onDelete: "restrict" }),
+	},
+	(table) => [
+		conversationOfKind(table, "direct_message_conversation_fkey"),
+		// One direct message per set of people in a workspace.
+		uniqueIndex("direct_message_key_idx").on(table.workspaceId, table.directKey),
+	],
+);
+
+/** An automation's own conversation, where each of its runs posts its result. */
+export const automationFeed = pgTable(
+	"automation_feed",
+	{
+		conversationId: uuid("conversation_id").primaryKey(),
+		kind: kindOf("automation_feed"),
+		workspaceId: uuid("workspace_id").notNull(),
+		/** The automation, whose bot the feed is with. */
+		automationId: uuid("automation_id").notNull(),
+	},
+	(table) => [
+		conversationOfKind(table, "automation_feed_conversation_fkey"),
+		foreignKey({
+			columns: [table.automationId, table.workspaceId],
+			foreignColumns: [automation.id, automation.workspaceId],
+			name: "automation_feed_automation_workspace_fkey",
+		}).onDelete("cascade"),
+		// One feed per automation.
+		uniqueIndex("automation_feed_automation_idx").on(table.automationId),
+	],
+);
+
+/**
+ * Where a system bot works on another conversation, which it serves rather
+ * than belongs to: one per system bot per served conversation, hidden from
+ * every list.
+ */
+export const systemConversation = pgTable(
+	"system_conversation",
+	{
+		conversationId: uuid("conversation_id").primaryKey(),
+		kind: kindOf("system"),
+		workspaceId: uuid("workspace_id").notNull(),
+		/** The system bot working here. */
+		botId: uuid("bot_id").notNull(),
+		systemBotKey: text("system_bot_key").$type<SystemBotKey>().notNull(),
+		servedConversationId: uuid("served_conversation_id")
+			.notNull()
+			.references((): AnyPgColumn => conversation.id, { onDelete: "cascade" }),
+	},
+	(table) => [
+		conversationOfKind(table, "system_conversation_conversation_fkey"),
+		foreignKey({
+			columns: [table.botId, table.workspaceId],
+			foreignColumns: [bot.id, bot.workspaceId],
+			name: "system_conversation_bot_workspace_fkey",
+		}).onDelete("cascade"),
+		uniqueIndex("system_conversation_served_key_idx").on(
+			table.servedConversationId,
+			table.systemBotKey,
+		),
+	],
+);
+
+export const automationRun = pgTable(
+	"run",
 	{
 		id: primaryKey(),
-		routineId: uuid("routine_id")
+		automationId: uuid("automation_id")
 			.notNull()
-			.references(() => routine.id, { onDelete: "restrict" }),
+			.references(() => automation.id, { onDelete: "restrict" }),
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		agentId: uuid("agent_id").notNull(),
-		threadId: uuid("thread_id")
-			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
+		botId: uuid("bot_id").notNull(),
+		/** The run's own conversation, where its bot works. */
+		conversationId: uuid("conversation_id").notNull(),
+		kind: kindOf("run"),
 		/** The trigger that started it; null for a run someone started, or once the trigger is removed. */
-		triggerId: uuid("trigger_id").references(() => routineTrigger.id, { onDelete: "set null" }),
-		triggerKind: text("trigger_kind").$type<RoutineExecutionTriggerKind>().notNull(),
+		triggerId: uuid("trigger_id").references(() => automationTrigger.id, { onDelete: "set null" }),
+		triggerKind: text("trigger_kind").$type<RunTriggerKind>().notNull(),
 		triggerIdentity: text("trigger_identity"),
-		trigger: jsonb("trigger").$type<RoutineExecutionTrigger>().notNull(),
-		routineName: text("routine_name").notNull(),
+		trigger: jsonb("trigger").$type<RunTrigger>().notNull(),
+		automationName: text("automation_name").notNull(),
 		instructions: text("instructions").notNull(),
-		state: text("state").$type<RoutineExecutionState>().notNull().default("queued"),
+		state: text("state").$type<RunState>().notNull().default("queued"),
 		error: text("error").$type<UserText>(),
 		pendingTerminalState: text("pending_terminal_state").$type<"failed" | "cancelled">(),
 		pendingTerminalError: text("pending_terminal_error").$type<UserText>(),
@@ -301,23 +377,24 @@ export const routineExecution = pgTable(
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.agentId, table.workspaceId],
-			foreignColumns: [agent.id, agent.workspaceId],
-			name: "routine_execution_agent_workspace_fkey",
+			columns: [table.botId, table.workspaceId],
+			foreignColumns: [bot.id, bot.workspaceId],
+			name: "run_bot_workspace_fkey",
 		}).onDelete("cascade"),
 		foreignKey({
-			columns: [table.routineId, table.workspaceId],
-			foreignColumns: [routine.id, routine.workspaceId],
-			name: "routine_execution_routine_workspace_fkey",
+			columns: [table.automationId, table.workspaceId],
+			foreignColumns: [automation.id, automation.workspaceId],
+			name: "run_automation_workspace_fkey",
 		}).onDelete("restrict"),
+		conversationOfKind(table, "run_conversation_fkey"),
 		check(
-			"routine_execution_trigger_valid",
+			"run_trigger_valid",
 			sql`${table.trigger}->>'kind' = ${table.triggerKind}
 				and (${table.triggerKind} = 'webhook' or ${table.triggerIdentity} is not null)
 				and (${table.triggerKind} <> 'manual' or ${table.triggerId} is null)`,
 		),
 		check(
-			"routine_execution_state_valid",
+			"run_state_valid",
 			sql`(
 				${table.state} = 'queued'
 				and ${table.startedAt} is null
@@ -333,79 +410,83 @@ export const routineExecution = pgTable(
 			)`,
 		),
 		check(
-			"routine_execution_pending_terminal_valid",
+			"run_pending_terminal_valid",
 			sql`(${table.pendingTerminalState} is null and ${table.pendingTerminalError} is null)
 				or (${table.state} = 'running' and ${table.pendingTerminalState} = 'cancelled' and ${table.pendingTerminalError} is null)
 				or (${table.state} = 'running' and ${table.pendingTerminalState} = 'failed')`,
 		),
-		uniqueIndex("routine_execution_thread_idx").on(table.threadId),
+		uniqueIndex("run_conversation_idx").on(table.conversationId),
 		// A trigger's retry of a delivery or an occurrence lands on the run it started.
-		uniqueIndex("routine_execution_trigger_identity_idx")
+		uniqueIndex("run_trigger_identity_idx")
 			.on(table.triggerId, table.triggerIdentity)
 			.where(sql`${table.triggerId} is not null and ${table.triggerIdentity} is not null`),
-		uniqueIndex("routine_execution_manual_identity_idx")
-			.on(table.routineId, table.triggerIdentity)
+		uniqueIndex("run_manual_identity_idx")
+			.on(table.automationId, table.triggerIdentity)
 			.where(sql`${table.triggerKind} = 'manual'`),
-		uniqueIndex("routine_execution_running_idx")
-			.on(table.routineId)
-			.where(sql`${table.state} = 'running'`),
-		index("routine_execution_list_idx").on(table.routineId, table.acceptedAt, table.id),
+		uniqueIndex("run_running_idx").on(table.automationId).where(sql`${table.state} = 'running'`),
+		index("run_list_idx").on(table.automationId, table.acceptedAt, table.id),
 	],
 );
 
 /**
  * Who is in a direct message, and so alone reaches it while they are in its
- * workspace. Unlike `threadParticipant`, which records who has taken part,
- * this is the whole set from the start, and it never changes: a different
- * set of people is a different direct message. A row outlives its person
- * leaving the workspace, so rejoining gives the conversation back.
+ * workspace. Unlike `conversationParticipant`, which records who has taken
+ * part, this is the whole set from the start, and it never changes: a
+ * different set of people is a different direct message. A row outlives its
+ * person leaving the workspace, so rejoining gives the conversation back.
  */
-export const directMember = pgTable(
-	"direct_member",
+export const directMessageMember = pgTable(
+	"direct_message_member",
 	{
-		threadId: uuid("thread_id")
-			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
+		conversationId: uuid("conversation_id").notNull(),
 		userId: uuid("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		uniqueIndex("direct_member_thread_user_idx").on(table.threadId, table.userId),
-		index("direct_member_user_idx").on(table.userId),
+		foreignKey({
+			columns: [table.conversationId],
+			foreignColumns: [directMessage.conversationId],
+			name: "direct_message_member_direct_message_fkey",
+		}).onDelete("cascade"),
+		uniqueIndex("direct_message_member_conversation_user_idx").on(
+			table.conversationId,
+			table.userId,
+		),
+		index("direct_message_member_user_idx").on(table.userId),
 	],
 );
 
-export const threadParticipant = pgTable(
-	"thread_participant",
+export const conversationParticipant = pgTable(
+	"conversation_participant",
 	{
 		id: primaryKey(),
-		threadId: uuid("thread_id")
+		conversationId: uuid("conversation_id")
 			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
+			.references(() => conversation.id, { onDelete: "cascade" }),
 		userId: uuid("user_id").references(() => user.id, { onDelete: "cascade" }),
-		agentId: uuid("agent_id").references(() => agent.id, { onDelete: "cascade" }),
+		botId: uuid("bot_id").references(() => bot.id, { onDelete: "cascade" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
 		check(
-			"thread_participant_one_identity",
-			sql`num_nonnulls(${table.userId}, ${table.agentId}) = 1`,
+			"conversation_participant_one_identity",
+			sql`num_nonnulls(${table.userId}, ${table.botId}) = 1`,
 		),
-		uniqueIndex("thread_participant_user_idx")
-			.on(table.threadId, table.userId)
+		uniqueIndex("conversation_participant_user_idx")
+			.on(table.conversationId, table.userId)
 			.where(sql`${table.userId} is not null`),
-		uniqueIndex("thread_participant_agent_idx")
-			.on(table.threadId, table.agentId)
-			.where(sql`${table.agentId} is not null`),
+		uniqueIndex("conversation_participant_bot_idx")
+			.on(table.conversationId, table.botId)
+			.where(sql`${table.botId} is not null`),
 	],
 );
 
 /**
- * Why an agent was given a turn: a person mentioned it or replied to it, it was the default,
- * it was asked to collaborate, a routine ran, a collaboration it stopped
- * waiting on ended, it opened its setup interview, or a bot started its thread
+ * Why a bot was given a turn: a person mentioned it or replied to it, it was the default,
+ * it was asked to collaborate, an automation ran, a collaboration it stopped
+ * waiting on ended, it opened its setup interview, or a bot started its conversation
  * for a person and briefed it.
  */
 export type TurnReason =
@@ -413,6 +494,7 @@ export type TurnReason =
 	| "reply"
 	| "default"
 	| "collaboration"
+	// An automation ran. Turns and the turn workflow's payload store it, so it keeps its old name.
 	| "routine"
 	| "resume"
 	| "interview"
@@ -427,12 +509,12 @@ export const turn = pgTable(
 	"turn",
 	{
 		id: primaryKey(),
-		threadId: uuid("thread_id")
+		conversationId: uuid("conversation_id")
 			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
-		agentId: uuid("agent_id")
+			.references(() => conversation.id, { onDelete: "cascade" }),
+		botId: uuid("bot_id")
 			.notNull()
-			.references(() => agent.id, { onDelete: "cascade" }),
+			.references(() => bot.id, { onDelete: "cascade" }),
 		triggerMessageId: uuid("trigger_message_id")
 			.notNull()
 			.references((): AnyPgColumn => message.id, { onDelete: "cascade" }),
@@ -456,7 +538,7 @@ export const turn = pgTable(
 		mutationStarted: boolean("mutation_started").notNull().default(false),
 		/** Server-owned AI SDK messages needed to continue after tool approval. */
 		checkpoint: jsonb("checkpoint").$type<unknown>(),
-		// Why this agent got the turn, for reading a routing decision back later.
+		// Why this bot got the turn, for reading a routing decision back later.
 		reason: text("reason").$type<TurnReason>(),
 		error: text("error").$type<UserText>(),
 		startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
@@ -465,8 +547,8 @@ export const turn = pgTable(
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		index("turn_thread_started_at_idx").on(table.threadId, table.startedAt),
-		uniqueIndex("turn_trigger_agent_idx").on(table.triggerMessageId, table.agentId),
+		index("turn_conversation_started_at_idx").on(table.conversationId, table.startedAt),
+		uniqueIndex("turn_trigger_bot_idx").on(table.triggerMessageId, table.botId),
 		index("turn_active_idx")
 			.on(table.status, table.startedAt)
 			.where(sql`${table.status} = 'running'`),
@@ -477,23 +559,23 @@ export const message = pgTable(
 	"message",
 	{
 		id: primaryKey(),
-		threadId: uuid("thread_id")
+		conversationId: uuid("conversation_id")
 			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
+			.references(() => conversation.id, { onDelete: "cascade" }),
 		authorUserId: uuid("author_user_id").references(() => user.id, { onDelete: "restrict" }),
-		authorAgentId: uuid("author_agent_id").references(() => agent.id, { onDelete: "cascade" }),
-		routineTrigger: jsonb("routine_trigger").$type<RoutineTriggerAuthor>(),
+		authorBotId: uuid("author_bot_id").references(() => bot.id, { onDelete: "cascade" }),
+		automationTrigger: jsonb("automation_trigger").$type<AutomationTriggerAuthor>(),
 		kind: text("kind").$type<"text">().notNull(),
 		status: text("status").$type<MessageStatus>().notNull(),
 		parts: jsonb("parts").$type<StoredMessagePart[]>().notNull(),
 		content: text("content").notNull(),
 		mentions: jsonb("mentions").$type<string[]>().notNull().default([]),
 		turnId: uuid("turn_id").references(() => turn.id, { onDelete: "set null" }),
-		/** The routine run this message is the result of, posted in the routine's thread or a pod's chat. */
-		routineExecutionId: uuid("routine_execution_id").references(() => routineExecution.id, {
+		/** The automation run this message is the result of, posted in the automation's feed. */
+		runId: uuid("run_id").references(() => automationRun.id, {
 			onDelete: "set null",
 		}),
-		/** The message this one quotes and answers, always in the same thread. */
+		/** The message this one quotes and answers, always in the same conversation. */
 		replyToMessageId: uuid("reply_to_message_id").references((): AnyPgColumn => message.id, {
 			onDelete: "set null",
 		}),
@@ -502,13 +584,13 @@ export const message = pgTable(
 	(table) => [
 		check(
 			"message_one_author",
-			sql`num_nonnulls(${table.authorUserId}, ${table.authorAgentId}, ${table.routineTrigger}) = 1`,
+			sql`num_nonnulls(${table.authorUserId}, ${table.authorBotId}, ${table.automationTrigger}) = 1`,
 		),
-		index("message_thread_created_at_idx").on(table.threadId, table.createdAt),
-		// A run's result is posted once in each thread it goes to: the routine's, and perhaps a pod's chat.
-		uniqueIndex("message_routine_execution_idx")
-			.on(table.routineExecutionId, table.threadId)
-			.where(sql`${table.routineExecutionId} is not null`),
+		index("message_conversation_created_at_idx").on(table.conversationId, table.createdAt),
+		// A run's result is posted once in each conversation it goes to.
+		uniqueIndex("message_run_idx")
+			.on(table.runId, table.conversationId)
+			.where(sql`${table.runId} is not null`),
 		// What a bot's search_history tool matches against. Stemmed so "hotels"
 		// finds "hotel"; unstemmed as well, so a word the English rules drop or
 		// change (German "was", French "hôtels") still matches as written; and
@@ -556,40 +638,49 @@ export const messageReaction = pgTable(
  * answer live on the `collaboration` row and are composed in on read, so the reply's
  * writer and the collaborator's completing turn never write the same row. A tool
  * call is kept by reference for the same reason in the other direction: its
- * output lands on the `tool_call` row without rewriting the reply's parts. An
- * artifact on a routine run's posted result is kept whole: it names the
+ * output lands on the `tool_call` row without rewriting the reply's parts. A
+ * file on an automation run's posted result is kept whole: it names the
  * version the run wrote, which never changes.
  */
 export type StoredMessagePart =
 	| { type: "text"; text: string }
 	| { type: "collaboration"; collaborationId: string }
 	| { type: "tool_call"; toolCallId: string }
-	| { type: "artifact"; artifactId: string; kind: ArtifactKind; title: string; version: number };
+	| { type: "written_file"; fileId: string; kind: WrittenFileKind; title: string; version: number };
 
 /**
- * One agent asking another for help mid-reply. The reply is `parentMessage`;
- * the collaborator answers in `childThread`. See `tools/collaborate/collaborations.ts`.
+ * One bot asking another for help mid-reply, and the collaboration's own
+ * conversation, where the collaborator answers. The reply is `parentMessage`,
+ * in `parentConversationId`. See `tools/collaborate/collaborations.ts`.
  */
 export const collaboration = pgTable(
 	"collaboration",
 	{
 		id: primaryKey(),
-		parentThreadId: uuid("parent_thread_id")
+		/** The collaboration's own conversation, where the collaborator answers. */
+		conversationId: uuid("conversation_id").notNull(),
+		kind: kindOf("collaboration"),
+		/** The conversation it was asked from, where the asking reply is. */
+		parentConversationId: uuid("parent_conversation_id")
 			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
+			.references(() => conversation.id, { onDelete: "cascade" }),
+		/**
+		 * The conversation people opened that it hangs under: its parent's, or
+		 * the parent itself, for the first collaboration asked from it.
+		 */
+		rootConversationId: uuid("root_conversation_id")
+			.notNull()
+			.references((): AnyPgColumn => conversation.id, { onDelete: "cascade" }),
 		parentMessageId: uuid("parent_message_id")
 			.notNull()
 			.references(() => message.id, { onDelete: "cascade" }),
-		/** The asking agent's turn, which bounds collaborations per turn. */
+		/** The asking bot's turn, which bounds collaborations per turn. */
 		turnId: uuid("turn_id")
 			.notNull()
 			.references(() => turn.id, { onDelete: "cascade" }),
-		childThreadId: uuid("child_thread_id")
+		collaboratorBotId: uuid("collaborator_bot_id")
 			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
-		collaboratorAgentId: uuid("collaborator_agent_id")
-			.notNull()
-			.references(() => agent.id, { onDelete: "cascade" }),
+			.references(() => bot.id, { onDelete: "cascade" }),
 		brief: text("brief").notNull(),
 		status: text("status").$type<CollaborationStatus>().notNull().default("waiting"),
 		answer: text("answer"),
@@ -599,12 +690,15 @@ export const collaboration = pgTable(
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
+		foreignKey({
+			columns: [table.conversationId, table.kind],
+			foreignColumns: [conversation.id, conversation.kind],
+			name: "collaboration_conversation_fkey",
+		}).onDelete("cascade"),
 		index("collaboration_parent_message_idx").on(table.parentMessageId),
-		uniqueIndex("collaboration_child_thread_idx").on(table.childThreadId),
-		index("collaboration_collaborator_created_at_idx").on(
-			table.collaboratorAgentId,
-			table.createdAt,
-		),
+		uniqueIndex("collaboration_conversation_idx").on(table.conversationId),
+		index("collaboration_root_idx").on(table.rootConversationId),
+		index("collaboration_collaborator_created_at_idx").on(table.collaboratorBotId, table.createdAt),
 		index("collaboration_turn_idx").on(table.turnId),
 	],
 );
@@ -612,11 +706,11 @@ export const collaboration = pgTable(
 export type CollaborationRow = typeof collaboration.$inferSelect;
 
 /**
- * One call an agent's reply made to a built-in tool: what it was given, what
+ * One call a bot's reply made to a built-in tool: what it was given, what
  * came back, and where in the reply it happened. See `tools/calls/repository.ts`.
  *
- * `thread_id` is here as well as on the message so the table can be filtered
- * by thread without a join. `input` and `output` are truncated to
+ * `conversation_id` is here as well as on the message so the table can be
+ * filtered by conversation without a join. `input` and `output` are truncated to
  * `MAX_STORED_JSON_CHARACTERS` before they are written; the model saw the
  * whole result.
  */
@@ -624,9 +718,9 @@ export const toolCall = pgTable(
 	"tool_call",
 	{
 		id: primaryKey(),
-		threadId: uuid("thread_id")
+		conversationId: uuid("conversation_id")
 			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
+			.references(() => conversation.id, { onDelete: "cascade" }),
 		/** The reply the call was made in. */
 		messageId: uuid("message_id")
 			.notNull()
@@ -670,68 +764,11 @@ export const toolCall = pgTable(
 
 export type ToolCallRow = typeof toolCall.$inferSelect;
 
-/**
- * Where a thread's file came from: a tool's result too large to hand a model
- * whole, a person's upload, or a file an agent attached to its own reply.
- */
-export type ThreadFileKind = "tool_result" | "upload" | "agent_attachment";
-
-/**
- * A file in a thread, which its agents can read. Its bytes are in the blob
- * store, under the thread's folder (see `thread-files/thread-files.ts`).
- */
-export const threadFile = pgTable(
-	"thread_file",
-	{
-		id: primaryKey(),
-		threadId: uuid("thread_id")
-			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
-		kind: text("kind").$type<ThreadFileKind>().notNull(),
-		/** For a tool result: the call whose result this is. */
-		toolCallId: uuid("tool_call_id").references(() => toolCall.id, { onDelete: "set null" }),
-		/** For an upload, the file's name as the person's computer had it; for an agent's attachment, the name it gave. */
-		name: text("name"),
-		/** For an upload: who uploaded it, the only one who may attach it while it is unsent. */
-		uploaderId: uuid("uploader_id").references(() => user.id, { onDelete: "set null" }),
-		/**
-		 * For an upload, the message it is attached to, unset until that message
-		 * is sent; for an agent's attachment, the reply it was attached to.
-		 */
-		messageId: uuid("message_id").references(() => message.id, { onDelete: "cascade" }),
-		/** For a file on a message: its place among the message's files, from 0. */
-		position: integer("position"),
-		contentType: text("content_type").notNull(),
-		/** In bytes. */
-		size: integer("size").notNull(),
-		createdAt: stamp("created_at"),
-	},
-	(table) => [
-		index("thread_file_thread_idx").on(table.threadId),
-		index("thread_file_message_idx").on(table.messageId),
-		check(
-			"thread_file_kind_valid",
-			sql`${table.kind} in ('tool_result', 'upload', 'agent_attachment')`,
-		),
-		check(
-			"thread_file_source_valid",
-			sql`case ${table.kind}
-				when 'upload' then ${table.name} is not null and ${table.toolCallId} is null
-					and (${table.messageId} is null) = (${table.position} is null)
-				when 'agent_attachment' then ${table.name} is not null and ${table.toolCallId} is null
-					and ${table.uploaderId} is null and ${table.messageId} is not null
-					and ${table.position} is not null
-				else ${table.name} is null and ${table.uploaderId} is null and ${table.messageId} is null
-					and ${table.position} is null
-			end`,
-		),
-	],
-);
-
-export const threadSummary = pgTable("thread_summary", {
-	threadId: uuid("thread_id")
+/** The Summariser's short account of one conversation, written from its messages up to `sourceMessageId`. */
+export const conversationSummary = pgTable("summary", {
+	conversationId: uuid("conversation_id")
 		.primaryKey()
-		.references(() => thread.id, { onDelete: "cascade" }),
+		.references(() => conversation.id, { onDelete: "cascade" }),
 	content: text("content").notNull(),
 	sourceMessageId: uuid("source_message_id")
 		.notNull()
@@ -741,17 +778,17 @@ export const threadSummary = pgTable("thread_summary", {
 
 /**
  * What a bot has been doing lately, at a glance: written by the Summariser
- * from the summaries of the bot's newest tasks and automation threads, each
+ * from the summaries of the bot's newest tasks and automation feeds, each
  * time one of them is summarised. People who reach the bot read it on its
  * page, and their Personal Assistant reads it to know what the bot is up to.
  */
-export const agentSummary = pgTable("agent_summary", {
-	agentId: uuid("agent_id")
+export const botSummary = pgTable("bot_summary", {
+	botId: uuid("bot_id")
 		.primaryKey()
-		.references(() => agent.id, { onDelete: "cascade" }),
+		.references(() => bot.id, { onDelete: "cascade" }),
 	content: text("content").notNull(),
 	/**
-	 * When the newest thread summary it was written from was written. A
+	 * When the newest conversation summary it was written from was written. A
 	 * summary written from older ones never replaces it, however late it
 	 * arrives.
 	 */
@@ -760,38 +797,38 @@ export const agentSummary = pgTable("agent_summary", {
 });
 
 /**
- * What a bot reads in place of a long thread's older messages, written by the
- * Compaction agent. The bot reads `summary`, then every message from `keptFrom` on word
+ * What a bot reads in place of a long conversation's older messages, written by the
+ * Compaction bot. The bot reads `summary`, then every message from `keptFrom` on word
  * for word. The summary covers the messages from `historyStartsAt` to `keptFrom`;
  * anything earlier is left out, and the bot searches for it when it needs it.
  */
-export const threadCompaction = pgTable("thread_compaction", {
-	threadId: uuid("thread_id")
+export const conversationCompaction = pgTable("compaction", {
+	conversationId: uuid("conversation_id")
 		.primaryKey()
-		.references(() => thread.id, { onDelete: "cascade" }),
+		.references(() => conversation.id, { onDelete: "cascade" }),
 	summary: text("summary").notNull(),
 	historyStartsAt: timestamp("history_starts_at", { withTimezone: true }).notNull(),
 	keptFrom: timestamp("kept_from", { withTimezone: true }).notNull(),
 	updatedAt: updatedStamp("updated_at"),
 });
 
-export type ThreadCompactionRow = typeof threadCompaction.$inferSelect;
+export type CompactionRow = typeof conversationCompaction.$inferSelect;
 
 /**
- * How far one person has read a thread: every message there up to
+ * How far one person has read a conversation: every message there up to
  * `readThrough` has been on their screen. No row means they never opened it.
  *
  * A message is stamped when its transaction begins, so one that began before
  * a read was recorded and committed after it counts as read. The window is a
  * transaction long, and the next message moves the chat on.
  */
-export const threadRead = pgTable(
-	"thread_read",
+export const conversationRead = pgTable(
+	"conversation_read",
 	{
 		id: primaryKey(),
-		threadId: uuid("thread_id")
+		conversationId: uuid("conversation_id")
 			.notNull()
-			.references(() => thread.id, { onDelete: "cascade" }),
+			.references(() => conversation.id, { onDelete: "cascade" }),
 		userId: uuid("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
@@ -799,19 +836,90 @@ export const threadRead = pgTable(
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
-	(table) => [uniqueIndex("thread_read_user_thread_idx").on(table.userId, table.threadId)],
+	(table) => [
+		uniqueIndex("conversation_read_user_conversation_idx").on(table.userId, table.conversationId),
+	],
 );
 
-export type ThreadRow = typeof thread.$inferSelect;
-export type RoutineRow = typeof routine.$inferSelect;
-export type RoutineTriggerRow = typeof routineTrigger.$inferSelect;
+/**
+ * Every conversation with what its kind table says about it, read as one
+ * row: the shape most reads want. Columns a kind does not have are null. The
+ * kind tables stay the only place each fact is written.
+ */
+export const placedConversation = pgView("placed_conversation", {
+	id: uuid("id").notNull(),
+	workspaceId: uuid("workspace_id").notNull(),
+	kind: text("kind").$type<ConversationKind>().notNull(),
+	title: text("title").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+	/**
+	 * The bot it is with: a task's, the collaborator, a run's or a feed's
+	 * automation's bot, or the system bot. Null on a channel's conversation
+	 * and a direct message, which are people's.
+	 */
+	botId: uuid("bot_id"),
+	/** On a channel's conversation: its channel. */
+	channelId: uuid("channel_id"),
+	/**
+	 * The conversation people open that it is in: its own id on a task, a
+	 * channel's conversation, a direct message and an automation's feed; the
+	 * one it hangs under on a collaboration; the automation's feed on a run.
+	 * Null on a system bot's conversation, which serves one rather than
+	 * belonging to one.
+	 */
+	rootConversationId: uuid("root_conversation_id"),
+	/** What it was opened under: the asking conversation of a collaboration, the served one of a system bot's. */
+	parentConversationId: uuid("parent_conversation_id"),
+	/** Who started a task, channel conversation or direct message. */
+	startedById: uuid("started_by_id"),
+	systemBotKey: text("system_bot_key").$type<SystemBotKey>(),
+	doneAt: timestamp("done_at", { withTimezone: true }),
+	/** On an automation's feed: the automation. */
+	automationId: uuid("automation_id"),
+	main: boolean("main").notNull(),
+	archivedAt: timestamp("archived_at", { withTimezone: true }),
+	directKey: text("direct_key"),
+}).as(sql`select
+	c.id, c.workspace_id, c.kind, c.title, c.created_at, c.updated_at,
+	coalesce(t.bot_id, co.collaborator_bot_id, r.bot_id, fa.bot_id, sc.bot_id) as bot_id,
+	cc.channel_id,
+	case c.kind
+		when 'collaboration' then co.root_conversation_id
+		when 'run' then rf.conversation_id
+		when 'system' then null
+		else c.id
+	end as root_conversation_id,
+	coalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,
+	coalesce(t.started_by_id, cc.started_by_id, dm.started_by_id) as started_by_id,
+	sc.system_bot_key,
+	t.done_at,
+	f.automation_id,
+	coalesce(cc.main, false) as main,
+	cc.archived_at,
+	dm.direct_key
+from ${conversation} c
+left join ${task} t on t.conversation_id = c.id
+left join ${channelConversation} cc on cc.conversation_id = c.id
+left join ${directMessage} dm on dm.conversation_id = c.id
+left join ${collaboration} co on co.conversation_id = c.id
+left join ${automationRun} r on r.conversation_id = c.id
+left join ${automationFeed} rf on rf.automation_id = r.automation_id
+left join ${automationFeed} f on f.conversation_id = c.id
+left join ${automation} fa on fa.id = f.automation_id
+left join ${systemConversation} sc on sc.conversation_id = c.id`);
+
+export type ConversationRow = typeof conversation.$inferSelect;
+export type PlacedConversationRow = typeof placedConversation.$inferSelect;
+export type AutomationRow = typeof automation.$inferSelect;
+export type AutomationTriggerRow = typeof automationTrigger.$inferSelect;
 /** What a trigger is, by kind: a trigger as the API shows it, without what the row keeps apart. */
-export type RoutineTriggerSettings = RoutineTrigger extends infer T
-	? T extends RoutineTrigger
+export type AutomationTriggerSettings = AutomationTrigger extends infer T
+	? T extends AutomationTrigger
 		? Omit<T, "id" | "nextScheduledAt">
 		: never
 	: never;
-export type RoutineExecutionRow = typeof routineExecution.$inferSelect;
+export type RunRow = typeof automationRun.$inferSelect;
 export type MessageRow = typeof message.$inferSelect;
 export type TurnRow = typeof turn.$inferSelect;
-export type ThreadSummaryRow = typeof threadSummary.$inferSelect;
+export type SummaryRow = typeof conversationSummary.$inferSelect;

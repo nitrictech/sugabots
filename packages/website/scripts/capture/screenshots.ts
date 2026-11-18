@@ -31,25 +31,25 @@ interface Shot {
 	prepare(stage: Stage): Promise<void>;
 }
 
-/** The carousel's slides, but for Sandboxes, which needs a desktop: see {@link SANDBOXES}. */
+/** The carousel's slides, but for Computers, which needs a desktop: see {@link COMPUTERS}. */
 const SHOTS: Shot[] = [
 	{
 		name: "one-thread",
 		backdrop: { form: "swoop", family: "silver" },
 		async prepare(stage) {
-			// Growth's chat, where its people talk and start threads with its bots.
-			await openPodChat(stage, "growth");
+			// Growth's main chat, where its people talk with each other and with its bots.
+			await openMainChat(stage, "growth");
 			await stage.app.getByText("Brightwater signed!").waitFor();
 		},
 	},
 	{
-		name: "routines",
+		name: "automations",
 		backdrop: { form: "rings", family: "graphite" },
 		async prepare(stage) {
-			// Ticket Desk's Routines page, with its morning queue open beside the list.
-			await stage.open(`/${WORKSPACE}/pods/support/routines?bot=ticket-desk`);
+			// Ticket Desk's automations page, with its morning queue's feed open beside the list.
+			await stage.open(`/${WORKSPACE}/bots/ticket-desk/automations`);
 			await stage.app
-				.getByRole("region", { name: "Routines" })
+				.getByRole("region", { name: "Automations" })
 				.getByRole("link", { name: /^Morning queue/ })
 				.first()
 				.click();
@@ -57,10 +57,10 @@ const SHOTS: Shot[] = [
 		},
 	},
 	{
-		name: "artifacts",
+		name: "files",
 		backdrop: { form: "sur", family: "ink" },
 		async prepare(stage) {
-			await openSeededThread(stage, "engineering", "What changed in Postgres 18");
+			await openSeededTask(stage, "researcher", "What changed in Postgres 18");
 			await stage.app.getByRole("button", { name: "Preview" }).last().click();
 			await stage.app.waitForTimeout(600);
 			await scrollToTop(stage.app.getByText("Graphile Worker fits best").last());
@@ -78,25 +78,27 @@ const SHOTS: Shot[] = [
 		name: "mcp-connections",
 		backdrop: { form: "petals", family: "graphite" },
 		async prepare(stage) {
-			await stage.open(`/${WORKSPACE}/settings/pods/engineering`);
-			await stage.app.getByText("Linear", { exact: true }).first().click();
-			// Both groups start open; the slide shows the tools that change things, which ask first.
-			await stage.app.getByRole("button", { name: /^Reading, / }).click();
-			await stage.app.getByRole("group", { name: "Prepare attachment upload" }).waitFor();
+			// Code Reviewer's connections, then Linear's tools one by one: those that change things ask first.
+			await stage.open(`/${WORKSPACE}/settings/bots/code-reviewer/connections`);
+			await stage.app.getByRole("link", { name: /^Linear, / }).click();
+			await stage.app.getByRole("button", { name: /^Individual tools/ }).click();
+			await stage.app.getByText("prepare_attachment_upload", { exact: true }).waitFor();
 		},
 	},
 ];
 
 /**
- * Code Reviewer's desktop, open beside its thread. Taken in a context of its
- * own: showing the desktop says sandboxes are on, which puts the desktop's
- * button on every thread with a bot that uses one.
+ * Researcher's desktop, open beside its task: the computer's button is on a
+ * task's header, and Code Reviewer, whose review is in Engineering's main
+ * chat, has no task. Taken in a context of its own: showing the desktop says
+ * computers are on, which puts the desktop's button on every task with a bot
+ * that uses one.
  */
-const SANDBOXES: Shot = {
-	name: "sandboxes",
+const COMPUTERS: Shot = {
+	name: "computers",
 	backdrop: { form: "petals", family: "ink" },
 	async prepare(stage) {
-		await openSeededThread(stage, "engineering", "Can you review PR #482");
+		await openSeededTask(stage, "researcher", "What changed in Postgres 18");
 		await stage.app.getByRole("button", { name: "Computer" }).click();
 		await stage.app.locator("canvas").first().waitFor();
 		await stage.app.getByText("Starting the desktop…").waitFor({ state: "detached" });
@@ -111,16 +113,16 @@ export async function captureScreenshots(browser: Browser, environment: Environm
 	for (const shot of SHOTS) await take(stage, shot, work);
 	await context.close();
 
-	step("Starting a sandbox desktop");
+	step("Starting a computer desktop");
 	const desktop = await startDesktop();
 	if (desktop) {
-		// A context of its own, where sandboxes are on from the start.
-		const sandboxContext = await signedInContext(browser, environment, SCALE);
+		// A context of its own, where computers are on from the start.
+		const computerContext = await signedInContext(browser, environment, SCALE);
 		try {
-			await desktop.showIn(sandboxContext);
-			await take(await openStage(sandboxContext, environment.appUrl, LAYOUT), SANDBOXES, work);
+			await desktop.showIn(computerContext);
+			await take(await openStage(computerContext, environment.appUrl, LAYOUT), COMPUTERS, work);
 		} finally {
-			await sandboxContext.close();
+			await computerContext.close();
 			desktop.stop();
 		}
 	}
@@ -152,22 +154,19 @@ async function take(stage: Stage, shot: Shot, work: string) {
 	}
 }
 
-/** The pod's chat, General: by its own address, since every pod's General is in the sidebar. */
-async function openPodChat(stage: Stage, pod: string) {
-	await stage.open(`/${WORKSPACE}/pods/${pod}/chat`);
+/** The channel's main chat, General, which the channel's own address opens. */
+async function openMainChat(stage: Stage, channel: string) {
+	await stage.open(`/${WORKSPACE}/channels/${channel}`);
 	await stage.app.getByRole("heading", { name: "General" }).first().waitFor();
 }
 
 /**
- * Opens the seeded thread whose title starts `title` from its line in the
- * pod's chat. A long title is cut short, so the start is what to match.
+ * Opens the seeded task whose title starts `title`: the bot's own address
+ * opens its newest open task, which is the bot's only one in the seed. A long
+ * title is cut short, so the start is what to match.
  */
-async function openSeededThread(stage: Stage, pod: string, title: string) {
-	await openPodChat(stage, pod);
-	// Named for where it stands and when it last moved, after its title.
-	await stage.app
-		.getByRole("button", { name: new RegExp(`^Open thread: ${escapeRegExp(title)}`) })
-		.click();
+async function openSeededTask(stage: Stage, botHandle: string, title: string) {
+	await stage.open(`/${WORKSPACE}/bots/${botHandle}`);
 	await stage.app
 		.getByRole("heading", { name: new RegExp(`^${escapeRegExp(title)}`) })
 		.first()

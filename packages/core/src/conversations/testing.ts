@@ -1,14 +1,14 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
+import { noComputers } from "../computers/testing.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { runOnPostgres } from "../database/testing.ts";
 import { Notifications } from "../notifications/notifications.ts";
-import { noComputers } from "../sandboxes/testing.ts";
 import { unimplemented } from "../testing.ts";
 import { Lanes } from "../workflows/lanes.ts";
+import { AutomationRuns } from "./automations/runs.ts";
 import { Conversations } from "./conversations.ts";
-import { RoutineRuns } from "./routines/runs.ts";
 import { TurnSignals, turnInternalsForTests } from "./turns/testing.ts";
 import { Turns } from "./turns/turns.ts";
 import { ConversationWorkflows } from "./workflows.ts";
@@ -51,7 +51,7 @@ export const conversationsForTests = (
 ) => {
 	const composedFrom = Layer.mergeAll(
 		signals ? Layer.succeed(TurnSignals.Service, signals) : Turns.signalsLayer,
-		RoutineRuns.layer,
+		AutomationRuns.layer,
 	).pipe(
 		Layer.provide(workflowsForTests),
 		Layer.merge(EventOutbox.layer.pipe(Layer.provide(unimplemented(EventBus.Service, bus)))),

@@ -9,8 +9,8 @@
   <img alt="" src="packages/avatars/assets/bot-crowd.svg" width="376">
 </p>
 
-Sugabots is a self-hosted workspace where people and AI agents work together.
-Create agents, organise them into shared pods, and run conversations that can use
+Sugabots is a self-hosted workspace where people and bots work together.
+Create bots, bring them into channels with your team, and run conversations that can use
 built-in tools and MCP connections.
 
 <p align="center">
@@ -46,16 +46,16 @@ a server of your own or a hosting platform.
 
 ## Features
 
-### Shared pods
+### Channels
 
-A pod is a shared space for a group of people and their bots. Everyone in it
+A channel is a long-running project shared by a group of people and their bots. Everyone in it
 sees the same chats, results and approvals, so nobody has to forward an answer
 or explain what a bot already did.
 
 ### Bots that work together
 
-When a bot needs help, it asks another bot in its pod. The exchange shows up as
-a thread under its message, so you can see exactly who said what.
+When a bot needs help, it asks another bot. The exchange shows up as
+a conversation under its message, so you can see exactly who said what.
 
 ### A different model for every bot
 
@@ -70,31 +70,31 @@ Connect Linear, Notion, Stripe, Sentry, Jira, any MCP server or a plain HTTP
 API once, and let your bots use it to do work. Choose which tools run straight
 away and which wait for someone to say yes.
 
-### Routines
+### Automations
 
 Give a bot a job to do on a schedule, or whenever a webhook or a GitHub event
 calls it. It posts what it did in its chat, where the team can pick it up. Try telling a bot "check in with me every morning at 9".
 
-### Sandboxes
+### Computers
 
 Bots can runs code, use software or browse the web in their own isolated environment.
 
 ### And more
 
-- **GitHub**: bots read a pod's repositories, push branches, and open pull
+- **GitHub**: bots read their repositories, push branches, and open pull
   requests once someone allows it.
-- **Artifacts**: files and outputs bots make are saved for the team to open and
-  review.
+- **Files**: what people upload and bots make is kept for the team to open
+  and review.
 - **Usage and costs**: see what every bot, model and team costs, day by day.
 - **Web search**: bots search the web and read pages, through Exa, Brave Search,
   Tavily or your own SearXNG server.
-- **Roles**: owners, admins, members and viewers, with pods deciding who sees
-  what.
-- **Personal pod**: everyone gets a private pod and assistant that nobody else
-  can see into, admins included.
+- **Roles**: owners, admins, members and viewers, with public and private bots and channels
+  deciding who sees what.
+- **Personal Assistant**: everyone gets an assistant of their own that nobody
+  else can talk to, admins included.
 - **Bots set their own schedules**: ask a bot to "check in with me every morning
-  at 9" and it sets up the routine.
-- **Signed webhooks**: routines check calls from GitHub, Stripe, Slack and Linear,
+  at 9" and it sets up the automation.
+- **Signed webhooks**: automations check calls from GitHub, Stripe, Slack and Linear,
   or any sender using HMAC, bearer, API key or basic auth.
 
 ## Community and support

@@ -1,10 +1,10 @@
-import type { AgentParticipant, PersonParticipant } from "@sugabots/contracts";
+import type { BotParticipant, PersonParticipant } from "@sugabots/contracts";
 import { cn } from "cn";
 import { listNames } from "@/lib/name-list.ts";
 
 /** Somebody the indicator shows: a bot at work on its reply, or a person writing in the composer. */
 export type Typer =
-	| Pick<AgentParticipant, "kind" | "id" | "name" | "color" | "face">
+	| Pick<BotParticipant, "kind" | "id" | "name" | "color" | "face">
 	| Pick<PersonParticipant, "kind" | "id" | "name" | "email" | "image">;
 
 /** Whether there is anybody to show, which `TypingIndicator` needs. */

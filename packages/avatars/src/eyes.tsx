@@ -1,4 +1,4 @@
-import type { AgentFace } from "@sugabots/contracts";
+import type { BotFace } from "@sugabots/contracts";
 import { type MotionValue, motion, useTransform } from "motion/react";
 import type { RefObject } from "react";
 import { Mark, markKey } from "./face-drawing.tsx";
@@ -33,7 +33,7 @@ export function LivelyEyes({
 	color,
 	drawing,
 }: {
-	face: AgentFace;
+	face: BotFace;
 	color: string;
 	drawing: FaceDrawing;
 }) {

@@ -30,6 +30,8 @@ import {
 	type WorkspacePermission,
 	workspacePermissions,
 } from "../../authorization/permissions.ts";
+import { BotComputers } from "../../computers/bot-computers.ts";
+import type { Computers } from "../../computers/computers.ts";
 import {
 	afterCommit,
 	query,
@@ -38,18 +40,16 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { agent, user, workspace, workspaceInvite, workspaceMember } from "../../database/schema.ts";
+import { bot, user, workspace, workspaceInvite, workspaceMember } from "../../database/schema.ts";
 import { Email } from "../../email/email.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
-import { AgentSandboxes } from "../../sandboxes/agent-sandboxes.ts";
-import type { Sandboxes } from "../../sandboxes/sandboxes.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { AgentRepository } from "../agents/agent-repository.ts";
-import { PersonalAssistants } from "../agents/personal-assistants.ts";
+import { BotRepository } from "../bots/bot-repository.ts";
+import { PersonalAssistants } from "../bots/personal-assistants.ts";
 
 /**
  * The workspaces the current actor is in, and who else is. Every operation
@@ -68,7 +68,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Its pods, bots, conversations and providers go with it, and its members
+	 * Its channels, bots, conversations and providers go with it, and its members
 	 * lose it. What its models cost stays on the ledger. The owner's alone.
 	 */
 	readonly delete: (
@@ -104,7 +104,7 @@ export interface Interface {
 		input: InWorkspace & { memberId: string },
 	) => Effect.Effect<
 		void,
-		AuthorizationDenied | OwnerStays | Sandboxes.Unavailable,
+		AuthorizationDenied | OwnerStays | Computers.Unavailable,
 		CurrentActor.Service
 	>;
 	/** The owner stays until they have transferred ownership. */
@@ -112,7 +112,7 @@ export interface Interface {
 		input: InWorkspace,
 	) => Effect.Effect<
 		void,
-		AuthorizationDenied | OwnerStays | Sandboxes.Unavailable,
+		AuthorizationDenied | OwnerStays | Computers.Unavailable,
 		CurrentActor.Service
 	>;
 	/**
@@ -176,8 +176,8 @@ export const make = Effect.gen(function* () {
 	const installation = yield* Installation.Service;
 	const sender = yield* Email.transactionalSender;
 	const personalAssistants = yield* PersonalAssistants.Service;
-	const agents = yield* AgentRepository.Service;
-	const agentSandboxes = yield* AgentSandboxes.Service;
+	const bots = yield* BotRepository.Service;
+	const botComputers = yield* BotComputers.Service;
 
 	/**
 	 * Takes the member out, which cascades to their Personal Assistant, pins
@@ -189,15 +189,13 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const [assistant] = yield* query((db) =>
 				db
-					.select({ id: agent.id })
-					.from(agent)
-					.where(
-						and(eq(agent.workspaceId, member.workspaceId), eq(agent.assistantOf, member.userId)),
-					)
+					.select({ id: bot.id })
+					.from(bot)
+					.where(and(eq(bot.workspaceId, member.workspaceId), eq(bot.assistantOf, member.userId)))
 					.limit(1),
 			);
 			if (assistant) {
-				yield* agentSandboxes.destroy({ workspaceId: member.workspaceId, agentId: assistant.id });
+				yield* botComputers.destroy({ workspaceId: member.workspaceId, botId: assistant.id });
 			}
 			yield* query((db) => db.delete(workspaceMember).where(eq(workspaceMember.id, member.id)));
 		});
@@ -295,7 +293,7 @@ export const make = Effect.gen(function* () {
 									.insert(workspaceMember)
 									.values({ workspaceId: created.id, userId, role: "owner" }),
 							);
-							yield* agents.ensureSystemAgents({ workspaceId: created.id, createdById: userId });
+							yield* bots.ensureSystemBots({ workspaceId: created.id, createdById: userId });
 							yield* searchProviders.provisionDefault(created.id, userId);
 							yield* modelProviders.seedPresets(created.id);
 							yield* personalAssistants.provision({ workspaceId: created.id, userId });
@@ -380,8 +378,8 @@ export const make = Effect.gen(function* () {
 						if (target.role === "admin" || input.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
-						// Promoting puts them in every shared pod, by the
-						// `administrator_shared_pods` trigger; demoting leaves their pods as they are.
+						// Promoting puts them in every channel, by the
+						// `administrator_channels` trigger; demoting leaves their channels as they are.
 						yield* query((db) =>
 							db
 								.update(workspaceMember)
@@ -452,8 +450,8 @@ export const make = Effect.gen(function* () {
 						if (target.role === "owner") return;
 						// The owner steps down first: `workspace_member_owner_idx` allows
 						// one owner, and would refuse the new one while the old one stands.
-						// The new owner joins every shared pod by the
-						// `administrator_shared_pods` trigger, as an admin would.
+						// The new owner joins every channel by the
+						// `administrator_channels` trigger, as an admin would.
 						yield* query((db) =>
 							db
 								.update(workspaceMember)
@@ -672,10 +670,10 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
 		PersonalAssistants.layer,
-		AgentRepository.layer,
+		BotRepository.layer,
 		SearchProviderRepository.layer,
 		ModelProviderRepository.layer,
-		AgentSandboxes.layer,
+		BotComputers.layer,
 	]),
 );
 

@@ -1,22 +1,22 @@
-import { BotFace, type BotLook, botColors, faceMarks, headShape } from "@sugabots/avatars";
+import { type BotLook, botPalettes, faceMarks, headShape, StillBotFace } from "@sugabots/avatars";
 import {
-	type AgentColor,
-	type AgentFace,
-	type AgentShape,
-	agentColors,
-	agentFaces,
-	agentShapes,
-	type PodColor,
-	podColors,
+	type BotColor,
+	type BotFace,
+	type BotShape,
+	botColors,
+	botFaces,
+	botShapes,
+	type ChannelColor,
+	channelColors,
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import { type ReactNode, useId } from "react";
-import { podPalettes } from "@/shell/PodTile.tsx";
+import { channelPalettes } from "@/shell/ChannelTile.tsx";
 import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
 /*
  * Choosing how a bot looks: one of the bot colours, one of the head shapes
- * and one of the eye styles; and a pod's colour, from its own eight. Each is a
+ * and one of the eye styles; and a channel's colour, from its own eight. Each is a
  * set of native radio buttons, so arrow keys move the choice. The shapes and
  * eyes are drawn alone on neutral chips, since the face shown above the picker
  * already carries the colour. All of a bot's sets span the full row so their
@@ -32,19 +32,19 @@ export function LookPicker({
 	onShapeChange,
 	onFaceChange,
 }: {
-	color: AgentColor;
-	shape: AgentShape;
-	face: AgentFace;
-	onColorChange: (color: AgentColor) => void;
-	onShapeChange: (shape: AgentShape) => void;
-	onFaceChange: (face: AgentFace) => void;
+	color: BotColor;
+	shape: BotShape;
+	face: BotFace;
+	onColorChange: (color: BotColor) => void;
+	onShapeChange: (shape: BotShape) => void;
+	onFaceChange: (face: BotFace) => void;
 }) {
 	return (
 		<>
 			<SettingsControlRow label="Colour" stackOnPhone>
 				<Swatches
-					colors={agentColors}
-					swatch={(one) => botColors[one].face}
+					colors={botColors}
+					swatch={(one) => botPalettes[one].face}
 					value={color}
 					onChange={onColorChange}
 					columns={8}
@@ -73,19 +73,19 @@ export function LookSections({
 	onShapeChange,
 	onFaceChange,
 }: {
-	color: AgentColor;
-	shape: AgentShape;
-	face: AgentFace;
-	onColorChange: (color: AgentColor) => void;
-	onShapeChange: (shape: AgentShape) => void;
-	onFaceChange: (face: AgentFace) => void;
+	color: BotColor;
+	shape: BotShape;
+	face: BotFace;
+	onColorChange: (color: BotColor) => void;
+	onShapeChange: (shape: BotShape) => void;
+	onFaceChange: (face: BotFace) => void;
 }) {
 	return (
 		<div className="flex flex-col gap-4">
 			<LookSection label="Colour">
 				<Swatches
-					colors={agentColors}
-					swatch={(one) => botColors[one].face}
+					colors={botColors}
+					swatch={(one) => botPalettes[one].face}
 					value={color}
 					onChange={onColorChange}
 					columns={8}
@@ -94,7 +94,7 @@ export function LookSections({
 			<LookSection label="Shape">
 				<FaceChoices
 					legend="Shape"
-					options={agentShapes}
+					options={botShapes}
 					value={shape}
 					onChange={onShapeChange}
 					look={(one) => ({ color, shape: one, face })}
@@ -104,7 +104,7 @@ export function LookSections({
 			<LookSection label="Eyes">
 				<FaceChoices
 					legend="Eyes"
-					options={agentFaces}
+					options={botFaces}
 					value={face}
 					onChange={onFaceChange}
 					look={(one) => ({ color, shape, face: one })}
@@ -158,25 +158,25 @@ function FaceChoices<Option extends string>({
 						onChange={() => onChange(option)}
 						className="sr-only"
 					/>
-					<BotFace {...look(option)} className="size-7" />
+					<StillBotFace {...look(option)} className="size-7" />
 				</label>
 			))}
 		</fieldset>
 	);
 }
 
-/** PodColourPicker picks a pod's colour from the pod palette. */
-export function PodColourPicker({
+/** ChannelColourPicker picks a channel's colour from the channel palette. */
+export function ChannelColourPicker({
 	value,
 	onChange,
 }: {
-	value: PodColor;
-	onChange: (color: PodColor) => void;
+	value: ChannelColor;
+	onChange: (color: ChannelColor) => void;
 }) {
 	return (
 		<Swatches
-			colors={podColors}
-			swatch={(color) => podPalettes[color].swatch}
+			colors={channelColors}
+			swatch={(color) => channelPalettes[color].swatch}
 			value={value}
 			onChange={onChange}
 		/>
@@ -249,14 +249,14 @@ function ShapePicker({
 	value,
 	onChange,
 }: {
-	value: AgentShape;
-	onChange: (shape: AgentShape) => void;
+	value: BotShape;
+	onChange: (shape: BotShape) => void;
 }) {
 	const name = useId();
 	return (
 		<fieldset className="m-0 grid flex-1 grid-cols-7 gap-1.5 border-0 p-0">
 			<legend className="sr-only">Shape</legend>
-			{agentShapes.map((shape) => (
+			{botShapes.map((shape) => (
 				<label
 					key={shape}
 					className="grid h-9 cursor-pointer place-items-center rounded-lg bg-chip max-sm:aspect-square max-sm:h-auto text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
@@ -279,7 +279,7 @@ function ShapePicker({
 
 /** A head's outline without its eyes, in the text colour. */
 /** A head shape alone, without eyes, in the current colour, `size` pixels square. */
-export function ShapeGlyph({ shape, size = 20 }: { shape: AgentShape; size?: number }) {
+export function ShapeGlyph({ shape, size = 20 }: { shape: BotShape; size?: number }) {
 	return (
 		<svg aria-hidden viewBox="0 0 40 40" width={size} height={size} fill="currentColor">
 			{headShape(shape).parts.map((part) =>
@@ -293,18 +293,12 @@ export function ShapeGlyph({ shape, size = 20 }: { shape: AgentShape; size?: num
 	);
 }
 
-function EyesPicker({
-	value,
-	onChange,
-}: {
-	value: AgentFace;
-	onChange: (face: AgentFace) => void;
-}) {
+function EyesPicker({ value, onChange }: { value: BotFace; onChange: (face: BotFace) => void }) {
 	const name = useId();
 	return (
 		<fieldset className="m-0 grid flex-1 grid-cols-5 gap-1.5 border-0 p-0">
 			<legend className="sr-only">Eyes</legend>
-			{agentFaces.map((face) => (
+			{botFaces.map((face) => (
 				<label
 					key={face}
 					className="grid h-8 cursor-pointer place-items-center rounded-lg bg-chip max-sm:h-11 text-soft-foreground transition-colors has-checked:bg-person-avatar has-checked:text-foreground has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
@@ -327,7 +321,7 @@ function EyesPicker({
 
 /** A face's eyes without the face, in the text colour, cropped to the band they sit in. */
 /** A pair of eyes alone, without a head, in the current colour, `width` pixels across. */
-export function EyesGlyph({ face, width = 34 }: { face: AgentFace; width?: number }) {
+export function EyesGlyph({ face, width = 34 }: { face: BotFace; width?: number }) {
 	return (
 		<svg
 			aria-hidden

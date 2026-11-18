@@ -1,10 +1,10 @@
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
 import type { ConnectionLook } from "@/lib/connections.ts";
 import {
-	ARTIFACT_TOOL_PREFIX,
 	BROWSER_TOOL_PREFIX,
 	BUILT_IN_HANDLE,
 	connectionLabel,
+	FILE_TOOL_PREFIX,
 	splitToolKey,
 	stepLabel,
 	wordsFromKey,
@@ -58,7 +58,7 @@ function narrationLine(text: string): string | undefined {
 	return line === "" ? undefined : line;
 }
 
-/** `fileNames` names the thread's files by id, as the calls that read them refer to them. */
+/** `fileNames` names the conversation's files by id, as the calls that read them refer to them. */
 export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, string>): ToolStep {
 	const input = asRecord(call.input);
 	const output = asRecord(call.output);
@@ -71,16 +71,20 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 			return step("Read", code(input.path), "Read a file");
 		case "write_file":
 			return step("Wrote", code(input.path), "Wrote a file");
+		case "copy_file_to_computer":
+		// The tool's name before computers were called that, which earlier calls record.
 		case "copy_file_to_sandbox":
-			return step("Copied", name(fileName(input.file)), "Copied a file to the sandbox");
+			return step("Copied", name(fileName(input.file)), "Copied a file to the computer");
 		case "share_file":
 			return step(
 				"Shared",
 				name(output.shared ?? input.name ?? baseName(input.path)),
 				"Shared a file",
 			);
+		case "read_conversation_file":
+		// The tool's name before conversations were called that, which earlier calls record.
 		case "read_thread_file":
-			// A long tool result is kept as a file too, and has no name in the thread.
+			// A long tool result is kept as a file too, and has no name in the conversation.
 			return step("Read", name(fileName(input.file)), "Read a long result");
 		case "web_search":
 			return step("Searched the web for", name(input.query), "Searched the web");
@@ -89,35 +93,46 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 		case "tool_search":
 			return step("Looked for tools to", name(input.query), "Looked for tools");
 		case "search_history":
-			return step("Searched the thread for", name(input.query), "Read back through the thread");
+			return step(
+				"Searched the conversation for",
+				name(input.query),
+				"Read back through the conversation",
+			);
+		// Tools since taken away, which earlier calls record, with the output they answered in.
 		case "list_threads":
-			return step("Looked for threads about", name(input.title), "Listed the pod's threads");
+			return step("Looked for conversations about", name(input.title), "Listed conversations");
 		case "read_thread":
 			return input.query === undefined
-				? step("Read", name(asRecord(output.thread).title), "Read another thread")
-				: step("Searched another thread for", name(input.query), "Searched another thread");
+				? step("Read", name(asRecord(output.thread).title), "Read another conversation")
+				: step(
+						"Searched another conversation for",
+						name(input.query),
+						"Searched another conversation",
+					);
 		case "read_docs":
 			return step("Read the docs on", name(input.page), "Read the docs");
-		case "artifact_list":
-			return { action: "Listed artifacts" };
-		case "artifact_read":
-			return step("Read", name(output.title), "Read an artifact");
-		case "artifact_write":
-			return input.artifactId === undefined
-				? step("Created", name(output.title ?? input.title), "Created an artifact")
-				: step("Rewrote", name(output.title ?? input.title), "Rewrote an artifact");
-		case "artifact_edit":
-			return step("Edited", name(output.title), "Edited an artifact");
-		case "list_routines":
-			return { action: "Listed its routines" };
-		case "create_routine":
-			return step("Set up the routine", name(input.name), "Set up a routine");
-		case "update_routine":
-			return step("Changed the routine", name(input.name), "Changed a routine");
+		case "file_list":
+			return { action: "Listed files" };
+		case "file_read":
+			return step("Read", name(output.title), "Read a file");
+		case "file_write":
+			return input.fileId === undefined
+				? step("Created", name(output.title ?? input.title), "Created a file")
+				: step("Rewrote", name(output.title ?? input.title), "Rewrote a file");
+		case "file_edit":
+			return step("Edited", name(output.title), "Edited a file");
+		case "list_automations":
+			return { action: "Listed its automations" };
+		case "create_automation":
+			return step("Set up the automation", name(input.name), "Set up an automation");
+		case "update_automation":
+			return step("Changed the automation", name(input.name), "Changed an automation");
 		case "mark_done":
-			return { action: "Marked the thread done" };
+			return { action: "Marked the task done" };
+		case "start_task":
+		// The tool's name before tasks were called that, which earlier calls record.
 		case "start_thread":
-			return step("Started the thread", name(input.title), "Started a thread");
+			return step("Started the task", name(input.title), "Started a task");
 		case "save_instructions":
 			return { action: "Saved its instructions" };
 		case "request_network_access":
@@ -129,7 +144,7 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) {
 		return { action, subject: code(withoutScheme(input.url)) };
 	}
-	// A file in the thread, such as one a connection uploads, is named as the thread names it.
+	// A file in the conversation, such as one a connection uploads, is named as the conversation names it.
 	const subject = fileName(input.file) ?? SUBJECT_ARGUMENTS.map((key) => input[key]).find(isWords);
 	return { action, subject: name(subject) };
 }
@@ -172,6 +187,8 @@ export function stepDetails(call: ToolCallPart): StepDetails {
 			};
 		case "write_file":
 			return { ...inputWithText("content"), output: shown(stored.output), ...cut };
+		case "read_conversation_file":
+		// The tool's name before conversations were called that, which earlier calls record.
 		case "read_thread_file":
 			return {
 				input: shown(call.input),
@@ -282,7 +299,7 @@ function pageTitle(output: Record<string, unknown>): unknown {
 export function appOf(call: ToolCallPart, look?: ConnectionLook): string {
 	const { handle } = splitToolKey(call.tool);
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return "Browser";
-	if (call.tool.startsWith(ARTIFACT_TOOL_PREFIX)) return "Artifacts";
+	if (call.tool.startsWith(FILE_TOOL_PREFIX)) return "Files";
 	return handle === BUILT_IN_HANDLE ? wordsFromKey(call.tool) : connectionLabel(handle, look?.name);
 }
 

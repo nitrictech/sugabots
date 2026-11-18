@@ -195,4 +195,4 @@ export class SearchProviderNotFound
 	}
 }
 
-const TEST_QUERY = "Sugabots agents";
+const TEST_QUERY = "Sugabots";

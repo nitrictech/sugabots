@@ -39,10 +39,10 @@ const runtime = ManagedRuntime.make(
 afterAll(() => runtime.dispose());
 
 describe.skipIf(!process.env.DATABASE_URL)("the summary workflow", () => {
-	it("summarises through the thread's lane and frees it afterwards", async () => {
+	it("summarises through the conversation's lane and frees it afterwards", async () => {
 		const request: SummaryRequest = {
-			threadId: crypto.randomUUID(),
-			agentId: crypto.randomUUID(),
+			conversationId: crypto.randomUUID(),
+			botId: crypto.randomUUID(),
 			sourceMessageId: crypto.randomUUID(),
 		};
 

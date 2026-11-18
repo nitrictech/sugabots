@@ -1,10 +1,10 @@
 import { botColorVariables } from "@sugabots/avatars";
 import {
-	AGENT_NAME_MAX_LENGTH,
-	type Agent,
-	type AgentColor,
-	type AgentFace,
-	type AgentShape,
+	BOT_NAME_MAX_LENGTH,
+	type Bot,
+	type BotColor,
+	type BotFace,
+	type BotShape,
 	effectiveCapabilities,
 	type ModelProvider,
 	type ProviderModel,
@@ -28,7 +28,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useAgents, useCreateAgent, useEnsureAssistant, useModels } from "@/lib/agents.ts";
+import { useBots, useCreateBot, useEnsureAssistant, useModels } from "@/lib/bots.ts";
 import { useStartInterview } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
@@ -47,7 +47,7 @@ import {
 	useWorkspace,
 } from "@/lib/workspace.ts";
 import { modelName } from "@/screens/ProviderSettings.tsx";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -105,14 +105,13 @@ export function Onboarding(props: SetupProps) {
 function SetupSteps({ session, workspace, onAddress, onCancel }: SetupProps) {
 	const cancelling = useRef(false);
 	const models = useModels(Boolean(workspace));
-	const { agents, isPending: agentsPending, error: agentsError, refetch } = useAgents();
+	const { bots, isPending: botsPending, error: botsError, refetch } = useBots();
 	const [chosen, setChosen] = useState<Step>();
 	// The Personal Assistant the workspace made for its maker, which the model step sets up,
 	// and the first bot they make here, a public one of the workspace's.
-	const assistant = agents?.find((agent) => agent.assistant);
-	const firstBot = agents?.find(
-		(agent) =>
-			!agent.assistant && agent.systemAgentKey === null && agent.createdById === session.user?.id,
+	const assistant = bots?.find((bot) => bot.assistant);
+	const firstBot = bots?.find(
+		(bot) => !bot.assistant && bot.systemBotKey === null && bot.createdById === session.user?.id,
 	);
 	const assistantHasModel =
 		models.data?.models.some((model) => model.modelId === assistant?.model) ?? false;
@@ -128,8 +127,8 @@ function SetupSteps({ session, workspace, onAddress, onCancel }: SetupProps) {
 	// Made, but not yet among the workspaces read back, so there is none to set up yet.
 	const loading =
 		(!workspace && step !== "workspace") ||
-		(Boolean(workspace) && (models.isPending || agentsPending));
-	const failure = models.error ?? agentsError;
+		(Boolean(workspace) && (models.isPending || botsPending));
+	const failure = models.error ?? botsError;
 	const index = counted.indexOf(step);
 	const back = index > 0 ? counted[index - 1] : undefined;
 
@@ -372,7 +371,7 @@ function WorkspaceStep({
 }
 
 /** Connecting a provider, then choosing which of its models the first bot runs on. */
-function ModelStep({ bot, onContinue }: { bot?: Agent; onContinue: () => void }) {
+function ModelStep({ bot, onContinue }: { bot?: Bot; onContinue: () => void }) {
 	const providers = useModelProviders().data ?? [];
 	// Read from the workspace's providers rather than kept, so a sign-in finished
 	// while choosing a model brings its models in.
@@ -477,11 +476,11 @@ function ChooseModelStep({
 	onOtherProvider,
 }: {
 	provider: ModelProvider;
-	bot?: Agent;
+	bot?: Bot;
 	onChosen: () => void;
 	onOtherProvider: () => void;
 }) {
-	const choose = useChooseFirstModel(bot?.id);
+	const choose = useChooseFirstModel();
 	// A subscription provider is added before it is signed in to, and lists its models once it is.
 	const signInService = providerLacksCredential(provider)
 		? presetSignInService(provider.preset)
@@ -598,13 +597,13 @@ function BotStep({
 	onCreated,
 }: {
 	model: string | null;
-	made: Agent | undefined;
+	made: Bot | undefined;
 	onCreated: () => void;
 }) {
-	const create = useCreateAgent();
-	const [color, setColor] = useState<AgentColor>(made?.color ?? "green");
-	const [shape, setShape] = useState<AgentShape>(made?.shape ?? "circle");
-	const [face, setFace] = useState<AgentFace>(made?.face ?? "pill");
+	const create = useCreateBot();
+	const [color, setColor] = useState<BotColor>(made?.color ?? "green");
+	const [shape, setShape] = useState<BotShape>(made?.shape ?? "circle");
+	const [face, setFace] = useState<BotFace>(made?.face ?? "pill");
 	const [name, setName] = useState(made?.name ?? "");
 	const trimmed = name.trim();
 
@@ -634,7 +633,7 @@ function BotStep({
 		<form onSubmit={submit} className="flex flex-col gap-5.5">
 			<StepHeading title="Make your first bot" />
 			<div className="flex justify-center">
-				<AgentAvatar color={color} face={face} shape={shape} size={96} />
+				<BotAvatar color={color} face={face} shape={shape} size={96} />
 			</div>
 			<div className="overflow-hidden rounded-panel bg-list">
 				<LookPicker
@@ -650,7 +649,7 @@ function BotStep({
 				aria-label="Name"
 				value={name}
 				onChange={(event) => setName(event.target.value)}
-				maxLength={AGENT_NAME_MAX_LENGTH}
+				maxLength={BOT_NAME_MAX_LENGTH}
 				placeholder="Give it a name"
 				className={fieldClass}
 			/>
@@ -787,14 +786,14 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 	);
 }
 
-function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }; bot: Agent }) {
+function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }; bot: Bot }) {
 	const navigate = useNavigate();
 	const complete = useCompleteOnboarding();
 	const interview = useStartInterview();
 
 	async function finish() {
 		try {
-			await complete.mutateAsync({ workspaceId: workspace.id, agentId: bot.id });
+			await complete.mutateAsync({ workspaceId: workspace.id, botId: bot.id });
 		} catch {
 			return;
 		}
@@ -825,7 +824,7 @@ function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }
 			>
 				<span className="pb-1 pl-10.5 font-medium text-2xs text-muted-foreground">{bot.name}</span>
 				<div className="flex items-end gap-2">
-					<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={34} />
+					<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={34} />
 					<div className="flex min-w-0 flex-col gap-0.75">
 						{[
 							`Hi, I'm ${bot.name}.`,

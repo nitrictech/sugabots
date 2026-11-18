@@ -9,7 +9,7 @@ import { uuidSchema } from "./uuid.ts";
  * Search costs money per query, so the workspace that wants it configures and
  * pays for it. One provider per workspace, made from a preset the
  * way a model provider is, with the workspace's own key. `web_search` is
- * offered to an agent only while the provider is enabled and, where the
+ * offered to a bot only while the provider is enabled and, where the
  * preset needs one, has a key.
  */
 
@@ -86,7 +86,7 @@ export const searchProviderSchema = Schema.Struct({
 	preset: searchProviderPresetIdSchema,
 	name: Schema.String,
 	baseUrl: providerUrlSchema,
-	/** Whether agents in this workspace are offered `web_search`. */
+	/** Whether bots in this workspace are offered `web_search`. */
 	enabled: Schema.Boolean,
 	status: providerStatusSchema,
 	hasApiKey: Schema.Boolean,

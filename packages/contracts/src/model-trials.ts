@@ -1,20 +1,20 @@
 import { Schema } from "effect";
-import { modelIdSchema, systemAgentKeySchema } from "./agents.ts";
+import { modelIdSchema, systemBotKeySchema } from "./bots.ts";
 
 /**
- * Trying a model out on a system agent before a workspace relies on it.
+ * Trying a model out on a system bot before a workspace relies on it.
  *
- * A system agent's model is chosen once and then runs unattended on every message, so
+ * A system bot's model is chosen once and then runs unattended on every message, so
  * "it seemed fine when I tried it" is not enough: what matters is how often it
  * is right, which is what a trial reports.
  */
 
-/** The jobs a model can be tried on: the system agents, by their own keys. */
-export const trialSystemAgentSchema = systemAgentKeySchema;
-export type TrialSystemAgent = typeof trialSystemAgentSchema.Type;
+/** The jobs a model can be tried on: the system bots, by their own keys. */
+export const trialSystemBotSchema = systemBotKeySchema;
+export type TrialSystemBot = typeof trialSystemBotSchema.Type;
 
 export const newModelTrialSchema = Schema.Struct({
-	systemAgentKey: trialSystemAgentSchema,
+	systemBotKey: trialSystemBotSchema,
 	model: modelIdSchema,
 });
 export type NewModelTrial = typeof newModelTrialSchema.Type;
@@ -44,7 +44,7 @@ export const trialAccuracySchema = Schema.Struct({
 	attempts: Schema.Int.check(Schema.isGreaterThan(0)),
 	/** Answers accepted, as a share of every attempt. */
 	share: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
-	/** The least a system agent can be right and still be worth running. */
+	/** The least a system bot can be right and still be worth running. */
 	needed: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
 	rating: trialRatingSchema,
 });
@@ -54,16 +54,16 @@ export const trialSpeedSchema = Schema.Struct({
 	/** The middle time, so one cold start does not stand for the model. */
 	typicalMs: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
 	slowestMs: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
-	/** How long this system agent can take before the wait is somebody's problem. */
+	/** How long this system bot can take before the wait is somebody's problem. */
 	budgetMs: Schema.Finite.check(Schema.isGreaterThan(0)),
 	rating: trialRatingSchema,
 });
 export type TrialSpeed = typeof trialSpeedSchema.Type;
 
 export const modelTrialSchema = Schema.Struct({
-	systemAgentKey: trialSystemAgentSchema,
+	systemBotKey: trialSystemBotSchema,
 	model: modelIdSchema,
-	/** The worse of the two: a system agent that is slow is no use, however right. */
+	/** The worse of the two: a system bot that is slow is no use, however right. */
 	rating: trialRatingSchema,
 	accuracy: trialAccuracySchema,
 	speed: trialSpeedSchema,

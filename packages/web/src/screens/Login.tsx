@@ -1,11 +1,11 @@
-import type { AgentColor, AgentFace } from "@sugabots/contracts";
+import type { BotColor, BotFace } from "@sugabots/contracts";
 import { isEmailUnverified } from "@sugabots/sdk";
 import { type FormEvent, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { AuthLayout, FormRow, fieldClass } from "@/screens/AuthLayout.tsx";
 import { ForgotPassword } from "@/screens/ResetPassword.tsx";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 
@@ -213,7 +213,7 @@ const secondaryActionClass =
 	"focus-ring rounded-md px-1.5 py-1.5 font-medium text-sm text-muted-foreground";
 
 /** A bot of each colour, each with its own eyes and a little up or down, as the design lines them up. */
-const crowd: readonly { color: AgentColor; face: AgentFace; drop: number }[] = [
+const crowd: readonly { color: BotColor; face: BotFace; drop: number }[] = [
 	{ color: "rose", face: "dot", drop: 12 },
 	{ color: "yellow", face: "pill", drop: -2 },
 	{ color: "purple", face: "arc", drop: 8 },
@@ -235,7 +235,7 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
 				<div aria-hidden className="flex justify-center gap-3 pb-2">
 					{crowd.map(({ color, face, drop }) => (
 						<span key={color} className="shrink-0" style={{ transform: `translateY(${drop}px)` }}>
-							<AgentAvatar color={color} face={face} shape="circle" size={52} />
+							<BotAvatar color={color} face={face} shape="circle" size={52} />
 						</span>
 					))}
 				</div>

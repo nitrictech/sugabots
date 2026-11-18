@@ -40,8 +40,8 @@ function request(
 			finishedAt: null,
 			approval,
 		},
-		agent: {
-			kind: "agent",
+		bot: {
+			kind: "bot",
 			id: growthDesk.id,
 			name: growthDesk.name,
 			handle: growthDesk.handle,
@@ -49,9 +49,9 @@ function request(
 			face: growthDesk.face,
 			shape: "circle",
 		},
-		podId: revenue.id,
-		threadId: storyTaskFor(growthDesk).id,
+		channelId: revenue.id,
 		conversationId: storyTaskFor(growthDesk).id,
+		rootConversationId: storyTaskFor(growthDesk).id,
 	};
 }
 

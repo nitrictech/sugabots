@@ -1,37 +1,44 @@
-import { ARTIFACT_WRITING_TOOLS, type CollaborationPart } from "@sugabots/contracts";
+import { type CollaborationPart, FILE_WRITING_TOOLS } from "@sugabots/contracts";
 import { docPages } from "@sugabots/docs";
 import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
 import type { Effect } from "effect";
-import type { Artifacts } from "../../artifacts/artifacts.ts";
 import type { RunEffect } from "../../database/database.ts";
 import type { EventBus } from "../../database/events/bus.ts";
-import type { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import type { ConversationFiles } from "../../files/conversation-files.ts";
+import type { Files } from "../../files/files.ts";
+import type { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import type { AssistantGuide } from "../assistant/assistant-guide.ts";
-import type { BotThreads } from "../chats/bot-threads.ts";
-import type { BotRoutines } from "../routines/bot-routines.ts";
-import type { ThreadFiles } from "../thread-files/thread-files.ts";
-import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
-import { artifactTools } from "../tools/artifacts/tool.ts";
+import type { BotAutomations } from "../automations/bot-automations.ts";
+import type { BotTasks } from "../chats/bot-tasks.ts";
+import { SEARCH_HISTORY_TOOL } from "../repository/message-text.ts";
 import { WORKSPACE_GUIDE_TOOL, workspaceGuideTool } from "../tools/assistant/tool.ts";
+import {
+	AUTOMATION_TOOL_MUTATES,
+	AUTOMATION_TOOLS,
+	AUTOMATIONS_KEY,
+	automationTools,
+} from "../tools/automations/tool.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
-import { collaborateTool } from "../tools/collaborate/tool.ts";
-import type { OfferedTool } from "../tools/connections.ts";
-import { MARK_DONE_TOOL, markDoneTool } from "../tools/mark-done/tool.ts";
-import { READ_DOCS_TOOL, readDocsTool } from "../tools/read-docs/tool.ts";
-import { READ_THREAD_FILE_TOOL, readThreadFileTool } from "../tools/read-thread-file/tool.ts";
 import {
-	ROUTINE_TOOL_MUTATES,
-	ROUTINE_TOOLS,
-	ROUTINES_KEY,
-	routineTools,
-} from "../tools/routines/tool.ts";
-import { READ_FILE_TOOL, SHARE_FILE_TOOL } from "../tools/sandbox/tools.ts";
-import type { Request, SandboxTools } from "../tools/sandbox.ts";
+	COLLABORATE_TOOL,
+	type CollaborateToolOptions,
+	collaborateTool,
+} from "../tools/collaborate/tool.ts";
+import { READ_FILE_TOOL, SHARE_FILE_TOOL } from "../tools/computer/tools.ts";
+import type { ComputerTools, Request } from "../tools/computer.ts";
+import type { OfferedTool } from "../tools/connections.ts";
+import { fileTools } from "../tools/files/tool.ts";
+import { MARK_DONE_TOOL, markDoneTool } from "../tools/mark-done/tool.ts";
+import {
+	READ_CONVERSATION_FILE_TOOL,
+	readConversationFileTool,
+} from "../tools/read-conversation-file/tool.ts";
+import { READ_DOCS_TOOL, readDocsTool } from "../tools/read-docs/tool.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
-import { START_THREAD_TOOL, startThreadTool } from "../tools/start-thread/tool.ts";
+import { START_TASK_TOOL, startTaskTool } from "../tools/start-task/tool.ts";
 import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
 import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
@@ -46,9 +53,9 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * this is the only place that knows which ones exist, so adding a tool is a
  * folder and a line here rather than a change to the turn's steps.
  *
- * Four kinds. The crew tool `collaborate` reaches other agents
- * and leave their own records. The built-in tools do work for the agent, the
- * sandbox tools work in the pod's sandbox, and the connection tools do work
+ * Four kinds. The collaboration tool `collaborate` reaches other bots
+ * and leave their own records. The built-in tools do work for the bot, the
+ * computer tools work in the bot's computer, and the connection tools do work
  * at a server the workspace configured; every call to any of them is recorded
  * as a `tool_call` part of the reply (`calls/`).
  * Connection tools, and the built-in tools a bot needs only now and then,
@@ -57,13 +64,13 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  * note rather than a whole description and schema in every request.
  *
  * A tool that can't run is still offered, and its calls refused: the tools
- * lead the provider's cached prompt, so changing them mid-thread loses the
+ * lead the provider's cached prompt, so changing them mid-conversation loses the
  * cache.
  */
 
 export interface ToolDependencies {
 	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
-	artifacts: Artifacts.AuthoringInterface;
+	authoring: Files.AuthoringInterface;
 	/** Where a built-in tool's calls are written down. */
 	calls: Pick<ToolCallRepository.Interface, "open" | "close" | "completedOutputs">;
 	approvals: Pick<ApprovedToolCalls.Interface, "beginExecution">;
@@ -73,20 +80,20 @@ export interface ToolDependencies {
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
 	builtIn: BuiltInTools.Offered;
-	/** The tools that work in the pod's sandbox. */
-	sandbox: SandboxTools.Offered;
-	/** The pod connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
+	/** The tools that work in the bot's computer. */
+	computer: ComputerTools.Offered;
+	/** The bot's connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
 	connections: Readonly<Record<string, OfferedTool>>;
-	/** The thread's files: where long tool results are kept, and what `read_thread_file` reads. */
-	files: Pick<ThreadFiles.Interface, "read" | "readMessageFile" | "write">;
-	/** Where the agent's own instructions are saved, as the person it is answering. */
-	agents: Pick<AgentAdministration.Interface, "update">;
+	/** The conversation's files: where long tool results are kept, and what `read_conversation_file` reads. */
+	files: Pick<ConversationFiles.Interface, "read" | "readMessageFile" | "write">;
+	/** Where the bot's own instructions are saved, as the person it is answering. */
+	bots: Pick<BotAdministration.Interface, "update">;
 	/** Where the web app is served, for links to its pages. */
 	webAppUrl: string;
-	/** The agent's own routines, read and changed for the person it is answering. */
-	routines: BotRoutines.Interface;
-	/** Threads the agent starts in its pod for the person it is answering. */
-	threads: Pick<BotThreads.Interface, "start" | "markDone">;
+	/** The bot's own automations, read and changed for the person it is answering. */
+	automations: BotAutomations.Interface;
+	/** Tasks the bot starts, and marks done, for the person it is answering. */
+	tasks: Pick<BotTasks.Interface, "start" | "markDone">;
 	/** For a tool that watches for something else to happen. */
 	bus: Pick<EventBus.Interface, "subscribe">;
 	/** Runs a service's Effect from inside the SDK's promise-shaped tool call. */
@@ -116,20 +123,22 @@ export interface ToolDependencies {
 	};
 }
 
-/** What people, and the model, are told of a call to a tool the pod has turned off. */
+/** What people, and the model, are told of a call to a tool the bot has turned off. */
 const TOOL_TURNED_OFF = userText`This tool is turned off for this bot.`;
 
 const TOOL_UNAVAILABLE = userText`This tool is switched off for this bot.`;
 
-const NO_SANDBOX = userText`This bot has no sandbox to work in.`;
+const ASSISTANT_ASKS_ONLY_FOR_ITS_PERSON = userText`A Personal Assistant asks other bots only while answering its person, who approves each request.`;
+
+const NO_COMPUTER = userText`This bot has no computer to work in.`;
 
 const readDocs = readDocsTool(docPages);
 
 /**
- * The sandbox tools after which a failed turn can run again: they change
- * nothing in the sandbox, and the files a reply shared go when it starts again.
+ * The computer tools after which a failed turn can run again: they change
+ * nothing in the computer, and the files a reply shared go when it starts again.
  */
-const RERUNNABLE_SANDBOX_TOOLS: ReadonlySet<string> = new Set([READ_FILE_TOOL, SHARE_FILE_TOOL]);
+const RERUNNABLE_COMPUTER_TOOLS: ReadonlySet<string> = new Set([READ_FILE_TOOL, SHARE_FILE_TOOL]);
 
 /** The tools sent with the turn's requests, and the catalog `tool_search` finds the rest in. */
 export interface TurnTools {
@@ -144,7 +153,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		files: deps.files,
 		run: deps.run,
 		from: {
-			threadId: prepared.context.thread.id,
+			conversationId: prepared.context.conversation.id,
 			messageId: prepared.responseMessage.id,
 			turnId: prepared.turnId,
 		},
@@ -157,18 +166,18 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 			? recorded(key, tool, recording)
 			: refused(key, tool, TOOL_UNAVAILABLE, recording);
 	}
-	// Once a command or a write has started, the sandbox may have changed, so
+	// Once a command or a write has started, the computer may have changed, so
 	// a turn that fails afterwards is not run again.
-	for (const [key, tool] of Object.entries(deps.sandbox.tools)) {
-		tools[key] = deps.sandbox.usable
-			? recorded(key, tool, { ...recording, mutating: !RERUNNABLE_SANDBOX_TOOLS.has(key) })
-			: refused(key, tool, NO_SANDBOX, recording);
+	for (const [key, tool] of Object.entries(deps.computer.tools)) {
+		tools[key] = deps.computer.usable
+			? recorded(key, tool, { ...recording, mutating: !RERUNNABLE_COMPUTER_TOOLS.has(key) })
+			: refused(key, tool, NO_COMPUTER, recording);
 	}
 	// What a request does once allowed changes something, so a turn that fails
 	// afterwards is not run again.
-	for (const [key, request] of Object.entries(deps.sandbox.requests)) {
-		if (!deps.sandbox.usable) {
-			tools[key] = refused(key, request.tool, NO_SANDBOX, recording);
+	for (const [key, request] of Object.entries(deps.computer.requests)) {
+		if (!deps.computer.usable) {
+			tools[key] = refused(key, request.tool, NO_COMPUTER, recording);
 			continue;
 		}
 		const asked = recorded(key, request.tool, {
@@ -190,8 +199,8 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	const builtInFound: Record<string, Tool> = {
 		[READ_DOCS_TOOL]: readDocs,
 		[WORKSPACE_ACCESS_TOOL]: workspaceAccessTool({
-			threadId: prepared.context.thread.id,
-			workspaceId: prepared.context.thread.workspaceId,
+			conversationId: prepared.context.conversation.id,
+			workspaceId: prepared.context.conversation.workspaceId,
 			run: deps.run,
 		}),
 	};
@@ -217,22 +226,22 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 				: {}),
 		});
 	}
-	const artifacts = artifactTools({
+	const writing = fileTools({
 		by: {
-			workspaceId: prepared.context.thread.workspaceId,
-			agentId: prepared.context.agent.id,
-			threadId: prepared.context.thread.id,
+			workspaceId: prepared.context.conversation.workspaceId,
+			botId: prepared.context.bot.id,
+			conversationId: prepared.context.conversation.id,
 		},
 		turnId: prepared.turnId,
 		calls: deps.calls,
-		authoring: deps.artifacts,
+		authoring: deps.authoring,
 		run: deps.run,
 	});
-	for (const [key, tool] of Object.entries(artifacts)) {
-		if (prepared.context.agent.disabledTools.includes(key)) continue;
-		tools[key] = recorded(key, tool, { ...recording, mutating: ARTIFACT_WRITING_TOOLS.has(key) });
+	for (const [key, tool] of Object.entries(writing)) {
+		if (prepared.context.bot.disabledTools.includes(key)) continue;
+		tools[key] = recorded(key, tool, { ...recording, mutating: FILE_WRITING_TOOLS.has(key) });
 	}
-	// Always these two, so a pod gaining or losing tools leaves the tools sent, and the cached prompt, as they were.
+	// Always these two, so a bot gaining or losing tools leaves the tools sent, and the cached prompt, as they were.
 	const catalog = buildCatalog(deps.connections, builtInFound);
 	tools[TOOL_SEARCH] = recorded(TOOL_SEARCH, toolSearchTool({ catalog }), recording);
 	// Not recorded itself: the tool it calls records the call, under its own name.
@@ -240,65 +249,68 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	tools[SEARCH_HISTORY_TOOL] = recorded(
 		SEARCH_HISTORY_TOOL,
 		searchHistoryTool({
-			threadId: prepared.context.thread.id,
+			conversationId: prepared.context.conversation.id,
 			before: prepared.context.compaction?.keptFrom,
-			usesSandbox: prepared.context.agent.usesSandbox,
+			usesComputer: prepared.context.bot.usesComputer,
 			run: deps.run,
 		}),
 		recording,
 	);
-	tools[READ_THREAD_FILE_TOOL] = recorded(
-		READ_THREAD_FILE_TOOL,
-		readThreadFileTool({
-			threadId: prepared.context.thread.id,
+	tools[READ_CONVERSATION_FILE_TOOL] = recorded(
+		READ_CONVERSATION_FILE_TOOL,
+		readConversationFileTool({
+			conversationId: prepared.context.conversation.id,
 			files: deps.files,
-			acceptsImages: prepared.context.agent.acceptsImages,
+			acceptsImages: prepared.context.bot.acceptsImages,
 			run: deps.run,
 		}),
 		recording,
 	);
 	// Sugabots manages a Personal Assistant, which has no automations of its own.
-	if (prepared.context.agent.assistantOf === null) {
-		const routinesOff = prepared.context.agent.disabledTools.includes(ROUTINES_KEY);
-		const ownRoutines = routineTools({
-			bot: { agentId: prepared.context.agent.id, askedBy: prepared.context.askedBy },
+	if (prepared.context.bot.assistantOf === null) {
+		const automationsOff = prepared.context.bot.disabledTools.includes(AUTOMATIONS_KEY);
+		const ownAutomations = automationTools({
+			bot: { botId: prepared.context.bot.id, askedBy: prepared.context.askedBy },
 			timeZone: prepared.context.workspaceTimeZone,
-			routines: deps.routines,
+			automations: deps.automations,
 			run: deps.run,
 		});
-		for (const key of ROUTINE_TOOLS) {
-			tools[key] = routinesOff
-				? refused(key, ownRoutines[key], TOOL_UNAVAILABLE, recording)
-				: recorded(key, ownRoutines[key], { ...recording, mutating: ROUTINE_TOOL_MUTATES[key] });
+		for (const key of AUTOMATION_TOOLS) {
+			tools[key] = automationsOff
+				? refused(key, ownAutomations[key], TOOL_UNAVAILABLE, recording)
+				: recorded(key, ownAutomations[key], {
+						...recording,
+						mutating: AUTOMATION_TOOL_MUTATES[key],
+					});
 		}
 	}
-	const threadsBot: BotThreads.Bot = {
-		agentId: prepared.context.agent.id,
-		workspaceId: prepared.context.thread.workspaceId,
+	const askedBot: BotTasks.Bot = {
+		botId: prepared.context.bot.id,
+		workspaceId: prepared.context.conversation.workspaceId,
 		askedBy: prepared.context.askedBy,
 	};
-	// Offered only when a person asked: a turn answering a bot, a brief or a
-	// routine could only be refused, and a briefed bot starting threads of its
+	// Offered only when a person asked: a turn answering a bot, a brief or an
+	// automation could only be refused, and a briefed bot starting tasks of its
 	// own would let bots brief each other without end. A Personal Assistant's
 	// is among its requests, which wait for its person to allow them.
 	if (prepared.context.askedBy && !deps.assistant) {
-		tools[START_THREAD_TOOL] = recorded(
-			START_THREAD_TOOL,
-			startThreadTool({ bot: threadsBot, threads: deps.threads, run: deps.run }),
+		tools[START_TASK_TOOL] = recorded(
+			START_TASK_TOOL,
+			startTaskTool({ bot: askedBot, tasks: deps.tasks, run: deps.run }),
 			{ ...recording, mutating: true },
 		);
 	}
-	// Only a task is ever done; a channel's conversation or an automation's thread is not.
-	if (prepared.context.thread.type === "conversation") {
+	// Only a task is ever done; a channel's conversation or an automation's feed is not.
+	if (prepared.context.conversation.kind === "task") {
 		tools[MARK_DONE_TOOL] = recorded(
 			MARK_DONE_TOOL,
 			markDoneTool({
 				bot: {
-					...threadsBot,
+					...askedBot,
 					askedBy: prepared.context.askedBy ?? prepared.context.startedFor,
 				},
-				threadId: prepared.context.thread.id,
-				threads: deps.threads,
+				conversationId: prepared.context.conversation.id,
+				tasks: deps.tasks,
 				run: deps.run,
 			}),
 			{ ...recording, mutating: true },
@@ -320,23 +332,23 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		}
 	}
 	// A Personal Assistant's instructions are Sugabots', so it has none of its own to save.
-	if (prepared.context.agent.assistantOf === null) {
+	if (prepared.context.bot.assistantOf === null) {
 		tools[SAVE_INSTRUCTIONS_TOOL] = recorded(
 			SAVE_INSTRUCTIONS_TOOL,
 			saveInstructionsTool({
-				agentId: prepared.context.agent.id,
+				botId: prepared.context.bot.id,
 				askedBy: prepared.context.askedBy,
-				agents: deps.agents,
-				settingsUrl: `${deps.webAppUrl}/${prepared.context.workspaceSlug}/settings/bots/${prepared.context.agent.handle}`,
+				bots: deps.bots,
+				settingsUrl: `${deps.webAppUrl}/${prepared.context.workspaceSlug}/settings/bots/${prepared.context.bot.handle}`,
 				run: deps.run,
 			}),
 			{ ...recording, mutating: true },
 		);
 	}
-	tools.collaborate = collaborateTool({
+	const collaborating: CollaborateToolOptions = {
 		from: {
-			threadId: prepared.context.thread.id,
-			agentId: prepared.context.agent.id,
+			conversationId: prepared.context.conversation.id,
+			botId: prepared.context.bot.id,
 			turnId: prepared.turnId,
 			messageId: prepared.responseMessage.id,
 		},
@@ -346,7 +358,19 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		replyLength: deps.reply.length,
 		noteCollaboration: deps.reply.noteCollaboration,
 		signal: deps.signal,
-	});
+	};
+	// A Personal Assistant's is among its requests, which wait for its person to
+	// allow them; on a turn that isn't answering its person there is nobody to ask.
+	if (prepared.context.bot.assistantOf === null) {
+		tools[COLLABORATE_TOOL] = collaborateTool(collaborating);
+	} else if (!deps.assistant) {
+		tools[COLLABORATE_TOOL] = refused(
+			COLLABORATE_TOOL,
+			collaborateTool(collaborating),
+			ASSISTANT_ASKS_ONLY_FOR_ITS_PERSON,
+			recording,
+		);
+	}
 	return { tools, catalog };
 }
 

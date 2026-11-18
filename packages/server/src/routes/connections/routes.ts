@@ -70,9 +70,9 @@ export const connectionRoutes = HttpApiBuilder.group(ServerApi, "connections", (
 						.pipe(asSessionUser, asHttpError(connectionErrors));
 					const back = new URL(webAppUrl);
 					back.pathname = `${back.pathname.replace(/\/$/, "")}${CONNECTION_SIGN_IN_RETURN_PATH}`;
-					if (outcome.agent) {
-						back.searchParams.set("workspace", outcome.agent.workspaceId);
-						back.searchParams.set("agent", outcome.agent.agentId);
+					if (outcome.bot) {
+						back.searchParams.set("workspace", outcome.bot.workspaceId);
+						back.searchParams.set("bot", outcome.bot.botId);
 					}
 					if ("failure" in outcome) {
 						back.searchParams.set("oauth_error", outcome.failure);

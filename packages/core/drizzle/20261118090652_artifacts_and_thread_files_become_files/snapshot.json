@@ -1,0 +1,1251 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "fdf13ae5-bf98-45c8-bf86-178d82f79c45",
+  "prevIds": [
+    "38d6bbc5-2009-4f5b-bc9a-cc398ce5568e"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "file"
+      ],
+      "writes": [
+        "s|tbl|public.file",
+        "n|tbl|public.file",
+        "e|tbl|public.file",
+        "n|rel|public.file",
+        "n|type|public.file",
+        "n|rel|public.file_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "file_version"
+      ],
+      "writes": [
+        "s|tbl|public.file_version",
+        "n|tbl|public.file_version",
+        "e|tbl|public.file_version",
+        "n|rel|public.file_version",
+        "n|type|public.file_version",
+        "n|rel|public.file_version_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "artifact_version"
+      ],
+      "writes": [
+        "s|fk|public.artifact_version.artifact_version_artifact_id_artifact_id_fkey",
+        "n|fk|public.artifact_version.artifact_version_artifact_id_artifact_id_fkey",
+        "e|fk|public.artifact_version.artifact_version_artifact_id_artifact_id_fkey",
+        "n|con|public.artifact_version.artifact_version_artifact_id_artifact_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.artifact_version",
+        "n|sch|public",
+        "e|col|public.artifact_version.artifact_id"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "thread_file"
+      ],
+      "writes": [
+        "s|tbl|public.thread_file",
+        "n|tbl|public.thread_file",
+        "e|tbl|public.thread_file",
+        "n|rel|public.thread_file",
+        "n|type|public.thread_file"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "artifact"
+      ],
+      "writes": [
+        "s|tbl|public.artifact",
+        "n|tbl|public.artifact",
+        "e|tbl|public.artifact",
+        "n|rel|public.artifact",
+        "n|type|public.artifact"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "artifact_version"
+      ],
+      "writes": [
+        "s|tbl|public.artifact_version",
+        "n|tbl|public.artifact_version",
+        "e|tbl|public.artifact_version",
+        "n|rel|public.artifact_version",
+        "n|type|public.artifact_version"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "file",
+        "file_thread_updated_at_idx"
+      ],
+      "writes": [
+        "s|idx|public.file_thread_updated_at_idx",
+        "n|idx|public.file_thread_updated_at_idx",
+        "e|idx|public.file_thread_updated_at_idx",
+        "n|rel|public.file_thread_updated_at_idx"
+      ],
+      "reads": [
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|col|public.file.thread_id",
+        "n|col|public.file.updated_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "file",
+        "file_message_idx"
+      ],
+      "writes": [
+        "s|idx|public.file_message_idx",
+        "n|idx|public.file_message_idx",
+        "e|idx|public.file_message_idx",
+        "n|rel|public.file_message_idx"
+      ],
+      "reads": [
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|col|public.file.message_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "file",
+        "file_id_kind_idx"
+      ],
+      "writes": [
+        "s|idx|public.file_id_kind_idx",
+        "n|idx|public.file_id_kind_idx",
+        "e|idx|public.file_id_kind_idx",
+        "n|rel|public.file_id_kind_idx"
+      ],
+      "reads": [
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|col|public.file.id",
+        "n|col|public.file.kind"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "file_version",
+        "file_version_number_idx"
+      ],
+      "writes": [
+        "s|idx|public.file_version_number_idx",
+        "n|idx|public.file_version_number_idx",
+        "e|idx|public.file_version_number_idx",
+        "n|rel|public.file_version_number_idx"
+      ],
+      "reads": [
+        "n|tbl|public.file_version",
+        "n|sch|public",
+        "n|col|public.file_version.file_id",
+        "n|col|public.file_version.number"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "file"
+      ],
+      "writes": [
+        "s|fk|public.file.file_thread_id_thread_id_fkey",
+        "n|fk|public.file.file_thread_id_thread_id_fkey",
+        "e|fk|public.file.file_thread_id_thread_id_fkey",
+        "n|con|public.file.file_thread_id_thread_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|tbl|public.thread",
+        "n|sch|public",
+        "n|col|public.file.thread_id",
+        "n|col|public.thread.id",
+        "e|uniqueness|public.thread.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "file"
+      ],
+      "writes": [
+        "s|fk|public.file.file_tool_call_id_tool_call_id_fkey",
+        "n|fk|public.file.file_tool_call_id_tool_call_id_fkey",
+        "e|fk|public.file.file_tool_call_id_tool_call_id_fkey",
+        "n|con|public.file.file_tool_call_id_tool_call_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|tbl|public.tool_call",
+        "n|sch|public",
+        "n|col|public.file.tool_call_id",
+        "n|col|public.tool_call.id",
+        "e|uniqueness|public.tool_call.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "file"
+      ],
+      "writes": [
+        "s|fk|public.file.file_uploader_id_user_id_fkey",
+        "n|fk|public.file.file_uploader_id_user_id_fkey",
+        "e|fk|public.file.file_uploader_id_user_id_fkey",
+        "n|con|public.file.file_uploader_id_user_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|tbl|public.user",
+        "n|sch|public",
+        "n|col|public.file.uploader_id",
+        "n|col|public.user.id",
+        "e|uniqueness|public.user.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "file"
+      ],
+      "writes": [
+        "s|fk|public.file.file_message_id_message_id_fkey",
+        "n|fk|public.file.file_message_id_message_id_fkey",
+        "e|fk|public.file.file_message_id_message_id_fkey",
+        "n|con|public.file.file_message_id_message_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|tbl|public.message",
+        "n|sch|public",
+        "n|col|public.file.message_id",
+        "n|col|public.message.id",
+        "e|uniqueness|public.message.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "file"
+      ],
+      "writes": [
+        "s|fk|public.file.file_created_by_agent_id_agent_id_fkey",
+        "n|fk|public.file.file_created_by_agent_id_agent_id_fkey",
+        "e|fk|public.file.file_created_by_agent_id_agent_id_fkey",
+        "n|con|public.file.file_created_by_agent_id_agent_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|tbl|public.agent",
+        "n|sch|public",
+        "n|col|public.file.created_by_agent_id",
+        "n|col|public.agent.id",
+        "e|uniqueness|public.agent.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "file_version"
+      ],
+      "writes": [
+        "s|fk|public.file_version.file_version_author_agent_id_agent_id_fkey",
+        "n|fk|public.file_version.file_version_author_agent_id_agent_id_fkey",
+        "e|fk|public.file_version.file_version_author_agent_id_agent_id_fkey",
+        "n|con|public.file_version.file_version_author_agent_id_agent_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.file_version",
+        "n|sch|public",
+        "n|tbl|public.agent",
+        "n|sch|public",
+        "n|col|public.file_version.author_agent_id",
+        "n|col|public.agent.id",
+        "e|uniqueness|public.agent.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "file_version"
+      ],
+      "writes": [
+        "s|fk|public.file_version.file_version_file_fkey",
+        "n|fk|public.file_version.file_version_file_fkey",
+        "e|fk|public.file_version.file_version_file_fkey",
+        "n|con|public.file_version.file_version_file_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.file_version",
+        "n|sch|public",
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|col|public.file_version.file_id",
+        "n|col|public.file_version.file_kind",
+        "n|col|public.file.id",
+        "n|col|public.file.kind",
+        "e|uniqueness|public.file.id.kind"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "file",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "file_version",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "thread_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "kind",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "content_type",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "size",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "tool_call_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "uploader_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "message_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "position",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "created_by_agent_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "current_version",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "file_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "file_kind",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "number",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "content_type",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "size",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "author_agent_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_thread_updated_at_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "thread_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "updated_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_message_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "message_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_id_kind_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "kind",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "file_version_number_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "file_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "number",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_thread_id_thread_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "thread_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "thread",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_tool_call_id_tool_call_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tool_call_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "tool_call",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_uploader_id_user_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "uploader_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "user",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_message_id_message_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "message_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "message",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_created_by_agent_id_agent_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "created_by_agent_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "agent",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "file_version_author_agent_id_agent_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "author_agent_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "agent",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "file_version_file_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "file_id",
+          "file_kind"
+        ],
+        "schemaTo": "public",
+        "tableTo": "file",
+        "columnsTo": [
+          "id",
+          "kind"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "file_version_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_kind_valid",
+        "value": "\"kind\" in ('document', 'html', 'upload', 'agent_attachment', 'tool_result')",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_source_valid",
+        "value": "case \"kind\"\n\t\t\t\twhen 'upload' then \"name\" is not null and \"content_type\" is not null\n\t\t\t\t\tand \"size\" is not null and \"tool_call_id\" is null\n\t\t\t\t\tand (\"message_id\" is null) = (\"position\" is null)\n\t\t\t\t\tand \"created_by_agent_id\" is null and \"current_version\" is null\n\t\t\t\twhen 'agent_attachment' then \"name\" is not null and \"content_type\" is not null\n\t\t\t\t\tand \"size\" is not null and \"tool_call_id\" is null\n\t\t\t\t\tand \"uploader_id\" is null and \"message_id\" is not null\n\t\t\t\t\tand \"position\" is not null\n\t\t\t\t\tand \"created_by_agent_id\" is null and \"current_version\" is null\n\t\t\t\twhen 'tool_result' then \"name\" is null and \"content_type\" is not null\n\t\t\t\t\tand \"size\" is not null and \"uploader_id\" is null\n\t\t\t\t\tand \"message_id\" is null and \"position\" is null\n\t\t\t\t\tand \"created_by_agent_id\" is null and \"current_version\" is null\n\t\t\t\telse \"name\" is not null and \"current_version\" is not null\n\t\t\t\t\tand \"content_type\" is null and \"size\" is null\n\t\t\t\t\tand \"tool_call_id\" is null and \"uploader_id\" is null\n\t\t\t\t\tand \"message_id\" is null and \"position\" is null\n\t\t\tend",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file_version",
+        "name": "file_version_file_kind_valid",
+        "value": "\"file_kind\" in ('document', 'html')",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"thread_file\"]"
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"artifact\"]"
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"artifact_version\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"thread_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"tool_call_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"content_type\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"size\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact\",\"workspace_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact\",\"kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact\",\"title\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact\",\"current_version\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact\",\"created_by_agent_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact\",\"created_in_thread_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact_version\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact_version\",\"artifact_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact_version\",\"number\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact_version\",\"content_type\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact_version\",\"size\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact_version\",\"author_agent_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"artifact_version\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"kind\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"name\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"uploader_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"message_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"thread_file\",\"position\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"thread_file_thread_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"artifact_version_number_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"thread_file_message_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"artifact_thread_updated_at_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"thread_file\",\"thread_file_thread_id_thread_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"thread_file\",\"thread_file_tool_call_id_tool_call_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"artifact\",\"artifact_workspace_id_workspace_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"artifact\",\"artifact_created_by_agent_id_agent_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"artifact\",\"artifact_created_in_thread_id_thread_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"artifact_version\",\"artifact_version_artifact_id_artifact_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"artifact_version\",\"artifact_version_author_agent_id_agent_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"thread_file\",\"thread_file_uploader_id_user_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"thread_file\",\"thread_file_message_id_message_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"thread_file\",\"thread_file_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"artifact\",\"artifact_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"artifact_version\",\"artifact_version_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"public\",\"artifact\",\"artifact_kind_valid\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"public\",\"thread_file\",\"thread_file_kind_valid\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"public\",\"thread_file\",\"thread_file_source_valid\"]"
+    }
+  ]
+}

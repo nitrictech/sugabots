@@ -1,10 +1,10 @@
 import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
+import { ConversationFiles } from "../../../files/conversation-files.ts";
 import { createEgressHttpClients } from "../../../providers/network/egress.ts";
-import { ThreadFiles } from "../../thread-files/thread-files.ts";
 import { signedUploadTool } from "./tool.ts";
 
-const THREAD = "0199a3a0-0000-7000-8000-000000000001";
+const CONVERSATION = "0199a3a0-0000-7000-8000-000000000001";
 const FILE = "0199a3a0-0000-7000-8000-0000000000f1";
 const SCREENSHOT = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
 const SERVICE = {
@@ -19,9 +19,9 @@ const SIGNED_HEADERS = {
 	"Content-Disposition": 'attachment; filename="bug.png"',
 };
 
-const files: Pick<ThreadFiles.Interface, "read"> = {
-	read: ({ threadId, fileId }) =>
-		threadId === THREAD && fileId === FILE
+const files: Pick<ConversationFiles.Interface, "read"> = {
+	read: ({ conversationId, fileId }) =>
+		conversationId === CONVERSATION && fileId === FILE
 			? Effect.succeed({
 					id: FILE,
 					name: "bug.png",
@@ -29,7 +29,7 @@ const files: Pick<ThreadFiles.Interface, "read"> = {
 					size: SCREENSHOT.byteLength,
 					stream: Stream.succeed(SCREENSHOT),
 				})
-			: new ThreadFiles.FileNotFound({ fileId }),
+			: new ConversationFiles.FileNotFound({ fileId }),
 };
 
 interface Sent {
@@ -39,7 +39,7 @@ interface Sent {
 	body: Uint8Array;
 }
 
-/** The upload tool without a sandbox, over the real egress policy with the network answering `status`. */
+/** The upload tool without a computer, over the real egress policy with the network answering `status`. */
 function uploadWith(status = 200, answer = "") {
 	const sent: Sent[] = [];
 	const upload = createEgressHttpClients({
@@ -55,9 +55,9 @@ function uploadWith(status = 200, answer = "") {
 		},
 	});
 	const tool = signedUploadTool(SERVICE, {
-		threadId: THREAD,
+		conversationId: CONVERSATION,
 		files,
-		sandbox: undefined,
+		computer: undefined,
 		upload,
 		run: Effect.runPromise,
 	});
@@ -71,7 +71,7 @@ function uploadWith(status = 200, answer = "") {
 }
 
 describe("a signed upload tool", () => {
-	it("PUTs a thread file's bytes to the signed URL with the signed headers as given", async () => {
+	it("PUTs a conversation file's bytes to the signed URL with the signed headers as given", async () => {
 		const { call, sent } = uploadWith();
 
 		const result = await call({ file: FILE, uploadUrl: SIGNED_URL, headers: SIGNED_HEADERS });
@@ -99,14 +99,14 @@ describe("a signed upload tool", () => {
 		expect(sent).toEqual([]);
 	});
 
-	it("refuses a sandbox path when the turn has no sandbox", async () => {
+	it("refuses a computer path when the turn has no computer", async () => {
 		const { call, sent } = uploadWith();
 
 		const result = await call({ path: "shots/bug.png", uploadUrl: SIGNED_URL, headers: {} });
 
 		expect(result).toEqual({
 			status: "failed",
-			error: "This bot has no sandbox, so only files in the thread can be uploaded.",
+			error: "This bot has no computer, so only files in the conversation can be uploaded.",
 		});
 		expect(sent).toEqual([]);
 	});
@@ -122,7 +122,7 @@ describe("a signed upload tool", () => {
 		});
 	});
 
-	it("says when the thread has no such file", async () => {
+	it("says when the conversation has no such file", async () => {
 		const { call, sent } = uploadWith();
 
 		const result = await call({
@@ -133,7 +133,7 @@ describe("a signed upload tool", () => {
 
 		expect(result).toEqual({
 			status: "failed",
-			error: "There is no file with that id in this thread.",
+			error: "There is no file with that id in this conversation.",
 		});
 		expect(sent).toEqual([]);
 	});

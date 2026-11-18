@@ -1,11 +1,11 @@
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
-import { agentStandingFor, mayDecideToolCall, ResourceHidden } from "../../authorization/access.ts";
+import { botStandingFor, mayDecideToolCall, ResourceHidden } from "../../authorization/access.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
-import { thread, toolCall, turn } from "../../database/schema.ts";
+import { conversation, toolCall, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { decidersOf } from "../tools/approval-deciders.ts";
@@ -38,11 +38,15 @@ export const makeControls = Effect.gen(function* () {
 						const hidden = new ResourceHidden({ resource: "turn" });
 						if (!isUuid(turnId)) return yield* hidden;
 						const [candidate] = yield* query((db) =>
-							db.select({ threadId: turn.threadId }).from(turn).where(eq(turn.id, turnId)).limit(1),
+							db
+								.select({ conversationId: turn.conversationId })
+								.from(turn)
+								.where(eq(turn.id, turnId))
+								.limit(1),
 						);
 						if (!candidate) return yield* hidden;
 						yield* visibility
-							.thread(candidate.threadId)
+							.conversationStanding(candidate.conversationId)
 							.pipe(Effect.catchTag("ResourceHidden", () => Effect.fail(hidden)));
 						const requested = yield* turns.requestCancel(turnId);
 						if (requested._tag === "Refused") return false;
@@ -68,14 +72,14 @@ export const makeControls = Effect.gen(function* () {
 							db
 								.select({
 									call: toolCall,
-									threadId: thread.id,
-									agentId: turn.agentId,
+									conversationId: conversation.id,
+									botId: turn.botId,
 									owner: turn.owner,
 									turn: { status: turn.status, cancelRequested: turn.cancelRequested },
 								})
 								.from(toolCall)
 								.innerJoin(turn, eq(turn.id, toolCall.turnId))
-								.innerJoin(thread, eq(thread.id, toolCall.threadId))
+								.innerJoin(conversation, eq(conversation.id, toolCall.conversationId))
 								.where(eq(toolCall.id, input.toolCallId))
 								.limit(1)
 								// The call alone: the turn is locked by whoever transitions it.
@@ -84,15 +88,17 @@ export const makeControls = Effect.gen(function* () {
 						if (!candidate?.call.approvalId || !awaitsDecisions(candidate.turn)) {
 							return yield* new ToolApprovalNotFound();
 						}
-						// Seeing the thread is enough to ask; who decides is `mayDecideToolCall`'s to say.
+						// Seeing the conversation is enough to ask; who decides is `mayDecideToolCall`'s to say.
 						const reached = yield* visibility
-							.thread(candidate.threadId)
+							.conversationStanding(candidate.conversationId)
 							.pipe(Effect.mapError(() => new ToolApprovalNotFound()));
 						const { userId } = yield* CurrentActor.Service;
-						const asking = yield* query((db) => agentStandingFor(db, candidate.agentId, userId));
+						const asking = yield* query((db) => botStandingFor(db, candidate.botId, userId));
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
-						const forRoutine = yield* admission.forRoutine(candidate.threadId);
-						if (!mayDecideToolCall(reached, asking, forRoutine, decidersOf(candidate.call.tool))) {
+						const forAutomation = yield* admission.forAutomation(candidate.conversationId);
+						if (
+							!mayDecideToolCall(reached, asking, forAutomation, decidersOf(candidate.call.tool))
+						) {
 							return yield* new ToolApprovalForbidden();
 						}
 						const approvalId = candidate.call.approvalId;
@@ -100,10 +106,10 @@ export const makeControls = Effect.gen(function* () {
 						if (!candidate.owner) return yield* new ToolApprovalNotFound();
 						// Recorded and sent in one transaction: the engine writes the signal
 						// through the same connection, so both commit or neither does, and
-						// everyone watching the thread sees it decided as this commits. The
+						// everyone watching the conversation sees it decided as this commits. The
 						// first decision recorded stands.
 						const recorded = yield* toolCalls.recordDecision({
-							threadId: candidate.threadId,
+							conversationId: candidate.conversationId,
 							approvalId,
 							decision,
 						});

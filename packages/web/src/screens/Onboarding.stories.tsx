@@ -33,7 +33,7 @@ const placeholder = {
 	workspaceId: WORKSPACE,
 	name: "Personal Assistant",
 	handle: "personal-assistant",
-	systemAgentKey: null,
+	systemBotKey: null,
 	description: "Your private assistant.",
 	color: "sky",
 	face: "pill",
@@ -41,7 +41,7 @@ const placeholder = {
 	model: "claude-sonnet",
 	prompt: "",
 	disabledTools: [],
-	usesSandbox: false,
+	usesComputer: false,
 	naturalBrowsing: false,
 	createdById: user.id,
 	visibility: "private",
@@ -79,8 +79,8 @@ function Preview({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 		});
 		client.setQueryData(["workspaces"], stage === "new" ? [] : [workspace]);
-		client.setQueryData(["pods", WORKSPACE], []);
-		client.setQueryData(["agents", WORKSPACE], [placeholder]);
+		client.setQueryData(["channels", WORKSPACE], []);
+		client.setQueryData(["bots", WORKSPACE], [placeholder]);
 		client.setQueryData(["models", WORKSPACE], {
 			models: stage === "model" ? [enabledModel] : [],
 		});
@@ -305,8 +305,8 @@ function firstBotSaved({
 	msw: { use: (...handlers: ReturnType<typeof http.get>[]) => void };
 }) {
 	msw.use(
-		http.patch(`${API}/agents/:agentId`, () => HttpResponse.json(chief)),
-		http.get(`${API}/workspaces/:workspace/agents`, () => HttpResponse.json([chief])),
+		http.patch(`${API}/bots/:botId`, () => HttpResponse.json(chief)),
+		http.get(`${API}/workspaces/:workspace/bots`, () => HttpResponse.json([chief])),
 	);
 }
 

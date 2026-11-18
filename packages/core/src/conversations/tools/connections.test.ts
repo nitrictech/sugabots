@@ -114,7 +114,7 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 
 function toolsFor(...targets: ConnectionTarget[]) {
 	const offered = ConnectionTools.from({
-		connections: { targetsForAgent: () => Effect.succeed({ targets, signInExpired: [] }) },
+		connections: { targetsForBot: () => Effect.succeed({ targets, signInExpired: [] }) },
 		httpClients: { for: () => fetch },
 	});
 	return offered;
@@ -124,7 +124,7 @@ describe("a turn's connection tools", () => {
 	it("runs a tool set to allow straight away, a change included", async () => {
 		const offered = toolsFor(target());
 
-		const set = await run(offered.forAgent("w", "p", NO_TURN));
+		const set = await run(offered.forBot("w", "p", NO_TURN));
 		try {
 			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
 			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, access: "allow" });
@@ -142,7 +142,7 @@ describe("a turn's connection tools", () => {
 	it("asks before each call to a tool set to ask, a read included", async () => {
 		const offered = toolsFor(target({ toolAccess: { lookup: "ask", wipe: "ask" } }));
 
-		const set = await run(offered.forAgent("w", "p", NO_TURN));
+		const set = await run(offered.forBot("w", "p", NO_TURN));
 		try {
 			expect(set.tools.wiki__lookup).toMatchObject({ mutating: false, access: "ask" });
 			expect(set.tools.wiki__wipe).toMatchObject({ mutating: true, access: "ask" });
@@ -154,7 +154,7 @@ describe("a turn's connection tools", () => {
 	it("still offers a tool set to off, so the tools sent to the model stay the same", async () => {
 		const offered = toolsFor(target({ toolAccess: { lookup: "allow", wipe: "off" } }));
 
-		const set = await run(offered.forAgent("w", "p", NO_TURN));
+		const set = await run(offered.forBot("w", "p", NO_TURN));
 		try {
 			expect(Object.keys(set.tools).sort()).toEqual(["wiki__lookup", "wiki__wipe"]);
 			expect(set.tools.wiki__wipe).toMatchObject({ access: "off" });
@@ -166,7 +166,7 @@ describe("a turn's connection tools", () => {
 	it("treats a tool the server did not list when last asked as its default says", async () => {
 		const offered = toolsFor(target({ toolAccess: {} }));
 
-		const set = await run(offered.forAgent("w", "p", NO_TURN));
+		const set = await run(offered.forBot("w", "p", NO_TURN));
 		try {
 			// `lookup` says it only reads; `wipe` says nothing, so it may change things.
 			expect(set.tools.wiki__lookup).toMatchObject({ access: "allow" });
@@ -189,7 +189,7 @@ describe("a turn's connection tools", () => {
 
 		const set = await run(
 			offered
-				.forAgent("w", "p", NO_TURN)
+				.forBot("w", "p", NO_TURN)
 				.pipe(Effect.provide(Logger.layer([Logger.make(({ message }) => logged.push(message))]))),
 		);
 		try {
@@ -209,14 +209,14 @@ describe("a turn's connection tools", () => {
 		});
 		const offered = ConnectionTools.from({
 			connections: {
-				targetsForAgent: () => Effect.succeed({ targets: [linear, target()], signInExpired: [] }),
+				targetsForBot: () => Effect.succeed({ targets: [linear, target()], signInExpired: [] }),
 			},
 			httpClients: { for: () => fetch },
 			// Linear's address, answered by the fixture server.
 			connect: (server, client) => connectServer({ ...server, url }, client),
 		});
 
-		const set = await run(offered.forAgent("w", "p", NO_TURN));
+		const set = await run(offered.forBot("w", "p", NO_TURN));
 		try {
 			expect(Object.keys(set.tools).sort()).toEqual([
 				"linear__lookup",
@@ -248,7 +248,7 @@ describe("a turn's connection tools", () => {
 		});
 		const offered = ConnectionTools.from({
 			connections: {
-				targetsForAgent: () =>
+				targetsForBot: () =>
 					Effect.succeed({
 						targets: [linear, target({ handle: "locked", headers: { "x-fixture-key": "nope" } })],
 						signInExpired: [{ handle: "notion", url: "https://mcp.notion.com/mcp" }],
@@ -261,10 +261,10 @@ describe("a turn's connection tools", () => {
 					: connectServer(server, client),
 		});
 
-		const set = await run(offered.forAgent("w", "p", NO_TURN));
+		const set = await run(offered.forBot("w", "p", NO_TURN));
 		try {
 			expect(set.signInExpired).toEqual(["notion", "linear"]);
-			// Notion is still the pod's, so the model isn't told to add it.
+			// Notion is still the bot's, so the model isn't told to add it.
 			expect(set.addable.map((preset) => preset.id)).not.toContain("notion");
 			expect(set.unavailable).toEqual(["locked"]);
 		} finally {
@@ -286,7 +286,7 @@ describe("a turn's connection tools", () => {
 			use: (set: ConnectionTools.ConnectionToolSet) => Promise<unknown> = async () => undefined,
 		) =>
 			Effect.gen(function* () {
-				const set = yield* offered.forAgent("w", "p", NO_TURN);
+				const set = yield* offered.forBot("w", "p", NO_TURN);
 				try {
 					return yield* Effect.promise(() => use(set));
 				} finally {
@@ -379,7 +379,7 @@ describe("a turn's connection tools", () => {
 			);
 			const offered = ConnectionTools.from({
 				connections: {
-					targetsForAgent: () => Effect.succeed({ targets: [signedIn], signInExpired: [] }),
+					targetsForBot: () => Effect.succeed({ targets: [signedIn], signInExpired: [] }),
 				},
 				httpClients: { for: () => fetch },
 				oauth: { clients: Effect.succeed({ for: () => provider }), fetch },
@@ -408,7 +408,7 @@ describe("a turn's connection tools", () => {
 		it("asks again once the connection has been edited", async () => {
 			const targets = [target()];
 			const offered = ConnectionTools.from({
-				connections: { targetsForAgent: () => Effect.succeed({ targets, signInExpired: [] }) },
+				connections: { targetsForBot: () => Effect.succeed({ targets, signInExpired: [] }) },
 				httpClients: { for: () => fetch },
 			});
 			await run(turnOn(offered));
@@ -439,12 +439,12 @@ describe("a turn's connection tools", () => {
 	});
 });
 
-/** A turn with no sandbox, for cases that only look at MCP servers' tools. */
+/** A turn with no computer, for cases that only look at MCP servers' tools. */
 const NO_TURN = {
 	turnId: "t",
-	agentId: "a",
-	threadId: "0199a3a0-0000-7000-8000-000000000001",
-	files: { read: () => Effect.die(new Error("No thread files in this test")) },
+	botId: "a",
+	conversationId: "0199a3a0-0000-7000-8000-000000000001",
+	files: { read: () => Effect.die(new Error("No conversation files in this test")) },
 	workspace: undefined,
-	sandboxSignsIn: false,
+	computerSignsIn: false,
 };

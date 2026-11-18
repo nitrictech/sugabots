@@ -2,23 +2,23 @@ import { builtInToolCatalog, CONNECTION_TOOL_SEPARATOR } from "@sugabots/contrac
 
 /**
  * What a tool call is called wherever it is shown: the tool line and approval
- * card in a thread, and a chat list row waiting on one.
+ * card in a conversation, and a chat list row waiting on one.
  */
 
 /** Calls to the product's own tools sit under this handle, which no connection can take. */
 export const BUILT_IN_HANDLE = "";
 
-/** The built-in tool an agent asks with for its sandbox to reach another host. */
+/** The built-in tool a bot asks with for its computer to reach another host. */
 export const NETWORK_REQUEST_TOOL = "request_network_access";
 
 /**
  * The browser tools' names start with this. They are the product's own, all
- * one app, the agent's browser, and each step is named by what it does.
+ * one app, the bot's browser, and each step is named by what it does.
  */
 export const BROWSER_TOOL_PREFIX = "browser_";
 
-/** The artifact tools' names start with this: one app, the pod's artifacts, read and written. */
-export const ARTIFACT_TOOL_PREFIX = "artifact_";
+/** The file tools' names start with this: one app, the documents and pages bots write, read and written. */
+export const FILE_TOOL_PREFIX = "file_";
 
 /**
  * What a connection is called wherever one of its tools is shown. A handle with

@@ -19,7 +19,7 @@ import {
  *
  * Such a test is about what the SQL does. `onPostgres(service)` hands back the
  * same service with its methods returning promises, so a case reads
- * `await pods.create(...)` rather than wrapping every line, and a failure
+ * `await channels.create(...)` rather than wrapping every line, and a failure
  * rejects with the service's own error so `rejects.toThrow(NameTaken)` still
  * means what it says.
  *

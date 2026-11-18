@@ -26,7 +26,7 @@ describe("the Brave backend", () => {
 						{
 							title: "Sugabots",
 							url: "https://example.com/sugabots",
-							description: "A workspace for people and agents.",
+							description: "A workspace for people and bots.",
 							page_age: "2026-09-01T00:00:00",
 						},
 						{ title: "Bare", url: "https://example.com/bare" },
@@ -46,7 +46,7 @@ describe("the Brave backend", () => {
 				{
 					title: "Sugabots",
 					url: "https://example.com/sugabots",
-					snippet: "A workspace for people and agents.",
+					snippet: "A workspace for people and bots.",
 					published: "2026-09-01T00:00:00",
 				},
 				{ title: "Bare", url: "https://example.com/bare", snippet: "", published: null },
@@ -121,7 +121,7 @@ describe("the Exa backend", () => {
 						title: "Sugabots",
 						url: "https://example.com/sugabots",
 						publishedDate: "2026-09-01T00:00:00.000Z",
-						highlights: ["People and agents", "in shared pods."],
+						highlights: ["People and bots", "in channels."],
 					},
 					{ title: null, url: "https://example.com/untitled" },
 				],
@@ -142,7 +142,7 @@ describe("the Exa backend", () => {
 				{
 					title: "Sugabots",
 					url: "https://example.com/sugabots",
-					snippet: "People and agents in shared pods.",
+					snippet: "People and bots in channels.",
 					published: "2026-09-01T00:00:00.000Z",
 				},
 				{

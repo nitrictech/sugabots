@@ -1,6 +1,6 @@
 import { MAX_ATTACHMENT_BYTES } from "@sugabots/contracts";
 import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
-import { ThreadFiles } from "@sugabots/core/conversations/thread-files/thread-files";
+import { ConversationFiles } from "@sugabots/core/files/conversation-files";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -38,7 +38,7 @@ const serving = (file: { name: string; contentType: string; bytes: Uint8Array })
 						size: file.bytes.byteLength,
 						stream: Stream.succeed(file.bytes),
 					})
-				: Effect.fail(new ThreadFiles.FileNotFound({ fileId })),
+				: Effect.fail(new ConversationFiles.FileNotFound({ fileId })),
 	});
 
 describe("uploading a chat file", () => {

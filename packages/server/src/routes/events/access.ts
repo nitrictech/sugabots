@@ -1,12 +1,17 @@
 export * as ChannelAccess from "./access.ts";
 
-import { type Channel, personChannel, threadChannel, workspaceChannel } from "@sugabots/contracts";
+import {
+	conversationChannel,
+	personChannel,
+	type StreamChannel,
+	workspaceChannel,
+} from "@sugabots/contracts";
 import { Authorization } from "@sugabots/core/authorization/authorization";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Visibility } from "@sugabots/core/authorization/visibility";
 import { query, serviceOperations } from "@sugabots/core/database/database";
 import type { Audience } from "@sugabots/core/database/events/audience";
-import { thread } from "@sugabots/core/database/schema";
+import { placedConversation } from "@sugabots/core/database/schema";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 
@@ -18,20 +23,24 @@ import { Context, Effect, Layer } from "effect";
  * demotion that closes a REST route closes the stream with it.
  *
  * Each function answers, for the current actor, with the channel to subscribe
- * to, or `undefined` when they may not have it. A thread's events go on that
- * thread's own channel, and a workspace channel carries what its lists need
- * (`ThreadFeed` in core decides both).
+ * to, or `undefined` when they may not have it. A conversation's events go on that
+ * conversation's own channel, and a workspace channel carries what its lists need
+ * (`ConversationFeed` in core decides both).
  */
 export interface Interface {
 	/** `workspaceRef` is the workspace's id or slug; the channel is always named by id. */
-	workspace(workspaceRef: string): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
-	thread(threadId: string): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
+	workspace(
+		workspaceRef: string,
+	): Effect.Effect<StreamChannel | undefined, never, CurrentActor.Service>;
+	conversation(
+		conversationId: string,
+	): Effect.Effect<StreamChannel | undefined, never, CurrentActor.Service>;
 	/** The current actor's own channel, which nobody else may have. */
-	me(): Effect.Effect<Channel | undefined, never, CurrentActor.Service>;
+	me(): Effect.Effect<StreamChannel | undefined, never, CurrentActor.Service>;
 	/**
 	 * Whether the current actor is in `audience`, by `Visibility`'s rules, and
-	 * so may hear what a workspace channel says of the thread it is for: they
-	 * reach the thread.
+	 * so may hear what a workspace channel says of the conversation it is for: they
+	 * reach the conversation.
 	 */
 	hears(audience: Audience.Group): Effect.Effect<boolean, never, CurrentActor.Service>;
 }
@@ -53,10 +62,10 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		thread: (threadId) =>
-			visibility.thread(threadId).pipe(
+		conversation: (conversationId) =>
+			visibility.conversationStanding(conversationId).pipe(
 				Effect.match({
-					onSuccess: ({ thread }) => threadChannel(thread.id),
+					onSuccess: ({ conversation }) => conversationChannel(conversation.id),
 					onFailure: () => undefined,
 				}),
 			),
@@ -67,13 +76,18 @@ export const make = Effect.gen(function* () {
 			operation(
 				"hears",
 				Effect.gen(function* () {
-					const { threadId } = audience;
-					const reachesThread = yield* visibility.reachesThread;
+					const { conversationId } = audience;
+					const reachesConversation = yield* visibility.reachesConversation;
 					const [reached] = yield* query((db) =>
 						db
-							.select({ id: thread.id })
-							.from(thread)
-							.where(and(eq(thread.id, threadId), reachesThread(thread)))
+							.select({ id: placedConversation.id })
+							.from(placedConversation)
+							.where(
+								and(
+									eq(placedConversation.id, conversationId),
+									reachesConversation(placedConversation),
+								),
+							)
 							.limit(1),
 					);
 					return reached !== undefined;

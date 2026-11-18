@@ -37,7 +37,7 @@ export const client = {
 			invitation: vi.fn(),
 			acceptInvitation: vi.fn(),
 		},
-		agents: {
+		bots: {
 			list: vi.fn(),
 			create: vi.fn(),
 			get: vi.fn(),
@@ -47,7 +47,7 @@ export const client = {
 			unpin: vi.fn(),
 			ensureAssistant: vi.fn(),
 		},
-		pods: {
+		channels: {
 			list: vi.fn(),
 			create: vi.fn(),
 			get: vi.fn(),
@@ -77,7 +77,7 @@ export const client = {
 		onboarding: {
 			complete: vi.fn(),
 		},
-		systemAgents: {
+		systemBots: {
 			list: vi.fn(),
 			update: vi.fn(),
 		},
@@ -108,7 +108,7 @@ export const client = {
 			remove: vi.fn(),
 			test: vi.fn(),
 		},
-		sandboxProviders: {
+		computerProviders: {
 			access: vi.fn(),
 		},
 		connections: {
@@ -124,9 +124,9 @@ export const client = {
 		},
 		chats: {
 			list: vi.fn(),
-			podMarkers: vi.fn(),
+			channelMarkers: vi.fn(),
 			approvals: vi.fn(),
-			activity: vi.fn(),
+			inbox: vi.fn(),
 			directMessages: vi.fn(),
 			directMessage: vi.fn(),
 			sendDirectMessage: vi.fn(),
@@ -135,8 +135,8 @@ export const client = {
 			botTasks: vi.fn(),
 			startTask: vi.fn(),
 			startInterview: vi.fn(),
-			openPodChat: vi.fn(),
-			openRoutineFeed: vi.fn(),
+			openMainChat: vi.fn(),
+			openAutomationFeed: vi.fn(),
 			startChat: vi.fn(),
 			markDone: vi.fn(),
 			reopen: vi.fn(),
@@ -147,19 +147,19 @@ export const client = {
 		},
 		events: {
 			workspace: vi.fn(),
-			thread: vi.fn(),
+			conversation: vi.fn(),
 			typing: vi.fn(),
 		},
-		threads: {
+		conversations: {
 			list: vi.fn(),
 			get: vi.fn(),
 			activity: vi.fn(),
 			cancelTurn: vi.fn(),
 		},
-		toolApprovals: {
+		approvals: {
 			decide: vi.fn(),
 		},
-		routines: {
+		automations: {
 			listInWorkspace: vi.fn(),
 			list: vi.fn(),
 			create: vi.fn(),
@@ -173,10 +173,10 @@ export const client = {
 			removeTrigger: vi.fn(),
 			getSecret: vi.fn(),
 			rotateSecret: vi.fn(),
-			executions: vi.fn(),
+			runs: vi.fn(),
 		},
 	},
-	events: { thread: vi.fn(), workspace: vi.fn(), me: vi.fn() },
+	events: { conversation: vi.fn(), workspace: vi.fn(), me: vi.fn() },
 	tokens: { get: vi.fn(), set: vi.fn() },
 	auth: {
 		signIn: vi.fn(),

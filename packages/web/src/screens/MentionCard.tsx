@@ -1,13 +1,13 @@
 import { Popover } from "@base-ui/react/popover";
 import {
-	type AgentParticipant,
+	type BotParticipant,
 	type PersonParticipant,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import type { ReactElement } from "react";
-import { useAgents } from "@/lib/agents.ts";
+import { useBots } from "@/lib/bots.ts";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import type { GroupMention, MentionTarget } from "./mentions.tsx";
 
@@ -62,7 +62,7 @@ export function MentionCard({
 					>
 						{target.kind === "group" ? (
 							<GroupCard group={target} />
-						) : target.kind === "agent" ? (
+						) : target.kind === "bot" ? (
 							<BotCard bot={target} />
 						) : (
 							<PersonCard person={target} />
@@ -132,11 +132,11 @@ function PersonRole({ personId }: { personId: string }) {
 	return <TitleTag>{workspaceRoleLabel(role)}</TitleTag>;
 }
 
-function BotCard({ bot }: { bot: AgentParticipant }) {
+function BotCard({ bot }: { bot: BotParticipant }) {
 	return (
 		<>
 			<CardHeading
-				face={<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={40} />}
+				face={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={40} />}
 				title={
 					<>
 						<span className="truncate">{bot.name}</span>
@@ -152,8 +152,8 @@ function BotCard({ bot }: { bot: AgentParticipant }) {
 
 /** What the bot does, in its own words from its settings, once the workspace's bots are loaded. */
 function BotDescription({ botId }: { botId: string }) {
-	const { agents } = useAgents();
-	const description = agents?.find((bot) => bot.id === botId)?.description;
+	const { bots } = useBots();
+	const description = bots?.find((bot) => bot.id === botId)?.description;
 	if (!description) return null;
 	return (
 		<p className="m-0 mt-2.5 wrap-break-word text-soft-foreground text-xs leading-normal">

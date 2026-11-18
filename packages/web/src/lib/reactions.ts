@@ -1,9 +1,9 @@
 import type {
 	ChatMessagesPage,
+	ConversationDetails,
 	Message,
 	MessageReaction,
 	SessionUser,
-	ThreadDetails,
 } from "@sugabots/contracts";
 import {
 	type InfiniteData,
@@ -25,7 +25,7 @@ interface ReactionChange {
  * Adds or takes back the user's reactions, showing each at once. They are sent
  * one at a time, in the order they were made. An answer, or a refusal putting
  * back what the message had, is only taken while nothing newer has changed
- * the message: another of the user's reactions, or the thread's event saying
+ * the message: another of the user's reactions, or the conversation's event saying
  * what the message has.
  */
 export function useReactions(user: SessionUser) {
@@ -35,7 +35,9 @@ export function useReactions(user: SessionUser) {
 		mutationFn: ({ message, emoji, reacting }: ReactionChange) => {
 			const request = { params: { messageId: message.id, emoji } };
 			return Effect.runPromise(
-				reacting ? client.api.threads.react(request) : client.api.threads.unreact(request),
+				reacting
+					? client.api.conversations.react(request)
+					: client.api.conversations.unreact(request),
 			);
 		},
 		onMutate: ({ message, emoji, reacting }) => {
@@ -79,11 +81,11 @@ const changesByMessage = new Map<string, number>();
 /**
  * Puts `reactions` on the message as its newest change, which an answer to an
  * earlier request will not then undo, returning which change it is. The
- * thread's events put in what the message has through this.
+ * conversation's events put in what the message has through this.
  */
 export function changeReactions(
 	queries: QueryClient,
-	message: Pick<Message, "id" | "threadId">,
+	message: Pick<Message, "id" | "conversationId">,
 	reactions: MessageReaction[],
 ): number {
 	const change = (changesByMessage.get(message.id) ?? 0) + 1;
@@ -107,12 +109,12 @@ export function hasReacted(message: Message, emoji: string, userId: string): boo
 }
 
 /**
- * Puts `reactions` on the message wherever the cache holds it: its thread, and
+ * Puts `reactions` on the message wherever the cache holds it: its conversation, and
  * the chat pages it was loaded in, which an older message may only be in.
  */
 function setMessageReactions(
 	queries: QueryClient,
-	message: Pick<Message, "id" | "threadId">,
+	message: Pick<Message, "id" | "conversationId">,
 	reactions: MessageReaction[],
 ): void {
 	const withReactions = (current: Message): Message => {
@@ -120,7 +122,7 @@ function setMessageReactions(
 		const { reactions: _previous, ...rest } = current;
 		return reactions.length > 0 ? { ...rest, reactions } : rest;
 	};
-	queries.setQueryData<ThreadDetails>(["thread", message.threadId], (details) =>
+	queries.setQueryData<ConversationDetails>(["conversation", message.conversationId], (details) =>
 		details ? { ...details, messages: details.messages.map(withReactions) } : details,
 	);
 	queries.setQueriesData<InfiniteData<ChatMessagesPage | undefined>>(

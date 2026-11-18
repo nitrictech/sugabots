@@ -36,7 +36,7 @@ const september: WorkspaceUsage = {
 	days: [],
 	bots: [],
 	models: [],
-	systemAgents: { usd: 5.65, unpricedRequests: 0 },
+	systemBots: { usd: 5.65, unpricedRequests: 0 },
 	personalAssistants: { usd: 0, unpricedRequests: 0 },
 };
 

@@ -11,44 +11,44 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
-import { threadCompaction } from "../../database/schema.ts";
+import { conversationCompaction } from "../../database/schema.ts";
 import { Lanes } from "../../workflows/lanes.ts";
-import { COMPACT_SYSTEM_AGENT, findSystemAgent } from "../../workspaces/agents/system-agents.ts";
+import { COMPACT_SYSTEM_BOT, findSystemBot } from "../../workspaces/bots/system-bots.ts";
 import type { ConversationEvent } from "../events.ts";
-import { ThreadRepository } from "../threads/repository.ts";
+import { ConversationRepository } from "../repository/repository.ts";
 import {
-	loadSystemAgentScope,
+	loadSystemBotScope,
 	loadTranscript,
 	type TranscriptEntry,
-} from "../threads/system-agent-threads.ts";
+} from "../repository/system-bot-conversations.ts";
 import { Turns } from "../turns/turns.ts";
 import { admitCompaction, type CompactionRequest } from "./compaction.workflow.ts";
 import { makeRecords } from "./repository.ts";
 import { needsCompaction, planCompaction } from "./window.ts";
 
 /**
- * Thread compaction, done by the `compact` system agent, Compaction.
+ * Compaction, done by the `compact` system bot, Compaction.
  *
- * When a turn's prompt passes the compaction line, the thread is queued for
- * compaction. The Compaction agent summarises the stretch of history just
- * before the newest messages, and from then on a bot in the thread reads that
- * summary and the newest messages instead of the whole thread. People still
- * see every message. Like the Scribe, its turns live in a child thread of the
+ * When a turn's prompt passes the compaction line, the conversation is queued for
+ * compaction. The Compaction bot summarises the stretch of history just
+ * before the newest messages, and from then on a bot in the conversation reads that
+ * summary and the newest messages instead of the whole conversation. People still
+ * see every message. Like the Summariser, its turns live in a system conversation hanging off the
  * one it works on. It runs on the model of the bot whose reply asked for it,
- * so a thread is summarised as well as it is read, and falls back to the
- * system agents' model for a bot with none.
+ * so a conversation is summarised as well as it is read, and falls back to the
+ * system bots' model for a bot with none.
  */
 export interface Interface {
 	/**
-	 * Opens the Compaction agent's thread and loads what it summarises, or says
-	 * why there is nothing to do: the thread is gone, neither the bot nor the
-	 * Compaction agent has a model, the turn that asked was measured before
+	 * Opens the Compaction bot's conversation and loads what it summarises, or says
+	 * why there is nothing to do: the conversation is gone, neither the bot nor the
+	 * Compaction bot has a model, the turn that asked was measured before
 	 * the latest compaction, or there is nothing new to summarise.
 	 */
 	readonly prepare: (
 		request: CompactionRequest,
 	) => Effect.Effect<PreparedCompaction | CompactionSkipped>;
-	/** Records the summary as what the thread's bots read from now on. */
+	/** Records the summary as what the conversation's bots read from now on. */
 	readonly complete: (prepared: PreparedCompaction, summary: string) => Effect.Effect<void>;
 	/**
 	 * Asks for a compaction once a completed reply's prompt reaches the
@@ -63,7 +63,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Compactions");
 	const lanes = yield* Lanes.Service;
-	const threads = yield* ThreadRepository.Service;
+	const conversations = yield* ConversationRepository.Service;
 	const compactions = yield* makeRecords;
 	return Service.of({
 		prepare: (request) =>
@@ -75,27 +75,33 @@ export const make = Effect.gen(function* () {
 						never,
 						Database
 					> {
-						const scope = yield* query((db) => loadSystemAgentScope(db, request));
+						const scope = yield* query((db) =>
+							loadSystemBotScope(db, {
+								conversationId: request.conversationId,
+								botId: request.botId,
+								sourceMessageId: request.sourceMessageId,
+							}),
+						);
 						if (!scope) {
-							return skipped("The thread, the agent that triggered it, or its message is gone");
+							return skipped("The conversation, the bot that triggered it, or its message is gone");
 						}
 						const compactor = yield* query((db) =>
-							findSystemAgent(db, scope.workspaceId, COMPACT_SYSTEM_AGENT),
+							findSystemBot(db, scope.workspaceId, COMPACT_SYSTEM_BOT),
 						);
-						if (!compactor) return skipped("This workspace has no Compaction agent");
-						const model = scope.agentModel ?? compactor.model;
+						if (!compactor) return skipped("This workspace has no Compaction bot");
+						const model = scope.botModel ?? compactor.model;
 						if (model === null) {
-							return skipped("Neither the bot nor the Compaction agent has a model");
+							return skipped("Neither the bot nor the Compaction bot has a model");
 						}
 
-						const previous = yield* query((db) => loadCompaction(db, scope.threadId));
+						const previous = yield* query((db) => loadCompaction(db, scope.conversationId));
 						if (previous && previous.keptFrom.toISOString() !== request.readKeptFrom) {
-							return skipped("The turn was measured before the thread's latest compaction");
+							return skipped("The turn was measured before the conversation's latest compaction");
 						}
 						// Only what the last compaction kept can be summarised now (see
 						// `planCompaction`), so nothing before it is read.
 						const transcript = yield* query((db) =>
-							loadTranscript(db, scope.threadId, { from: previous?.keptFrom }),
+							loadTranscript(db, scope.conversationId, { from: previous?.keptFrom }),
 						);
 						const sourceIndex = transcript.findIndex((row) => row.id === request.sourceMessageId);
 						const history = transcript
@@ -105,9 +111,9 @@ export const make = Effect.gen(function* () {
 									? [{ ...entry, createdAt, tokens: Turns.estimatedTokens(entry.content) }]
 									: [],
 							);
-						// Sized to the bot that reads the thread next, and capped to what
+						// Sized to the bot that reads the conversation next, and capped to what
 						// the model summarising it can read.
-						const readerModel = scope.agentModel;
+						const readerModel = scope.botModel;
 						const readerTokens =
 							readerModel === null
 								? Turns.MAX_CONTEXT_WINDOW_TOKENS
@@ -122,23 +128,19 @@ export const make = Effect.gen(function* () {
 						});
 						if (!plan) return skipped("There is nothing new to summarise");
 
-						const systemAgentThreadId = yield* threads.openSystemAgentThread({
-							served: {
-								id: scope.threadId,
-								workspaceId: scope.workspaceId,
-								initiatorUserId: scope.initiatorUserId,
-							},
-							systemAgentId: compactor.id,
-							systemAgentKey: COMPACT_SYSTEM_AGENT,
-							title: `Compactions of ${scope.threadTitle}`,
+						const systemConversationId = yield* conversations.openSystemConversation({
+							served: { id: scope.conversationId, workspaceId: scope.workspaceId },
+							systemBotId: compactor.id,
+							systemBotKey: COMPACT_SYSTEM_BOT,
+							title: `Compactions of ${scope.conversationTitle}`,
 						});
 						return {
 							_tag: "Prepared",
 							request,
-							compactor: { threadId: systemAgentThreadId, agentId: compactor.id },
-							threadId: scope.threadId,
+							compactor: { conversationId: systemConversationId, botId: compactor.id },
+							conversationId: scope.conversationId,
 							workspaceId: scope.workspaceId,
-							threadTitle: scope.threadTitle,
+							conversationTitle: scope.conversationTitle,
 							model,
 							transcript: plan.summarised.map(({ author, kind, content, createdAt }) => ({
 								author,
@@ -163,7 +165,7 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						yield* compactions.save({
 							workspaceId: prepared.workspaceId,
-							threadId: prepared.threadId,
+							conversationId: prepared.conversationId,
 							summary,
 							historyStartsAt: prepared.historyStartsAt,
 							keptFrom: prepared.keptFrom,
@@ -180,8 +182,8 @@ export const make = Effect.gen(function* () {
 					needsCompaction(event.contextTokens, event.contextCapacity)
 						? afterCommit(
 								admitCompaction(lanes, {
-									threadId: event.threadId,
-									agentId: event.agentId,
+									conversationId: event.conversationId,
+									botId: event.botId,
 									sourceMessageId: event.messageId,
 									readKeptFrom: event.readKeptFrom,
 								}),
@@ -194,11 +196,11 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide(ThreadRepository.layer));
+export const layer = layerNoDeps.pipe(Layer.provide(ConversationRepository.layer));
 
 /**
- * A compaction with nothing to do: its thread or source is gone, there is
- * nothing new to summarise, or the Compaction agent's turn may not run.
+ * A compaction with nothing to do: its conversation or source is gone, there is
+ * nothing new to summarise, or the Compaction bot's turn may not run.
  * `reason` is for the logs.
  */
 export interface CompactionSkipped {
@@ -210,13 +212,13 @@ export interface CompactionSkipped {
 export interface PreparedCompaction {
 	readonly _tag: "Prepared";
 	request: CompactionRequest;
-	/** The Compaction agent, and the thread its turns are recorded in. */
-	compactor: { threadId: string; agentId: string };
-	threadId: string;
+	/** The Compaction bot, and the conversation its turns are recorded in. */
+	compactor: { conversationId: string; botId: string };
+	conversationId: string;
 	workspaceId: string;
-	threadTitle: string;
+	conversationTitle: string;
 	model: string;
-	/** The summary the thread's bots read until now, which this one replaces and carries forward. */
+	/** The summary the conversation's bots read until now, which this one replaces and carries forward. */
 	previousSummary: string | undefined;
 	/** The messages to summarise, oldest first: those since the previous summary's. */
 	transcript: Array<TranscriptEntry & { createdAt: Date }>;
@@ -228,19 +230,19 @@ function skipped(reason: string): CompactionSkipped {
 	return { _tag: "Skipped", reason };
 }
 
-/** A thread's current compaction, if it has one. */
+/** A conversation's current compaction, if it has one. */
 const loadCompaction = Effect.fn("Compactions.loadCompaction")(function* (
 	db: Executor,
-	threadId: string,
+	conversationId: string,
 ) {
 	const [row] = yield* db
 		.select({
-			summary: threadCompaction.summary,
-			historyStartsAt: threadCompaction.historyStartsAt,
-			keptFrom: threadCompaction.keptFrom,
+			summary: conversationCompaction.summary,
+			historyStartsAt: conversationCompaction.historyStartsAt,
+			keptFrom: conversationCompaction.keptFrom,
 		})
-		.from(threadCompaction)
-		.where(eq(threadCompaction.threadId, threadId))
+		.from(conversationCompaction)
+		.where(eq(conversationCompaction.conversationId, conversationId))
 		.limit(1);
 	return row;
 });

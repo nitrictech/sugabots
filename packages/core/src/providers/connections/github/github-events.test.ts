@@ -11,7 +11,7 @@ const pullRequest = {
 	head: { ref: "fix-login" },
 };
 
-/** What GitHub's deliveries say happened, as a routine's run is told. */
+/** What GitHub's deliveries say happened, as an automation's run is told. */
 describe("GitHub's events", () => {
 	it("tells a review on a pull request, with its verdict and words", () => {
 		const activity = activityOf(
@@ -97,7 +97,7 @@ describe("GitHub's events", () => {
 		});
 	});
 
-	it("leaves out what the workspace's own app did, so a routine can't set itself off", () => {
+	it("leaves out what the workspace's own app did, so an automation can't set itself off", () => {
 		const activity = activityOf(
 			"push",
 			{

@@ -4,23 +4,23 @@ import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
 import type { ConversationEvent } from "../events.ts";
-import { ThreadRepository } from "../threads/repository.ts";
+import { ConversationRepository } from "../repository/repository.ts";
 import { Turns } from "../turns/turns.ts";
 import { decideFloor, type FloorMessage, loadFloorScope } from "./floor.ts";
 
-/** Who speaks after a person's message, in a thread of any type. */
+/** Who speaks after a person's message, in a conversation of any type. */
 export interface Interface {
 	/**
 	 * Decides who speaks after the committed message `committed` (see
-	 * `decideFloor`) and asks for them: brings each addressed agent into the
-	 * thread and asks for its turn. Runs in the caller's transaction, so it
+	 * `decideFloor`) and asks for them: brings each addressed bot into the
+	 * conversation and asks for its turn. Runs in the caller's transaction, so it
 	 * commits with the message.
 	 */
 	readonly giveFloor: (committed: FloorMessage) => Effect.Effect<void>;
 	/**
 	 * Asks for the collaborator's turn when a collaboration opens, for the
-	 * asking agent's when a collaboration ends after it stopped waiting, and
-	 * for the bot's in a thread another bot started and briefed it in.
+	 * asking bot's when a collaboration ends after it stopped waiting, and
+	 * for the bot's in a conversation another bot started and briefed it in.
 	 */
 	readonly handler: DomainEvents.Handler<ConversationEvent>;
 }
@@ -29,7 +29,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("FloorControl");
-	const threads = yield* ThreadRepository.Service;
+	const conversations = yield* ConversationRepository.Service;
 	const turns = yield* Turns.Service;
 
 	const giveFloor: Interface["giveFloor"] = (committed) =>
@@ -40,14 +40,14 @@ export const make = Effect.gen(function* () {
 					const scope = yield* query((db) => loadFloorScope(db, committed));
 					const decision = decideFloor({ ...scope, content: committed.content });
 					if (decision.kind !== "turns") return;
-					yield* threads.addAgents(
-						committed.threadId,
-						decision.agents.map(({ agentId }) => agentId),
+					yield* conversations.addBots(
+						committed.conversationId,
+						decision.bots.map(({ botId }) => botId),
 					);
-					for (const { agentId, reason } of decision.agents) {
+					for (const { botId, reason } of decision.bots) {
 						yield* turns.ask({
-							threadId: committed.threadId,
-							agentId,
+							conversationId: committed.conversationId,
+							botId,
 							triggerMessageId: committed.id,
 							reason,
 						});
@@ -65,16 +65,16 @@ export const make = Effect.gen(function* () {
 					switch (event._tag) {
 						case "CollaborationOpened":
 							return turns.ask({
-								threadId: event.collaboration.threadId,
-								agentId: event.collaboratorAgentId,
+								conversationId: event.collaboration.conversationId,
+								botId: event.collaboratorBotId,
 								triggerMessageId: event.briefMessageId,
 								reason: "collaboration",
 							});
 						// The brief is a bot's message, which gives nobody the floor by itself.
-						case "BriefedThreadStarted":
+						case "BriefedTaskStarted":
 							return turns.ask({
-								threadId: event.threadId,
-								agentId: event.hostAgentId,
+								conversationId: event.conversationId,
+								botId: event.hostBotId,
 								triggerMessageId: event.briefMessageId,
 								reason: "brief",
 							});
@@ -82,8 +82,8 @@ export const make = Effect.gen(function* () {
 						case "CollaborationFailed":
 							return event.askerToResume
 								? turns.ask({
-										threadId: event.parentThreadId,
-										agentId: event.askerToResume,
+										conversationId: event.parentConversationId,
+										botId: event.askerToResume,
 										triggerMessageId: event.parentMessageId,
 										reason: "resume",
 									})
@@ -99,4 +99,4 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide(ThreadRepository.layer));
+export const layer = layerNoDeps.pipe(Layer.provide(ConversationRepository.layer));

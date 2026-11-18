@@ -11,7 +11,7 @@ import {
 import { SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 
 /**
- * Naming a chat in a pod: a new one, under `title` "New channel", or one being
+ * Naming a chat in a channel: a new one, under `title` "New channel", or one being
  * renamed, starting from its `name`. `onSave` is given the name as written.
  */
 export function ChatNameDialog({
@@ -58,7 +58,7 @@ export function ChatNameDialog({
 					/>
 				</SettingsGroup>
 				<p className="m-0 px-1 text-xs text-subtle-foreground leading-normal">
-					Everyone in the pod can read and write in it.
+					Everyone in the channel can read and write in it.
 				</p>
 				{failure !== undefined && (
 					<Alert>

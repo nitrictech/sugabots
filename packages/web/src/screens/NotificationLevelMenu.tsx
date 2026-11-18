@@ -40,7 +40,7 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 
 /**
- * Right-clicking `children`, a pod's or a bot's row in the sidebar, offers
+ * Right-clicking `children`, a channel's or a bot's row in the sidebar, offers
  * what it notifies the person about, muting it among them, and, under More
  * options, muting it for a while, as Slack's channel menu does. Until
  * `settings` load, right-clicking does nothing; `children` stays the same
@@ -132,7 +132,7 @@ function MoreOptions({
 	);
 }
 
-/** A bell struck through, after the name of a pod or bot the person muted, for good or for a while. */
+/** A bell struck through, after the name of a channel or bot the person muted, for good or for a while. */
 export function MutedMark({
 	settings,
 	place,

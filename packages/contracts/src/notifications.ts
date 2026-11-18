@@ -32,32 +32,32 @@ export const quietHoursSchema = Schema.Struct({
 
 export type QuietHours = typeof quietHoursSchema.Type;
 
-/** Which of a person's routines' runs they hear the end of: failed ones, every one, or none. */
-export const routineRunNotificationsSchema = Schema.Literals(["failures", "all", "none"]);
+/** Which of a person's automations' runs they hear the end of: failed ones, every one, or none. */
+export const automationRunNotificationsSchema = Schema.Literals(["failures", "all", "none"]);
 
-export type RoutineRunNotifications = typeof routineRunNotificationsSchema.Type;
+export type AutomationRunNotifications = typeof automationRunNotificationsSchema.Type;
 
 /**
  * What a person hears of besides messages, at any level but `nothing`: a
- * bot's reply to them that failed, and the runs of routines they made or
+ * bot's reply to them that failed, and the runs of automations they made or
  * started.
  */
 const otherNotificationsFields = {
 	turnFailures: Schema.Boolean,
-	routineRuns: routineRunNotificationsSchema,
+	automationRuns: automationRunNotificationsSchema,
 };
 
-/** Where a person chooses in place of the level above: a pod, or one of its bots. */
-export const notificationPlaceKindSchema = Schema.Literals(["pod", "bot"]);
+/** Where a person chooses in place of the level above: a channel, or one of its bots. */
+export const notificationPlaceKindSchema = Schema.Literals(["channel", "bot"]);
 
 export type NotificationPlaceKind = typeof notificationPlaceKindSchema.Type;
 
-/** The level chosen for a pod or bot, or null to follow the one above it, which also ends a mute. */
+/** The level chosen for a channel or bot, or null to follow the one above it, which also ends a mute. */
 export const notificationLevelChoiceSchema = Schema.Struct({
 	level: Schema.NullOr(notificationLevelSchema),
 });
 
-/** Mutes a pod or bot until `until`, whatever its level, or with null, or a time passed, ends its mute. */
+/** Mutes a channel or bot until `until`, whatever its level, or with null, or a time passed, ends its mute. */
 export const notificationMuteSchema = Schema.Struct({ until: Schema.NullOr(isoTimestampSchema) });
 
 /** What the person is notified about, and when not. */
@@ -67,16 +67,16 @@ export const notificationSettingsSchema = Schema.Struct({
 	pausedUntil: Schema.NullOr(isoTimestampSchema),
 	quietHours: Schema.NullOr(quietHoursSchema),
 	...otherNotificationsFields,
-	/** Levels chosen for pods, by pod id. */
-	pods: Schema.Record(uuidSchema, notificationLevelSchema),
-	/** Levels chosen for bots, by bot id, which win over their pod's. */
+	/** Levels chosen for channels, by channel id. */
+	channels: Schema.Record(uuidSchema, notificationLevelSchema),
+	/** Levels chosen for bots, by bot id, which win over their channel's. */
 	bots: Schema.Record(uuidSchema, notificationLevelSchema),
 	/**
-	 * Pods and bots muted for a while, by id, with when each mute ends. While
+	 * Channels and bots muted for a while, by id, with when each mute ends. While
 	 * it lasts, a place is at `nothing` whatever level it has.
 	 */
 	mutedUntil: Schema.Struct({
-		pods: Schema.Record(uuidSchema, isoTimestampSchema),
+		channels: Schema.Record(uuidSchema, isoTimestampSchema),
 		bots: Schema.Record(uuidSchema, isoTimestampSchema),
 	}),
 });

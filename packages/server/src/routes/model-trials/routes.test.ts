@@ -30,7 +30,7 @@ const trial = (run: ModelTrials.Interface["run"], body: unknown) =>
 	});
 
 const report = {
-	systemAgentKey: "summarise" as const,
+	systemBotKey: "summarise" as const,
 	model: "llama3.2:3b",
 	rating: "terrible" as const,
 	accuracy: { passed: 0, attempts: 3, share: 0, needed: 0.9, rating: "terrible" as const },
@@ -39,17 +39,17 @@ const report = {
 	verdict: [],
 };
 
-describe("trying a model on a system agent", () => {
+describe("trying a model on a system bot", () => {
 	it("tries the model in the workspace in the path, and returns the report", async () => {
 		const run = vi.fn<ModelTrials.Interface["run"]>(() => Effect.succeed(report));
 
-		const response = await trial(run, { systemAgentKey: "summarise", model: "llama3.2:3b" });
+		const response = await trial(run, { systemBotKey: "summarise", model: "llama3.2:3b" });
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toMatchObject({ rating: "terrible" });
 		expect(run).toHaveBeenCalledWith({
 			workspace: WORKSPACE,
-			systemAgentKey: "summarise",
+			systemBotKey: "summarise",
 			model: "llama3.2:3b",
 		});
 	});
@@ -57,16 +57,16 @@ describe("trying a model on a system agent", () => {
 	it("answers somebody who may not choose the workspace's models as forbidden", async () => {
 		const response = await trial(
 			() => Effect.fail(new ActionForbidden({ permission: "workspace.providers.manage" })),
-			{ systemAgentKey: "summarise", model: "llama3.2:3b" },
+			{ systemBotKey: "summarise", model: "llama3.2:3b" },
 		);
 
 		expect(response.status).toBe(403);
 	});
 
-	it("refuses a system agent it does not have cases for", async () => {
+	it("refuses a system bot it does not have cases for", async () => {
 		const run = vi.fn<ModelTrials.Interface["run"]>(() => Effect.succeed(report));
 
-		const response = await trial(run, { systemAgentKey: "handwriting", model: "llama3.2:3b" });
+		const response = await trial(run, { systemBotKey: "handwriting", model: "llama3.2:3b" });
 
 		expect(response.status).toBe(400);
 		expect(run).not.toHaveBeenCalled();

@@ -1,17 +1,18 @@
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { noComputers } from "@sugabots/core/computers/testing";
+import { AutomationRuns } from "@sugabots/core/conversations/automations/runs";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { Conversations } from "@sugabots/core/conversations/conversations";
-import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
+import { ComputerTools } from "@sugabots/core/conversations/tools/computer";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
-import { SandboxTools } from "@sugabots/core/conversations/tools/sandbox";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventStore } from "@sugabots/core/database/events/store";
 import {
-	agent,
+	bot,
 	collaboration,
 	message,
 	turn,
@@ -23,7 +24,6 @@ import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/da
 import { Notifications } from "@sugabots/core/notifications/notifications";
 import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
-import { noComputers } from "@sugabots/core/sandboxes/testing";
 import { unimplemented } from "@sugabots/core/testing";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
@@ -62,20 +62,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		);
 
 		// The server's tiers, over the test database and a workflow engine in
-		// memory, with the model above and no tools but collaboration. The routine
+		// memory, with the model above and no tools but collaboration. The automation
 		// scheduler, pruning and seeding are left out: nothing here needs them.
 		const runtime = ManagedRuntime.make(
 			ConversationWorkflows.layer.pipe(
 				Layer.provideMerge(
 					Conversations.layer.pipe(
-						Layer.provideMerge(Layer.mergeAll(Turns.signalsLayer, RoutineRuns.layer)),
+						Layer.provideMerge(Layer.mergeAll(Turns.signalsLayer, AutomationRuns.layer)),
 					),
 				),
 				Layer.provide(
 					Layer.mergeAll(
 						Layer.succeed(Models.Service, model),
 						Layer.succeed(BuiltInTools.Service, BuiltInTools.none),
-						Layer.succeed(SandboxTools.Service, SandboxTools.none),
+						Layer.succeed(ComputerTools.Service, ComputerTools.none),
 						Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
 						unimplemented(Notifications.Service, { handler: () => Effect.void }),
 						noComputers,
@@ -117,9 +117,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await onDatabase((db) =>
 				db.insert(workspaceMember).values({ workspaceId: space.id, userId: member.id }),
 			);
-			const crew = await onDatabase((db) =>
+			const bots = await onDatabase((db) =>
 				db
-					.insert(agent)
+					.insert(bot)
 					.values([
 						{
 							workspaceId: space.id,
@@ -141,14 +141,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							createdById: member.id,
 						},
 					])
-					.returning({ id: agent.id, name: agent.name }),
+					.returning({ id: bot.id, name: bot.name }),
 			);
-			const host = crew.find((one) => one.name === "Host");
+			const host = bots.find((one) => one.name === "Host");
 			if (!host) throw new Error("fixture");
 			return { member, host };
 		}
 
-		async function startTask(input: { hostAgentId: string; userId: string; content: string }) {
+		async function startTask(input: { hostBotId: string; userId: string; content: string }) {
 			const asPerson = CurrentActor.provide(
 				CurrentActor.AuthenticatedUserId.vouchedFor(input.userId),
 			);
@@ -156,7 +156,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				Effect.gen(function* () {
 					const chats = yield* Chats.Service;
 					const started = yield* chats.startTask({
-						agentId: input.hostAgentId,
+						botId: input.hostBotId,
 						messageId: crypto.randomUUID(),
 						content: input.content,
 					});
@@ -169,7 +169,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const { member, host } = await aRoom();
 			const started = Date.now();
 			const opened = await startTask({
-				hostAgentId: host.id,
+				hostBotId: host.id,
 				userId: member.id,
 				content: "What pets does Helper have?",
 			});
@@ -181,20 +181,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					db
 						.select({ status: turn.status })
 						.from(turn)
-						.where(and(eq(turn.threadId, opened.id), eq(turn.agentId, host.id))),
+						.where(and(eq(turn.conversationId, opened.id), eq(turn.botId, host.id))),
 				);
 				if (hostTurn?.status === "done") break;
 				await new Promise((resolve) => setTimeout(resolve, 100));
 			}
 			const elapsed = Date.now() - started;
 			const [made] = await onDatabase((db) =>
-				db.select().from(collaboration).where(eq(collaboration.parentThreadId, opened.id)),
+				db.select().from(collaboration).where(eq(collaboration.parentConversationId, opened.id)),
 			);
 			const [reply] = await onDatabase((db) =>
 				db
 					.select({ content: message.content })
 					.from(message)
-					.where(and(eq(message.threadId, opened.id), eq(message.authorAgentId, host.id))),
+					.where(and(eq(message.conversationId, opened.id), eq(message.authorBotId, host.id))),
 			);
 
 			expect(hostTurn?.status).toBe("done");

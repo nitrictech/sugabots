@@ -1,38 +1,38 @@
 import { Turns } from "../turns/turns.ts";
 
 /**
- * Where the Compaction agent cuts a thread when it gets long. Every limit is a
- * share of the window of the model reading the thread.
+ * Where the Compaction bot cuts a conversation when it gets long. Every limit is a
+ * share of the window of the model reading the conversation.
  */
 
-/** Past this share of the window in a turn's prompt, the Compaction agent compacts the thread. */
+/** Past this share of the window in a turn's prompt, the Compaction bot compacts the conversation. */
 const COMPACTION_LINE_SHARE = 0.7;
 
 /** How much of the newest history the bot keeps reading word for word after compacting. */
 const KEPT_SHARE = 0.25;
 
 /**
- * How much of its own window the model compacting a thread may be given to
+ * How much of its own window the model compacting a conversation may be given to
  * summarise. The rest holds its instructions, the previous summary, the
  * summary it writes, and the error in estimating tokens.
  */
 const SUMMARISER_INPUT_SHARE = 0.6;
 
-/** Past this many tokens in a turn's prompt, the Compaction agent compacts the thread. */
+/** Past this many tokens in a turn's prompt, the Compaction bot compacts the conversation. */
 export function compactionLineTokens(windowTokens: number): number {
 	return Math.floor(windowTokens * COMPACTION_LINE_SHARE);
 }
 
 /**
  * Whether a turn whose prompt measured `contextTokens`, read by a model with
- * this window, should have its thread compacted.
+ * this window, should have its conversation compacted.
  */
 export function needsCompaction(contextTokens: number | undefined, windowTokens: number): boolean {
 	return contextTokens !== undefined && contextTokens >= compactionLineTokens(windowTokens);
 }
 
 export interface CompactionPlan<Message> {
-	/** The messages the Compaction agent summarises, oldest first. */
+	/** The messages the Compaction bot summarises, oldest first. */
 	summarised: Message[];
 	/** When the first summarised message was written: history before it is left out. */
 	historyStartsAt: Date;
@@ -41,14 +41,14 @@ export interface CompactionPlan<Message> {
 }
 
 /**
- * Where to cut a thread's history, oldest first: the newest messages are kept
+ * Where to cut a conversation's history, oldest first: the newest messages are kept
  * word for word, and the ones just before them are summarised. Nothing before
  * `previousKeptFrom` is summarised again, since the last compaction already
  * folded it into its summary. Nothing is planned when there is nothing to
  * summarise, such as when the newest messages alone fill what is kept.
  *
  * What is kept and summarised is sized to the window of the bot reading the
- * thread: at the compaction line, the bot read about what is kept plus what is
+ * conversation: at the compaction line, the bot read about what is kept plus what is
  * summarised. What is summarised is also capped to what the model summarising
  * it can read.
  */
@@ -74,7 +74,7 @@ export function planCompaction<Message extends { createdAt: Date; tokens: number
 	const [firstSummarised] = summarised;
 	const [firstKept] = kept;
 	// The newest message before what is kept is always taken, so a single one
-	// larger than the Compaction agent may read leaves it nothing it can summarise.
+	// larger than the Compaction bot may read leaves it nothing it can summarise.
 	if (!firstSummarised || !firstKept || firstSummarised.tokens > summarisedTokens) {
 		return undefined;
 	}

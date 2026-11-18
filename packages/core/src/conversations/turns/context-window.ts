@@ -4,8 +4,8 @@ import type { Executor } from "../../database/database.ts";
 import { providerModel } from "../../database/schema.ts";
 
 /**
- * How much of a model's context window a thread may fill. Every limit is a
- * share of the window of the model reading the thread.
+ * How much of a model's context window a conversation may fill. Every limit is a
+ * share of the window of the model reading the conversation.
  */
 
 /**
@@ -23,9 +23,9 @@ export function contextWindowTokens(contextLength: number | null | undefined): n
 }
 
 /**
- * The most history a turn is shown whether or not the thread has been
+ * The most history a turn is shown whether or not the conversation has been
  * compacted, below the window so the system text, tools and reply still fit.
- * Compaction keeps a thread well under this; it is what stops a thread from
+ * Compaction keeps a conversation well under this; it is what stops a conversation from
  * overflowing when there is no model to compact it with or compaction has
  * not caught up.
  */

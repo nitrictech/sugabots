@@ -1,20 +1,34 @@
 import { handleFromName } from "@sugabots/contracts";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
-import { Artifacts } from "../../artifacts/artifacts.ts";
 import { query } from "../../database/database.ts";
-import { agent, connection, pod, user, workspace, workspaceMember } from "../../database/schema.ts";
+import {
+	bot,
+	channel,
+	connection,
+	user,
+	workspace,
+	workspaceMember,
+} from "../../database/schema.ts";
 import { onDatabase, type Promised } from "../../database/testing.ts";
+import { ConversationFiles } from "../../files/conversation-files.ts";
+import { Files } from "../../files/files.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
-import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
 import type { Chats } from "../chats/chats.ts";
 import { lanesForTests } from "../testing.ts";
-import { ThreadFiles } from "../thread-files/thread-files.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import { type PreparedTurn, TurnExecution, type TurnRun, turnRunFor } from "./execution.ts";
 import { TurnRepository } from "./repository.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
-import { admitTurn, Turn, TurnRequest, turnLane } from "./turn.workflow.ts";
+import {
+	admitTurn,
+	StoredTurn,
+	Turn,
+	type TurnRequest,
+	turnLane,
+	turnOfStored,
+} from "./turn.workflow.ts";
 
 // Turn internals the cases outside `turns/` drive or inspect directly.
 export { modelPrompt } from "./context.ts";
@@ -33,9 +47,9 @@ export const turnInternalsForTests = Layer.mergeAll(
 	TurnRepository.layer,
 	ToolCallRepository.layer,
 	ApprovedToolCalls.layer,
-	AgentRepository.layer,
-	ThreadFiles.layer,
-	Artifacts.authoringLayer,
+	BotRepository.layer,
+	ConversationFiles.layer,
+	Files.authoringLayer,
 );
 
 /*
@@ -48,21 +62,25 @@ export const turnInternalsForTests = Layer.mergeAll(
 export const queueTurnForTests = (request: TurnRequest) =>
 	Effect.flatMap(lanesForTests, (service) => admitTurn(service, request));
 
-/** The turns running in the thread, each as its workflow runs it. */
-export const runningTurns = (threadId: string) =>
+/** The turns running in the conversation, each as its workflow runs it. */
+export const runningTurns = (conversationId: string) =>
 	query((db) =>
 		db
 			.select()
 			.from(lane)
-			.where(and(eq(lane.subject, threadId), eq(lane.workflow, Turn._tag), ne(lane.state, "idle"))),
+			.where(
+				and(eq(lane.subject, conversationId), eq(lane.workflow, Turn._tag), ne(lane.state, "idle")),
+			),
 	).pipe(
 		Effect.flatMap((rows) =>
-			Effect.forEach(rows, (row) => turnRunFor(Schema.decodeUnknownSync(TurnRequest)(row.payload))),
+			Effect.forEach(rows, (row) =>
+				turnRunFor(turnOfStored(Schema.decodeUnknownSync(StoredTurn)(row.payload))),
+			),
 		),
 	);
 
-/** The turns asked for while the agent's turn in the thread runs, oldest first. */
-export const waitingTurns = (lane: Pick<TurnRequest, "threadId" | "agentId">) =>
+/** The turns asked for while the bot's turn in the conversation runs, oldest first. */
+export const waitingTurns = (lane: Pick<TurnRequest, "conversationId" | "botId">) =>
 	Effect.map(
 		query((db) =>
 			db
@@ -71,7 +89,7 @@ export const waitingTurns = (lane: Pick<TurnRequest, "threadId" | "agentId">) =>
 				.where(eq(laneRequest.laneKey, turnLane(lane)))
 				.orderBy(asc(laneRequest.createdAt), asc(laneRequest.id)),
 		),
-		(rows) => rows.map((row) => Schema.decodeUnknownSync(TurnRequest)(row.payload)),
+		(rows) => rows.map((row) => turnOfStored(Schema.decodeUnknownSync(StoredTurn)(row.payload))),
 	);
 
 /** Frees the turn's lane, as its workflow's last step does, starting the turn waiting in it. */
@@ -123,7 +141,7 @@ export async function aChatAwaitingReply(
 	);
 	const [room] = await onDatabase((db) =>
 		db
-			.insert(pod)
+			.insert(channel)
 			.values({
 				workspaceId,
 				name: "Room",
@@ -133,10 +151,10 @@ export async function aChatAwaitingReply(
 			.returning(),
 	);
 	if (!room) throw new Error("fixture");
-	const podId = room.id;
+	const channelId = room.id;
 	const [host] = await onDatabase((db) =>
 		db
-			.insert(agent)
+			.insert(bot)
 			.values({
 				workspaceId,
 				name: `Host ${suffix}`,
@@ -146,7 +164,7 @@ export async function aChatAwaitingReply(
 				model: "m",
 				createdById: memberId,
 			})
-			.returning({ id: agent.id }),
+			.returning({ id: bot.id }),
 	);
 	if (!host) throw new Error("fixture");
 	const [connected] = await onDatabase((db) =>
@@ -154,7 +172,7 @@ export async function aChatAwaitingReply(
 			.insert(connection)
 			.values({
 				workspaceId,
-				agentId: host.id,
+				botId: host.id,
 				name: `Linear ${suffix}`,
 				handle: `linear-${suffix}`,
 				url: "https://linear.example.com/mcp",
@@ -165,17 +183,17 @@ export async function aChatAwaitingReply(
 	);
 	if (!connected) throw new Error("fixture");
 	const started = await chatsAs(memberId).startTask({
-		agentId: host.id,
+		botId: host.id,
 		messageId: crypto.randomUUID(),
 		content: "What does example.com say?",
 	});
 	const opened = started.conversation;
 	return {
 		workspaceId,
-		podId,
+		channelId,
 		memberId,
 		hostId: host.id,
 		connectionId: connected.id,
-		threadId: opened.id,
+		conversationId: opened.id,
 	};
 }

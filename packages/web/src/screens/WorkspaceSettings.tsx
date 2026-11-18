@@ -1,6 +1,6 @@
 import { type Liveliness, livelinessLevels } from "@sugabots/avatars";
 import {
-	type Agent,
+	type Bot,
 	USER_NAME_MAX_LENGTH,
 	WORKSPACE_NAME_MAX_LENGTH,
 	type WorkspaceRole,
@@ -9,10 +9,10 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useChannels } from "@/lib/channels.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useLivelinessChoice } from "@/lib/liveliness.tsx";
 import { SETTINGS_BESIDE, useMediaQuery } from "@/lib/media.ts";
-import { usePods } from "@/lib/pods.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -27,8 +27,8 @@ import {
 	useWorkspaceTimeZone,
 } from "@/lib/workspace.ts";
 import type {
-	AgentSettingsPage as AgentSettingsPageId,
-	PodSettingsPage,
+	BotSettingsPage as BotSettingsPageId,
+	ChannelSettingsPage,
 	WorkspaceSettingSection,
 } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -45,28 +45,24 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import {
-	AgentComputerSettings,
-	AgentConnection,
-	AgentConnectionsSettings,
-} from "./AgentResourcesSettings.tsx";
-import { AgentSettingsPage } from "./AgentSettingsPage.tsx";
+import { BotComputerPage, BotConnection, BotConnectionsSettings } from "./BotResourcesSettings.tsx";
+import { BotSettingsPage } from "./BotSettingsPage.tsx";
+import { ComputerSettings } from "./ComputerSettings.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { NotificationsSettings } from "./NotificationsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
-import { SandboxSettings } from "./SandboxSettings.tsx";
 import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
+import { WorkspaceBotsSettings, WorkspaceChannelsSettings } from "./WorkspaceChannelsSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
-import { WorkspaceBotsSettings, WorkspacePodsSettings } from "./WorkspacePodsSettings.tsx";
 
 export function WorkspaceSettings({
 	section,
-	selectedAgent,
-	selectedPodId,
-	podPage,
-	agentPage,
+	selectedBot,
+	selectedChannelId,
+	channelPage,
+	botPage,
 	selectedConnectionId,
 	connectionSignInError,
 	selectedProviderId,
@@ -75,12 +71,12 @@ export function WorkspaceSettings({
 }: {
 	section: WorkspaceSettingSection;
 	/** A bot open on its own page. */
-	selectedAgent?: Agent;
-	selectedPodId?: string;
+	selectedBot?: Bot;
+	selectedChannelId?: string;
 	/** Which of the selected channel's pages is open. */
-	podPage?: PodSettingsPage;
+	channelPage?: ChannelSettingsPage;
 	/** Which of the selected bot's pages is open. */
-	agentPage?: AgentSettingsPageId;
+	botPage?: BotSettingsPageId;
 	/** The connection of the selected bot open on its own page. */
 	selectedConnectionId?: string;
 	connectionSignInError?: string;
@@ -102,7 +98,7 @@ export function WorkspaceSettings({
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			{section === "providers" && may.manageProviders ? (
-				modelChoice === "system" && may.configureBuiltInAgents ? (
+				modelChoice === "system" && may.configureBuiltInBots ? (
 					<SystemModelSettings />
 				) : modelChoice === "default" ? (
 					<DefaultModelSettings />
@@ -111,30 +107,30 @@ export function WorkspaceSettings({
 				) : (
 					<ModelsSettings />
 				)
-			) : selectedAgent && selectedConnectionId ? (
-				<AgentConnection
+			) : selectedBot && selectedConnectionId ? (
+				<BotConnection
 					key={selectedConnectionId}
-					agent={selectedAgent}
+					bot={selectedBot}
 					connectionId={selectedConnectionId}
 				/>
-			) : selectedAgent && agentPage === "connections" ? (
-				<AgentConnectionsSettings
-					key={selectedAgent.id}
-					agent={selectedAgent}
+			) : selectedBot && botPage === "connections" ? (
+				<BotConnectionsSettings
+					key={selectedBot.id}
+					bot={selectedBot}
 					signInError={connectionSignInError}
 				/>
-			) : selectedAgent && agentPage === "computer" ? (
-				<AgentComputerSettings key={selectedAgent.id} agent={selectedAgent} />
-			) : selectedAgent ? (
-				<AgentSettingsPage key={selectedAgent.id} agent={selectedAgent} />
+			) : selectedBot && botPage === "computer" ? (
+				<BotComputerPage key={selectedBot.id} bot={selectedBot} />
+			) : selectedBot ? (
+				<BotSettingsPage key={selectedBot.id} bot={selectedBot} />
 			) : section === "channels" ? (
-				<WorkspacePodsSettings
-					selectedPodId={selectedPodId}
-					podPage={podPage}
-					canCreatePods={may.createPods}
+				<WorkspaceChannelsSettings
+					selectedChannelId={selectedChannelId}
+					channelPage={channelPage}
+					canCreateChannels={may.createChannels}
 				/>
 			) : section === "bots" ? (
-				<WorkspaceBotsSettings canCreate={may.createAgents} />
+				<WorkspaceBotsSettings canCreate={may.createBots} />
 			) : (
 				<>
 					{section === "general" && (
@@ -168,13 +164,13 @@ export function WorkspaceSettings({
 							)}
 						</SettingsPage>
 					)}
-					{section === "sandboxes" && (
+					{section === "computers" && (
 						<SettingsPage
 							title="Computers"
 							description="Give bots their own computer to run commands, browse and edit files."
 						>
 							{may.manageProviders ? (
-								<SandboxSettings />
+								<ComputerSettings />
 							) : (
 								<Alert>Only workspace administrators can manage computers.</Alert>
 							)}
@@ -202,11 +198,11 @@ export function WorkspaceSettings({
 /** What General says the workspace holds, once both counts have loaded. */
 function workspaceSummary(
 	people: number | undefined,
-	pods: number | undefined,
+	channels: number | undefined,
 ): string | undefined {
-	if (people === undefined || pods === undefined) return undefined;
+	if (people === undefined || channels === undefined) return undefined;
 	const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
-	return `Workspace with ${plural(people, "member")} and ${plural(pods, "channel")}`;
+	return `Workspace with ${plural(people, "member")} and ${plural(channels, "channel")}`;
 }
 
 function GeneralSettings({
@@ -220,9 +216,9 @@ function GeneralSettings({
 }) {
 	const { workspace } = useWorkspace();
 	const { data: members } = useWorkspaceMembers(workspace?.id);
-	const { data: pods } = usePods();
+	const { data: channels } = useChannels();
 	const [choosingTimeZone, setChoosingTimeZone] = useState(false);
-	// Loaded with the page, so the dialog opens with its routines note already in place.
+	// Loaded with the page, so the dialog opens with its automations note already in place.
 	useWorkspaceTimeZone(workspace?.id ?? "", canUpdate && workspace !== undefined);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const deleteWorkspace = useDeleteWorkspace();
@@ -240,7 +236,7 @@ function GeneralSettings({
 	}
 
 	return (
-		<SettingsPage title="General" description={workspaceSummary(members?.length, pods?.length)}>
+		<SettingsPage title="General" description={workspaceSummary(members?.length, channels?.length)}>
 			<SettingsGroup>
 				{canUpdate ? (
 					// Keeps the slug: it is in every link to the workspace, which nothing redirects from.
@@ -256,7 +252,7 @@ function GeneralSettings({
 				)}
 				<SettingsRow
 					label="Time zone"
-					sub="Routines run on this clock"
+					sub="Automations run on this clock"
 					trailing={<SettingsValue>{workspace.timeZone}</SettingsValue>}
 					chevron={canUpdate}
 					onClick={canUpdate ? () => setChoosingTimeZone(true) : undefined}

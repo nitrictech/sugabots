@@ -1,10 +1,10 @@
 import {
-	type Channel,
 	conversationNotificationTag,
 	handleFromName,
 	type Message,
 	type NotificationPreferences,
 	personChannel,
+	type StreamChannel,
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
@@ -13,18 +13,18 @@ import { Effect, Exit, Layer, Scope } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CurrentActor } from "../authorization/current-actor.ts";
 import { ConversationEvent } from "../conversations/events.ts";
+import { seedConversation } from "../conversations/seed.test-support.ts";
 import { transaction } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
 import {
-	agent,
+	automation,
+	automationRun,
+	bot as botTable,
+	channel,
+	channelBot,
+	channelMember,
+	conversationParticipant,
 	message,
-	pod,
-	podAgent,
-	podMember,
-	routine,
-	routineExecution,
-	thread,
-	threadParticipant,
 	toolCall,
 	turn,
 	user,
@@ -48,13 +48,13 @@ function preferences(chosen: Partial<NotificationPreferences>): NotificationPref
 		pausedUntil: null,
 		quietHours: null,
 		turnFailures: true,
-		routineRuns: "failures",
+		automationRuns: "failures",
 		...chosen,
 	};
 }
 
 /** What the service published on the bus, for every test in the file. */
-const published: { channel: Channel; event: StreamEvent }[] = [];
+const published: { channel: StreamChannel; event: StreamEvent }[] = [];
 
 /**
  * The service over the test database's own pool, publishing to `published`,
@@ -123,8 +123,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 	let workspaceId: string;
 	let workspaceSlug: string;
-	let podId: string;
-	let podSlug: string;
+	let channelId: string;
+	let channelSlug: string;
 	let botId: string;
 	let people: Record<"ada" | "bob" | "cy" | "outsider", { id: string; name: string }>;
 
@@ -165,29 +165,29 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values(rows.map((person) => ({ workspaceId, userId: person.id }))),
 		);
-		podSlug = `pod-${suffix}`;
+		channelSlug = `channel-${suffix}`;
 		const [room] = await onDatabase((db) =>
 			db
-				.insert(pod)
+				.insert(channel)
 				.values({
 					workspaceId,
 					name: "Launch",
-					slug: podSlug,
+					slug: channelSlug,
 					createdById: ada.id,
 				})
 				.returning(),
 		);
 		if (!room) throw new Error("Could not create the channel");
-		podId = room.id;
+		channelId = room.id;
 		// Everybody but the outsider is in the channel.
 		await onDatabase((db) =>
 			db
-				.insert(podMember)
-				.values([ada, bob, cy].map((person) => ({ workspaceId, podId, userId: person.id }))),
+				.insert(channelMember)
+				.values([ada, bob, cy].map((person) => ({ workspaceId, channelId, userId: person.id }))),
 		);
 		const [bot] = await onDatabase((db) =>
 			db
-				.insert(agent)
+				.insert(botTable)
 				.values({
 					workspaceId,
 					name: "Scout",
@@ -201,41 +201,41 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		);
 		if (!bot) throw new Error("Could not create the bot");
 		botId = bot.id;
-		await onDatabase((db) => db.insert(podAgent).values({ workspaceId, podId, agentId: botId }));
+		await onDatabase((db) =>
+			db.insert(channelBot).values({ workspaceId, channelId, botId: botId }),
+		);
 	});
 
 	const conversationWithBot = async (participants: readonly string[]) => {
 		const id = crypto.randomUUID();
 		await onDatabase((db) =>
-			db.insert(thread).values({
+			seedConversation(db, {
 				id,
 				workspaceId,
-				hostAgentId: botId,
-				conversationId: id,
-				type: "conversation",
+				kind: "task",
+				botId,
 				title: "Release notes",
 			}),
 		);
 		await onDatabase((db) =>
 			db
-				.insert(threadParticipant)
+				.insert(conversationParticipant)
 				.values([
-					{ threadId: id, agentId: botId },
-					...participants.map((userId) => ({ threadId: id, userId })),
+					{ conversationId: id, botId: botId },
+					...participants.map((userId) => ({ conversationId: id, userId })),
 				]),
 		);
 		return id;
 	};
 
-	const podChat = async () => {
+	const channelConversation = async () => {
 		const id = crypto.randomUUID();
 		await onDatabase((db) =>
-			db.insert(thread).values({
+			seedConversation(db, {
 				id,
 				workspaceId,
-				podId,
-				conversationId: id,
-				type: "pod_chat",
+				kind: "channel_conversation",
+				channelId,
 				title: "Launch",
 				main: true,
 			}),
@@ -248,7 +248,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	 * the channel asks, unless a test says who did.
 	 */
 	const botReplied = async (
-		threadId: string,
+		conversationId: string,
 		content: string,
 		askedBy: { id: string } = people.outsider,
 	) => {
@@ -256,7 +256,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(message).values({
 				id: asked,
-				threadId,
+				conversationId: conversationId,
 				authorUserId: askedBy.id,
 				kind: "text",
 				status: "complete",
@@ -268,8 +268,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(turn).values({
 				id: turnId,
-				threadId,
-				agentId: botId,
+				conversationId: conversationId,
+				botId: botId,
 				triggerMessageId: asked,
 				status: "done",
 				model: "test/model",
@@ -277,10 +277,10 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			}),
 		);
 		return ConversationEvent.TurnCompleted({
-			threadId,
+			conversationId,
 			workspaceId,
 			turnId,
-			agentId: botId,
+			botId: botId,
 			messageId: crypto.randomUUID(),
 			content,
 			contextTokens: undefined,
@@ -290,13 +290,13 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	};
 
 	const personPosted = (
-		threadId: string,
+		conversationId: string,
 		author: { id: string; name: string },
 		content: string,
 		more: Partial<Message> = {},
 	) =>
 		ConversationEvent.MessagePosted({
-			threadId,
+			conversationId,
 			workspaceId,
 			message: {
 				id: crypto.randomUUID(),
@@ -323,7 +323,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		);
 
 	it("tells a person they were mentioned in a channel, linking to the message", async () => {
-		const chat = await podChat();
+		const chat = await channelConversation();
 		const posted = personPosted(
 			chat,
 			people.ada,
@@ -337,7 +337,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				title: `${people.ada.name} mentioned you in Launch`,
 				body: `@${handleFromName(people.bob.name)} can you look at the launch checklist?`,
 				tag: `conversation:${chat}`,
-				path: `/${workspaceSlug}/channels/${podSlug}/${chat}?message=${posted.message.id}`,
+				path: `/${workspaceSlug}/channels/${channelSlug}/${chat}?message=${posted.message.id}`,
 				conversationId: chat,
 			},
 		]);
@@ -349,7 +349,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	it.each(["@here the launch moved to Friday", "@channel the launch moved to Friday"])(
 		"tells everyone in the channel of a person's %s, but not the author or an outsider",
 		async (text) => {
-			const chat = await podChat();
+			const chat = await channelConversation();
 
 			await emit(personPosted(chat, people.ada, text));
 
@@ -378,7 +378,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	});
 
 	it("tells a person of a reply to their message in a channel, and names a file shared without text", async () => {
-		const chat = await podChat();
+		const chat = await channelConversation();
 		const asked = personPosted(chat, people.bob, "Who has the launch checklist?");
 
 		await emit(
@@ -409,24 +409,24 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	});
 
 	it("names the files an automation's result shares without text in a channel", async () => {
-		const chat = await podChat();
+		const chat = await channelConversation();
 		await chooseLevel(people.bob.id, "all");
 		const resultSharing = (titles: readonly string[]) =>
 			ConversationEvent.MessagePosted({
-				threadId: chat,
+				conversationId: chat,
 				workspaceId,
 				message: {
 					id: crypto.randomUUID(),
 					content: "",
 					parts: titles.map((title) => ({
-						type: "artifact",
-						artifactId: crypto.randomUUID(),
+						type: "written_file",
+						fileId: crypto.randomUUID(),
 						kind: "html",
 						title,
 						version: 1,
 					})),
 					author: {
-						kind: "agent",
+						kind: "bot",
 						id: botId,
 						name: "Scout",
 						handle: "scout",
@@ -442,7 +442,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 		expect(await deliveredTo(people.bob.id)).toEqual([
 			expect.objectContaining({ body: "Shared Weekly traction" }),
-			expect.objectContaining({ body: "Shared 2 artifacts" }),
+			expect.objectContaining({ body: "Shared 2 files" }),
 		]);
 	});
 
@@ -512,12 +512,12 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	});
 
 	it("lets a channel's level quiet its bots, and a bot's level win over it", async () => {
-		const chat = await podChat();
+		const chat = await channelConversation();
 		for (const person of [people.ada, people.bob]) {
 			await as(
 				person.id,
 				Effect.flatMap(Notifications.Service, (service) =>
-					service.setLevel({ kind: "pod", id: podId }, "nothing"),
+					service.setLevel({ kind: "channel", id: channelId }, "nothing"),
 				),
 			);
 		}
@@ -535,7 +535,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	});
 
 	it("quiets a muted bot's replies in a channel, and not what people post there", async () => {
-		const chat = await podChat();
+		const chat = await channelConversation();
 		await chooseLevel(people.bob.id, "all");
 		await as(
 			people.bob.id,
@@ -583,7 +583,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	});
 
 	it("quiets every bot in a channel muted for a while, even one with a level of its own", async () => {
-		const chat = await podChat();
+		const chat = await channelConversation();
 		for (const person of [people.ada, people.bob]) {
 			await as(
 				person.id,
@@ -595,7 +595,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await as(
 			people.bob.id,
 			Effect.flatMap(Notifications.Service, (service) =>
-				service.mute({ kind: "pod", id: podId }, new Date(Date.now() + 60_000)),
+				service.mute({ kind: "channel", id: channelId }, new Date(Date.now() + 60_000)),
 			),
 		);
 
@@ -606,78 +606,71 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	});
 
 	/**
-	 * A run of one of the bot's routines, in a thread of its own, which Ada
-	 * started, of a routine `createdById` made, ended as `ended` when given.
+	 * A run of one of the bot's automations, in a conversation of its own, which Ada
+	 * started, of an automation `createdById` made, ended as `ended` when given.
 	 */
-	const routineRunElsewhere = async (
+	const automationRunElsewhere = async (
 		ended?: { state: "completed" | "failed"; error?: UserText },
 		createdById?: string,
 		name = "Digest",
 	) => {
 		const [defined] = await onDatabase((db) =>
 			db
-				.insert(routine)
+				.insert(automation)
 				.values({
 					workspaceId,
-					agentId: botId,
+					botId: botId,
 					name,
 					instructions: "Summarise",
 					createdById,
 				})
 				.returning(),
 		);
-		if (!defined) throw new Error("Could not create the routine");
-		const threadId = crypto.randomUUID();
-		await onDatabase((db) =>
-			db.insert(thread).values({
-				id: threadId,
-				workspaceId,
-				hostAgentId: botId,
-				type: "routine",
-				title: "Digest",
-			}),
-		);
+		if (!defined) throw new Error("Could not create the automation");
 		const requestId = crypto.randomUUID();
-		await onDatabase((db) =>
-			db.insert(routineExecution).values({
-				routineId: defined.id,
+		const run = await onDatabase((db) =>
+			seedConversation(db, {
 				workspaceId,
-				agentId: botId,
-				threadId,
-				triggerKind: "manual",
-				triggerIdentity: requestId,
-				trigger: {
-					kind: "manual",
-					requestId,
-					requestedAt: new Date().toISOString(),
-					requestedByUserId: people.ada.id,
+				kind: "run",
+				title: "Digest",
+				run: {
+					automationId: defined.id,
+					botId: botId,
+					triggerKind: "manual",
+					triggerIdentity: requestId,
+					trigger: {
+						kind: "manual",
+						requestId,
+						requestedAt: new Date().toISOString(),
+						requestedByUserId: people.ada.id,
+					},
+					automationName: "Digest",
+					instructions: "Summarise",
+					...(ended && {
+						state: ended.state,
+						error: ended.error,
+						startedAt: new Date(),
+						finishedAt: new Date(),
+					}),
 				},
-				routineName: "Digest",
-				instructions: "Summarise",
-				...(ended && {
-					state: ended.state,
-					error: ended.error,
-					startedAt: new Date(),
-					finishedAt: new Date(),
-				}),
 			}),
 		);
-		return threadId;
+		return run.id;
 	};
 
-	const runSettled = (threadId: string) =>
-		ConversationEvent.RoutineExecutionSettled({
+	const runSettled = (conversationId: string) =>
+		ConversationEvent.RunSettled({
 			workspaceId,
-			conversationId: threadId,
-			threadId,
+			rootConversationId: conversationId,
+			conversationId,
 		});
 
 	it("tells the person who made an automation and the one who ran it when a run fails, and not when it finishes", async () => {
-		const failedRun = await routineRunElsewhere(
+		const failedRun = await automationRunElsewhere(
 			{ state: "failed", error: userText`The calendar could not be read.` },
 			people.bob.id,
 		);
-		const finishedRun = await routineRunElsewhere(
+		const finishedRun = await automationRunElsewhere(
 			{ state: "completed" },
 			people.bob.id,
 			"Briefing",
@@ -688,8 +681,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		const failure = {
 			title: "Digest failed",
 			body: "The calendar could not be read.",
-			tag: `routine:${failedRun}`,
-			path: `/${workspaceSlug}/tasks/${failedRun}?threadPage=${failedRun}`,
+			tag: `automation:${failedRun}`,
+			path: `/${workspaceSlug}/tasks/${failedRun}?itemPage=${failedRun}`,
 			conversationId: failedRun,
 		};
 		expect(await deliveredTo(people.bob.id)).toEqual([failure]);
@@ -698,11 +691,11 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	});
 
 	it("tells somebody of every run of their automation when they chose to", async () => {
-		const run = await routineRunElsewhere({ state: "completed" }, people.bob.id);
+		const run = await automationRunElsewhere({ state: "completed" }, people.bob.id);
 		await as(
 			people.bob.id,
 			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(preferences({ routineRuns: "all" })),
+				service.updatePreferences(preferences({ automationRuns: "all" })),
 			),
 		);
 
@@ -714,36 +707,33 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(people.ada.id)).toEqual([]);
 	});
 
-	it("tells those an automation's result mentions in its automation's thread, unless it went to a channel as well", async () => {
-		const runThread = await routineRunElsewhere({ state: "completed" }, people.bob.id);
+	it("tells those an automation's result mentions in its automation's feed, unless it went to a channel as well", async () => {
+		const runConversation = await automationRunElsewhere({ state: "completed" }, people.bob.id);
 		const [run] = await onDatabase((db) =>
 			db
-				.select({ id: routineExecution.id, routineId: routineExecution.routineId })
-				.from(routineExecution)
-				.where(eq(routineExecution.threadId, runThread)),
+				.select({ id: automationRun.id, automationId: automationRun.automationId })
+				.from(automationRun)
+				.where(eq(automationRun.conversationId, runConversation)),
 		);
 		if (!run) throw new Error("fixture");
-		const feed = crypto.randomUUID();
-		await onDatabase((db) =>
-			db.insert(thread).values({
-				id: feed,
+		const { id: feed } = await onDatabase((db) =>
+			seedConversation(db, {
 				workspaceId,
-				hostAgentId: botId,
-				routineId: run.routineId,
-				type: "routine_feed",
+				kind: "automation_feed",
+				automationId: run.automationId,
 				title: "Digest",
 			}),
 		);
 		await chooseLevel(people.cy.id, "all");
 		const content = `@${handleFromName(people.ada.name)} the calendar needs reconnecting.`;
-		const resultPosted = async (threadId: string) => {
+		const resultPosted = async (conversationId: string) => {
 			const id = crypto.randomUUID();
 			await onDatabase((db) =>
 				db.insert(message).values({
 					id,
-					threadId,
-					authorAgentId: botId,
-					routineExecutionId: run.id,
+					conversationId: conversationId,
+					authorBotId: botId,
+					runId: run.id,
 					kind: "text",
 					status: "complete",
 					parts: [{ type: "text", text: content }],
@@ -751,14 +741,14 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				}),
 			);
 			return ConversationEvent.MessagePosted({
-				threadId,
+				conversationId,
 				workspaceId,
 				message: {
 					id,
 					content,
 					parts: [{ type: "text", text: content }],
 					author: {
-						kind: "agent",
+						kind: "bot",
 						id: botId,
 						name: "Scout",
 						handle: "scout",
@@ -766,11 +756,11 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 						face: "pill",
 						shape: "circle",
 					},
-					routineResultOf: {
-						executionId: run.id,
-						threadId: runThread,
-						routineId: run.routineId,
-						routineName: "Digest",
+					automationResultOf: {
+						runId: run.id,
+						conversationId: runConversation,
+						automationId: run.automationId,
+						automationName: "Digest",
 					},
 				} as Message,
 			});
@@ -784,15 +774,15 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				title: "Scout mentioned you in Digest",
 				body: content,
 				tag: conversationNotificationTag(feed),
-				path: `/${workspaceSlug}/tasks/${feed}?threadPage=${runThread}`,
+				path: `/${workspaceSlug}/tasks/${feed}?itemPage=${runConversation}`,
 				conversationId: feed,
 			},
 		]);
-		// Everything is what is said in chats; a routine's thread speaks up only for those it mentions.
+		// Everything is what is said in chats; an automation's feed speaks up only for those it mentions.
 		expect(sentTo(people.cy.id)).toEqual([]);
 
 		published.length = 0;
-		const chat = await podChat();
+		const chat = await channelConversation();
 		const inChat = await resultPosted(chat);
 		await emit(inFeed, inChat);
 
@@ -808,7 +798,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			await onDatabase((db) =>
 				db.insert(message).values({
 					id: asked,
-					threadId: conversation,
+					conversationId: conversation,
 					authorUserId: asker.id,
 					kind: "text",
 					status: "complete",
@@ -820,8 +810,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			await onDatabase((db) =>
 				db.insert(turn).values({
 					id: turnId,
-					threadId: conversation,
-					agentId: botId,
+					conversationId: conversation,
+					botId: botId,
 					triggerMessageId: asked,
 					status: "failed",
 					model: "test/model",
@@ -829,10 +819,10 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				}),
 			);
 			return ConversationEvent.TurnFailed({
-				threadId: conversation,
+				conversationId: conversation,
 				workspaceId,
 				turnId,
-				agentId: botId,
+				botId: botId,
 				messageId: crypto.randomUUID(),
 				userMessage: userText`The model is unavailable.`,
 				willRetry: false,
@@ -859,10 +849,10 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	it("asks the people who may decide a bot's tool call to approve it", async () => {
 		// Only Ada, who made it, reaches a private bot, so only she may decide its calls.
 		await onDatabase((db) =>
-			db.update(agent).set({ visibility: "private" }).where(eq(agent.id, botId)),
+			db.update(botTable).set({ visibility: "private" }).where(eq(botTable.id, botId)),
 		);
-		// A routine run elsewhere must not make this call one raised during a run.
-		await routineRunElsewhere();
+		// An automation run elsewhere must not make this call one raised during a run.
+		await automationRunElsewhere();
 		const conversation = await conversationWithBot([people.ada.id]);
 		const triggerId = crypto.randomUUID();
 		const replyId = crypto.randomUUID();
@@ -871,7 +861,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(message).values({
 				id: triggerId,
-				threadId: conversation,
+				conversationId: conversation,
 				authorUserId: people.ada.id,
 				kind: "text",
 				status: "complete",
@@ -882,8 +872,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(turn).values({
 				id: turnId,
-				threadId: conversation,
-				agentId: botId,
+				conversationId: conversation,
+				botId: botId,
 				triggerMessageId: triggerId,
 				status: "waiting",
 				model: "test/model",
@@ -893,8 +883,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(message).values({
 				id: replyId,
-				threadId: conversation,
-				authorAgentId: botId,
+				conversationId: conversation,
+				authorBotId: botId,
 				kind: "text",
 				status: "complete",
 				parts: [],
@@ -905,7 +895,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(toolCall).values({
 				id: callId,
-				threadId: conversation,
+				conversationId: conversation,
 				messageId: replyId,
 				turnId,
 				tool: "post_message",
@@ -915,7 +905,9 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			}),
 		);
 
-		await emit(ConversationEvent.TurnSuspended({ threadId: conversation, workspaceId, turnId }));
+		await emit(
+			ConversationEvent.TurnSuspended({ conversationId: conversation, workspaceId, turnId }),
+		);
 
 		expect(await deliveredTo(people.ada.id)).toEqual([
 			{

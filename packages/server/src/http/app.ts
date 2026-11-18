@@ -16,26 +16,26 @@ import {
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
-import { agentSandboxRoutes } from "../routes/agent-sandbox/routes.ts";
-import { agentRoutes } from "../routes/agents/routes.ts";
-import { artifactRoutes } from "../routes/artifacts/routes.ts";
+import { approvalRoutes } from "../routes/approvals/routes.ts";
+import { automationRoutes } from "../routes/automations/routes.ts";
+import { botComputerRoutes } from "../routes/bot-computer/routes.ts";
+import { botRoutes } from "../routes/bots/routes.ts";
+import { channelRoutes } from "../routes/channels/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
+import { computerProviderRoutes } from "../routes/computer-providers/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
+import { conversationRoutes } from "../routes/conversations/routes.ts";
 import { eventRoutes } from "../routes/events/routes.ts";
+import { fileRoutes } from "../routes/files/routes.ts";
 import { gitHubConnectionRoutes, gitHubWebhookRoutes } from "../routes/github/routes.ts";
 import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
 import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
 import { notificationRoutes } from "../routes/notifications/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
-import { podRoutes } from "../routes/pods/routes.ts";
 import { referralRoutes } from "../routes/referrals/routes.ts";
-import { routineRoutes } from "../routes/routines/routes.ts";
-import { sandboxProviderRoutes } from "../routes/sandbox-providers/routes.ts";
 import { searchProviderRoutes } from "../routes/search-providers/routes.ts";
 import { systemRoutes } from "../routes/system/routes.ts";
-import { systemAgentRoutes } from "../routes/system-agents/routes.ts";
-import { threadRoutes } from "../routes/threads/routes.ts";
-import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
+import { systemBotRoutes } from "../routes/system-bots/routes.ts";
 import { usageRoutes } from "../routes/usage/routes.ts";
 import { workspaceRoutes } from "../routes/workspaces/routes.ts";
 import { ServerApi } from "./api.ts";
@@ -83,22 +83,22 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				workspaceRoutes,
 				eventRoutes,
 				onboardingRoutes,
-				podRoutes,
-				systemAgentRoutes,
+				channelRoutes,
+				systemBotRoutes,
 				modelTrialRoutes,
 				modelProviderRoutes,
 				searchProviderRoutes,
-				sandboxProviderRoutes,
-				agentSandboxRoutes,
+				computerProviderRoutes,
+				botComputerRoutes,
 				gitHubConnectionRoutes,
 				gitHubWebhookRoutes,
 				connectionRoutes,
-				artifactRoutes,
-				agentRoutes,
+				fileRoutes,
+				botRoutes,
 				chatRoutes,
-				routineRoutes,
-				toolApprovalRoutes,
-				threadRoutes,
+				automationRoutes,
+				approvalRoutes,
+				conversationRoutes,
 				usageRoutes,
 				referralRoutes,
 				notificationRoutes,

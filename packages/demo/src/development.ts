@@ -1,16 +1,18 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { ComputerCredentials } from "@sugabots/core/computers/computer-credentials";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
-import { agent, pod, workspace } from "@sugabots/core/database/schema";
+import { bot as botTable, channel, workspace } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
-import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
-import { PersonalAssistants } from "@sugabots/core/workspaces/agents/personal-assistants";
+import { Egress } from "@sugabots/core/providers/network/egress";
+import { BotRepository } from "@sugabots/core/workspaces/bots/bot-repository";
+import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
+import { ChannelRepository } from "@sugabots/core/workspaces/channels/channel-repository";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, type SQL } from "drizzle-orm";
 import { Effect, Layer } from "effect";
@@ -39,8 +41,8 @@ const seed = Effect.gen(function* () {
 	}
 	const membership = yield* Membership.Service;
 	const personalAssistants = yield* PersonalAssistants.Service;
-	const pods = yield* PodRepository.Service;
-	const agents = yield* AgentRepository.Service;
+	const channels = yield* ChannelRepository.Service;
+	const bots = yield* BotRepository.Service;
 	const personId = yield* ensureAccount({ name: "Development", email: EMAIL, password: PASSWORD });
 
 	// Made the way the app makes one, so it has its system bots, search
@@ -60,12 +62,12 @@ const seed = Effect.gen(function* () {
 	// Already made with a new workspace; this makes it when a run before
 	// the Personal Assistant existed made the workspace.
 	yield* personalAssistants.provision({ workspaceId, userId: personId });
-	const supportId = yield* pods
+	const supportId = yield* channels
 		.create(workspaceId, { creatorId: personId, name: "Support", slug: "support" })
 		.pipe(
 			Effect.map((created) => created.id),
-			Effect.catchTag("PodSlugTaken", () =>
-				idOf(pod, and(eq(pod.workspaceId, workspaceId), eq(pod.slug, "support"))),
+			Effect.catchTag("ChannelSlugTaken", () =>
+				idOf(channel, and(eq(channel.workspaceId, workspaceId), eq(channel.slug, "support"))),
 			),
 		);
 
@@ -98,15 +100,15 @@ const seed = Effect.gen(function* () {
 		},
 	]) {
 		const { channelId, ...bot } = seedling;
-		const botId = yield* agents
-			.create(workspaceId, { createdById: personId, agent: { ...bot, model } })
+		const botId = yield* bots
+			.create(workspaceId, { createdById: personId, bot: { ...bot, model } })
 			.pipe(
 				Effect.map((created) => created.id),
-				Effect.catchTag("AgentNameTaken", () =>
-					idOf(agent, and(eq(agent.workspaceId, workspaceId), eq(agent.name, bot.name))),
+				Effect.catchTag("BotNameTaken", () =>
+					idOf(botTable, and(eq(botTable.workspaceId, workspaceId), eq(botTable.name, bot.name))),
 				),
 			);
-		if (channelId) yield* pods.addBot(workspaceId, channelId, botId);
+		if (channelId) yield* channels.addBot(workspaceId, channelId, botId);
 	}
 
 	console.log(`workspace dev, administered by ${EMAIL} (password: ${PASSWORD})`);
@@ -114,7 +116,7 @@ const seed = Effect.gen(function* () {
 });
 
 /** The id of the one row of `table` matching `where`, which a previous run made. */
-const idOf = (table: typeof workspace | typeof pod | typeof agent, where: SQL | undefined) =>
+const idOf = (table: typeof workspace | typeof channel | typeof botTable, where: SQL | undefined) =>
 	Effect.flatMap(
 		query((db) => db.select({ id: table.id }).from(table).where(where).limit(1)),
 		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error("A seeded row is missing"))),
@@ -127,13 +129,16 @@ seed.pipe(
 			Authentication.layer,
 			Membership.layer,
 			PersonalAssistants.layer,
-			PodRepository.layer,
-			AgentRepository.layer,
+			ChannelRepository.layer,
+			BotRepository.layer,
 		).pipe(
 			Layer.provideMerge(
 				Layer.mergeAll(
 					Ids.layer,
 					Credentials.layer,
+					// Leaving and deleting go through the bots' computers; the seed never makes one.
+					Egress.layer,
+					ComputerCredentials.none,
 					seedAccountsLayer,
 					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
 				).pipe(Layer.provideMerge(Installation.layer), Layer.provideMerge(databaseLayer)),

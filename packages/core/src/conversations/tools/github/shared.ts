@@ -1,24 +1,24 @@
 import { and, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { type Database, query, type RunEffect } from "../../../database/database.ts";
-import { agent, toolCall, user } from "../../../database/schema.ts";
+import { bot, toolCall, user } from "../../../database/schema.ts";
 import {
 	BOT_BRANCH_PREFIX,
 	type Connected,
 } from "../../../providers/connections/github/connected.ts";
 
-/** What every tool of a pod's GitHub connection works with in a turn. */
+/** What every tool of a bot's GitHub connection works with in a turn. */
 export type ToolContext = ReturnType<typeof toolContext>;
 
 export function toolContext({
 	connected,
 	turnId,
-	agentId,
+	botId,
 	run,
 }: {
 	connected: Connected;
 	turnId: string;
-	agentId: string;
+	botId: string;
 	run: RunEffect<Database>;
 }) {
 	const repositorySchema = Schema.String.check(
@@ -46,7 +46,7 @@ export function toolContext({
 	 * wrote passes back what it read, signed.
 	 */
 	const sign = (toolCallId: string, did: string, body: string) =>
-		Effect.map(attribution({ agentId, turnId, sdkToolCallId: toolCallId }, did), (signature) => {
+		Effect.map(attribution({ botId, turnId, sdkToolCallId: toolCallId }, did), (signature) => {
 			const unsigned = body.replace(TRAILING_SIGNATURE, "");
 			return unsigned ? `${unsigned}${SIGNATURE_DIVIDER}${signature}` : signature;
 		});
@@ -123,13 +123,10 @@ export const commentBodySchema = Schema.String.check(
  * The line under what a bot wrote on GitHub, such as a pull request's
  * description: which bot `did` it, and who allowed it.
  */
-const attribution = (
-	call: { agentId: string; turnId: string; sdkToolCallId: string },
-	did: string,
-) =>
+const attribution = (call: { botId: string; turnId: string; sdkToolCallId: string }, did: string) =>
 	Effect.gen(function* () {
 		const [opener] = yield* query((db) =>
-			db.select({ name: agent.name }).from(agent).where(eq(agent.id, call.agentId)),
+			db.select({ name: bot.name }).from(bot).where(eq(bot.id, call.botId)),
 		);
 		const [decider] = yield* query((db) =>
 			db
@@ -141,8 +138,8 @@ const attribution = (
 				)
 				.limit(1),
 		);
-		const bot = opener ? `**${opener.name}**, a bot in Sugabots,` : "A bot in Sugabots";
-		return decider ? `${bot} ${did}, which ${decider.name} allowed.` : `${bot} ${did}.`;
+		const actor = opener ? `**${opener.name}**, a bot in Sugabots,` : "A bot in Sugabots";
+		return decider ? `${actor} ${did}, which ${decider.name} allowed.` : `${actor} ${did}.`;
 	});
 
 /** What divides what a bot wrote from its {@link attribution}. */

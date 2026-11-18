@@ -15,8 +15,8 @@ import { uuidSchema } from "../../uuid.ts";
 import { BadRequest, Conflict, NotFound, refused, Unauthorized } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
-const agent = { agentId: uuidSchema };
-const connected = { agentId: uuidSchema, connectionId: uuidSchema };
+const bot = { botId: uuidSchema };
+const connected = { botId: uuidSchema, connectionId: uuidSchema };
 
 /**
  * A bot's GitHub app: making it, installing it on the account the bot works
@@ -24,49 +24,41 @@ const connected = { agentId: uuidSchema, connectionId: uuidSchema };
  */
 export class GitHubConnectionsApi extends HttpApiGroup.make("gitHubConnections")
 	.add(
-		HttpApiEndpoint.post("start", "/agents/:agentId/github", {
-			params: agent,
+		HttpApiEndpoint.post("start", "/bots/:botId/github", {
+			params: bot,
 			payload: newGitHubAppSchema,
 			success: gitHubAppFormSchema,
 			error: [BadRequest, Conflict, ...refused],
 		}),
-		HttpApiEndpoint.post(
-			"installUrl",
-			"/agents/:agentId/connections/:connectionId/github/install",
-			{
-				params: connected,
-				success: gitHubAppInstallSchema,
-				error: [NotFound, ...refused],
-			},
-		),
+		HttpApiEndpoint.post("installUrl", "/bots/:botId/connections/:connectionId/github/install", {
+			params: connected,
+			success: gitHubAppInstallSchema,
+			error: [NotFound, ...refused],
+		}),
 		HttpApiEndpoint.get(
 			"reachableRepositories",
-			"/agents/:agentId/connections/:connectionId/github/reachable",
+			"/bots/:botId/connections/:connectionId/github/reachable",
 			{
 				params: connected,
 				success: Schema.Array(accountRepositorySchema),
 				error: [BadRequest, NotFound, ...refused],
 			},
 		),
-		HttpApiEndpoint.get("repositories", "/agents/:agentId/connections/:connectionId/repositories", {
+		HttpApiEndpoint.get("repositories", "/bots/:botId/connections/:connectionId/repositories", {
 			params: connected,
 			success: connectionRepositoriesSchema,
 			error: [NotFound, ...refused],
 		}),
-		HttpApiEndpoint.post(
-			"addRepository",
-			"/agents/:agentId/connections/:connectionId/repositories",
-			{
-				params: connected,
-				payload: connectionRepositoryChangeSchema,
-				success: connectionRepositoriesSchema,
-				error: [BadRequest, NotFound, ...refused],
-			},
-		),
+		HttpApiEndpoint.post("addRepository", "/bots/:botId/connections/:connectionId/repositories", {
+			params: connected,
+			payload: connectionRepositoryChangeSchema,
+			success: connectionRepositoriesSchema,
+			error: [BadRequest, NotFound, ...refused],
+		}),
 		// A repository's path has a slash in it, so it goes in the body.
 		HttpApiEndpoint.post(
 			"removeRepository",
-			"/agents/:agentId/connections/:connectionId/repositories/remove",
+			"/bots/:botId/connections/:connectionId/repositories/remove",
 			{
 				params: connected,
 				payload: connectionRepositoryChangeSchema,

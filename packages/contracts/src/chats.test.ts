@@ -4,7 +4,7 @@ import {
 	chatHistoryPageSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
-	customerThreadTypeSchema,
+	itemConversationKindSchema,
 	MAX_CHAT_PAGE_LIMIT,
 } from "./chats.ts";
 
@@ -20,11 +20,11 @@ describe("chat contracts", () => {
 		).toBe("Failure");
 	});
 
-	it.each(["chat", "system_agent"])("keeps %s threads out of customer-facing history", (type) => {
+	it.each(["chat", "system"])("keeps %s conversations out of customer-facing history", (kind) => {
 		const internalEntry = {
-			threadId: ID,
-			parentThreadId: null,
-			type,
+			conversationId: ID,
+			parentConversationId: null,
+			kind,
 			title: "Summary",
 			participants: [],
 			status: "completed",
@@ -38,19 +38,19 @@ describe("chat contracts", () => {
 		).toBe("Failure");
 	});
 
-	it.each(["collaboration", "routine"])("accepts customer thread type %s", (type) => {
-		expect(Schema.decodeUnknownSync(customerThreadTypeSchema)(type)).toBe(type);
+	it.each(["collaboration", "run"])("accepts item conversation kind %s", (type) => {
+		expect(Schema.decodeUnknownSync(itemConversationKindSchema)(type)).toBe(type);
 	});
 
-	it("accepts a Routine run in the Chat timeline", () => {
+	it("accepts an automation run in the Chat timeline", () => {
 		expect(
 			Schema.decodeSync(chatMessagesPageSchema)({
 				items: [
 					{
-						kind: "routine",
+						kind: "run",
 						id: ID,
-						threadId: "0199a3a0-0000-7000-8000-000000000002",
-						routineName: "Overnight review",
+						conversationId: "0199a3a0-0000-7000-8000-000000000002",
+						automationName: "Overnight review",
 						triggerKind: "webhook",
 						state: "completed",
 						error: null,
@@ -60,6 +60,6 @@ describe("chat contracts", () => {
 				],
 				nextCursor: null,
 			}).items[0]?.kind,
-		).toBe("routine");
+		).toBe("run");
 	});
 });

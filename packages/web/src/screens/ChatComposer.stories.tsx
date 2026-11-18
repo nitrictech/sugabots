@@ -1,4 +1,4 @@
-import type { ThreadParticipant } from "@sugabots/contracts";
+import type { Participant } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -46,10 +46,10 @@ const sam = testPerson({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam 
 /** Who is writing the draft: someone other than Sam, so `@here` would notify Sam. */
 const WRITER_ID = "0199a3a0-0000-7000-8000-000000000004";
 
-const mentionable: ThreadParticipant[] = [
-	{ kind: "agent", ...issueTriager },
+const mentionable: Participant[] = [
+	{ kind: "bot", ...issueTriager },
 	{
-		kind: "agent",
+		kind: "bot",
 		id: "0199a3a0-0000-7000-8000-000000000003",
 		name: "Linear Handler",
 		handle: "linear-handler",
@@ -72,7 +72,7 @@ const meta = preview.meta({
 		submitLabel: "Send message",
 		mentionable: [
 			...mentionable,
-			...groupMentionsBy({ kind: "person", id: WRITER_ID }, [sam], "conversation"),
+			...groupMentionsBy({ kind: "person", id: WRITER_ID }, [sam], "task"),
 		],
 		attachments: withFiles([]),
 	},
@@ -122,7 +122,7 @@ export const LongDraft = meta.story({
 			"Please summarise the customer feedback from the last sprint.",
 			"Highlight anything we should act on today.",
 			"Group the rest by theme so we can plan next week.",
-			"Then post the summary back in this thread.",
+			"Then post the summary back in this conversation.",
 			"Mention anyone who already has a fix in flight.",
 			"Finish with the three things you would do first.",
 			"Keep it short enough to read on a phone.",
@@ -179,7 +179,7 @@ export const SelectGroupMention = meta.story({
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Heads up @cha");
 		await expect(canvas.getAllByRole("option")).toHaveLength(1);
-		// Sam is everyone else in the pod.
+		// Sam is everyone else in the channel.
 		await expect(canvas.getByRole("option", { name: /Notifies 1 person/ })).toBeVisible();
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Heads up @channel ");
@@ -380,7 +380,7 @@ export const MentionCardsInTheDraft = meta.story({
 				const client = new QueryClient();
 				client.setQueryData(["workspaces"], [workspace]);
 				client.setQueryData(
-					["agents", workspace.id],
+					["bots", workspace.id],
 					[
 						{
 							...growthDesk,
@@ -473,7 +473,7 @@ export const ReplyingTo = meta.story({
 		replyingTo: {
 			message: {
 				id: "0199a3a0-0000-7000-8000-000000000c11",
-				author: mentionable[0] as Extract<ThreadParticipant, { kind: "agent" }>,
+				author: mentionable[0] as Extract<Participant, { kind: "bot" }>,
 				preview:
 					"The release notes are drafted. Checkout gets the retry fix, and search gets the new filters.",
 			},

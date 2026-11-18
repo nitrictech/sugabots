@@ -1,9 +1,9 @@
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
+import { Computers } from "../../../computers/computers.ts";
 import { BOT_BRANCH_PREFIX } from "../../../providers/connections/github/connected.ts";
 import { BUNDLE_REF, pushBundle } from "../../../providers/connections/github/push.ts";
-import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
-import { inSandbox, type Place, type TurnSandbox } from "../sandbox/tools.ts";
+import { inComputer, type Place, type TurnComputer } from "../computer/tools.ts";
 import {
 	botBranchSchema,
 	commitSchema,
@@ -15,19 +15,19 @@ import {
 /** The largest bundle a push carries: a whole branch's history, read into the API's memory. */
 const MAX_BUNDLE_BYTES = 256 * 1024 * 1024;
 
-/** The pod's sandbox, while the turn may use it, for tools that work from a checkout there. */
-export interface Workspace extends TurnSandbox {
+/** The bot's computer, while the turn may use it, for tools that work from a checkout there. */
+export interface Workspace extends TurnComputer {
 	readonly place: Place;
 }
 
-/** `push_branch`, refused when `workspace` is undefined because the turn has no sandbox. */
+/** `push_branch`, refused when `workspace` is undefined because the turn has no computer. */
 export function pushTool(
 	{ connected, turnId, repositorySchema, onRepository }: ToolContext,
 	workspace: Workspace | undefined,
 ) {
 	return {
 		push_branch: tool({
-			description: `Push a commit from a git checkout in the sandbox to a branch of one of the connection's repositories. Commit your work first, and pass the commit's full hash. The branch must start with ${BOT_BRANCH_PREFIX}. The checkout must have its full history: if it is shallow, run git fetch --unshallow first. GitHub refuses changes to .github/workflows. Pushing to the branch of an open pull request updates it; for a new branch, call open_pull_request once it's pushed.`,
+			description: `Push a commit from a git checkout in the computer to a branch of one of the connection's repositories. Commit your work first, and pass the commit's full hash. The branch must start with ${BOT_BRANCH_PREFIX}. The checkout must have its full history: if it is shallow, run git fetch --unshallow first. GitHub refuses changes to .github/workflows. Pushing to the branch of an open pull request updates it; for a new branch, call open_pull_request once it's pushed.`,
 			inputSchema: Schema.Struct({
 				repository: repositorySchema,
 				branch: botBranchSchema,
@@ -35,7 +35,7 @@ export function pushTool(
 				directory: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)).annotate({
 					description: workspace
 						? `The checkout, relative to ${workspace.place.folder} unless it starts with /`
-						: "The checkout in the sandbox",
+						: "The checkout in the computer",
 				}),
 				force: Schema.optional(Schema.Boolean).annotate({
 					description:
@@ -48,9 +48,9 @@ export function pushTool(
 			) => {
 				const path = connected.repository(repository);
 				if (!path) return notConnectionRepository(repository, connected.repositories);
-				if (!workspace) return failed("This bot has no sandbox to push from in this turn.");
-				const bundled = await inSandbox(workspace, abortSignal, (sandbox) =>
-					bundleCommit(sandbox, workspace.place, { turnId, directory, commit }),
+				if (!workspace) return failed("This bot has no computer to push from in this turn.");
+				const bundled = await inComputer(workspace, abortSignal, (computer) =>
+					bundleCommit(computer, workspace.place, { turnId, directory, commit }),
 				);
 				if (!("bundle" in bundled)) return bundled;
 				return onRepository(path, (target) =>
@@ -84,11 +84,11 @@ const MISSING_COMMIT_EXIT_CODE = 4;
 const TOO_LARGE_EXIT_CODE = 5;
 
 /**
- * `commit` and its history as a bundle, made in the sandbox under
+ * `commit` and its history as a bundle, made in the computer under
  * {@link BUNDLE_REF} and read out of it.
  */
 function bundleCommit(
-	sandbox: Sandboxes.Sandbox,
+	computer: Computers.Computer,
 	place: Place,
 	{ turnId, directory, commit }: { turnId: string; directory: string; commit: string },
 ) {
@@ -106,7 +106,7 @@ function bundleCommit(
 	].join("\n");
 	const cwd = directory.startsWith("/") ? directory : `${place.folder}/${directory}`;
 	return Effect.gen(function* () {
-		const made = yield* sandbox.exec(`bash -c ${Sandboxes.shellQuoted(script)}`, {
+		const made = yield* computer.exec(`bash -c ${Computers.shellQuoted(script)}`, {
 			cwd,
 			env: { HOME: place.home },
 			timeout: "5 minutes",
@@ -128,8 +128,11 @@ function bundleCommit(
 					`Couldn't bundle the commit in ${directory}: ${made.stderr.text.trim() || `exit ${made.exitCode ?? "timed out"}`}`,
 				);
 		}
-		const bundle = yield* sandbox.downloadFile(bundlePath);
-		yield* sandbox.exec(`rm -f ${bundlePath}`, { timeout: "30 seconds", maxOutputCharacters: 200 });
+		const bundle = yield* computer.downloadFile(bundlePath);
+		yield* computer.exec(`rm -f ${bundlePath}`, {
+			timeout: "30 seconds",
+			maxOutputCharacters: 200,
+		});
 		return { bundle };
 	});
 }

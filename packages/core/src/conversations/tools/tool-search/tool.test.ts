@@ -24,7 +24,7 @@ const sentry: ConnectionPreset = {
 	url: "https://mcp.sentry.dev/mcp",
 };
 
-const connectionsPageUrl = "https://app.example.com/acme/settings/pods/support/connections";
+const connectionsPageUrl = "https://app.example.com/acme/settings/channels/support/connections";
 
 describe("the turn's note on connection tools", () => {
 	it("quotes what a server says about its tools as the server's own text, without hidden characters", () => {
@@ -41,7 +41,7 @@ describe("the turn's note on connection tools", () => {
 		expect(note).toContain('<server name="wiki">\nSearch before you look up.\n</server>');
 	});
 
-	it("gives the guidance even when the pod offers no catalog tools yet", () => {
+	it("gives the guidance even when the channel offers no catalog tools yet", () => {
 		const note = toolCatalogNote({
 			catalog: [],
 			unavailable: [],

@@ -1,5 +1,5 @@
 import { PgClient } from "@effect/sql-pg";
-import type { Channel, StreamEvent } from "@sugabots/contracts";
+import type { StreamChannel, StreamEvent } from "@sugabots/contracts";
 import { Data, Deferred, Duration, Effect, Fiber, Queue } from "effect";
 import { Ids } from "../../ids/ids.ts";
 import type { EventBus } from "./bus.ts";
@@ -16,13 +16,13 @@ import type { EventStore } from "./store.ts";
  */
 export interface EventRelay {
 	/** Tells every other process about a delivery this one has already made locally. */
-	broadcast(channel: Channel, delivery: EventBus.Delivery): Promise<void>;
+	broadcast(channel: StreamChannel, delivery: EventBus.Delivery): Promise<void>;
 	/**
 	 * Hands over what other processes broadcast, until the returned function is
 	 * called. Resolves once listening, so nothing published after that is missed.
 	 */
 	listen(
-		receive: (channel: Channel, delivery: EventBus.Delivery) => void,
+		receive: (channel: StreamChannel, delivery: EventBus.Delivery) => void,
 	): Promise<() => Promise<void>>;
 }
 
@@ -44,7 +44,7 @@ const PROBE_TIMEOUT = Duration.seconds(5);
 /** What travels in a notification. `event` is absent when it did not fit. */
 interface Notice {
 	from: string;
-	channel: Channel;
+	channel: StreamChannel;
 	seq?: number;
 	event?: StreamEvent;
 }

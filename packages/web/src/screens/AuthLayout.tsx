@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
  * — you are not in a workspace yet — so they get their own frame.
  *
  * The fields inside come from `@/ui/field` and the errors from `@/ui/alert`,
- * the same ones the agent editor and settings forms will use.
+ * the same ones the bot editor and settings forms will use.
  */
 export function AuthLayout({
 	title,

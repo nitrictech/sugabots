@@ -5,7 +5,7 @@ import type { BackTarget } from "@/ui/settings-page.tsx";
 /*
  * Where Back goes in settings: the page you came from, as a browser's Back
  * does, rather than a fixed parent. A link that goes deeper from where you are
- * (a pod to one of its bots, a chat to its bot's settings) writes the page it
+ * (a channel to one of its bots, a chat to its bot's settings) writes the page it
  * leaves into the history entry it opens, and Back is the browser's own Back
  * to that entry. A navigation that writes nothing, such as picking a section,
  * leaves the page its parent's Back, so a link that forgets never offers a way

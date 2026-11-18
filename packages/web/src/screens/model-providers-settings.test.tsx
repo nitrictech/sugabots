@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, builtInAgents, MODELS, modelProviders, mount } from "@/test-api.tsx";
+import { apiAnswers, builtInBots, MODELS, modelProviders, mount } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -117,10 +117,10 @@ describe("a model's capabilities", () => {
 	});
 });
 
-/** Puts the system agents, which make summaries, on `model`. */
+/** Puts the system bots, which make summaries, on `model`. */
 function summariesOn(model: string) {
-	client.api.systemAgents.list.mockReturnValue(
-		Effect.succeed(builtInAgents.map((agent) => ({ ...agent, model }))),
+	client.api.systemBots.list.mockReturnValue(
+		Effect.succeed(builtInBots.map((bot) => ({ ...bot, model }))),
 	);
 }
 

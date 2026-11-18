@@ -1,4 +1,4 @@
-import { ArtifactPages } from "@sugabots/core/artifacts/pages";
+import { FilePages } from "@sugabots/core/files/pages";
 import { Installation } from "@sugabots/core/installation/installation";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
@@ -23,11 +23,11 @@ const withPages = (contentOrigin: string | undefined = CONTENT_ORIGIN) =>
 					...(contentOrigin ? { contentOrigin } : {}),
 				}),
 			),
-			unimplemented(ArtifactPages.Service, {
+			unimplemented(FilePages.Service, {
 				open: (token) =>
 					token === SEALED
 						? Effect.succeed({ title: "Chart", html: "<!doctype html><p>chart</p>" })
-						: Effect.fail(new ArtifactPages.PageUnavailable()),
+						: Effect.fail(new FilePages.PageUnavailable()),
 			}),
 		),
 	);

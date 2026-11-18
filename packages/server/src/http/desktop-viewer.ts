@@ -1,23 +1,24 @@
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import type { Computers } from "@sugabots/core/computers/computers";
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import {
 	answerChallenge,
 	CHALLENGE_BYTES,
 } from "@sugabots/core/conversations/tools/browser/vnc-authentication";
 import { Installation } from "@sugabots/core/installation/installation";
-import type { Sandboxes } from "@sugabots/core/sandboxes/sandboxes";
 import { Data, Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Socket } from "effect/unstable/socket";
 import { Authentication } from "../auth/authentication.ts";
 
 /**
- * An agent's desktop in a thread, live: a WebSocket the web app's noVNC
- * viewer opens, relayed to the desktop's VNC server in the sandbox. The relay
+ * A bot's desktop in a conversation, live: a WebSocket the web app's noVNC
+ * viewer opens, relayed to the desktop's VNC server in the computer. The relay
  * logs in to the server with its password and offers the viewer no
  * authentication, then passes frames both ways untouched; neither the
- * password nor the sandbox's address reaches the browser.
+ * password nor the computer's address reaches the browser. It closes once the
+ * person may no longer see the desktop as it was opened for them.
  */
 export const desktopViewerRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
@@ -28,7 +29,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 
 		yield* router.add(
 			"GET",
-			`${API_BASE_PATH}/threads/:threadId/agents/:agentId/desktop`,
+			`${API_BASE_PATH}/conversations/:conversationId/bots/:botId/desktop`,
 			Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest;
 				// Any page the browser visits can open a WebSocket here with the
@@ -38,14 +39,18 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 				}
 				const holder = yield* authentication.identify(new Headers(request.headers));
 				if (!holder) return HttpServerResponse.text("Sign in first", { status: 401 });
-				const { threadId, agentId } = yield* HttpRouter.params;
-				if (!threadId || !agentId) return HttpServerResponse.empty({ status: 404 });
+				const { conversationId, botId } = yield* HttpRouter.params;
+				if (!conversationId || !botId) return HttpServerResponse.empty({ status: 404 });
 
 				return yield* Effect.scoped(
 					Effect.gen(function* () {
-						const desktop = yield* viewer.open({ threadId, agentId });
+						const desktop = yield* viewer.open({ conversationId, botId });
 						const browserSide = yield* request.upgrade;
-						yield* relay(browserSide, upstream(desktop.endpoint), desktop.password);
+						// Ending the relay closes the person's socket.
+						yield* Effect.raceFirst(
+							relay(browserSide, upstream(desktop.endpoint), desktop.password),
+							desktop.accessLost,
+						);
 						return HttpServerResponse.empty();
 					}),
 				).pipe(
@@ -69,11 +74,11 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 );
 
 /**
- * The desktop's VNC server as a WebSocket, reached through the sandbox
- * provider: websockify in front of Xvnc, or x11vnc itself in sandboxes made
+ * The desktop's VNC server as a WebSocket, reached through the computer
+ * provider: websockify in front of Xvnc, or x11vnc itself in computers made
  * from images before Xvnc.
  */
-function upstream(desktop: Sandboxes.Endpoint) {
+function upstream(desktop: Computers.Endpoint) {
 	const url = desktop.url.replace(/^http/, "ws");
 	return Socket.fromWebSocket(
 		Effect.acquireRelease(

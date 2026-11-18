@@ -51,7 +51,7 @@ describe("userText", () => {
 
 	it("refuses text that could hold anything", () => {
 		const fromAnException: string = new Error("ECONNREFUSED 127.0.0.1:11434").message;
-		const someId = "0199a3a0" as Brand.Branded<string, "AgentId">;
+		const someId = "0199a3a0" as Brand.Branded<string, "BotId">;
 
 		// @ts-expect-error: a plain string could hold anything.
 		userText`Failed: ${fromAnException}.`;

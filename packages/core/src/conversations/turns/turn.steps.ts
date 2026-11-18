@@ -1,4 +1,4 @@
-import { streamEvent, threadChannel } from "@sugabots/contracts";
+import { type CollaborationPart, conversationChannel, streamEvent } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
 import type { ToolApprovalConfiguration, ToolSet } from "ai";
 import {
@@ -15,27 +15,28 @@ import {
 	Schedule,
 	Semaphore,
 } from "effect";
-import { Artifacts } from "../../artifacts/artifacts.ts";
 import { type Database, effectRunner, transaction } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
+import { ConversationFiles } from "../../files/conversation-files.ts";
+import { Files } from "../../files/files.ts";
 import { Ids } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
 import { Models } from "../../providers/models/models.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import { AssistantGuide } from "../assistant/assistant-guide.ts";
-import { BotThreads } from "../chats/bot-threads.ts";
+import { BotAutomations } from "../automations/bot-automations.ts";
+import { BotTasks } from "../chats/bot-tasks.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { BotRoutines } from "../routines/bot-routines.ts";
-import { ThreadFiles } from "../thread-files/thread-files.ts";
-import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
 import { assistantRequests } from "../tools/assistant/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
+import { COLLABORATE_TOOL, collaborateTool } from "../tools/collaborate/tool.ts";
+import { ComputerTools, type Request } from "../tools/computer.ts";
 import { ConnectionTools, type OfferedTool } from "../tools/connections.ts";
-import { type Request, SandboxTools } from "../tools/sandbox.ts";
-import { START_THREAD_TOOL, startThreadTool } from "../tools/start-thread/tool.ts";
+import { FILE_TOOLS } from "../tools/files/tool.ts";
+import { START_TASK_TOOL, startTaskTool } from "../tools/start-task/tool.ts";
 import {
 	callToolApproval,
 	findApprovalTarget,
@@ -59,7 +60,7 @@ import {
 } from "./repository.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
 import { bindingOf, toolsForTurn } from "./tools.ts";
-import { type SegmentOutcome, TurnSteps } from "./turn.workflow.ts";
+import { type SegmentOutcome, TurnSteps, turnOfStored } from "./turn.workflow.ts";
 
 /** Token deltas are batched so a fast model does not publish per token. */
 const DELTA_PUBLISH_INTERVAL = Duration.millis(50);
@@ -86,20 +87,20 @@ const TURN_MODEL_CALLS = 100;
 type SegmentServices =
 	| Models.Service
 	| BuiltInTools.Service
-	| SandboxTools.Service
+	| ComputerTools.Service
 	| ConnectionTools.Service
 	| EventBus.Service
 	| TurnExecution.Service
 	| TurnRepository.Service
 	| ToolCallRepository.Service
 	| Collaborations.Service
-	| Artifacts.Authoring
+	| Files.Authoring
 	| ApprovedToolCalls.Service
-	| AgentAdministration.Service
-	| ThreadFiles.Service
-	| BotRoutines.Service
+	| BotAdministration.Service
+	| ConversationFiles.Service
+	| BotAutomations.Service
 	| Installation.Service
-	| BotThreads.Service
+	| BotTasks.Service
 	| AssistantGuide.Service
 	| Ids.Service;
 
@@ -111,11 +112,14 @@ export const turnStepsLayer = Layer.effect(
 		const turns = yield* TurnRepository.Service;
 		const { emit } = yield* ConversationEvents.Service;
 		return TurnSteps.of({
-			segment: (request) =>
-				Effect.flatMap(turnRunFor(request), runSegment).pipe(Effect.provideContext(services)),
-			abandon: (request) =>
+			segment: (stored) =>
+				Effect.flatMap(turnRunFor(turnOfStored(stored)), runSegment).pipe(
+					Effect.provideContext(services),
+				),
+			abandon: (stored) =>
 				transaction(
 					Effect.gen(function* () {
+						const request = turnOfStored(stored);
 						const run = yield* turnRunFor(request);
 						const ended = yield* turns.abandon(run.executionId, {
 							status: "failed",
@@ -125,18 +129,20 @@ export const turnStepsLayer = Layer.effect(
 						if (ended) return;
 						yield* emit([
 							ConversationEvent.TurnAbandoned({
-								threadId: request.threadId,
-								agentId: request.agentId,
+								conversationId: request.conversationId,
+								botId: request.botId,
 								outcome: { state: "failed", error: TURN_STOPPED_UNEXPECTEDLY },
 							}),
 						]);
 					}),
 				).pipe(Effect.provideContext(services)),
-			cancelWaiting: (request) => turns.cancelWaiting(request),
-			announceReleased: (request) =>
-				transaction(emit([ConversationEvent.LaneReleased({ threadId: request.threadId })])).pipe(
-					Effect.provideContext(services),
-				),
+			cancelWaiting: (stored) => turns.cancelWaiting(turnOfStored(stored)),
+			announceReleased: (stored) =>
+				transaction(
+					emit([
+						ConversationEvent.LaneReleased({ conversationId: turnOfStored(stored).conversationId }),
+					]),
+				).pipe(Effect.provideContext(services)),
 		});
 	}),
 );
@@ -320,16 +326,16 @@ const generateReply = (
 				}
 				const { contextTokens } = streamed.value;
 				// One transaction: the answer must be readable by the time anyone
-				// hears the turn completed, or the asking agent wakes to nothing
+				// hears the turn completed, or the asking bot wakes to nothing
 				// and gives up waiting for an answer that lands a moment later.
 				yield* transaction(
 					Effect.gen(function* () {
 						// `answer` runs in a savepoint of this transaction, so a
 						// defect in it rolls back only what it wrote, and catching it here
 						// still lets the reply complete.
-						if (prepared.context.thread.parentThreadId) {
+						if (prepared.context.conversation.parentConversationId) {
 							yield* collaborations
-								.answer({ threadId: prepared.context.thread.id, answer: draft.content })
+								.answer({ conversationId: prepared.context.conversation.id, answer: draft.content })
 								.pipe(
 									Effect.catchCause((cause) =>
 										Effect.logError("Delivering a collaboration answer failed", cause),
@@ -362,7 +368,7 @@ const generateReply = (
 const logTurnFailure = (prepared: PreparedTurn, why: string) =>
 	Effect.logError(
 		`Turn ${prepared.turnId} failed: ${why}`,
-		`(thread ${prepared.context.thread.id}, agent ${prepared.context.agent.name}, model ${prepared.context.agent.model})`,
+		`(conversation ${prepared.context.conversation.id}, bot ${prepared.context.bot.name}, model ${prepared.context.bot.model})`,
 	);
 
 /**
@@ -394,17 +400,17 @@ const streamReply = (
 			const events = yield* EventBus.Service;
 			const builtInTools = yield* BuiltInTools.Service;
 			const connectionTools = yield* ConnectionTools.Service;
-			const sandboxTools = yield* SandboxTools.Service;
+			const computerTools = yield* ComputerTools.Service;
 			const turns = yield* TurnRepository.Service;
 			const toolCalls = yield* ToolCallRepository.Service;
 			const collaborations = yield* Collaborations.Service;
-			const artifacts = yield* Artifacts.Authoring;
+			const authoring = yield* Files.Authoring;
 			const approvals = yield* ApprovedToolCalls.Service;
-			const agents = yield* AgentAdministration.Service;
-			const files = yield* ThreadFiles.Service;
-			const routines = yield* BotRoutines.Service;
+			const bots = yield* BotAdministration.Service;
+			const files = yield* ConversationFiles.Service;
+			const automations = yield* BotAutomations.Service;
 			const installation = yield* Installation.Service;
-			const botThreads = yield* BotThreads.Service;
+			const botTasks = yield* BotTasks.Service;
 			const assistantGuide = yield* AssistantGuide.Service;
 			const signal = yield* Effect.abortSignal;
 
@@ -423,43 +429,48 @@ const streamReply = (
 			const runInTurn = effectRunner({ runPromiseExit: Effect.runPromiseExitWith(context) });
 			const now = yield* DateTime.nowAsDate;
 			const offeredBuiltIns = yield* builtInTools.forWorkspace(
-				prepared.context.thread.workspaceId,
+				prepared.context.conversation.workspaceId,
 				`${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/search`,
 			);
 			const builtIn = {
 				tools: offeredBuiltIns.tools,
 				usable: offeredBuiltIns.usable.filter(
-					(key) => !prepared.context.agent.disabledTools.includes(key),
+					(key) => !prepared.context.bot.disabledTools.includes(key),
 				),
 			};
-			const sandbox = yield* sandboxTools.forTurn({
-				workspaceId: prepared.context.thread.workspaceId,
-				usesSandbox: prepared.context.agent.usesSandbox,
+			const computer = yield* computerTools.forTurn({
+				workspaceId: prepared.context.conversation.workspaceId,
+				usesComputer: prepared.context.bot.usesComputer,
 				turnId: prepared.turnId,
-				threadId: prepared.context.thread.id,
-				agentId: prepared.context.agent.id,
-				color: prepared.context.agent.color,
-				naturalBrowsing: prepared.context.agent.naturalBrowsing,
-				acceptsImages: prepared.context.agent.acceptsImages,
-				// A task or a channel's conversation serves the files in its own thread, so only there can people be shown one.
-				...((prepared.context.thread.type === "conversation" ||
-					prepared.context.thread.type === "pod_chat") && {
+				conversationId: prepared.context.conversation.id,
+				botId: prepared.context.bot.id,
+				color: prepared.context.bot.color,
+				naturalBrowsing: prepared.context.bot.naturalBrowsing,
+				acceptsImages: prepared.context.bot.acceptsImages,
+				// A task or a channel's conversation serves the files in it, so only there can people be shown one.
+				...((prepared.context.conversation.kind === "task" ||
+					prepared.context.conversation.kind === "channel_conversation") && {
 					attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
 				}),
 			});
 			// The connections' sessions live as long as the turn.
 			const connections = yield* Effect.acquireRelease(
-				connectionTools.forAgent(prepared.context.thread.workspaceId, prepared.context.agent.id, {
+				connectionTools.forBot(prepared.context.conversation.workspaceId, prepared.context.bot.id, {
 					turnId: prepared.turnId,
-					agentId: prepared.context.agent.id,
-					threadId: prepared.context.thread.id,
+					botId: prepared.context.bot.id,
+					conversationId: prepared.context.conversation.id,
 					files,
-					workspace: sandbox.usable ? sandbox.workspace : undefined,
-					sandboxSignsIn: sandbox.signsIn,
+					workspace: computer.usable ? computer.workspace : undefined,
+					computerSignsIn: computer.signsIn,
 				}),
 				(opened) => Effect.promise(() => opened.close()),
 			);
-			const { assistantOf } = prepared.context.agent;
+			const noteCollaboration = (collaboration: Pick<CollaborationPart, "id" | "atOffset">) =>
+				Ref.update(reply, (draft) => ({
+					...draft,
+					collaborations: [...draft.collaborations, collaboration],
+				})).pipe(Effect.andThen(Effect.provideContext(saveReply, context)));
+			const { assistantOf } = prepared.context.bot;
 			// A Personal Assistant asks its person before any call that may change
 			// something, whatever its connections allow without asking.
 			const offeredTools =
@@ -471,32 +482,51 @@ const streamReply = (
 					? (() => {
 							const person: AssistantGuide.Person = {
 								userId: assistantOf,
-								workspaceId: prepared.context.thread.workspaceId,
+								workspaceId: prepared.context.conversation.workspaceId,
 								workspaceSlug: prepared.context.workspaceSlug,
 							};
-							const startsThreads: Request = {
-								tool: startThreadTool({
+							const startsTasks: Request = {
+								tool: startTaskTool({
 									bot: {
-										agentId: prepared.context.agent.id,
-										workspaceId: prepared.context.thread.workspaceId,
+										botId: prepared.context.bot.id,
+										workspaceId: prepared.context.conversation.workspaceId,
 										askedBy: assistantOf,
 									},
-									threads: botThreads,
+									tasks: botTasks,
 									run: runInTurn,
 								}),
 								refusal: () => undefined,
 							};
-							// A task it starts is seen by others, so it waits for its person too.
+							// The bot it asks acts with that bot's own connections and computer.
+							const collaborates: Request = {
+								tool: collaborateTool({
+									from: {
+										conversationId: prepared.context.conversation.id,
+										botId: prepared.context.bot.id,
+										turnId: prepared.turnId,
+										messageId: prepared.responseMessage.id,
+									},
+									collaborations,
+									bus: events,
+									run: runInTurn,
+									replyLength: () => Ref.getUnsafe(reply).content.length,
+									noteCollaboration,
+									signal,
+								}),
+								refusal: () => undefined,
+							};
+							// A task it starts, or a bot it asks, is seen by others, so it waits for its person too.
 							const requests: Record<string, Request> = {
 								...assistantRequests({ guide: assistantGuide, person, run: runInTurn }),
-								[START_THREAD_TOOL]: startsThreads,
+								[START_TASK_TOOL]: startsTasks,
+								[COLLABORATE_TOOL]: collaborates,
 							};
 							return { guide: assistantGuide, person, requests };
 						})()
 					: undefined;
 			// The built-in tools whose calls wait for a person to allow them.
 			const builtInRequests = {
-				...(sandbox.usable ? sandbox.requests : {}),
+				...(computer.usable ? computer.requests : {}),
 				...assistant?.requests,
 			};
 			const approvalBoundTools = new Set<string>();
@@ -522,7 +552,7 @@ const streamReply = (
 				...callToolApproval(offeredTools),
 				// A request refused outright runs at once, to be recorded as refused.
 				...Object.fromEntries(
-					Object.entries({ ...sandbox.requests, ...assistant?.requests }).map(([key, request]) => [
+					Object.entries({ ...computer.requests, ...assistant?.requests }).map(([key, request]) => [
 						key,
 						(input: unknown) =>
 							builtInRequests[key] && request.refusal(input) === undefined
@@ -533,29 +563,25 @@ const streamReply = (
 			};
 			const { tools, catalog } = toolsForTurn(prepared, {
 				collaborations,
-				artifacts,
+				authoring,
 				calls: toolCalls,
 				approvals,
 				turns,
 				approvalBoundTools,
 				builtIn,
-				sandbox,
+				computer,
 				connections: offeredTools,
 				files,
-				agents,
+				bots,
 				webAppUrl: installation.webAppUrl,
-				routines,
-				threads: botThreads,
+				automations,
+				tasks: botTasks,
 				bus: events,
 				run: runInTurn,
 				...(assistant && { assistant }),
 				reply: {
 					length: () => Ref.getUnsafe(reply).content.length,
-					noteCollaboration: (collaboration) =>
-						Ref.update(reply, (draft) => ({
-							...draft,
-							collaborations: [...draft.collaborations, collaboration],
-						})).pipe(Effect.andThen(Effect.provideContext(saveReply, context))),
+					noteCollaboration,
 					noteToolCall: ({ id, atOffset }) =>
 						Ref.update(reply, (draft) => ({
 							...draft,
@@ -571,7 +597,7 @@ const streamReply = (
 				now,
 				builtInTools: [
 					...builtIn.usable,
-					...Object.keys(tools).filter((key) => ARTIFACT_TOOLS.has(key)),
+					...Object.keys(tools).filter((key) => FILE_TOOLS.has(key)),
 				],
 				toolCatalog: toolCatalogNote({
 					catalog,
@@ -579,16 +605,16 @@ const streamReply = (
 					signInExpired: connections.signInExpired,
 					instructions: connections.instructions,
 					addable: connections.addable,
-					connectionsPageUrl: `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/bots/${prepared.context.agent.handle}/connections`,
+					connectionsPageUrl: `${installation.webAppUrl}/${prepared.context.workspaceSlug}/settings/bots/${prepared.context.bot.handle}/connections`,
 				}),
-				sandbox: sandbox.note,
+				computer: computer.note,
 			};
-			const resultFiles = yield* files.resultFiles(prepared.context.thread.id);
+			const resultFiles = yield* files.resultFiles(prepared.context.conversation.id);
 			const freshPrompt = modelPrompt(prepared.context, environment, resultFiles);
 			const modelInput =
 				prepared.checkpoint?.modelInput ??
 				({
-					model: prepared.context.agent.model,
+					model: prepared.context.bot.model,
 					system: freshPrompt.system,
 					messages: freshPrompt.messages,
 				} satisfies TurnCheckpoint["modelInput"]);
@@ -603,11 +629,11 @@ const streamReply = (
 				? [...priorMessages, approvalResponse]
 				: priorMessages;
 			const generated = yield* model.stream({
-				workspaceId: prepared.context.thread.workspaceId,
+				workspaceId: prepared.context.conversation.workspaceId,
 				activity: {
-					purpose: "agent-turn",
-					agentId: prepared.context.agent.id,
-					threadId: prepared.context.thread.id,
+					purpose: "bot-turn",
+					botId: prepared.context.bot.id,
+					conversationId: prepared.context.conversation.id,
 					turnId: prepared.turnId,
 				},
 				model: modelInput.model,
@@ -629,7 +655,7 @@ const streamReply = (
 				if (finished.approvalRequests.length === 0) {
 					const { content, collaborations } = yield* Ref.get(reply);
 					const answered = content.trim() !== "" || collaborations.length > 0;
-					// Files the agent shared answer as words do. Looked up only when nothing else answered.
+					// Files the bot shared answer as words do. Looked up only when nothing else answered.
 					const carriesFiles = Effect.map(
 						turns.replyFiles(replyTurnOf(prepared)),
 						(files) => files.length > 0,
@@ -811,7 +837,7 @@ const consumeDeltas = (
 /** Waits for `turn.cancel_requested` on this turn. Never succeeds if the bus closes first. */
 function cancelRequested(events: Pick<EventBus.Interface, "subscribe">, prepared: PreparedTurn) {
 	return Effect.promise(async (signal) => {
-		const channel = threadChannel(prepared.context.thread.id);
+		const channel = conversationChannel(prepared.context.conversation.id);
 		for await (const { event } of events.subscribe(channel, { signal })) {
 			if (event.type === "turn.cancel_requested" && event.turnId === prepared.turnId) return true;
 		}
@@ -828,9 +854,9 @@ const publishDelta = (
 ) =>
 	Effect.promise(() =>
 		events.publish(
-			threadChannel(prepared.context.thread.id),
+			conversationChannel(prepared.context.conversation.id),
 			streamEvent("message.delta", {
-				threadId: prepared.context.thread.id,
+				conversationId: prepared.context.conversation.id,
 				messageId: prepared.responseMessage.id,
 				offset,
 				text,

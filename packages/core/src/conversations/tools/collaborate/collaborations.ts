@@ -1,41 +1,41 @@
 export * as Collaborations from "./collaborations.ts";
 
 import type { CollaborationPart } from "@sugabots/contracts";
-import { MAX_THREAD_TITLE_CHARACTERS } from "@sugabots/contracts";
+import { MAX_CONVERSATION_TITLE_CHARACTERS } from "@sugabots/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../../database/database.ts";
 import type { DomainEvents } from "../../../database/events/domain-events.ts";
 import type * as schema from "../../../database/schema.ts";
-import { agent, collaboration, thread } from "../../../database/schema.ts";
+import { bot, collaboration, placedConversation } from "../../../database/schema.ts";
 import type { ConversationEvent } from "../../events.ts";
-import { toCollaborationPart } from "../../threads/collaboration-parts.ts";
-import { crewAgent } from "../../threads/participants.ts";
-import { ThreadRepository } from "../../threads/repository.ts";
-import { lineageOf } from "../../threads/tree.ts";
+import { toCollaborationPart } from "../../repository/collaboration-parts.ts";
+import { madeByPeople } from "../../repository/participants.ts";
+import { ConversationRepository } from "../../repository/repository.ts";
+import { lineageOf } from "../../repository/tree.ts";
 import { makeRecords, type WaitOutcome } from "./repository.ts";
 
 /**
- * Collaboration: one crew agent asking another for help.
+ * Collaboration: one bot asking another for help.
  *
- * The asking agent's turn calls the `collaborate` tool mid-reply. That opens a
- * child thread hosted by the collaborator, whose first message is the brief,
- * and records a collaboration pointing from the reply to that thread. The
+ * The asking bot's turn calls the `collaborate` tool mid-reply. That opens a
+ * conversation of the collaborator's own, whose first message is the brief,
+ * and records a collaboration pointing from the reply to that conversation. The
  * reply keeps a reference to the collaboration among its parts at the point
- * the call was made, so a reader sees the text before, the child thread, and
+ * the call was made, so a reader sees the text before, the child conversation, and
  * the text after.
  */
 export interface Interface {
 	/**
-	 * Opens the collaborator's thread with the brief as its first message and
+	 * Opens the collaborator's conversation with the brief as its first message and
 	 * records the collaboration; floor control asks for the collaborator's
 	 * turn when it is opened. Fails, writing nothing, when policy refuses.
 	 */
 	readonly open: (input: {
-		/** The asking agent's thread, agent, turn, reply message, and how far into the reply it was. */
+		/** The asking bot's conversation, bot, turn, reply message, and how far into the reply it was. */
 		from: {
-			threadId: string;
-			agentId: string;
+			conversationId: string;
+			botId: string;
 			turnId: string;
 			messageId: string;
 			atOffset: number;
@@ -52,25 +52,25 @@ export interface Interface {
 	 */
 	readonly collectAnswer: (collaborationId: string) => Effect.Effect<WaitOutcome>;
 	/**
-	 * Hands the collaborator's reply in its thread `threadId` back to the
-	 * agent that asked, when it answers an outstanding brief. Floor control
-	 * gives an agent that stopped waiting a turn in the parent thread to pick
+	 * Hands the collaborator's reply in its conversation `conversationId` back to the
+	 * bot that asked, when it answers an outstanding brief. Floor control
+	 * gives a bot that stopped waiting a turn in the parent conversation to pick
 	 * the answer up. A reply with nothing outstanding is an ordinary message.
 	 */
-	readonly answer: (input: { threadId: string; answer: string }) => Effect.Effect<void>;
+	readonly answer: (input: { conversationId: string; answer: string }) => Effect.Effect<void>;
 	/**
-	 * Fails a collaboration once its collaborator's turn in its thread ends for
+	 * Fails a collaboration once its collaborator's turn in its conversation ends for
 	 * good without answering: failed with no retry, cancelled, or given up
-	 * on. An asking agent that stopped waiting gets a turn to say so, as it
+	 * on. An asking bot that stopped waiting gets a turn to say so, as it
 	 * told the person it would follow up.
 	 */
 	readonly handler: DomainEvents.Handler<ConversationEvent>;
 	/**
-	 * Fails the collaborations asked for in these threads that are still
-	 * waiting or pending, because the routine run they work for ended. One
+	 * Fails the collaborations asked for in these conversations that are still
+	 * waiting or pending, because the automation run they work for ended. One
 	 * another transaction holds is skipped: its holder is moving it on.
 	 */
-	readonly failUnder: (threadIds: readonly string[]) => Effect.Effect<void>;
+	readonly failUnder: (conversationIds: readonly string[]) => Effect.Effect<void>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -79,7 +79,7 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Collaborations");
-	const threads = yield* ThreadRepository.Service;
+	const conversations = yield* ConversationRepository.Service;
 	const repository = yield* makeRecords;
 
 	return Service.of({
@@ -89,20 +89,26 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const [parent] = yield* query((db) =>
-							db.select().from(thread).where(eq(thread.id, from.threadId)).limit(1),
+							db
+								.select()
+								.from(placedConversation)
+								.where(eq(placedConversation.id, from.conversationId))
+								.limit(1),
 						);
 						if (!parent) {
-							return yield* new CollaborationRefused({ reason: "This thread no longer exists" });
+							return yield* new CollaborationRefused({
+								reason: "This conversation no longer exists",
+							});
 						}
-						const collaborator = yield* crewNamed(parent, to);
+						const collaborator = yield* collaboratorNamed(parent, to);
 						if (!collaborator) {
 							return yield* new CollaborationRefused({
 								reason: `No bot in this workspace is called "${to}"`,
 							});
 						}
-						if (collaborator.id === from.agentId) {
+						if (collaborator.id === from.botId) {
 							return yield* new CollaborationRefused({
-								reason: "An agent cannot collaborate with itself",
+								reason: "A bot cannot collaborate with itself",
 							});
 						}
 						const hostsAbove = yield* hostsAboveOf(parent.id);
@@ -113,7 +119,7 @@ export const make = Effect.gen(function* () {
 						}
 						if (hostsAbove.includes(collaborator.id)) {
 							return yield* new CollaborationRefused({
-								reason: `${collaborator.name} is already waiting on this thread; answer it yourself`,
+								reason: `${collaborator.name} is already waiting on this conversation; answer it yourself`,
 							});
 						}
 						if (yield* hasAskedThisTurn(from.turnId, collaborator.id)) {
@@ -122,18 +128,19 @@ export const make = Effect.gen(function* () {
 							});
 						}
 
-						const child = yield* threads.openCollaborationThread({
+						const child = yield* conversations.openCollaboration({
 							parent,
-							askingAgentId: from.agentId,
+							askingBotId: from.botId,
 							collaboratorId: collaborator.id,
 							title: firstLine(brief),
 							brief,
 						});
 						const opened = yield* repository.open({
-							parentThreadId: parent.id,
+							parentConversationId: parent.id,
+							rootConversationId: parent.rootConversationId ?? parent.id,
 							parentMessageId: from.messageId,
 							turnId: from.turnId,
-							childThreadId: child.threadId,
+							conversationId: child.conversationId,
 							briefMessageId: child.briefMessageId,
 							collaborator,
 							brief,
@@ -147,8 +154,8 @@ export const make = Effect.gen(function* () {
 		collectAnswer: (collaborationId) =>
 			operation("collectAnswer", repository.stopWaiting(collaborationId)),
 
-		answer: ({ threadId, answer }) =>
-			operation("answer", transaction(repository.answer(threadId, answer))),
+		answer: ({ conversationId, answer }) =>
+			operation("answer", transaction(repository.answer(conversationId, answer))),
 
 		handler: (events) =>
 			Effect.forEach(events.flatMap(unansweredBy), (ended) => repository.failUnanswered(ended), {
@@ -161,27 +168,27 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide(ThreadRepository.layer));
+export const layer = layerNoDeps.pipe(Layer.provide(ConversationRepository.layer));
 
-/** The collaborator whose turn in a collaboration's thread the event ended without an answer. */
+/** The collaborator whose turn in a collaboration's conversation the event ended without an answer. */
 function unansweredBy(
 	event: ConversationEvent,
-): Array<{ readonly childThreadId: string; readonly collaboratorAgentId: string }> {
+): Array<{ readonly childConversationId: string; readonly collaboratorBotId: string }> {
 	switch (event._tag) {
 		case "TurnFailed":
 			// A turn that runs again may still answer.
 			return event.willRetry
 				? []
-				: [{ childThreadId: event.threadId, collaboratorAgentId: event.agentId }];
+				: [{ childConversationId: event.conversationId, collaboratorBotId: event.botId }];
 		case "TurnCancelled":
 		case "TurnAbandoned":
-			return [{ childThreadId: event.threadId, collaboratorAgentId: event.agentId }];
+			return [{ childConversationId: event.conversationId, collaboratorBotId: event.botId }];
 		default:
 			return [];
 	}
 }
 
-/** How deep collaboration may nest: a root thread, a child, and a grandchild. */
+/** How deep collaboration may nest: a root conversation, a child, and a grandchild. */
 const MAX_DEPTH = 2;
 
 export type { WaitOutcome };
@@ -201,17 +208,17 @@ export class CollaborationRefused extends Data.TaggedError("CollaborationRefused
 }
 
 /** A bot in the workspace, by the name the model used. Any bot may ask any other, private ones included. */
-const crewNamed = (parent: schema.ThreadRow, name: string) =>
+const collaboratorNamed = (parent: schema.PlacedConversationRow, name: string) =>
 	Effect.map(
 		query((db) =>
 			db
-				.select({ id: agent.id, name: agent.name })
-				.from(agent)
+				.select({ id: bot.id, name: bot.name })
+				.from(bot)
 				.where(
 					and(
-						crewAgent,
-						eq(agent.workspaceId, parent.workspaceId),
-						sql`lower(${agent.name}) = lower(${name.trim()})`,
+						madeByPeople,
+						eq(bot.workspaceId, parent.workspaceId),
+						sql`lower(${bot.name}) = lower(${name.trim()})`,
 					),
 				)
 				.limit(1),
@@ -219,22 +226,22 @@ const crewNamed = (parent: schema.ThreadRow, name: string) =>
 		([row]) => row,
 	);
 
-/** Who hosts each thread above `threadId`, nearest first. */
-const hostsAboveOf = (threadId: string) =>
+/** Who hosts each conversation above `conversationId`, nearest first. */
+const hostsAboveOf = (conversationId: string) =>
 	Effect.map(
 		query((db) =>
-			db.execute<{ host_agent_id: string }>(
-				sql`select lineage.host_agent_id from ${lineageOf(sql`${threadId}`)} as lineage
+			db.execute<{ bot_id: string }>(
+				sql`select lineage.bot_id from ${lineageOf(sql`${conversationId}`)} as lineage
 					where lineage.depth > 0 order by lineage.depth`,
 				"objects",
 			),
 		),
-		(rows) => rows.map((row) => row.host_agent_id),
+		(rows) => rows.map((row) => row.bot_id),
 	);
 
 /**
  * Whether the turn already asked this collaborator. A turn may ask several
- * crew agents, but asking one twice only repeats a brief it could have
+ * bots, but asking one twice only repeats a brief it could have
  * written once.
  */
 const hasAskedThisTurn = (turnId: string, collaboratorId: string) =>
@@ -246,7 +253,7 @@ const hasAskedThisTurn = (turnId: string, collaboratorId: string) =>
 				.where(
 					and(
 						eq(collaboration.turnId, turnId),
-						eq(collaboration.collaboratorAgentId, collaboratorId),
+						eq(collaboration.collaboratorBotId, collaboratorId),
 					),
 				)
 				.limit(1),
@@ -256,7 +263,7 @@ const hasAskedThisTurn = (turnId: string, collaboratorId: string) =>
 
 function firstLine(text: string): string {
 	const line = text.split(/\r?\n/, 1)[0]?.trim() ?? "";
-	return line.length <= MAX_THREAD_TITLE_CHARACTERS
+	return line.length <= MAX_CONVERSATION_TITLE_CHARACTERS
 		? line
-		: `${line.slice(0, MAX_THREAD_TITLE_CHARACTERS - 1).trimEnd()}…`;
+		: `${line.slice(0, MAX_CONVERSATION_TITLE_CHARACTERS - 1).trimEnd()}…`;
 }

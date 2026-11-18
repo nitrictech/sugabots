@@ -1,5 +1,5 @@
 import { Schema, Struct } from "effect";
-import { handleSchema } from "./agents.ts";
+import { handleSchema } from "./bots.ts";
 import {
 	headerNameSchema,
 	isClientOwnedHeader,
@@ -125,7 +125,7 @@ export type ConnectionSignInFailure = typeof connectionSignInFailureSchema.Type;
 export const connectionSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	agentId: uuidSchema,
+	botId: uuidSchema,
 	name: Schema.String,
 	/** Prefixes the server's tool names for the model: `exa.web_search_exa`. */
 	handle: handleSchema,

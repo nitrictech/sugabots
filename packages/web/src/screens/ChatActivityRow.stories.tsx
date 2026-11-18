@@ -1,10 +1,10 @@
-import type { RoutineExecutionTriggerKind } from "@sugabots/contracts";
+import type { RunTriggerKind } from "@sugabots/contracts";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { type ActivityState, ChatActivityRow } from "./ChatActivityRow.tsx";
 
 const growthDesk = {
-	kind: "agent" as const,
+	kind: "bot" as const,
 	id: "0199a3a0-0000-7000-8000-000000000401",
 	name: "Growth Desk",
 	handle: "growth-desk",
@@ -14,7 +14,7 @@ const growthDesk = {
 };
 
 const linearHandler = {
-	kind: "agent" as const,
+	kind: "bot" as const,
 	id: "0199a3a0-0000-7000-8000-000000000402",
 	name: "Linear Handler",
 	handle: "linear-handler",
@@ -39,10 +39,10 @@ const collaboration = (state: ActivityState, onOpen = fn()) => (
 	/>
 );
 
-const routine = (state: ActivityState, triggerKind: RoutineExecutionTriggerKind = "cron") => (
+const automation = (state: ActivityState, triggerKind: RunTriggerKind = "schedule") => (
 	<ChatActivityRow
-		type="routine"
-		routineName="Overnight outbound"
+		type="run"
+		automationName="Overnight outbound"
 		triggerKind={triggerKind}
 		state={state}
 		onOpen={fn()}
@@ -91,11 +91,11 @@ export const CollaborationWithWhatWasAsked = meta.story({
 	},
 });
 
-/** RoutineRan is a scheduled routine that posted into the chat, marked with a clock. */
-export const RoutineRan = meta.story({ render: () => routine("done") });
+/** AutomationRan is a scheduled automation that posted into the chat, marked with a clock. */
+export const AutomationRan = meta.story({ render: () => automation("done") });
 
-/** RoutineRanFromWebhook is a run its webhook started, marked with a hook in the clock's place. */
-export const RoutineRanFromWebhook = meta.story({ render: () => routine("done", "webhook") });
+/** AutomationRanFromWebhook is a run its webhook started, marked with a hook in the clock's place. */
+export const AutomationRanFromWebhook = meta.story({ render: () => automation("done", "webhook") });
 
-/** RoutineFailed marks the failure with the one red the design allows. */
-export const RoutineFailed = meta.story({ render: () => routine("failed") });
+/** AutomationFailed marks the failure with the one red the design allows. */
+export const AutomationFailed = meta.story({ render: () => automation("failed") });

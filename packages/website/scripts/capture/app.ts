@@ -106,19 +106,16 @@ export async function click(stage: Stage, locator: Locator) {
 	await stage.page.mouse.up();
 }
 
-/** Opens the thread titled `title` from its line under the message it was started from. */
-export async function openThread(stage: Stage, title: string) {
-	const line = stage.app
-		.getByRole("button", { name: new RegExp(`^Open thread: ${escapeRegExp(title)}`) })
-		.last();
-	await line.waitFor({ timeout: 20_000 });
-	await wait(stage, 600);
-	await click(stage, line);
+/**
+ * Starts a task with the bot named `bot` from its row in the sidebar, whose +
+ * shows while the pointer is over the row, and waits for the new task's page.
+ */
+export async function openNewTask(stage: Stage, bot: string) {
+	const newTask = stage.app.getByRole("link", { name: `New task with ${bot}` });
+	await newTask.waitFor({ timeout: 20_000 });
+	await click(stage, newTask);
+	await stage.app.getByRole("heading", { name: `What should ${bot} work on?` }).waitFor();
 	await wait(stage, 800);
-}
-
-function escapeRegExp(text: string) {
-	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Closes the panel open over the chat, as its close button does. */

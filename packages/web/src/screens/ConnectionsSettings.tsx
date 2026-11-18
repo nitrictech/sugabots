@@ -1,5 +1,5 @@
 import {
-	type Agent,
+	type Bot,
 	type Connection,
 	type ConnectionPreset,
 	connectionCatalog,
@@ -45,13 +45,13 @@ import { accessSummaryText } from "./tool-access.tsx";
  */
 
 export function ConnectionsSettings({
-	agent,
+	bot,
 	canManage,
 	signInError,
 	adding,
 	onAddingChange,
 }: {
-	agent: Agent;
+	bot: Bot;
 	canManage: boolean;
 	/** Why the OAuth sign-in that just returned here did not finish, in our own words. */
 	signInError?: string;
@@ -59,7 +59,7 @@ export function ConnectionsSettings({
 	adding: boolean;
 	onAddingChange: (adding: boolean) => void;
 }) {
-	const connections = useConnections(agent.id);
+	const connections = useConnections(bot.id);
 	if (connections.isPending) return null;
 	if (connections.isError) return <Alert>{failureMessage(connections.error)}</Alert>;
 	const listed = connections.data;
@@ -71,7 +71,7 @@ export function ConnectionsSettings({
 			{signInError && <Alert>Signing in did not finish: {signInError}</Alert>}
 			<SettingsGroup note="Bots act as whoever connected each one. Open one to choose for each tool.">
 				{listed.map((one) => (
-					<ConnectionRow key={one.id} connection={one} agent={agent} canManage={canManage} />
+					<ConnectionRow key={one.id} connection={one} bot={bot} canManage={canManage} />
 				))}
 				{listed.length === 0 && (
 					<SettingsRow label={<span className="text-muted-foreground">No connections yet</span>} />
@@ -81,8 +81,8 @@ export function ConnectionsSettings({
 				<Dialog open={adding} onOpenChange={setAdding}>
 					{adding && (
 						<AddConnectionDialog
-							agentId={agent.id}
-							botName={agent.name}
+							botId={bot.id}
+							botName={bot.name}
 							available={connectionCatalog.filter((preset) => !taken.has(preset.id))}
 							offersGitHub={!listed.some((one) => one.kind === "github")}
 							done={() => setAdding(false)}
@@ -105,17 +105,17 @@ function lineFor(connection: Connection): string {
 
 function ConnectionRow({
 	connection,
-	agent,
+	bot,
 	canManage,
 }: {
 	connection: Connection;
-	agent: Agent;
+	bot: Bot;
 	canManage: boolean;
 }) {
-	const actions = useConnectionActions(agent.id);
+	const actions = useConnectionActions(bot.id);
 	const navigate = useNavigate();
 	const backToList = useBackToHere("Connections");
-	const page = { ...connectionSettingsLink(agent, connection), state: backToList };
+	const page = { ...connectionSettingsLink(bot, connection), state: backToList };
 	const needsSignIn = !connection.signedIn;
 	const failing =
 		connection.signInExpired || (connection.signedIn && connection.status === "error");
@@ -186,13 +186,13 @@ type Choice = ConnectionPreset | "custom" | "http" | "github";
 
 /** Adding a connection: which app, then its sign-in, or any other server by its address. */
 function AddConnectionDialog({
-	agentId,
+	botId,
 	botName,
 	available,
 	offersGitHub,
 	done,
 }: {
-	agentId: string;
+	botId: string;
 	botName: string;
 	available: readonly ConnectionPreset[];
 	/** Whether the bot may connect to GitHub, which it may only once. */
@@ -203,16 +203,16 @@ function AddConnectionDialog({
 	return (
 		<DialogFormFrame>
 			{choice === "github" ? (
-				<GitHubConnectStep agentId={agentId} onBack={() => setChoice(undefined)} done={done} />
+				<GitHubConnectStep botId={botId} onBack={() => setChoice(undefined)} done={done} />
 			) : choice === "custom" || choice === "http" ? (
 				<ByUrlStep
-					agentId={agentId}
+					botId={botId}
 					kind={choice === "http" ? "http" : "mcp"}
 					onBack={() => setChoice(undefined)}
 					done={done}
 				/>
 			) : choice ? (
-				<AppStep agentId={agentId} preset={choice} onBack={() => setChoice(undefined)} />
+				<AppStep botId={botId} preset={choice} onBack={() => setChoice(undefined)} />
 			) : (
 				<AppList
 					botName={botName}
@@ -333,15 +333,15 @@ function AppList({
  * which brings the browser back to this bot.
  */
 function AppStep({
-	agentId,
+	botId,
 	preset,
 	onBack,
 }: {
-	agentId: string;
+	botId: string;
 	preset: ConnectionPreset;
 	onBack: () => void;
 }) {
-	const actions = useConnectionActions(agentId);
+	const actions = useConnectionActions(botId);
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
@@ -397,18 +397,18 @@ const signInMethodOptions: { value: SignInMethod; label: string }[] = [
  * test before it is added: its check sends no request.
  */
 function ByUrlStep({
-	agentId,
+	botId,
 	kind,
 	onBack,
 	done,
 }: {
-	agentId: string;
+	botId: string;
 	kind: "mcp" | "http";
 	onBack: () => void;
 	done: () => void;
 }) {
 	const isEndpoint = kind === "http";
-	const actions = useConnectionActions(agentId);
+	const actions = useConnectionActions(botId);
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
 	const [method, setMethod] = useState<SignInMethod>("token");

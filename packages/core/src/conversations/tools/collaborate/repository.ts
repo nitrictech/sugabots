@@ -11,18 +11,18 @@ import {
 import type * as schema from "../../../database/schema.ts";
 import {
 	ACTIVE_TURN_STATUSES,
-	agent,
+	bot,
 	collaboration,
+	conversation,
 	message,
-	thread,
 	turn,
 } from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { type CollaborationChange, ConversationEvent } from "../../events.ts";
-import { toCollaborationPart } from "../../threads/collaboration-parts.ts";
+import { toCollaborationPart } from "../../repository/collaboration-parts.ts";
 
 /**
- * The only writer of `collaboration`: one crew agent asking another for help.
+ * The only writer of `collaboration`: one bot asking another for help.
  *
  * A collaboration moves through `waiting` (the asking turn is blocked on it),
  * `pending` (it gave up waiting; the answer will resume it), and `answered` or
@@ -31,12 +31,16 @@ import { toCollaborationPart } from "../../threads/collaboration-parts.ts";
  * on its current status, and announces what changed.
  */
 export interface Records {
-	/** Records a collaboration whose thread `childThreadId` is open, `waiting`. */
+	/** Records a collaboration whose conversation `childConversationId` is open, `waiting`. */
 	readonly open: (input: {
-		parentThreadId: string;
+		/** The conversation it was asked from. */
+		parentConversationId: string;
+		/** The conversation people opened that the parent is in, or the parent itself. */
+		rootConversationId: string;
 		parentMessageId: string;
 		turnId: string;
-		childThreadId: string;
+		/** The collaboration's own conversation, opened in the same transaction. */
+		conversationId: string;
 		briefMessageId: string;
 		collaborator: { id: string; name: string };
 		brief: string;
@@ -50,25 +54,25 @@ export interface Records {
 	 */
 	readonly stopWaiting: (collaborationId: string) => Effect.Effect<WaitOutcome>;
 	/**
-	 * Records `answer` as the reply to the collaboration whose thread is
-	 * `childThreadId`, if one is outstanding.
+	 * Records `answer` as the reply to the collaboration whose conversation is
+	 * `childConversationId`, if one is outstanding.
 	 */
-	readonly answer: (childThreadId: string, answer: string) => Effect.Effect<void>;
+	readonly answer: (childConversationId: string, answer: string) => Effect.Effect<void>;
 	/**
-	 * Fails the collaborations asked for in these threads that are still
-	 * waiting or pending, because the routine run they work for ended. One
+	 * Fails the collaborations asked for in these conversations that are still
+	 * waiting or pending, because the automation run they work for ended. One
 	 * another transaction holds is skipped: its holder is moving it on.
 	 */
-	readonly failUnder: (threadIds: readonly string[]) => Effect.Effect<void>;
+	readonly failUnder: (conversationIds: readonly string[]) => Effect.Effect<void>;
 	/**
-	 * Fails the collaboration asked of `collaboratorAgentId` in its thread
-	 * `childThreadId`, if it is still waiting or pending, because the
+	 * Fails the collaboration asked of `collaboratorBotId` in its conversation
+	 * `childConversationId`, if it is still waiting or pending, because the
 	 * collaborator's turn there ended without answering. One the collaborator
 	 * still has an active turn for is left alone: that turn may answer it.
 	 */
 	readonly failUnanswered: (collaborator: {
-		childThreadId: string;
-		collaboratorAgentId: string;
+		childConversationId: string;
+		collaboratorBotId: string;
 	}) => Effect.Effect<void>;
 }
 
@@ -87,11 +91,12 @@ export const makeRecords = Effect.gen(function* () {
 							db
 								.insert(collaboration)
 								.values({
-									parentThreadId: input.parentThreadId,
+									conversationId: input.conversationId,
+									parentConversationId: input.parentConversationId,
+									rootConversationId: input.rootConversationId,
 									parentMessageId: input.parentMessageId,
 									turnId: input.turnId,
-									childThreadId: input.childThreadId,
-									collaboratorAgentId: input.collaborator.id,
+									collaboratorBotId: input.collaborator.id,
 									brief: input.brief,
 									atOffset: input.atOffset,
 								})
@@ -99,19 +104,19 @@ export const makeRecords = Effect.gen(function* () {
 						).pipe(Effect.flatMap(writtenRow("collaboration")));
 						const [address] = yield* query((db) =>
 							db
-								.select({ workspaceId: thread.workspaceId })
-								.from(thread)
-								.where(eq(thread.id, input.parentThreadId))
+								.select({ workspaceId: conversation.workspaceId })
+								.from(conversation)
+								.where(eq(conversation.id, input.parentConversationId))
 								.limit(1),
 						);
 						if (!address) {
-							return yield* Effect.die(new Error("A collaboration's parent thread is gone"));
+							return yield* Effect.die(new Error("A collaboration's parent conversation is gone"));
 						}
 						yield* emit([
 							ConversationEvent.CollaborationOpened({
 								...collaborationChange(opened, input.collaborator.name),
 								workspaceId: address.workspaceId,
-								collaboratorAgentId: input.collaborator.id,
+								collaboratorBotId: input.collaborator.id,
 								briefMessageId: input.briefMessageId,
 							}),
 						]);
@@ -143,12 +148,12 @@ export const makeRecords = Effect.gen(function* () {
 				),
 			),
 
-		answer: (childThreadId, answer) =>
+		answer: (childConversationId, answer) =>
 			operation(
 				"answer",
 				transaction(
 					Effect.gen(function* () {
-						const current = yield* locked(eq(collaboration.childThreadId, childThreadId));
+						const current = yield* locked(eq(collaboration.conversationId, childConversationId));
 						if (!current || current.row.status === "answered" || current.row.status === "failed") {
 							return;
 						}
@@ -163,20 +168,20 @@ export const makeRecords = Effect.gen(function* () {
 				),
 			),
 
-		failUnder: (threadIds) =>
+		failUnder: (conversationIds) =>
 			operation(
 				"failUnder",
 				transaction(
 					Effect.gen(function* () {
-						if (threadIds.length === 0) return;
+						if (conversationIds.length === 0) return;
 						const unanswered = yield* query((db) =>
 							db
-								.select({ collaboration, collaboratorName: agent.name })
+								.select({ collaboration, collaboratorName: bot.name })
 								.from(collaboration)
-								.innerJoin(agent, eq(agent.id, collaboration.collaboratorAgentId))
+								.innerJoin(bot, eq(bot.id, collaboration.collaboratorBotId))
 								.where(
 									and(
-										inArray(collaboration.parentThreadId, [...threadIds]),
+										inArray(collaboration.parentConversationId, [...conversationIds]),
 										inArray(collaboration.status, ["waiting", "pending"]),
 									),
 								)
@@ -196,15 +201,15 @@ export const makeRecords = Effect.gen(function* () {
 				),
 			),
 
-		failUnanswered: ({ childThreadId, collaboratorAgentId }) =>
+		failUnanswered: ({ childConversationId, collaboratorBotId }) =>
 			operation(
 				"failUnanswered",
 				transaction(
 					Effect.gen(function* () {
 						const current = yield* locked(
 							and(
-								eq(collaboration.childThreadId, childThreadId),
-								eq(collaboration.collaboratorAgentId, collaboratorAgentId),
+								eq(collaboration.conversationId, childConversationId),
+								eq(collaboration.collaboratorBotId, collaboratorBotId),
 								inArray(collaboration.status, ["waiting", "pending"]),
 							),
 						);
@@ -215,8 +220,8 @@ export const makeRecords = Effect.gen(function* () {
 								.from(turn)
 								.where(
 									and(
-										eq(turn.threadId, childThreadId),
-										eq(turn.agentId, collaboratorAgentId),
+										eq(turn.conversationId, childConversationId),
+										eq(turn.botId, collaboratorBotId),
 										inArray(turn.status, [...ACTIVE_TURN_STATUSES]),
 									),
 								)
@@ -256,32 +261,32 @@ const locked = (by: SQL | undefined) =>
 			db
 				.select({
 					collaboration,
-					collaboratorName: agent.name,
-					askingAgentId: message.authorAgentId,
+					collaboratorName: bot.name,
+					askingBotId: message.authorBotId,
 				})
 				.from(collaboration)
-				.innerJoin(agent, eq(agent.id, collaboration.collaboratorAgentId))
+				.innerJoin(bot, eq(bot.id, collaboration.collaboratorBotId))
 				.innerJoin(message, eq(message.id, collaboration.parentMessageId))
 				.where(by)
 				.limit(1)
 				.for("update", { of: collaboration }),
 		),
 		([row]) =>
-			row?.askingAgentId
+			row?.askingBotId
 				? {
 						row: row.collaboration,
 						collaboratorName: row.collaboratorName,
-						askingAgentId: row.askingAgentId,
+						askingBotId: row.askingBotId,
 					}
 				: undefined,
 	);
 
-/** The asking agent, if it stopped waiting for the collaboration about to end. */
+/** The asking bot, if it stopped waiting for the collaboration about to end. */
 function askerToResume(current: {
 	row: schema.CollaborationRow;
-	askingAgentId: string;
+	askingBotId: string;
 }): string | null {
-	return current.row.status === "pending" ? current.askingAgentId : null;
+	return current.row.status === "pending" ? current.askingBotId : null;
 }
 
 const writeStatus = (
@@ -299,7 +304,7 @@ function collaborationChange(
 	collaboratorName: string,
 ): CollaborationChange {
 	return {
-		parentThreadId: row.parentThreadId,
+		parentConversationId: row.parentConversationId,
 		parentMessageId: row.parentMessageId,
 		collaboration: toCollaborationPart(row, collaboratorName),
 	};

@@ -4,11 +4,11 @@ import { cn } from "cn";
 import { Check, ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useApprovalApp } from "@/lib/approval-app.ts";
+import { useChannels } from "@/lib/channels.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
+import { useReviewToolCall } from "@/lib/conversations.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { usePods } from "@/lib/pods.ts";
-import { useReviewToolCall } from "@/lib/threads.ts";
 import { toolTitle, wordsFromKey } from "@/lib/tool-names.ts";
 import { ConversationLink } from "@/shell/ConversationLink.tsx";
 import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE, usePhoneBack } from "@/ui/back-button.tsx";
@@ -50,13 +50,13 @@ function findRequest(inbox: ApprovalInbox | undefined, callId: string): InboxReq
 
 function ApprovalDetail({ found }: { found: InboxRequest }) {
 	const { request } = found;
-	const { call, agent } = request;
-	const { data: pods } = usePods();
+	const { call, bot } = request;
+	const { data: channels } = useChannels();
 	const { look, appName, action } = useApprovalApp(request);
-	const review = useReviewToolCall(request.threadId);
-	const pod = pods?.find((candidate) => candidate.id === request.podId);
+	const review = useReviewToolCall(request.conversationId);
+	const channel = channels?.find((candidate) => candidate.id === request.channelId);
 	const askedIn = [
-		pod && `in ${pod.name}`,
+		channel && `in ${channel.name}`,
 		`at ${formatListTime(new Date(call.startedAt), new Date())}`,
 	]
 		.filter(Boolean)
@@ -94,7 +94,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 						{/* On a phone, the title first, then one line of who asked, for what, where and when. */}
 						<div className="flex min-w-0 flex-col max-md:flex-col-reverse max-md:gap-1">
 							<span className="truncate text-muted-foreground text-xs max-md:whitespace-normal max-md:text-sm">
-								{agent.name} wants to use {appName}
+								{bot.name} wants to use {appName}
 								<span className="md:hidden"> · {askedIn}</span>
 							</span>
 							<h1 className="m-0 truncate font-bold text-xl text-foreground leading-tight tracking-normal max-md:whitespace-normal max-md:font-semibold max-md:text-xl">
@@ -125,17 +125,19 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 						/>
 					) : (
 						<p className="m-0 text-xs text-muted-foreground">
-							No longer waiting: {agent.name} stopped before it was answered.
+							No longer waiting: {bot.name} stopped before it was answered.
 						</p>
 					)}
 					<span className="flex-1 max-md:hidden" />
-					{request.conversationId && (
+					{/* A channel's conversation links once the channel is known. */}
+					{request.rootConversationId && (request.channelId === null || channel) && (
 						<ConversationLink
-							pod={pod}
-							agent={request.agent}
-							conversationId={request.conversationId}
+							channel={channel ?? null}
+							conversationId={request.rootConversationId}
 							search={
-								request.threadId === request.conversationId ? {} : { thread: request.threadId }
+								request.conversationId === request.rootConversationId
+									? {}
+									: { item: request.conversationId }
 							}
 							className="focus-ring rounded-sm font-medium text-xs text-link max-md:self-center max-md:py-2 max-md:text-sm"
 						>

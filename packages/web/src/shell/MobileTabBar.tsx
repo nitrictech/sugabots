@@ -62,7 +62,7 @@ export function MobileTabBar({ className }: { className?: string }) {
 					label="Home"
 				/>
 				<TabLink
-					render={<Link from="/$workspace" to="./activity" />}
+					render={<Link from="/$workspace" to="./inbox" />}
 					current={tab === "inbox"}
 					icon={<Inbox />}
 					label="Inbox"
@@ -140,12 +140,12 @@ function TabLink({
 }
 
 /**
- * Which tab the page is under: anything in a pod is Home's, a chat opened
+ * Which tab the page is under: anything in a channel is Home's, a chat opened
  * from Inbox is Inbox's, and settings, reached from You, are You's.
  */
 function useMobileTab(): MobileTab {
 	const matchRoute = useMatchRoute();
-	if (matchRoute({ to: "/$workspace/activity", fuzzy: true })) return "inbox";
+	if (matchRoute({ to: "/$workspace/inbox", fuzzy: true })) return "inbox";
 	if (matchRoute({ to: "/$workspace/approvals", fuzzy: true })) return "approvals";
 	if (
 		matchRoute({ to: "/$workspace/you", fuzzy: true }) ||

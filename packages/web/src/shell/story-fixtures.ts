@@ -1,13 +1,13 @@
 import type {
-	Agent,
-	AgentColor,
-	AgentFace,
-	AgentPermissions,
-	AgentShape,
-	Direct,
+	Bot,
+	BotColor,
+	BotFace,
+	BotPermissions,
+	BotShape,
+	Channel,
+	ChannelPermissions,
+	DirectMessage,
 	DirectMessageListItem,
-	Pod,
-	PodPermissions,
 } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 
@@ -18,30 +18,30 @@ import { testPerson } from "@sugabots/contracts/testing";
  */
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
-const PERMISSIONS: PodPermissions = {
+const PERMISSIONS: ChannelPermissions = {
 	rename: true,
 	manageMembers: true,
 	manageBots: true,
 	leave: false,
 	join: false,
 	delete: true,
-	deleteArtifacts: true,
+	deleteFiles: true,
 };
 
 /** What the viewer may do with a bot in the stories: everything. */
-export const BOT_PERMISSIONS: AgentPermissions = {
+export const BOT_PERMISSIONS: BotPermissions = {
 	update: true,
 	delete: true,
 	manageConnections: true,
-	manageSandbox: true,
+	manageComputer: true,
 	useDesktop: true,
-	manageRoutines: true,
-	runRoutines: true,
+	manageAutomations: true,
+	runAutomations: true,
 	decideApprovals: true,
 	talk: true,
 };
 
-function pod(id: string, name: string, color: Pod["color"]): Pod {
+function channel(id: string, name: string, color: Channel["color"]): Channel {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000000${id}`,
 		workspaceId: WORKSPACE,
@@ -56,25 +56,25 @@ function pod(id: string, name: string, color: Pod["color"]): Pod {
 	};
 }
 
-export const revenue = pod("a1", "Revenue", "green");
-export const engineering = pod("a2", "Engineering", "blue");
-export const design = pod("a3", "Design", "plum");
+export const revenue = channel("a1", "Revenue", "green");
+export const engineering = channel("a2", "Engineering", "blue");
+export const design = channel("a3", "Design", "plum");
 
 let next = 0;
 function bot(
 	name: string,
-	color: AgentColor,
-	face: AgentFace = "pill",
-	shape: AgentShape = "circle",
-	extra: Partial<Agent> = {},
-): Agent {
+	color: BotColor,
+	face: BotFace = "pill",
+	shape: BotShape = "circle",
+	extra: Partial<Bot> = {},
+): Bot {
 	next += 1;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000001${String(next).padStart(2, "0")}`,
 		workspaceId: WORKSPACE,
 		name,
 		handle: name.toLowerCase().replace(/\s+/g, "-"),
-		systemAgentKey: null,
+		systemBotKey: null,
 		description: null,
 		color,
 		face,
@@ -82,7 +82,7 @@ function bot(
 		model: "claude-sonnet-4-20250514",
 		prompt: "",
 		disabledTools: [],
-		usesSandbox: false,
+		usesComputer: false,
 		naturalBrowsing: false,
 		createdById: null,
 		visibility: "public",
@@ -106,14 +106,14 @@ export const chief = bot("Chief", "purple", "wink", "blob", {
 });
 
 /** The channels, each with the bots added to it. */
-export const podsWithBots = [
-	{ pod: revenue, bots: [growthDesk, accountManager, leadResearcher] },
-	{ pod: engineering, bots: [linearHandler, oncall] },
-	{ pod: design, bots: [] },
+export const channelsWithBots = [
+	{ channel: revenue, bots: [growthDesk, accountManager, leadResearcher] },
+	{ channel: engineering, bots: [linearHandler, oncall] },
+	{ channel: design, bots: [] },
 ];
 
 /** Every bot in the stories' workspace. */
-export const storyAgents: readonly Agent[] = [
+export const storyBots: readonly Bot[] = [
 	chief,
 	growthDesk,
 	accountManager,
@@ -142,9 +142,9 @@ export const theo = testPerson({
 	email: "theo@nitric.io",
 });
 
-function direct(id: string): Direct {
+function direct(id: string): DirectMessage {
 	return {
-		kind: "direct",
+		kind: "direct_message",
 		id: `0199a3a0-0000-7000-8000-0000000006${id}`,
 		workspaceId: WORKSPACE,
 		title: "Direct message",

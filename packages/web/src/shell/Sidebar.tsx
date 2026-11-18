@@ -1,32 +1,34 @@
 import { useRender } from "@base-ui/react/use-render";
-import type { Agent, NotificationSettings, Pod, Workspace } from "@sugabots/contracts";
+import type { Bot, Channel, NotificationSettings, Workspace } from "@sugabots/contracts";
 import { Link, useMatchRoute, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Bot, Hash, Inbox, Library, Plus, ShieldCheck } from "lucide-react";
+import { Bot as BotIcon, Hash, Inbox, Library, Plus, ShieldCheck } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
-import { useAgents, useAssistant, useEnsureAssistant } from "@/lib/agents.ts";
-import { useAttentionCounts, usePodChatMarkers } from "@/lib/chats.ts";
+import { useAssistant, useBots, useEnsureAssistant } from "@/lib/bots.ts";
+import { useChannels } from "@/lib/channels.ts";
+import { useAttentionCounts, useChannelConversationMarkers } from "@/lib/chats.ts";
 import { useFolded } from "@/lib/folded.ts";
-import { artifactsLink, botLink, botsLink, channelsLink } from "@/lib/links.ts";
+import { botLink, botsLink, channelsLink, filesLink } from "@/lib/links.ts";
 import { useNotificationSettings } from "@/lib/notifications.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
-import { usePods } from "@/lib/pods.ts";
 import { useSession, useSignOut } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { AccountMenu } from "@/shell/AccountMenu.tsx";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import {
 	type BotStanding,
 	ChannelConversations,
+	END_SLOT,
 	SidebarBot,
 	sidebarRowClassName,
+	UnreadMarker,
 } from "@/shell/ConversationList.tsx";
 import { DirectMessages } from "@/shell/DirectMessages.tsx";
 import { HelpMenu } from "@/shell/HelpMenu.tsx";
 import { InboxNews } from "@/shell/InboxNews.tsx";
-import { NewInPodMenu, useNewBot } from "@/shell/NewInPod.tsx";
-import { type PodStanding, SidebarPod } from "@/shell/SidebarPod.tsx";
+import { NewInChannelMenu, useNewBot } from "@/shell/NewInChannel.tsx";
+import { type ChannelStanding, SidebarChannel } from "@/shell/SidebarChannel.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
@@ -47,11 +49,11 @@ export type SidebarView = "inbox" | "approvals" | "settings" | "channels" | "bot
  * A phone has `MobileTabBar` and `MobileHome` instead.
  */
 export function Sidebar() {
-	const { data: pods } = usePods();
-	const { agents, isPending: agentsPending, error: agentsError } = useAgents();
+	const { data: channels } = useChannels();
+	const { bots, isPending: botsPending, error: botsError } = useBots();
 	const assistant = useAssistant();
-	useEnsuredAssistant(!agentsPending && !agentsError && !assistant);
-	const { data: markers } = usePodChatMarkers();
+	useEnsuredAssistant(!botsPending && !botsError && !assistant);
+	const { data: markers } = useChannelConversationMarkers();
 	const { unreadForYou, unreadInInbox, waitingApprovals } = useAttentionCounts();
 	const { data: notificationSettings } = useNotificationSettings();
 	const { workspace } = useWorkspace();
@@ -62,20 +64,20 @@ export function Sidebar() {
 	const newBot = useNewBot();
 	// Settings opened from a chat leads back to it; opened from settings, it keeps settings' own Back.
 	const backToChat = useBackToHere("Chat");
-	const nothing = { unreadMessages: 0, needsApproval: false, failedRoutines: 0 };
+	const nothing = { unreadMessages: 0, needsApproval: false, failedAutomations: 0 };
 
 	return (
 		<>
 			<SidebarView
-				assistant={assistant && { agent: assistant, ...(markers?.agents[assistant.id] ?? nothing) }}
-				channels={(pods ?? [])
-					.filter((pod) => pod.isMember)
-					.map((pod) => ({ pod, ...(markers?.pods[pod.id] ?? nothing) }))}
-				bots={sidebarBots(agents ?? [], place.botHandle).map((agent) => ({
-					agent,
-					...(markers?.agents[agent.id] ?? nothing),
+				assistant={assistant && { bot: assistant, ...(markers?.bots[assistant.id] ?? nothing) }}
+				channels={(channels ?? [])
+					.filter((channel) => channel.isMember)
+					.map((channel) => ({ channel, ...(markers?.channels[channel.id] ?? nothing) }))}
+				bots={sidebarBots(bots ?? [], place.botHandle).map((bot) => ({
+					bot,
+					...(markers?.bots[bot.id] ?? nothing),
 				}))}
-				currentPodSlug={place.podSlug}
+				currentChannelSlug={place.channelSlug}
 				currentBotHandle={place.botHandle}
 				selectedConversationId={place.conversationId}
 				view={place.view}
@@ -91,17 +93,19 @@ export function Sidebar() {
 				onNewBot={newBot.start}
 				// A phone has its tabs instead, and Home in place of the channels.
 				className="max-md:hidden"
-				newIn={(pod) => <NewInPodMenu pod={pod} />}
+				newIn={(channel) => <NewInChannelMenu channel={channel} />}
 				directMessages={
 					<DirectMessages
 						selectedConversationId={place.directMessageId}
 						newMessageOpen={place.newDirectMessage}
 					/>
 				}
-				conversationsOf={(pod) => (
+				conversationsOf={(channel) => (
 					<ChannelConversations
-						pod={pod}
-						selectedConversationId={pod.slug === place.podSlug ? place.conversationId : undefined}
+						channel={channel}
+						selectedConversationId={
+							channel.slug === place.channelSlug ? place.conversationId : undefined
+						}
 					/>
 				)}
 			/>
@@ -115,13 +119,11 @@ export function Sidebar() {
  * one open at `openHandle` while it is open, though not pinned, as an open
  * conversation is listed until it is left.
  */
-export function sidebarBots(agents: readonly Agent[], openHandle: string | undefined): Agent[] {
-	const listable = (agent: Agent) =>
-		!agent.assistant && agent.systemAgentKey === null && agent.permissions.talk;
-	const pinned = agents.filter((agent) => agent.pinned && listable(agent));
-	const open = agents.find(
-		(agent) => agent.handle === openHandle && !agent.pinned && listable(agent),
-	);
+export function sidebarBots(bots: readonly Bot[], openHandle: string | undefined): Bot[] {
+	const listable = (bot: Bot) =>
+		!bot.assistant && bot.systemBotKey === null && bot.permissions.talk;
+	const pinned = bots.filter((bot) => bot.pinned && listable(bot));
+	const open = bots.find((bot) => bot.handle === openHandle && !bot.pinned && listable(bot));
 	return open ? [...pinned, open] : pinned;
 }
 
@@ -136,7 +138,7 @@ export function useEnsuredAssistant(missing: boolean) {
 /** Where the address is, as the sidebar marks it. */
 interface SidebarPlace {
 	/** The channel the address is in, if any. */
-	podSlug: string | undefined;
+	channelSlug: string | undefined;
 	/** The bot the address is in, if any. */
 	botHandle: string | undefined;
 	/** The conversation open, if one is. */
@@ -155,7 +157,7 @@ function useSidebarPlace(): SidebarPlace {
 	const inSettings = Boolean(matchRoute({ to: "/$workspace/settings", fuzzy: true }));
 	const view: SidebarView | undefined = inSettings
 		? "settings"
-		: matchRoute({ to: "/$workspace/activity", fuzzy: true })
+		: matchRoute({ to: "/$workspace/inbox", fuzzy: true })
 			? "inbox"
 			: matchRoute({ to: "/$workspace/approvals", fuzzy: true })
 				? "approvals"
@@ -165,7 +167,7 @@ function useSidebarPlace(): SidebarPlace {
 						? "bots"
 						: undefined;
 	return {
-		podSlug: inSettings ? undefined : channel,
+		channelSlug: inSettings ? undefined : channel,
 		botHandle: inSettings ? undefined : bot,
 		conversationId: conversation,
 		view,
@@ -180,7 +182,7 @@ export function SidebarView({
 	assistant,
 	channels,
 	bots,
-	currentPodSlug,
+	currentChannelSlug,
 	currentBotHandle,
 	selectedConversationId,
 	view,
@@ -202,11 +204,11 @@ export function SidebarView({
 	/** The viewer's Personal Assistant, once it is there, with how it stands. */
 	assistant?: BotStanding;
 	/** The channels the viewer is in, with how each stands. */
-	channels: readonly PodStanding[];
+	channels: readonly ChannelStanding[];
 	/** The bots the viewer pinned, with how each stands. */
 	bots: readonly BotStanding[];
 	/** The channel the page open is in, while it is in one. */
-	currentPodSlug?: string;
+	currentChannelSlug?: string;
 	/** The bot the page open is about, while it is about one. */
 	currentBotHandle?: string;
 	/** The conversation open, while one is. */
@@ -234,11 +236,11 @@ export function SidebarView({
 	onNewBot?: () => void;
 	className?: string;
 	/** What makes a thread in a channel, at the end of its name. */
-	newIn?: (pod: Pod) => ReactNode;
+	newIn?: (channel: Channel) => ReactNode;
 	/** The viewer's direct messages, under the bots. */
 	directMessages?: ReactNode;
 	/** A channel's conversations, under its files. */
-	conversationsOf: (pod: Pod) => ReactNode;
+	conversationsOf: (channel: Channel) => ReactNode;
 }) {
 	const [folded, toggleFolded] = useFolded();
 	const [width, setWidth] = usePaneWidth("sidebar");
@@ -263,13 +265,14 @@ export function SidebarView({
 			<div className="flex flex-col gap-px border-border border-b px-3 pt-3 pb-2.5">
 				{assistant && (
 					<AssistantLink
-						assistant={assistant.agent}
-						selected={currentBotHandle === assistant.agent.handle}
-						attention={assistant.unreadMessages > 0 || assistant.needsApproval}
+						assistant={assistant.bot}
+						selected={currentBotHandle === assistant.bot.handle}
+						unreadMessages={assistant.unreadMessages}
+						needsApproval={assistant.needsApproval}
 					/>
 				)}
 				<SidebarLink
-					render={<Link from="/$workspace" to="./activity" />}
+					render={<Link from="/$workspace" to="./inbox" />}
 					icon={<Inbox />}
 					label="Inbox"
 					selected={view === "inbox"}
@@ -315,29 +318,29 @@ export function SidebarView({
 					}
 				>
 					{channels.map((standing) => {
-						const { pod } = standing;
-						const current = pod.slug === currentPodSlug;
+						const { channel } = standing;
+						const current = channel.slug === currentChannelSlug;
 						return (
-							<SidebarPod
-								key={pod.id}
+							<SidebarChannel
+								key={channel.id}
 								standing={standing}
-								open={!folded.has(pod.id)}
+								open={!folded.has(channel.id)}
 								holdsSelected={current}
-								onToggle={() => toggleFolded(pod.id)}
+								onToggle={() => toggleFolded(channel.id)}
 								settingsBack={settingsBack}
 								notificationSettings={notificationSettings}
-								newMenu={newIn?.(pod)}
+								newMenu={newIn?.(channel)}
 							>
-								{conversationsOf(pod)}
+								{conversationsOf(channel)}
 								<div className="flex flex-col gap-px pt-px pb-px">
 									<SidebarLink
-										render={<Link {...artifactsLink({ pod })} />}
+										render={<Link {...filesLink({ channel })} />}
 										icon={<Library />}
 										label="Files"
 										selected={current && view === undefined && !selectedConversationId}
 									/>
 								</div>
-							</SidebarPod>
+							</SidebarChannel>
 						);
 					})}
 					<SidebarLink
@@ -359,10 +362,10 @@ export function SidebarView({
 				>
 					<ul className="m-0 flex list-none flex-col gap-px p-0">
 						{bots.map((standing) => {
-							const selected = standing.agent.handle === currentBotHandle;
+							const selected = standing.bot.handle === currentBotHandle;
 							return (
 								<SidebarBot
-									key={standing.agent.id}
+									key={standing.bot.id}
 									standing={standing}
 									open={selected}
 									selected={selected}
@@ -374,7 +377,7 @@ export function SidebarView({
 					</ul>
 					<SidebarLink
 						render={<Link {...botsLink()} />}
-						icon={<Bot />}
+						icon={<BotIcon />}
 						label="Browse bots"
 						selected={view === "bots"}
 					/>
@@ -459,25 +462,30 @@ function SidebarSection({
 function AssistantLink({
 	assistant,
 	selected,
-	attention,
+	unreadMessages,
+	needsApproval,
 }: {
-	assistant: Agent;
+	assistant: Bot;
 	selected: boolean;
-	attention: boolean;
+	unreadMessages: number;
+	needsApproval: boolean;
 }) {
+	const attention = unreadMessages > 0 || needsApproval;
 	return (
 		<Link
 			{...botLink(assistant)}
 			aria-current={selected ? "page" : undefined}
 			className={cn(sidebarRowClassName(selected), attention && "font-semibold text-foreground")}
 		>
-			<AgentAvatar
-				color={assistant.color}
-				face={assistant.face}
-				shape={assistant.shape}
-				size={18}
-			/>
+			<BotAvatar color={assistant.color} face={assistant.face} shape={assistant.shape} size={18} />
 			<span className="min-w-0 flex-1 truncate">{assistant.name}</span>
+			{attention && (
+				<span className={END_SLOT}>
+					{/* Read after its name, as a bot's row reads what waits in it. */}
+					<span className="sr-only">, </span>
+					<UnreadMarker unreadMessages={unreadMessages} needsYou={needsApproval} />
+				</span>
+			)}
 		</Link>
 	);
 }

@@ -13,7 +13,7 @@ import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 export type CloseStage = (how?: { replace: boolean }) => void;
 
 /**
- * The level a view inside a stage was opened from, such as a bot's routines
+ * The level a view inside a stage was opened from, such as a bot's automations
  * above one of them, which its Back returns to.
  */
 export interface StageParent {

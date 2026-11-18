@@ -1,12 +1,12 @@
 import type { ToolCallPart } from "@sugabots/contracts";
 
 /*
- * How a reply's tool calls stand and are timed where the thread shows them:
+ * How a reply's tool calls stand and are timed where the conversation shows them:
  * the tool line above the reply and an approval card among its bubbles. What
  * they are called is `@/lib/tool-names.ts`.
  *
  * What the bot says just before a call is narration ("Now let me get the
- * cycle:"). The thread leaves it out, where it would read as a sentence
+ * cycle:"). The conversation leaves it out, where it would read as a sentence
  * pointing at nothing; the tool line shows it over the calls it introduced.
  */
 

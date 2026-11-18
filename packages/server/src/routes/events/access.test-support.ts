@@ -1,4 +1,4 @@
-import { personChannel, threadChannel, workspaceChannel } from "@sugabots/contracts";
+import { conversationChannel, personChannel, workspaceChannel } from "@sugabots/contracts";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { Effect } from "effect";
 import type { ChannelAccess } from "./access.ts";
@@ -6,7 +6,7 @@ import type { ChannelAccess } from "./access.ts";
 /** Grants nothing, so a stream route is never open by omission. */
 export const closedChannelAccess: ChannelAccess.Interface = {
 	workspace: () => Effect.undefined,
-	thread: () => Effect.undefined,
+	conversation: () => Effect.undefined,
 	me: () => Effect.undefined,
 	hears: () => Effect.succeed(false),
 };
@@ -14,7 +14,7 @@ export const closedChannelAccess: ChannelAccess.Interface = {
 /** Grants every channel, for stream cases that are not about who may listen. */
 export const openChannelAccess: ChannelAccess.Interface = {
 	workspace: (workspaceId) => Effect.succeed(workspaceChannel(workspaceId)),
-	thread: (threadId) => Effect.succeed(threadChannel(threadId)),
+	conversation: (conversationId) => Effect.succeed(conversationChannel(conversationId)),
 	me: () => Effect.map(CurrentActor.Service, ({ userId }) => personChannel(userId)),
 	hears: () => Effect.succeed(true),
 };

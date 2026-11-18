@@ -1,50 +1,52 @@
 import { NodeRuntime } from "@effect/platform-node";
 import type {
-	AgentColor,
-	AgentFace,
-	AgentShape,
-	NewRoutine,
-	PodColor,
+	BotColor,
+	BotFace,
+	BotShape,
+	ChannelColor,
+	NewAutomation,
 	ProviderPresetId,
 } from "@sugabots/contracts";
-import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
+import { ComputerCredentials } from "@sugabots/core/computers/computer-credentials";
+import { Automations } from "@sugabots/core/conversations/automations/automations";
+import { AutomationRuns } from "@sugabots/core/conversations/automations/runs";
 import { ConversationEvents } from "@sugabots/core/conversations/conversation-events";
-import { Routines } from "@sugabots/core/conversations/routines/routines";
-import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
 import {
-	agent,
+	automationTrigger,
+	bot as botTable,
+	channel,
 	modelProvider,
 	modelRequest,
-	pod,
 	providerModel,
-	routineTrigger,
 	user,
 	workspace,
 	workspaceDefaultModel,
 } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
+import { Files } from "@sugabots/core/files/files";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
+import { Egress } from "@sugabots/core/providers/network/egress";
 import { unimplemented } from "@sugabots/core/testing";
-import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
-import { PersonalAssistants } from "@sugabots/core/workspaces/agents/personal-assistants";
+import { BotRepository } from "@sugabots/core/workspaces/bots/bot-repository";
+import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
+import { ChannelRepository } from "@sugabots/core/workspaces/channels/channel-repository";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ensureAccount, seedAccountsLayer } from "../accounts.ts";
 import {
+	type AutomationRun,
 	type ChatScene,
 	ensureConnections,
 	ensureConversations,
-	type RoutineRun,
 	type SeedConnection,
 	type TaskScene,
 } from "./conversations.ts";
@@ -75,7 +77,7 @@ import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
  * page has a history. Those rows have no turn, which is how a later run
  * knows they are there.
  *
- * Its routines show as on but are held a year from running, since they would
+ * Its automations show as on but are held a year from running, since they would
  * otherwise run on schedule and fail without a model.
  *
  * Every step is idempotent, so it can be run again over its own data.
@@ -133,7 +135,7 @@ type ChannelKey = "growth" | "support" | "engineering";
 
 const CHANNELS: Record<
 	ChannelKey,
-	{ name: string; color: PodColor; members: readonly PersonKey[] }
+	{ name: string; color: ChannelColor; members: readonly PersonKey[] }
 > = {
 	growth: { name: "Growth", color: "green", members: ["gary", "lorraine"] },
 	support: { name: "Support", color: "blue", members: ["lorraine", "doreen"] },
@@ -201,14 +203,14 @@ interface SeedBot {
 	name: string;
 	/** The channel a public bot is in; a private bot, only Anita's, is in none. */
 	channel: ChannelKey | "private";
-	color: AgentColor;
-	face: AgentFace;
-	shape: AgentShape;
+	color: BotColor;
+	face: BotFace;
+	shape: BotShape;
 	description: string;
 	prompt: string;
 	/** In order of preference; the first is what the ledger's history is on. */
 	models: readonly [ModelChoice, ...ModelChoice[]];
-	usesSandbox?: boolean;
+	usesComputer?: boolean;
 	/** Roughly how many model requests it makes on a weekday, for the ledger. */
 	requestsPerWeekday: number;
 }
@@ -284,7 +286,7 @@ const BOTS: readonly SeedBot[] = [
 		prompt:
 			"You find out why billing went wrong for a customer. Reproduce it on your computer against the billing code, run the tests, and say plainly what caused it and what fixes it. Open a pull request with the fix, and write the incident up for the team.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
-		usesSandbox: true,
+		usesComputer: true,
 		requestsPerWeekday: 7,
 	},
 	{
@@ -297,7 +299,7 @@ const BOTS: readonly SeedBot[] = [
 		prompt:
 			"You review Fieldnote's pull requests. Check out the branch on your computer, run the tests, and reply with what fails, what's risky and what you'd change. Lead with the one thing that matters most.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
-		usesSandbox: true,
+		usesComputer: true,
 		requestsPerWeekday: 18,
 	},
 	{
@@ -310,7 +312,7 @@ const BOTS: readonly SeedBot[] = [
 		prompt:
 			"You read papers, docs, changelogs and long threads for the engineering team, and summarise what matters for Fieldnote. Quote the source for every claim. Use your computer to try code samples before recommending them.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
-		usesSandbox: true,
+		usesComputer: true,
 		requestsPerWeekday: 9,
 	},
 	{
@@ -341,10 +343,10 @@ const BOTS: readonly SeedBot[] = [
 
 const minutes = (hours: number, minutesPastHour = 0) => hours * 60 + minutesPastHour;
 
-const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
+const AUTOMATIONS: readonly { bot: string; automation: NewAutomation }[] = [
 	{
 		bot: "Growth Desk",
-		routine: {
+		automation: {
 			name: "Monday pipeline summary",
 			instructions:
 				"Summarise last week's deals: what closed, what slipped and what needs a reply today.",
@@ -353,7 +355,7 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 	},
 	{
 		bot: "Ticket Desk",
-		routine: {
+		automation: {
 			name: "Morning queue",
 			instructions:
 				"Go through the tickets that came in overnight. Answer what you can and list what needs a person, oldest first.",
@@ -362,7 +364,7 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 	},
 	{
 		bot: "Inbox Sorter",
-		routine: {
+		automation: {
 			name: "Inbox triage",
 			instructions: "Label the new support emails and flag anything urgent.",
 			triggers: [daily([minutes(7), minutes(13)])],
@@ -370,7 +372,7 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 	},
 	{
 		bot: "Code Reviewer",
-		routine: {
+		automation: {
 			name: "Review new pull requests",
 			instructions:
 				"A pull request was opened or updated. Review it, run the tests, and post what you find.",
@@ -379,7 +381,7 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 	},
 	{
 		bot: "Researcher",
-		routine: {
+		automation: {
 			name: "Friday dependency digest",
 			instructions:
 				"Read this week's release notes for our main dependencies and summarise anything that affects us.",
@@ -388,7 +390,7 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 	},
 	{
 		bot: "Journal",
-		routine: {
+		automation: {
 			name: "End-of-day prompt",
 			instructions: "Ask Anita what went well today and what's still on her mind.",
 			state: "paused",
@@ -604,7 +606,7 @@ const TASKS: readonly TaskScene<PersonKey>[] = [
 				at: { time: "11:16" },
 				from: { bot: "Researcher" },
 				parts: [
-					{ artifact: { kind: "html", title: QUEUE_REPORT_TITLE, content: QUEUE_REPORT } },
+					{ file: { kind: "html", title: QUEUE_REPORT_TITLE, content: QUEUE_REPORT } },
 					{
 						text: "Graphile Worker fits best: it picks up jobs over LISTEN/NOTIFY, has cron built in, and retries with backoff, all on the Postgres we already run. pg-boss is a close second. The comparison and next steps are in the page below.",
 					},
@@ -638,11 +640,11 @@ const TASKS: readonly TaskScene<PersonKey>[] = [
 	},
 ];
 
-/** Past runs of automations, so their threads and run lists have history. */
-const ROUTINE_RUNS: readonly RoutineRun[] = [
+/** Past runs of automations, so their conversations and run lists have history. */
+const AUTOMATION_RUNS: readonly AutomationRun[] = [
 	{
 		bot: "Ticket Desk",
-		routine: "Morning queue",
+		automation: "Morning queue",
 		scheduledAt: { time: "8:30", day: "previous weekday" },
 		finishedAt: { time: "8:32", day: "previous weekday" },
 		result:
@@ -650,7 +652,7 @@ const ROUTINE_RUNS: readonly RoutineRun[] = [
 	},
 	{
 		bot: "Ticket Desk",
-		routine: "Morning queue",
+		automation: "Morning queue",
 		scheduledAt: { time: "8:30" },
 		finishedAt: { time: "8:33" },
 		result:
@@ -658,7 +660,7 @@ const ROUTINE_RUNS: readonly RoutineRun[] = [
 	},
 	{
 		bot: "Growth Desk",
-		routine: "Monday pipeline summary",
+		automation: "Monday pipeline summary",
 		scheduledAt: { time: "9:00", day: "previous monday" },
 		finishedAt: { time: "9:02", day: "previous monday" },
 		result:
@@ -852,16 +854,16 @@ const seed = Effect.gen(function* () {
 	yield* placeBots({ workspaceId, people, channelIds, botIds });
 
 	yield* Effect.forEach(
-		ROUTINES,
-		({ bot, routine }) => {
-			const agentId = botIds.get(bot);
-			return agentId
-				? ensureRoutine({ agentId, routine })
+		AUTOMATIONS,
+		({ bot, automation }) => {
+			const botId = botIds.get(bot);
+			return botId
+				? ensureAutomation({ botId, automation })
 				: Effect.die(new Error(`No bot is named ${bot}`));
 		},
 		{ discard: true },
 	).pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(people[OWNER])));
-	yield* holdScheduledRoutines(workspaceId);
+	yield* holdScheduledAutomations(workspaceId);
 
 	yield* ensureConnections({
 		workspaceId,
@@ -877,7 +879,7 @@ const seed = Effect.gen(function* () {
 			botIds,
 			botModels: new Map(BOTS.map((bot) => [bot.name, chooseModel(bot, offered)])),
 		},
-		{ chats: CHATS, tasks: TASKS, runs: ROUTINE_RUNS },
+		{ chats: CHATS, tasks: TASKS, runs: AUTOMATION_RUNS },
 	);
 
 	const ledgerRows = yield* fillLedger({ workspaceId, botIds });
@@ -970,25 +972,25 @@ const joinWorkspace = (input: {
  */
 const ensureChannels = (workspaceId: string, people: Record<PersonKey, string>) =>
 	Effect.gen(function* () {
-		const pods = yield* PodRepository.Service;
+		const channelRepository = yield* ChannelRepository.Service;
 		const personalAssistants = yield* PersonalAssistants.Service;
 		yield* personalAssistants.provision({ workspaceId, userId: people[OWNER] });
 		const channels = yield* Effect.forEach(
 			Object.entries(CHANNELS) as [ChannelKey, (typeof CHANNELS)[ChannelKey]][],
 			([key, { name, color, members }]) =>
 				Effect.gen(function* () {
-					const podId = yield* pods
+					const channelId = yield* channelRepository
 						.create(workspaceId, { creatorId: people[OWNER], name, slug: key, color })
 						.pipe(
 							Effect.map((created) => created.id),
-							Effect.catchTag("PodSlugTaken", () => channelIdBySlug(workspaceId, key)),
+							Effect.catchTag("ChannelSlugTaken", () => channelIdBySlug(workspaceId, key)),
 						);
 					yield* Effect.forEach(
 						members,
-						(member) => pods.addMember(workspaceId, podId, people[member]),
+						(member) => channelRepository.addMember(workspaceId, channelId, people[member]),
 						{ discard: true },
 					);
-					return [key, podId] as const;
+					return [key, channelId] as const;
 				}),
 		);
 		return Object.fromEntries(channels) as Record<ChannelKey, string>;
@@ -998,9 +1000,9 @@ const channelIdBySlug = (workspaceId: string, slug: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
-				.select({ id: pod.id })
-				.from(pod)
-				.where(and(eq(pod.workspaceId, workspaceId), eq(pod.slug, slug))),
+				.select({ id: channel.id })
+				.from(channel)
+				.where(and(eq(channel.workspaceId, workspaceId), eq(channel.slug, slug))),
 		),
 		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error(`Channel ${slug} is missing`))),
 	);
@@ -1016,21 +1018,21 @@ const placeBots = (input: {
 	botIds: ReadonlyMap<string, string>;
 }) =>
 	Effect.gen(function* () {
-		const pods = yield* PodRepository.Service;
-		const agents = yield* AgentRepository.Service;
+		const channels = yield* ChannelRepository.Service;
+		const bots = yield* BotRepository.Service;
 		for (const bot of BOTS) {
-			const agentId = input.botIds.get(bot.name);
-			if (bot.channel === "private" || !agentId) continue;
-			yield* pods
-				.addBot(input.workspaceId, input.channelIds[bot.channel], agentId)
+			const botId = input.botIds.get(bot.name);
+			if (bot.channel === "private" || !botId) continue;
+			yield* channels
+				.addBot(input.workspaceId, input.channelIds[bot.channel], botId)
 				.pipe(Effect.orDie);
 			yield* Effect.forEach(
 				CHANNELS[bot.channel].members,
 				(member) =>
-					agents.setPinned({
+					bots.setPinned({
 						workspaceId: input.workspaceId,
 						userId: input.people[member],
-						agentId,
+						botId,
 						pinned: true,
 					}),
 				{ discard: true },
@@ -1114,12 +1116,12 @@ const ensureBot = (input: {
 	model: string;
 }) =>
 	Effect.gen(function* () {
-		const agents = yield* AgentRepository.Service;
+		const bots = yield* BotRepository.Service;
 		const { bot } = input;
-		const created = yield* agents
+		const created = yield* bots
 			.create(input.workspaceId, {
 				createdById: input.createdById,
-				agent: {
+				bot: {
 					name: bot.name,
 					visibility: bot.channel === "private" ? "private" : "public",
 					color: bot.color,
@@ -1128,69 +1130,69 @@ const ensureBot = (input: {
 					description: bot.description,
 					prompt: bot.prompt,
 					model: input.model,
-					usesSandbox: bot.usesSandbox ?? false,
+					usesComputer: bot.usesComputer ?? false,
 				},
 			})
 			.pipe(
 				Effect.map((row) => row.id),
-				Effect.catchTag("AgentNameTaken", () => Effect.succeed(undefined)),
+				Effect.catchTag("BotNameTaken", () => Effect.succeed(undefined)),
 				Effect.orDie,
 			);
 		if (created) return created;
 		const [existing] = yield* query((db) =>
 			db
-				.select({ id: agent.id })
-				.from(agent)
-				.where(and(eq(agent.workspaceId, input.workspaceId), eq(agent.name, bot.name))),
+				.select({ id: botTable.id })
+				.from(botTable)
+				.where(and(eq(botTable.workspaceId, input.workspaceId), eq(botTable.name, bot.name))),
 		);
 		if (!existing) return yield* Effect.die(new Error(`${bot.name} was not made`));
-		yield* agents
+		yield* bots
 			.update(input.workspaceId, existing.id, { model: input.model, shape: bot.shape })
 			.pipe(Effect.orDie);
 		return existing.id;
 	});
 
-const ensureRoutine = (input: { agentId: string; routine: NewRoutine }) =>
+const ensureAutomation = (input: { botId: string; automation: NewAutomation }) =>
 	Effect.gen(function* () {
-		const routines = yield* Routines.Service;
-		yield* routines.create({ agentId: input.agentId }, input.routine).pipe(
+		const automations = yield* Automations.Service;
+		yield* automations.create({ botId: input.botId }, input.automation).pipe(
 			Effect.asVoid,
-			Effect.catchTag("RoutineNameTaken", () => Effect.void),
+			Effect.catchTag("AutomationNameTaken", () => Effect.void),
 			Effect.orDie,
 		);
 	});
 
-/** How far off the seeded routines' next runs are put. */
-const ROUTINE_HOLD_DAYS = 365;
+/** How far off the seeded automations' next runs are put. */
+const AUTOMATION_HOLD_DAYS = 365;
 
 /**
- * Puts every scheduled trigger's next run a year out, so the routines show as
+ * Puts every scheduled trigger's next run a year out, so the automations show as
  * on, with their schedules, but never come due while the showcase is in use.
  * Due, they would run, and fail where the workspace offers no model. A paused
- * routine's schedule has no next run, and keeps none.
+ * automation's schedule has no next run, and keeps none.
  */
-const holdScheduledRoutines = (workspaceId: string) =>
+const holdScheduledAutomations = (workspaceId: string) =>
 	query((db) =>
 		db
-			.update(routineTrigger)
-			.set({ nextScheduledAt: new Date(Date.now() + ROUTINE_HOLD_DAYS * MILLISECONDS_PER_DAY) })
+			.update(automationTrigger)
+			.set({ nextScheduledAt: new Date(Date.now() + AUTOMATION_HOLD_DAYS * MILLISECONDS_PER_DAY) })
 			.where(
 				and(
-					eq(routineTrigger.workspaceId, workspaceId),
-					eq(routineTrigger.kind, "cron"),
-					isNotNull(routineTrigger.nextScheduledAt),
+					eq(automationTrigger.workspaceId, workspaceId),
+					eq(automationTrigger.kind, "schedule"),
+					isNotNull(automationTrigger.nextScheduledAt),
 				),
 			),
 	);
 
-type ScheduledTrigger = Extract<NewRoutine["triggers"][number], { kind: "cron" }>;
+type ScheduledTrigger = Extract<NewAutomation["triggers"][number], { kind: "schedule" }>;
 
 function weekly(
 	days: readonly ("mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun")[],
 	times: readonly number[],
 ): ScheduledTrigger {
 	return {
-		kind: "cron",
+		kind: "schedule",
 		schedule: { repeat: "weekly", every: 1, days, times, startsOn: today() },
 		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 	};
@@ -1198,7 +1200,7 @@ function weekly(
 
 function daily(times: readonly number[]): ScheduledTrigger {
 	return {
-		kind: "cron",
+		kind: "schedule",
 		schedule: { repeat: "daily", every: 1, times, startsOn: today() },
 		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 	};
@@ -1219,7 +1221,7 @@ const LEDGER_INSERT_BATCH = 500;
 /**
  * Six weeks of the bots' model requests, quieter at weekends, so the Usage
  * page has days, bots and models to show. Skipped when an earlier run
- * wrote them: seeded rows are the only agent turns with no turn.
+ * wrote them: seeded rows are the only bot turns with no turn.
  */
 const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, string> }) =>
 	Effect.gen(function* () {
@@ -1230,7 +1232,7 @@ const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, st
 				.where(
 					and(
 						eq(modelRequest.workspaceId, input.workspaceId),
-						eq(modelRequest.purpose, "agent-turn"),
+						eq(modelRequest.purpose, "bot-turn"),
 						isNull(modelRequest.turnId),
 					),
 				)
@@ -1256,8 +1258,8 @@ const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, st
 			for (const bot of BOTS) {
 				const [choice] = bot.models;
 				const providerId = providerIdByPreset.get(choice.preset);
-				const agentId = input.botIds.get(bot.name);
-				if (!providerId || !agentId) continue;
+				const botId = input.botIds.get(bot.name);
+				if (!providerId || !botId) continue;
 				const busyness = (isWeekend ? WEEKEND_SHARE : 1) * (0.6 + random() * 0.8);
 				const requests = Math.round(bot.requestsPerWeekday * busyness);
 				for (let request = 0; request < requests; request++) {
@@ -1273,8 +1275,8 @@ const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, st
 						1_000_000;
 					rows.push({
 						workspaceId: input.workspaceId,
-						purpose: "agent-turn",
-						agentId,
+						purpose: "bot-turn",
+						botId,
 						step: 0,
 						providerId,
 						preset: choice.preset,
@@ -1326,14 +1328,14 @@ seed.pipe(
 			Authentication.layer,
 			Membership.layer,
 			PersonalAssistants.layer,
-			PodRepository.layer,
-			AgentRepository.layer,
+			ChannelRepository.layer,
+			BotRepository.layer,
 			ModelProviderRepository.layer,
-			Artifacts.authoringLayer,
-			// The seed defines routines and never runs one, which is all these are for.
-			Routines.layer.pipe(
+			Files.authoringLayer,
+			// The seed defines automations and never runs one, which is all these are for.
+			Automations.layer.pipe(
 				Layer.provide([
-					unimplemented(RoutineRuns.Service, {}),
+					unimplemented(AutomationRuns.Service, {}),
 					unimplemented(ConversationEvents.Service, {}),
 				]),
 			),
@@ -1341,6 +1343,9 @@ seed.pipe(
 			Layer.provideMerge(
 				Layer.mergeAll(
 					Credentials.layer,
+					// Leaving and deleting go through the bots' computers; the seed never makes one.
+					Egress.layer,
+					ComputerCredentials.none,
 					seedAccountsLayer,
 					BlobStore.layer,
 					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),

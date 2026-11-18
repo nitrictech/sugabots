@@ -64,7 +64,7 @@ export const Hero = meta.story({
 			</SettingsGroup>
 			<SettingsDanger
 				label="Delete workspace"
-				description="Removes every pod, bot and thread in Nitric."
+				description="Removes every channel, bot and conversation in Nitric."
 				action="Delete"
 				onClick={fn()}
 			/>
@@ -77,8 +77,11 @@ const opened = fn();
 /** Listing is a page of things to open, each row a way in, with a note under its group. */
 export const Listing = meta.story({
 	render: () => (
-		<SettingsPage title="Routines" description="What your bots do on a schedule, or when called.">
-			<SettingsGroup label="Growth Desk" note="Routines post into the bot's chat when they run.">
+		<SettingsPage
+			title="Automations"
+			description="What your bots do on a schedule, or when called."
+		>
+			<SettingsGroup label="Growth Desk" note="Automations post into the bot's chat when they run.">
 				<SettingsRow
 					icon={
 						<SettingsRowIcon>

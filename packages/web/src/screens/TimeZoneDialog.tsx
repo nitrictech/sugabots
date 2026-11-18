@@ -28,7 +28,7 @@ import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.ts
 
 /**
  * Choosing the workspace's time zone: this device's, or one from a region,
- * or any found by typing part of its name. When routines are scheduled on its
+ * or any found by typing part of its name. When automations are scheduled on its
  * time, it says from the start that they move with it, so choosing a zone
  * doesn't resize it.
  */
@@ -67,7 +67,7 @@ function TimeZoneStep({
 	current: string;
 	done: () => void;
 }) {
-	const scheduled = useWorkspaceTimeZone(workspaceId, true).data?.scheduledRoutines ?? 0;
+	const scheduled = useWorkspaceTimeZone(workspaceId, true).data?.scheduledAutomations ?? 0;
 	const change = useChangeWorkspaceTimeZone(workspaceId);
 	const choices = useMemo(() => timeZoneChoices(new Date()), []);
 	const regions = useMemo(() => timeZoneRegions(choices), [choices]);
@@ -176,8 +176,8 @@ function TimeZoneStep({
 				</div>
 				{scheduled > 0 && (
 					<Note>
-						All routines scheduled on {timeZonePlace(current)} time will now run in whichever zone
-						you pick.
+						All automations scheduled on {timeZonePlace(current)} time will now run in whichever
+						zone you pick.
 					</Note>
 				)}
 				{change.error && <Alert>{failureMessage(change.error)}</Alert>}

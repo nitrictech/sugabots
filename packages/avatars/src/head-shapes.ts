@@ -1,4 +1,4 @@
-import type { AgentShape } from "@sugabots/contracts";
+import type { BotShape } from "@sugabots/contracts";
 import { FACE_VIEWBOX_SIZE } from "./face-marks.ts";
 
 /** One filled piece of a head: an outline, or a disc such as an ear or a petal. */
@@ -83,7 +83,7 @@ function ring(count: number, distance: number, radius: number): HeadPart[] {
  * Every head fills the 40-unit square a face is drawn in, as a circle does,
  * so swapping one shape for another keeps a bot the same size.
  */
-const headShapes: Record<AgentShape, HeadShape> = {
+const headShapes: Record<BotShape, HeadShape> = {
 	circle: { parts: [disc(CENTRE, CENTRE, CENTRE)], eyes: centred },
 	squircle: {
 		parts: [outline("M20 1C34.5 1 39 5.5 39 20S34.5 39 20 39 1 34.5 1 20 5.5 1 20 1Z")],
@@ -222,6 +222,6 @@ const headShapes: Record<AgentShape, HeadShape> = {
 };
 
 /** How a head shape is drawn: its pieces and where its eyes go. */
-export function headShape(shape: AgentShape): HeadShape {
+export function headShape(shape: BotShape): HeadShape {
 	return headShapes[shape];
 }

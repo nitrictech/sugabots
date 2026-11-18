@@ -14,55 +14,55 @@ import type { Turns } from "./turns/turns.ts";
  * What happened in a conversation, as the facts that changed.
  *
  * The repositories emit these through `DomainEvents` in the transaction that wrote
- * them; `ThreadFeed` decides what a watching client is told. An event carries
+ * them; `ConversationFeed` decides what a watching client is told. An event carries
  * the ids involved and what changed, plus what the feed would otherwise have
  * to query back, such as a finished reply's content. A tool call or
- * collaboration is carried whole, as the thread shows it, because clients
+ * collaboration is carried whole, as the conversation shows it, because clients
  * replace the part rather than patch it. An event the workspace's lists hear
- * of carries its thread, so only people who reach the thread are told.
+ * of carries its conversation, so only people who reach the conversation are told.
  */
 export type ConversationEvent = Data.TaggedEnum<{
 	/** A message was posted whole: a person's, or an automation run's result. */
 	MessagePosted: {
-		readonly threadId: string;
+		readonly conversationId: string;
 		readonly workspaceId: string;
 		readonly message: Message;
 	};
 	/** Somebody reacted to a message or took a reaction back. `reactions` is all it has now. */
 	ReactionsChanged: {
-		readonly threadId: string;
+		readonly conversationId: string;
 		readonly messageId: string;
 		readonly reactions: readonly MessageReaction[];
 	};
 	/**
-	 * An agent attached a file to its reply. `files` is all the reply carries
+	 * A bot attached a file to its reply. `files` is all the reply carries
 	 * now; a reply that starts again starts without them, as its `TurnStarted` says.
 	 */
 	MessageFilesChanged: {
-		readonly threadId: string;
+		readonly conversationId: string;
 		readonly messageId: string;
 		readonly files: readonly FilePart[];
 	};
-	/** Agents were brought into the thread to answer in it. */
-	AgentsJoined: { readonly threadId: string; readonly agentIds: readonly string[] };
+	/** Bots were brought into the conversation to answer in it. */
+	BotsJoined: { readonly conversationId: string; readonly botIds: readonly string[] };
 	/**
-	 * An agent's turn was asked for while it was already answering in the
-	 * thread, so it waits to start, and will read what was posted meanwhile.
+	 * A bot's turn was asked for while it was already answering in the
+	 * conversation, so it waits to start, and will read what was posted meanwhile.
 	 */
-	TurnQueued: { readonly threadId: string };
-	/** An agent's turn opened, with its reply as an empty `streaming` message. Not emitted when a suspended turn resumes. */
+	TurnQueued: { readonly conversationId: string };
+	/** A bot's turn opened, with its reply as an empty `streaming` message. Not emitted when a suspended turn resumes. */
 	TurnStarted: {
-		readonly threadId: string;
+		readonly conversationId: string;
 		readonly turnId: string;
-		readonly agentId: string;
+		readonly botId: string;
 		readonly reply: Message;
 	};
 	/** The turn finished and its reply is complete. */
 	TurnCompleted: {
-		readonly threadId: string;
+		readonly conversationId: string;
 		readonly workspaceId: string;
 		readonly turnId: string;
-		readonly agentId: string;
+		readonly botId: string;
 		readonly messageId: string;
 		readonly content: string;
 		/** The prompt's size, and the window it was read with. */
@@ -73,7 +73,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	};
 	/** The turn parked until people decide the tool approvals it asked for. */
 	TurnSuspended: {
-		readonly threadId: string;
+		readonly conversationId: string;
 		readonly workspaceId: string;
 		readonly turnId: string;
 	};
@@ -82,10 +82,10 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 * failed. `willRetry` is whether its owner runs it again.
 	 */
 	TurnFailed: {
-		readonly threadId: string;
+		readonly conversationId: string;
 		readonly workspaceId: string;
 		readonly turnId: string;
-		readonly agentId: string;
+		readonly botId: string;
 		readonly messageId: string;
 		/** What people are told went wrong. */
 		readonly userMessage: UserText;
@@ -93,33 +93,33 @@ export type ConversationEvent = Data.TaggedEnum<{
 	};
 	/** The turn was cancelled, or found stopped and ended as cancelled, keeping the reply written so far. */
 	TurnCancelled: {
-		readonly threadId: string;
+		readonly conversationId: string;
 		readonly workspaceId: string;
 		readonly turnId: string;
-		readonly agentId: string;
+		readonly botId: string;
 		readonly messageId: string;
 		readonly content: string;
 	};
-	/** Somebody asked a running turn to stop, or its routine run ended. */
+	/** Somebody asked a running turn to stop, or its automation run ended. */
 	TurnCancelRequested: {
-		readonly threadId: string;
+		readonly conversationId: string;
 		readonly turnId: string;
 	};
 	/**
-	 * The agent `agentId`'s turn in the thread was given up with no active
+	 * The bot `botId`'s turn in the conversation was given up with no active
 	 * turn left to end: it could not open, or its workflow failed while none
 	 * was running. `outcome` is how it ended.
 	 */
 	TurnAbandoned: {
-		readonly threadId: string;
-		readonly agentId: string;
+		readonly conversationId: string;
+		readonly botId: string;
 		readonly outcome: Turns.Ended;
 	};
 	/**
-	 * A turn's workflow in the thread finished and freed its
-	 * lane, so it no longer keeps the thread busy.
+	 * A turn's workflow in the conversation finished and freed its
+	 * lane, so it no longer keeps the conversation busy.
 	 */
-	LaneReleased: { readonly threadId: string };
+	LaneReleased: { readonly conversationId: string };
 	/** A reply called a tool: the call is running, or waiting for a person to approve it. */
 	ToolCallStarted: ToolCallChange;
 	/** A person allowed or denied a call, which the lists hear of, since it no longer waits on anyone. */
@@ -128,11 +128,11 @@ export type ConversationEvent = Data.TaggedEnum<{
 	ToolCallExecuting: ToolCallChange;
 	/** The call returned, failed, or was abandoned with its turn. */
 	ToolCallFinished: ToolCallChange;
-	/** An agent opened a child thread to brief a collaborator. */
+	/** A bot opened a conversation for a collaborator, and briefed it there. */
 	CollaborationOpened: CollaborationChange & {
 		readonly workspaceId: string;
-		readonly collaboratorAgentId: string;
-		/** The brief, the first message in the collaboration's thread. */
+		readonly collaboratorBotId: string;
+		/** The brief, the first message in the collaboration's conversation. */
 		readonly briefMessageId: string;
 	};
 	/** The asking turn stopped waiting; the answer will resume it instead. */
@@ -140,71 +140,71 @@ export type ConversationEvent = Data.TaggedEnum<{
 	/** The collaborator's reply was recorded as the answer. */
 	CollaborationAnswered: CollaborationChange & AskerResume;
 	/**
-	 * The collaboration ended unanswered: the routine run it worked for ended,
+	 * The collaboration ended unanswered: the automation run it worked for ended,
 	 * or the collaborator's turn ended without an answer.
 	 */
 	CollaborationFailed: CollaborationChange & AskerResume;
-	/** `person` read further into the thread, at `readAt`: every message created up to `readThrough`. */
-	ThreadRead: {
-		readonly threadId: string;
+	/** `person` read further into the conversation, at `readAt`: every message created up to `readThrough`. */
+	ConversationRead: {
+		readonly conversationId: string;
 		readonly person: PersonParticipant;
 		readonly readThrough: Date;
 		readonly readAt: Date;
 	};
-	/** Somebody started the task `threadId` with a bot. */
+	/** Somebody started the task `conversationId` with a bot. */
 	TaskStarted: {
 		readonly workspaceId: string;
-		readonly threadId: string;
+		readonly conversationId: string;
 	};
 	/**
-	 * A bot started the thread `threadId` for the person it was answering,
-	 * with the bot `hostAgentId`, whose first message is the brief it works from.
+	 * A bot started the conversation `conversationId` for the person it was answering,
+	 * with the bot `hostBotId`, whose first message is the brief it works from.
 	 */
-	BriefedThreadStarted: {
+	BriefedTaskStarted: {
 		readonly workspaceId: string;
-		readonly threadId: string;
-		readonly hostAgentId: string;
+		readonly conversationId: string;
+		readonly hostBotId: string;
 		readonly briefMessageId: string;
 	};
-	/** Somebody started, renamed or archived the pod's chat `threadId`. */
-	PodChatChanged: {
+	/** Somebody started, renamed or archived the channel's conversation `conversationId`. */
+	ChannelConversationChanged: {
 		readonly workspaceId: string;
-		readonly threadId: string;
+		readonly conversationId: string;
 	};
 	/** Somebody marked the conversation done, or reopened it. */
 	ConversationDoneChanged: {
 		readonly workspaceId: string;
-		readonly threadId: string;
+		readonly conversationId: string;
 	};
-	/** The Scribe rewrote the thread's summary, and on its first pass titled it. */
-	ThreadSummarised: {
-		readonly workspaceId: string;
-		readonly threadId: string;
-	};
-	/** The compaction agent replaced the thread's older history with a summary for its bots. */
-	ThreadCompacted: {
-		readonly workspaceId: string;
-		readonly threadId: string;
-	};
-	/** A routine run began in its own thread, listed in the agent's conversation. */
-	RoutineExecutionAccepted: {
+	/** The Summariser rewrote the conversation's summary, and on its first pass titled it. */
+	ConversationSummarised: {
 		readonly workspaceId: string;
 		readonly conversationId: string;
-		readonly threadId: string;
+	};
+	/** The compaction bot replaced the conversation's older history with a summary for its bots. */
+	ConversationCompacted: {
+		readonly workspaceId: string;
+		readonly conversationId: string;
+	};
+	/** An automation run began in its own conversation, listed in `rootConversationId`. */
+	RunAccepted: {
+		readonly workspaceId: string;
+		readonly rootConversationId: string;
+		readonly conversationId: string;
 	};
 	/**
-	 * A routine run was told to end, and the work still going on in its
-	 * threads was cancelled: waiting turns, pending approvals, collaborations.
+	 * An automation run was told to end, and the work still going on in its
+	 * conversations was cancelled: waiting turns, pending approvals, collaborations.
 	 */
-	RoutineWorkCancelled: {
+	AutomationWorkCancelled: {
 		readonly workspaceId: string;
-		readonly threadIds: readonly string[];
+		readonly conversationIds: readonly string[];
 	};
-	/** A routine run finished, failed, or was cancelled. */
-	RoutineExecutionSettled: {
+	/** An automation run finished, failed, or was cancelled. */
+	RunSettled: {
 		readonly workspaceId: string;
+		readonly rootConversationId: string;
 		readonly conversationId: string;
-		readonly threadId: string;
 	};
 }>;
 
@@ -212,27 +212,27 @@ export const ConversationEvent = Data.taggedEnum<ConversationEvent>();
 
 /** A tool call in the reply `messageId`, as it stands after the change. */
 export interface ToolCallChange {
-	readonly threadId: string;
+	readonly conversationId: string;
 	readonly messageId: string;
 	readonly toolCall: ToolCallPart;
 }
 
 /**
  * A collaboration made in the reply `parentMessageId`, as it stands after the
- * change. Its own thread is `collaboration.threadId`.
+ * change. Its own conversation is `collaboration.conversationId`.
  */
 export interface CollaborationChange {
-	readonly parentThreadId: string;
+	readonly parentConversationId: string;
 	readonly parentMessageId: string;
 	readonly collaboration: CollaborationPart;
 }
 
-/** Whether a collaboration's end is owed to the agent that asked, in a turn of its own. */
+/** Whether a collaboration's end is owed to the bot that asked, in a turn of its own. */
 export interface AskerResume {
 	/**
-	 * The asking agent, when its turn stopped waiting and so nothing is reading
+	 * The asking bot, when its turn stopped waiting and so nothing is reading
 	 * how the collaboration ended. Null while the asking tool still waits, and
-	 * when the routine run the collaboration worked for ended, which takes no
+	 * when the automation run the collaboration worked for ended, which takes no
 	 * more turns.
 	 */
 	readonly askerToResume: string | null;

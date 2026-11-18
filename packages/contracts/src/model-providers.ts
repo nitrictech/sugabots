@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { modelIdSchema } from "./agents.ts";
+import { modelIdSchema } from "./bots.ts";
 import {
 	presetRequiresApiKey,
 	presetSignsIn,
@@ -165,7 +165,7 @@ export const providerModelCapabilityCatalog: ReadonlyArray<{
 	{
 		key: "embeddings",
 		name: "Embeddings",
-		description: "Turns text into vectors. Not offered to agents as a chat model.",
+		description: "Turns text into vectors. Not offered to bots as a chat model.",
 	},
 ];
 
@@ -176,7 +176,7 @@ export const providerModelSchema = Schema.Struct({
 	/** What the provider reports the model can do; for a model added by hand, what the admin said. */
 	capabilities: Schema.mutable(Schema.Array(providerModelCapabilitySchema)),
 	/**
-	 * Of `capabilities`, the ones an admin switched off for agents. The report
+	 * Of `capabilities`, the ones an admin switched off for bots. The report
 	 * is the ceiling: nothing can be switched on that is not in it, only off,
 	 * and a refresh brings the report up to date without touching this list.
 	 */
@@ -346,7 +346,7 @@ const capabilityListSchema = Schema.mutable(Schema.Array(providerModelCapability
 
 export const providerModelUpdateSchema = Schema.Struct({
 	enabled: Schema.optional(Schema.Boolean),
-	/** The capabilities agents may not use, out of what the model has. */
+	/** The capabilities bots may not use, out of what the model has. */
 	disabledCapabilities: Schema.optional(capabilityListSchema),
 	/** What the model can do. Only for a model added by hand; the provider says for the rest. */
 	capabilities: Schema.optional(capabilityListSchema),
@@ -356,7 +356,7 @@ export const providerModelUpdateSchema = Schema.Struct({
 
 export type ProviderModelUpdate = typeof providerModelUpdateSchema.Type;
 
-/** What agents may actually use: the model's capabilities less the ones switched off. */
+/** What bots may actually use: the model's capabilities less the ones switched off. */
 export function effectiveCapabilities(
 	model: Pick<ProviderModel, "capabilities" | "disabledCapabilities">,
 ): ProviderModelCapability[] {
@@ -411,21 +411,21 @@ export const workspaceModelSchema = Schema.Struct({
 	providerActive: Schema.Boolean,
 	modelId: modelIdSchema,
 	displayName: Schema.NullOr(Schema.String),
-	/** What agents may use it for: what it can do, less what an admin switched off. */
+	/** What bots may use it for: what it can do, less what an admin switched off. */
 	capabilities: Schema.mutable(Schema.Array(providerModelCapabilitySchema)),
 });
 
 export const workspaceModelsResponseSchema = Schema.Struct({
 	models: Schema.mutable(Schema.Array(workspaceModelSchema)),
 	/**
-	 * The model new agents start on. `null` only until the workspace first
+	 * The model new bots start on. `null` only until the workspace first
 	 * offers a model; from then on it always has one. Usually one of `models`,
 	 * but not while a failed test has its provider switched off.
 	 */
 	defaultModel: Schema.NullOr(modelIdSchema),
 });
 
-/** Choosing the model a workspace's new agents start on. */
+/** Choosing the model a workspace's new bots start on. */
 export const defaultModelUpdateSchema = Schema.Struct({
 	model: modelIdSchema,
 });

@@ -14,7 +14,7 @@ export const GITHUB_WEBHOOK_PATH = "/hooks/connections";
 
 /**
  * Where the web app takes the browser back from GitHub: `workspace` and
- * `agent` name the bot, `connection` its GitHub app once it is made,
+ * `bot` name the bot, `connection` its GitHub app once it is made,
  * and `github_error`, when set, a {@link GitHubSetupFailure}.
  */
 export const GITHUB_SETUP_RETURN_PATH = "/connections/github/return";
@@ -72,7 +72,7 @@ export const accountRepositorySchema = Schema.Struct({
 export type AccountRepository = typeof accountRepositorySchema.Type;
 
 /**
- * What happens at a repository that can start a routine: a pull request
+ * What happens at a repository that can start an automation: a pull request
  * opened (or reopened, or marked ready for review), a review of one, a
  * comment on one or on its code, an issue opened, a comment on an issue, a
  * run of checks that failed, and a push to a branch.

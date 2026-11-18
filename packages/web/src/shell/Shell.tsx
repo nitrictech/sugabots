@@ -3,8 +3,8 @@ import { cn } from "cn";
 import type { ReactNode } from "react";
 import { useAppBadge } from "@/lib/app-badge.ts";
 import { useAttentionCounts } from "@/lib/chats.ts";
+import { useWorkspaceEvents } from "@/lib/conversation-events.ts";
 import { useNotificationsInThisBrowser } from "@/lib/notifications.ts";
-import { useWorkspaceEvents } from "@/lib/thread-events.ts";
 import { useVisibleHeight } from "@/lib/visible-height.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 import { MobileTabBar } from "@/shell/MobileTabBar.tsx";
@@ -42,7 +42,7 @@ export function Shell() {
 	);
 }
 
-/** The thread column: everything to the right of the sidebar and any list beside it. */
+/** The conversation column: everything to the right of the sidebar and any list beside it. */
 export function Panes({ children, className }: { children: ReactNode; className?: string }) {
 	return (
 		<main className={cn("relative flex min-w-0 flex-1 flex-col bg-background", className)}>

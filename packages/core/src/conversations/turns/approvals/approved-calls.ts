@@ -8,7 +8,7 @@ import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../../database/database.ts";
 import { toolCall } from "../../../database/schema.ts";
 import type { UserFacing } from "../../../user-message.ts";
-import { toToolCallPart } from "../../threads/tool-calls.ts";
+import { toToolCallPart } from "../../repository/tool-calls.ts";
 import { TurnRepository } from "../repository.ts";
 import { ToolCallRepository } from "../tool-calls/repository.ts";
 
@@ -32,7 +32,7 @@ export interface Interface {
 	 * that may change something marks its turn as having acted.
 	 */
 	readonly beginExecution: (input: {
-		threadId: string;
+		conversationId: string;
 		messageId: string;
 		turnId: string;
 		sdkToolCallId: string;

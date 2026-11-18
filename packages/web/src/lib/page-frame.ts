@@ -9,7 +9,7 @@ export const FIT_HEIGHT_PX = { min: 120, max: 560 } as const;
 
 /**
  * The app's tokens a page is given as CSS variables of the same names, which
- * the artifact tools tell bots about. Each is copied as the stylesheet
+ * the file tools tell bots about. Each is copied as the stylesheet
  * declares it, `light-dark()` and all, so it follows the frame's
  * `color-scheme`, which is the app's.
  */

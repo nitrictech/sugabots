@@ -12,7 +12,7 @@ import { WEB_FETCH_TOOL, webFetchTool } from "./web-fetch/tool.ts";
 import { WEB_SEARCH_TOOL, webSearchTool } from "./web-search/tool.ts";
 
 /**
- * The built-in tools offered to a workspace's crew turns.
+ * The built-in tools offered to the turns of a workspace's bots.
  *
  * forWorkspace returns `web_fetch` and `web_search`, usable only while
  * `searchProviders.resolve` finds an enabled search provider with every

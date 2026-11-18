@@ -1,10 +1,10 @@
 import type {
-	AgentColor,
-	AgentFace,
-	AgentShape,
 	AssignableWorkspaceRole,
-	PodColor,
-	SystemAgentKey,
+	BotColor,
+	BotFace,
+	BotShape,
+	ChannelColor,
+	SystemBotKey,
 	WorkspaceRole,
 } from "@sugabots/contracts";
 import {
@@ -214,8 +214,8 @@ export const workspaceInvite = pgTable(
 	],
 );
 
-export const pod = pgTable(
-	"pod",
+export const channel = pgTable(
+	"channel",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id")
@@ -223,9 +223,9 @@ export const pod = pgTable(
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		name: text("name").notNull(),
 		slug: text("slug").notNull(),
-		// One of the contract's channel colour names, as `agent.color` is a bot's.
+		// One of the contract's channel colour names, as `bot.color` is a bot's.
 		// Null reads as the default colour.
-		color: text("color").$type<PodColor>(),
+		color: text("color").$type<ChannelColor>(),
 		description: text("description"),
 		visibility: text("visibility").$type<"public" | "private">().notNull().default("public"),
 		// Who made it. Kept when they leave, so the record survives the person.
@@ -234,9 +234,9 @@ export const pod = pgTable(
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		check("pod_visibility_check", sql`${table.visibility} in ('public', 'private')`),
-		uniqueIndex("pod_slug_idx").on(table.workspaceId, table.slug),
-		uniqueIndex("pod_id_workspace_id_idx").on(table.id, table.workspaceId),
+		check("channel_visibility_check", sql`${table.visibility} in ('public', 'private')`),
+		uniqueIndex("channel_slug_idx").on(table.workspaceId, table.slug),
+		uniqueIndex("channel_id_workspace_id_idx").on(table.id, table.workspaceId),
 	],
 );
 
@@ -257,45 +257,46 @@ export const pod = pgTable(
  * where somebody checking what writes these rows looks. Added in
  * `20260928141359_admins_in_every_pod`, extended to the owner in
  * `20260929002409_workspace_owner` and made to cover every channel in
- * `20261118061416_bots_leave_pods_keys`: `shared_pod_administrators` adds every
- * owner and admin to a new channel, and `administrator_shared_pods` adds a
+ * `20261118061416_bots_leave_pods_keys`, then named for channels in
+ * `20261118092649_pods_become_channels`: `channel_administrators` adds every
+ * owner and admin to a new channel, and `administrator_channels` adds a
  * new owner or admin to every channel. Both take
- * `lock_pod_membership(workspace_id)`, as must anything that removes a row
+ * `lock_channel_membership(workspace_id)`, as must anything that removes a row
  * on the strength of somebody's role, so a promotion cannot slip between them.
  */
-export const podMember = pgTable(
-	"pod_member",
+export const channelMember = pgTable(
+	"channel_member",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id").notNull(),
-		podId: uuid("pod_id").notNull(),
+		channelId: uuid("channel_id").notNull(),
 		userId: uuid("user_id").notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "pod_member_pod_workspace_fkey",
+			columns: [table.channelId, table.workspaceId],
+			foreignColumns: [channel.id, channel.workspaceId],
+			name: "channel_member_channel_workspace_fkey",
 		}).onDelete("cascade"),
 		foreignKey({
 			columns: [table.workspaceId, table.userId],
 			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
-			name: "pod_member_workspace_member_fkey",
+			name: "channel_member_workspace_member_fkey",
 		}).onDelete("cascade"),
-		uniqueIndex("pod_member_idx").on(table.podId, table.userId),
-		// "Which pods can this person see", which is every sidebar load.
-		index("pod_member_user_id_idx").on(table.userId),
+		uniqueIndex("channel_member_idx").on(table.channelId, table.userId),
+		// "Which channels can this person see", which is every sidebar load.
+		index("channel_member_user_id_idx").on(table.userId),
 	],
 );
 
 /**
  * A bot: a name, a face, a prompt and the tools it may reach for.
  *
- * A row is one of three things: a bot people made (`system_agent_key` and
+ * A row is one of three things: a bot people made (`system_bot_key` and
  * `assistant_of` both null), public or private by `visibility`; somebody's
  * Personal Assistant (`assistant_of` names them), only ever theirs; or a
- * system bot (`system_agent_key` names it), which works in the background for
+ * system bot (`system_bot_key` names it), which works in the background for
  * the whole workspace and nobody talks to.
  *
  * Any may have no `model`, which means nobody has chosen one. That is a
@@ -308,20 +309,20 @@ export const podMember = pgTable(
  * talks to it.
  *
  * `color`, `face` and `shape` are the whole avatar. Small columns rather than
- * an image, which is what lets an agent created at run time have a face at all.
+ * an image, which is what lets a bot created at run time have a face at all.
  */
-export const agent = pgTable(
-	"agent",
+export const bot = pgTable(
+	"bot",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		name: text("name").notNull(),
-		// How the agent is addressed in a message: `@personal-assistant`.
+		// How the bot is addressed in a message: `@personal-assistant`.
 		// Derived from the name unless an admin sets one; unique per workspace.
 		handle: text("handle").notNull(),
-		systemAgentKey: text("system_agent_key").$type<SystemAgentKey>(),
+		systemBotKey: text("system_bot_key").$type<SystemBotKey>(),
 		// Whether everyone in the workspace sees the bot, or only its creator.
 		visibility: text("visibility").$type<"public" | "private">().notNull().default("public"),
 		// On a Personal Assistant: the one person who sees it and talks to it.
@@ -329,20 +330,20 @@ export const agent = pgTable(
 		description: text("description"),
 		// One of the contract's colour names. Not a Postgres enum: the palette is
 		// the contract's to state, and an enum here would be a second place to change it.
-		color: text("color").$type<AgentColor>().notNull(),
-		face: text("face").$type<AgentFace>().notNull(),
-		// Every agent made before shapes existed was a circle.
-		shape: text("shape").$type<AgentShape>().notNull().default("circle"),
+		color: text("color").$type<BotColor>().notNull(),
+		face: text("face").$type<BotFace>().notNull(),
+		// Every bot made before shapes existed was a circle.
+		shape: text("shape").$type<BotShape>().notNull().default("circle"),
 		// Null when nobody has chosen one, or somebody has cleared it. A system
-		// agent with no model does not run; a crew agent's turns refuse.
+		// bot with no model does not run; a turn of a bot people talk to refuses.
 		model: text("model"),
 		prompt: text("prompt").notNull().default(""),
-		// The built-in tools switched off for this agent, by key. What is off
-		// rather than what is on, so a new tool reaches every existing agent.
+		// The built-in tools switched off for this bot, by key. What is off
+		// rather than what is on, so a new tool reaches every existing bot.
 		disabledTools: jsonb("disabled_tools").$type<string[]>().notNull().default([]),
 		// Whether it may use its computer. Off until its creator or an admin
 		// turns it on: running commands is a bigger step than the other built-in tools.
-		usesSandbox: boolean("uses_sandbox").notNull().default(false),
+		usesComputer: boolean("uses_computer").notNull().default(false),
 		// Whether it browses so people watching can follow, which is slower.
 		naturalBrowsing: boolean("natural_browsing").notNull().default(false),
 		// Who made it. Kept when they leave, so the record survives the person.
@@ -351,82 +352,82 @@ export const agent = pgTable(
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		check("agent_visibility_check", sql`${table.visibility} in ('public', 'private')`),
+		check("bot_visibility_check", sql`${table.visibility} in ('public', 'private')`),
 		// A Personal Assistant goes with its person's membership.
 		foreignKey({
 			columns: [table.workspaceId, table.assistantOf],
 			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
-			name: "agent_assistant_workspace_member_fkey",
+			name: "bot_assistant_workspace_member_fkey",
 		}).onDelete("cascade"),
 		// How people address a bot, so one of each per workspace. System bots
 		// and Personal Assistants are never addressed by others.
-		uniqueIndex("agent_name_idx")
+		uniqueIndex("bot_name_idx")
 			.on(table.workspaceId, sql`lower(${table.name})`)
-			.where(sql`${table.systemAgentKey} is null and ${table.assistantOf} is null`),
-		uniqueIndex("agent_handle_idx")
+			.where(sql`${table.systemBotKey} is null and ${table.assistantOf} is null`),
+		uniqueIndex("bot_handle_idx")
 			.on(table.workspaceId, table.handle)
-			.where(sql`${table.systemAgentKey} is null and ${table.assistantOf} is null`),
-		uniqueIndex("agent_assistant_idx")
+			.where(sql`${table.systemBotKey} is null and ${table.assistantOf} is null`),
+		uniqueIndex("bot_assistant_idx")
 			.on(table.workspaceId, table.assistantOf)
 			.where(sql`${table.assistantOf} is not null`),
 		// One of each system bot per workspace. Other bots never collide here: their
-		// `system_agent_key` is null, and nulls are distinct in a btree index.
-		// It is also the workspace-prefixed index "every agent in this workspace"
+		// `system_bot_key` is null, and nulls are distinct in a btree index.
+		// It is also the workspace-prefixed index "every bot in this workspace"
 		// scans, so a second index on `workspace_id` alone would only cost writes.
-		uniqueIndex("agent_system_agent_key_idx").on(table.workspaceId, table.systemAgentKey),
-		uniqueIndex("agent_id_workspace_id_idx").on(table.id, table.workspaceId),
+		uniqueIndex("bot_system_bot_key_idx").on(table.workspaceId, table.systemBotKey),
+		uniqueIndex("bot_id_workspace_id_idx").on(table.id, table.workspaceId),
 	],
 );
 
-export type PodRow = typeof pod.$inferSelect;
-export type AgentRow = typeof agent.$inferSelect;
+export type ChannelRow = typeof channel.$inferSelect;
+export type BotRow = typeof bot.$inferSelect;
 
 /** A bot in a channel. */
-export const podAgent = pgTable(
-	"pod_agent",
+export const channelBot = pgTable(
+	"channel_bot",
 	{
 		workspaceId: uuid("workspace_id").notNull(),
-		podId: uuid("pod_id").notNull(),
-		agentId: uuid("agent_id").notNull(),
+		channelId: uuid("channel_id").notNull(),
+		botId: uuid("bot_id").notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		compositePrimaryKey({ columns: [table.podId, table.agentId] }),
+		compositePrimaryKey({ columns: [table.channelId, table.botId] }),
 		foreignKey({
-			columns: [table.podId, table.workspaceId],
-			foreignColumns: [pod.id, pod.workspaceId],
-			name: "pod_agent_pod_workspace_fkey",
+			columns: [table.channelId, table.workspaceId],
+			foreignColumns: [channel.id, channel.workspaceId],
+			name: "channel_bot_channel_workspace_fkey",
 		}).onDelete("cascade"),
 		foreignKey({
-			columns: [table.agentId, table.workspaceId],
-			foreignColumns: [agent.id, agent.workspaceId],
-			name: "pod_agent_agent_workspace_fkey",
+			columns: [table.botId, table.workspaceId],
+			foreignColumns: [bot.id, bot.workspaceId],
+			name: "channel_bot_bot_workspace_fkey",
 		}).onDelete("cascade"),
-		index("pod_agent_agent_id_idx").on(table.agentId),
+		index("channel_bot_bot_id_idx").on(table.botId),
 	],
 );
 
 /** A bot a person pinned to their sidebar. */
-export const pinnedAgent = pgTable(
-	"pinned_agent",
+export const pinnedBot = pgTable(
+	"pinned_bot",
 	{
 		workspaceId: uuid("workspace_id").notNull(),
 		userId: uuid("user_id").notNull(),
-		agentId: uuid("agent_id").notNull(),
+		botId: uuid("bot_id").notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		compositePrimaryKey({ columns: [table.userId, table.agentId] }),
+		compositePrimaryKey({ columns: [table.userId, table.botId] }),
 		foreignKey({
 			columns: [table.workspaceId, table.userId],
 			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
-			name: "pinned_agent_workspace_member_fkey",
+			name: "pinned_bot_workspace_member_fkey",
 		}).onDelete("cascade"),
 		foreignKey({
-			columns: [table.agentId, table.workspaceId],
-			foreignColumns: [agent.id, agent.workspaceId],
-			name: "pinned_agent_agent_workspace_fkey",
+			columns: [table.botId, table.workspaceId],
+			foreignColumns: [bot.id, bot.workspaceId],
+			name: "pinned_bot_bot_workspace_fkey",
 		}).onDelete("cascade"),
-		index("pinned_agent_agent_id_idx").on(table.agentId),
+		index("pinned_bot_bot_id_idx").on(table.botId),
 	],
 );

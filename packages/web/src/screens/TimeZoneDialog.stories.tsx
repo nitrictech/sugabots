@@ -11,9 +11,9 @@ const timeZoneUrl = `${import.meta.env.VITE_API_URL}/workspaces/${WORKSPACE_ID}/
 /** What the API was asked to move the workspace to. */
 const movedTo = fn<(timeZone: unknown) => void>();
 
-const answering = (scheduledRoutines: number) => [
+const answering = (scheduledAutomations: number) => [
 	http.get(timeZoneUrl, () =>
-		HttpResponse.json({ timeZone: "Australia/Sydney", scheduledRoutines }),
+		HttpResponse.json({ timeZone: "Australia/Sydney", scheduledAutomations }),
 	),
 	http.put(timeZoneUrl, async ({ request }) => {
 		movedTo(((await request.json()) as { timeZone: unknown }).timeZone);
@@ -95,25 +95,25 @@ export const BrowsingRegions = meta.story({
 	},
 });
 
-const MOVES_ROUTINES_NOTE =
-	"All routines scheduled on Sydney time will now run in whichever zone you pick.";
+const MOVES_AUTOMATIONS_NOTE =
+	"All automations scheduled on Sydney time will now run in whichever zone you pick.";
 
 /**
- * With routines scheduled on the workspace's time, it says from the start that
+ * With automations scheduled on the workspace's time, it says from the start that
  * they move with it, and keeps saying so while another zone is chosen.
  */
-export const MovesRoutines = meta.story({
+export const MovesAutomations = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...answering(3));
 	},
 	play: async ({ canvasElement, userEvent }) => {
 		const dialog = within(await dialogOf(canvasElement));
-		await expect(await dialog.findByText(MOVES_ROUTINES_NOTE)).toBeInTheDocument();
+		await expect(await dialog.findByText(MOVES_AUTOMATIONS_NOTE)).toBeInTheDocument();
 
 		await userEvent.type(dialog.getByRole("searchbox", { name: "Search time zones" }), "tokyo");
 		await userEvent.click(dialog.getByRole("button", { name: /Tokyo/ }));
 
-		await expect(dialog.getByText(MOVES_ROUTINES_NOTE)).toBeInTheDocument();
+		await expect(dialog.getByText(MOVES_AUTOMATIONS_NOTE)).toBeInTheDocument();
 	},
 });
 

@@ -1,6 +1,6 @@
 export * as EventStore from "./store.ts";
 
-import type { Channel, StreamEvent } from "@sugabots/contracts";
+import type { StreamChannel, StreamEvent } from "@sugabots/contracts";
 import { and, asc, count, eq, gt, lt } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { type Database, type Executor, type QueryFailure, query } from "../database.ts";
@@ -16,10 +16,10 @@ import { event } from "../schema.ts";
  */
 export interface Interface {
 	/** Persists an event on a channel and returns its `seq`. */
-	append(channel: Channel, event: StreamEvent): Promise<number>;
+	append(channel: StreamChannel, event: StreamEvent): Promise<number>;
 
 	/** Events on a channel after `since`, oldest first, at most `limit` of them. */
-	replay(channel: Channel, since: number, limit: number): Promise<Stored[]>;
+	replay(channel: StreamChannel, since: number, limit: number): Promise<Stored[]>;
 
 	/**
 	 * Whether the event a client claims to have last seen is still here.
@@ -29,7 +29,7 @@ export interface Interface {
 	 * gaps that say nothing about what was pruned. If the row a client names is
 	 * gone, its history is broken and it needs a `reset`.
 	 */
-	has(channel: Channel, seq: number): Promise<boolean>;
+	has(channel: StreamChannel, seq: number): Promise<boolean>;
 
 	/** Drops events older than `before`. Returns how many went. */
 	prune(before: Date): Promise<number>;
@@ -110,7 +110,7 @@ export interface Stored {
 }
 
 interface MemoryRow extends Stored {
-	channel: Channel;
+	channel: StreamChannel;
 	createdAt: Date;
 }
 

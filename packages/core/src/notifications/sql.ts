@@ -1,4 +1,8 @@
-import type { NotificationLevel, QuietHours, RoutineRunNotifications } from "@sugabots/contracts";
+import type {
+	AutomationRunNotifications,
+	NotificationLevel,
+	QuietHours,
+} from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
 	boolean,
@@ -11,7 +15,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, updatedStamp } from "../database/sql.ts";
-import { agent, pod, user } from "../workspaces/sql.ts";
+import { bot, channel, user } from "../workspaces/sql.ts";
 
 const notificationLevel = (name: string) => text(name).$type<NotificationLevel>();
 
@@ -29,8 +33,8 @@ export const notificationSettings = pgTable(
 		pausedUntil: timestamp("paused_until", { withTimezone: true }),
 		quietHours: jsonb("quiet_hours").$type<QuietHours>(),
 		turnFailures: boolean("turn_failures").notNull().default(true),
-		routineRuns: text("routine_runs")
-			.$type<RoutineRunNotifications>()
+		automationRuns: text("automation_runs")
+			.$type<AutomationRunNotifications>()
 			.notNull()
 			.default("failures"),
 		updatedAt: updatedStamp("updated_at"),
@@ -38,14 +42,14 @@ export const notificationSettings = pgTable(
 	(table) => [
 		levelIsValid("notification_settings_level_valid", table.level),
 		check(
-			"notification_settings_routine_runs_valid",
-			sql`${table.routineRuns} in ('failures', 'all', 'none')`,
+			"notification_settings_automation_runs_valid",
+			sql`${table.automationRuns} in ('failures', 'all', 'none')`,
 		),
 	],
 );
 
 /**
- * What a person chose for one pod or one of a pod's bots: a level, in place of
+ * What a person chose for one channel or one of a channel's bots: a level, in place of
  * the one above it, a mute until `mutedUntil`, or both.
  */
 export const notificationOverride = pgTable(
@@ -55,8 +59,8 @@ export const notificationOverride = pgTable(
 		userId: uuid("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
-		podId: uuid("pod_id").references(() => pod.id, { onDelete: "cascade" }),
-		agentId: uuid("agent_id").references(() => agent.id, { onDelete: "cascade" }),
+		channelId: uuid("channel_id").references(() => channel.id, { onDelete: "cascade" }),
+		botId: uuid("bot_id").references(() => bot.id, { onDelete: "cascade" }),
 		level: notificationLevel("level"),
 		mutedUntil: timestamp("muted_until", { withTimezone: true }),
 		updatedAt: updatedStamp("updated_at"),
@@ -69,13 +73,13 @@ export const notificationOverride = pgTable(
 		),
 		check(
 			"notification_override_one_place",
-			sql`num_nonnulls(${table.podId}, ${table.agentId}) = 1`,
+			sql`num_nonnulls(${table.channelId}, ${table.botId}) = 1`,
 		),
-		uniqueIndex("notification_override_pod_idx")
-			.on(table.userId, table.podId)
-			.where(sql`${table.podId} is not null`),
-		uniqueIndex("notification_override_agent_idx")
-			.on(table.userId, table.agentId)
-			.where(sql`${table.agentId} is not null`),
+		uniqueIndex("notification_override_channel_idx")
+			.on(table.userId, table.channelId)
+			.where(sql`${table.channelId} is not null`),
+		uniqueIndex("notification_override_bot_idx")
+			.on(table.userId, table.botId)
+			.where(sql`${table.botId} is not null`),
 	],
 );

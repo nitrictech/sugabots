@@ -1,4 +1,4 @@
-import type { ActivityFeed, ActivityItem, Message } from "@sugabots/contracts";
+import type { InboxFeed, InboxItem, Message } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
@@ -8,18 +8,18 @@ import { appHandlers, StoryApp, storyTaskFor, storyWorkspace } from "@/story-app
 
 /*
  * Inbox, opened from the sidebar: what is new across the workspace's chats,
- * mentions of you, messages you have not read, routine runs and
+ * mentions of you, messages you have not read, automation runs and
  * collaborations, narrowed by kind and by unread or read. A message opens its
  * chat; a run or collaboration opens as a page of its own.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
 
-type MessageItem = Extract<ActivityItem, { messageId: string }>;
+type MessageItem = Extract<InboxItem, { messageId: string }>;
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
-const feed: ActivityFeed = {
+const feed: InboxFeed = {
 	items: [
 		{
 			kind: "mention",
@@ -28,15 +28,15 @@ const feed: ActivityFeed = {
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
 			preview: "@rowan-ellis can you sign off the Acme quote before 5?",
 			at: minutesAgo(4),
-			podId: null,
-			conversationId: storyTaskFor(growthDesk).id,
+			channelId: null,
+			rootConversationId: storyTaskFor(growthDesk).id,
 		},
 		{
 			kind: "message",
 			unread: true,
 			messageId: "0199a3a0-0000-7000-8000-000000000802",
 			author: {
-				kind: "agent",
+				kind: "bot",
 				id: accountManager.id,
 				name: accountManager.name,
 				handle: accountManager.handle,
@@ -46,20 +46,20 @@ const feed: ActivityFeed = {
 			},
 			preview: "Renewal notes for Halcyon are ready.",
 			at: minutesAgo(40),
-			podId: null,
-			conversationId: storyTaskFor(accountManager).id,
+			channelId: null,
+			rootConversationId: storyTaskFor(accountManager).id,
 		},
 		{
-			kind: "routine",
-			threadId: "0199a3a0-0000-7000-8000-000000000811",
-			routineName: "Overnight outbound",
+			kind: "run",
+			conversationId: "0199a3a0-0000-7000-8000-000000000811",
+			automationName: "Overnight outbound",
 			state: "completed",
-			triggerKind: "cron",
+			triggerKind: "schedule",
 			preview:
 				"Queued 38 leads overnight and six have already replied. The two Northwind accounts both asked for pricing.",
 			mentionsYou: false,
-			agent: {
-				kind: "agent",
+			bot: {
+				kind: "bot",
 				id: growthDesk.id,
 				name: growthDesk.name,
 				handle: growthDesk.handle,
@@ -69,13 +69,13 @@ const feed: ActivityFeed = {
 			},
 			at: minutesAgo(90),
 			unread: true,
-			conversationId: storyTaskFor(growthDesk).id,
+			rootConversationId: storyTaskFor(growthDesk).id,
 		},
 		{
 			kind: "collaboration",
-			threadId: "0199a3a0-0000-7000-8000-000000000812",
+			conversationId: "0199a3a0-0000-7000-8000-000000000812",
 			initiator: {
-				kind: "agent",
+				kind: "bot",
 				id: growthDesk.id,
 				name: growthDesk.name,
 				handle: growthDesk.handle,
@@ -84,7 +84,7 @@ const feed: ActivityFeed = {
 				shape: "circle",
 			},
 			recipient: {
-				kind: "agent",
+				kind: "bot",
 				id: accountManager.id,
 				name: accountManager.name,
 				handle: accountManager.handle,
@@ -96,7 +96,7 @@ const feed: ActivityFeed = {
 			brief: "Check whether Acme can have 25% off the annual tier.",
 			at: minutesAgo(120),
 			unread: false,
-			conversationId: storyTaskFor(growthDesk).id,
+			rootConversationId: storyTaskFor(growthDesk).id,
 		},
 		{
 			kind: "mention",
@@ -105,8 +105,8 @@ const feed: ActivityFeed = {
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Priya Kaur" }),
 			preview: "Thanks @rowan-ellis, that fixed it.",
 			at: minutesAgo(26 * 60),
-			podId: null,
-			conversationId: storyTaskFor(growthDesk).id,
+			channelId: null,
+			rootConversationId: storyTaskFor(growthDesk).id,
 		},
 	],
 };
@@ -117,16 +117,16 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/activity`, () => HttpResponse.json(feed)),
+			http.get(`${API}/workspaces/:workspace/chats/inbox`, () => HttpResponse.json(feed)),
 			...appHandlers(),
 		);
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/activity`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/inbox`} />,
 });
 
 /**
- * What is unread, newest first: mentions, messages, routine runs and
- * collaborations together, each with its pod and when; the sidebar's Inbox
+ * What is unread, newest first: mentions, messages, automation runs and
+ * collaborations together, each with its channel and when; the sidebar's Inbox
  * counts what is unread.
  */
 export const Default = meta.story({
@@ -158,12 +158,12 @@ export const Filtered = meta.story({
 	play: async ({ canvas }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Filter" }));
 		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Mentions/ }));
-		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Routines/ }));
+		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Automations/ }));
 		await userEvent.keyboard("{Escape}");
 		const inbox = canvas.getByRole("region", { name: "Inbox" });
 		await expect(within(inbox).getAllByRole("listitem")).toHaveLength(2);
 		await userEvent.click(canvas.getByRole("button", { name: "Filter" }));
-		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Routines/ }));
+		await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Automations/ }));
 		await userEvent.keyboard("{Escape}");
 		await expect(within(inbox).getAllByRole("listitem")).toHaveLength(1);
 		await expect(within(inbox).getByText(/can you sign off the Acme quote/)).toBeVisible();
@@ -175,10 +175,10 @@ export const MarkAllAsRead = meta.story({
 	beforeEach({ msw }) {
 		const read = new Set<string>();
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/activity`, () =>
+			http.get(`${API}/workspaces/:workspace/chats/inbox`, () =>
 				HttpResponse.json({
 					items: feed.items.map((item) =>
-						read.has(item.conversationId) ? { ...item, unread: false } : item,
+						read.has(item.rootConversationId) ? { ...item, unread: false } : item,
 					),
 				}),
 			),
@@ -201,7 +201,7 @@ export const MarkAllAsRead = meta.story({
 export const CaughtUp = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/activity`, () =>
+			http.get(`${API}/workspaces/:workspace/chats/inbox`, () =>
 				HttpResponse.json({ items: feed.items.map((item) => ({ ...item, unread: false })) }),
 			),
 		);
@@ -223,12 +223,12 @@ const longChat: Message[] = Array.from({ length: 30 }, (_, index) => {
 			: `Update ${index + 1} on the Northwind accounts.`;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(index).padStart(2, "0")}`,
-		threadId: storyTaskFor(growthDesk).id,
+		conversationId: storyTaskFor(growthDesk).id,
 		author:
 			index === 4
 				? testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" })
 				: {
-						kind: "agent",
+						kind: "bot",
 						id: growthDesk.id,
 						name: growthDesk.name,
 						handle: growthDesk.handle,
@@ -253,7 +253,7 @@ const mentionInLongChat = "0199a3a0-0000-7000-8000-000000000904";
 export const Opened = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/activity`, () =>
+			http.get(`${API}/workspaces/:workspace/chats/inbox`, () =>
 				HttpResponse.json({
 					items: [
 						{ ...(feed.items[0] as MessageItem), messageId: mentionInLongChat },
@@ -266,11 +266,11 @@ export const Opened = meta.story({
 	},
 	render: () => (
 		<StoryApp
-			path={`/${storyWorkspace.slug}/activity/${revenue.slug}/${storyTaskFor(growthDesk).id}?message=${mentionInLongChat}`}
+			path={`/${storyWorkspace.slug}/inbox/${revenue.slug}/${storyTaskFor(growthDesk).id}?message=${mentionInLongChat}`}
 		/>
 	),
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: "Open thread" })).toBeVisible();
+		await expect(await canvas.findByRole("link", { name: "Open task" })).toBeVisible();
 		const inbox = canvas.getByRole("region", { name: "Inbox" });
 		await expect(
 			await within(inbox).findByRole("link", { name: /Jay Yu mentioned you/ }),
@@ -279,7 +279,7 @@ export const Opened = meta.story({
 });
 
 /** More unread messages than fit, as a busy workspace has. */
-const longFeed: ActivityFeed = {
+const longFeed: InboxFeed = {
 	items: Array.from({ length: 40 }, (_, index) => ({
 		...(feed.items[1] as MessageItem),
 		messageId: `0199a3a0-0000-7000-8000-000000000a${String(index).padStart(2, "0")}`,
@@ -292,7 +292,7 @@ const longFeed: ActivityFeed = {
 export const LongFeed = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/activity`, () => HttpResponse.json(longFeed)),
+			http.get(`${API}/workspaces/:workspace/chats/inbox`, () => HttpResponse.json(longFeed)),
 		);
 	},
 	play: async ({ canvas, canvasElement }) => {

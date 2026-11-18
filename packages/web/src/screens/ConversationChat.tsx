@@ -1,22 +1,22 @@
 import {
-	type Agent,
-	type AgentParticipant,
-	type BotStartedThread,
-	botStartedThreadSchema,
+	type Bot,
+	type BotParticipant,
+	type BotStartedTask,
+	botStartedTaskSchema,
+	type Channel,
 	type ChatHistoryEntry,
 	type ChatMessageItem,
+	type ConversationDetails,
 	type FilePart,
 	MESSAGE_MAX_LENGTH,
 	type Message,
 	mentionedHandles,
 	mentionPattern,
 	mentionsOnlyPeople,
-	type Pod,
+	type Participant,
 	quotedPreview,
 	type SessionUser,
-	START_THREAD_TOOL,
-	type ThreadDetails,
-	type ThreadParticipant,
+	START_TASK_TOOL,
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -36,12 +36,12 @@ import {
 	useState,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { useAgents, useModelName } from "@/lib/agents.ts";
 import { useAuthorLinks } from "@/lib/author-links.ts";
+import { useBots, useModelName } from "@/lib/bots.ts";
 import { useChatDraft, useChatReplyDraft, useTakenOffRecipients } from "@/lib/chat-draft.ts";
 import { chatFileUrl } from "@/lib/chat-files.ts";
 import {
-	type ConversationKind,
+	type ConversationPlaceKind,
 	chatItemCreatedAt,
 	type DirectPeople,
 	directPeopleNames,
@@ -56,30 +56,32 @@ import {
 	useSetDone,
 } from "@/lib/chats.ts";
 import { isFileGoneRefusal, useComposerAttachments } from "@/lib/composer-attachments.ts";
+import {
+	useConversationEvents,
+	useConversationNotices,
+	usePeopleTyping,
+	useTypingSignal,
+} from "@/lib/conversation-events.ts";
+import { useConversation } from "@/lib/conversations.ts";
 import { keepFootInView, useFollowContentGrowth, useSettledAtLatest } from "@/lib/follow-latest.ts";
-import type { ThreadsTab } from "@/lib/links.ts";
-import { agentSettingsLink, conversationLink, routineThreadLink } from "@/lib/links.ts";
+import type { TasksTab } from "@/lib/links.ts";
+import { automationFeedLink, botSettingsLink, conversationLink } from "@/lib/links.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { countOf, listNames } from "@/lib/name-list.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
 import { useReactions } from "@/lib/reactions.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import {
-	usePeopleTyping,
-	useThreadEvents,
-	useThreadNotices,
-	useTypingSignal,
-} from "@/lib/thread-events.ts";
-import { useThread } from "@/lib/threads.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
+import { ChannelConversationTile } from "@/shell/ChannelConversationTile.tsx";
 import { DirectPeopleAvatar } from "@/shell/DirectMessages.tsx";
-import { PodChatTile } from "@/shell/PodChatTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
-import { ArtifactStage } from "./Artifacts.tsx";
+import { AutomationPanel } from "./AutomationPanel.tsx";
+import { NextRunDivider, RunDivider, RunMessage } from "./AutomationRun.tsx";
+import { AutomationsStage, type AutomationsView } from "./AutomationsStage.tsx";
 import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import {
@@ -91,28 +93,26 @@ import {
 	PHONE_FACE_SIZE_PX,
 } from "./ChatHeader.tsx";
 import { ChatMenu } from "./ChatMenu.tsx";
-import { ChatThreadPanel } from "./ChatThreadPanel.tsx";
 import { ConnectionsNotice } from "./ConnectionsNotice.tsx";
+import { ConversationMessages, DaySeparator, typersAfter } from "./ConversationMessages.tsx";
+import { ConversationNotices } from "./ConversationNotices.tsx";
+import { findAnsweringFace, startsNewDay } from "./conversation-layout.ts";
 import { DesktopStage } from "./DesktopViewer.tsx";
 import {
 	ChannelDetails,
+	type ConversationContents,
 	DetailsSidebar,
 	PeopleDetails,
-	type ThreadContents,
 } from "./DetailsSidebar.tsx";
 import { DirectMembersButton } from "./DirectMembers.tsx";
 import { FileDropTarget } from "./FileDropTarget.tsx";
+import { FileStage } from "./Files.tsx";
+import { ItemPanel } from "./ItemPanel.tsx";
 import { botsNamed, groupMentionsBy, mentionableIn } from "./mentions.tsx";
 import { queuedBehindReply } from "./queued-messages.ts";
-import { RoutinePanel } from "./RoutinePanel.tsx";
-import { NextRunDivider, RunDivider, RunMessage } from "./RoutineRun.tsx";
-import { RoutinesStage, type RoutinesView } from "./RoutinesStage.tsx";
-import { SideThreadLine } from "./SideThreadLine.tsx";
-import { DaySeparator, ThreadConversation, typersAfter } from "./ThreadConversation.tsx";
-import { ThreadNotices } from "./ThreadNotices.tsx";
-import { ThreadsStage } from "./ThreadsStage.tsx";
+import { SideConversationLine } from "./SideConversationLine.tsx";
+import { TasksStage } from "./TasksStage.tsx";
 import { anyoneTyping, TypingIndicator } from "./TypingIndicator.tsx";
-import { findAnsweringFace, startsNewDay } from "./thread-layout.ts";
 
 /**
  * How close to the foot of the log still counts as at the latest message, both
@@ -132,23 +132,23 @@ const BOT_LIST = new Intl.ListFormat("en", { type: "conjunction" });
  * at the view of them that is open, or the bot's tasks, at the tab open.
  */
 export type Staged =
-	| { kind: "artifact"; artifactId: string; version?: number }
+	| { kind: "file"; fileId: string; version?: number }
 	| { kind: "desktop" }
-	| { kind: "routines"; view: RoutinesView }
-	| { kind: "threads"; tab: ThreadsTab };
+	| { kind: "automations"; view: AutomationsView }
+	| { kind: "tasks"; tab: TasksTab };
 
 /** Opens `staged` large beside a chat, or closes it as a `Stage` asks, as `how` says; see `CloseStage`. */
 export type StagedChange = (staged: Staged | undefined, how?: { replace: boolean }) => void;
 
 export function ConversationChat({
 	conversation,
-	pod,
+	channel,
 	conversationId,
 	user,
-	threadId,
+	itemConversationId,
 	focusMessageId,
 	place,
-	onThreadChange,
+	onItemChange,
 	staged,
 	onStagedChange,
 	headerless = false,
@@ -156,17 +156,17 @@ export function ConversationChat({
 	covered = false,
 }: {
 	/** Which kind of conversation it is, and its bot when it has one. */
-	conversation: ConversationKind;
+	conversation: ConversationPlaceKind;
 	/** The channel it is in; null for a bot's task or a direct message, which are in none. */
-	pod: Pod | null;
+	channel: Channel | null;
 	/** The conversation shown. */
 	conversationId: string;
 	user: SessionUser;
-	threadId?: string;
+	itemConversationId?: string;
 	/** A message to jump to and point out, such as the mention it was opened from. */
 	focusMessageId?: string;
 	place: ChatPlace;
-	onThreadChange: (threadId: string | undefined) => void;
+	onItemChange: (itemConversationId: string | undefined) => void;
 	/** Open large beside the chat, in place of any sidebar. */
 	staged?: Staged;
 	onStagedChange: StagedChange;
@@ -177,18 +177,18 @@ export function ConversationChat({
 	/** Hidden under something else on the page, so nothing in it counts as seen. */
 	covered?: boolean;
 }) {
-	const openArtifact = (artifactId: string) => onStagedChange({ kind: "artifact", artifactId });
+	const openFile = (fileId: string) => onStagedChange({ kind: "file", fileId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
-	const openRoutines = (view: RoutinesView = { kind: "list" }) =>
-		onStagedChange({ kind: "routines", view });
+	const openAutomations = (view: AutomationsView = { kind: "list" }) =>
+		onStagedChange({ kind: "automations", view });
 	const messages = useChatMessages(conversationId);
 	const history = useChatHistory(conversationId);
-	const mainThread = useThread(conversationId);
+	const opened = useConversation(conversationId);
 	// Drafts are kept by the channel they are written in; elsewhere, by the conversation alone.
-	const podId = pod?.id ?? null;
+	const channelId = channel?.id ?? null;
 	const authorLinkOf = useAuthorLinks();
-	useThreadEvents(conversationId);
-	const notices = useThreadNotices(conversationId);
+	useConversationEvents(conversationId);
+	const notices = useConversationNotices(conversationId);
 	const optimistic = useOptimisticChatItems(conversationId);
 	const send = useSendChatMessage(conversationId, user);
 	const setDone = useSetDone(conversationId);
@@ -198,80 +198,85 @@ export function ConversationChat({
 	const [startError, setStartError] = useState<string>();
 	const reactions = useReactions(user);
 	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
-	const [draft, setDraft] = useChatDraft(user.id, podId, conversationId);
-	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, podId, conversationId);
+	const [draft, setDraft] = useChatDraft(user.id, channelId, conversationId);
+	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, channelId, conversationId);
 	const attachments = useComposerAttachments(conversationId);
 	useTypingSignal(conversationId, draft);
 	const peopleTyping = usePeopleTyping(conversationId, user.id);
 	const viewport = useRef<HTMLDivElement>(null);
 	const opener = useRef<HTMLElement | null>(null);
-	const previousThreadId = useRef<string | undefined>(undefined);
+	const previousItemConversationId = useRef<string | undefined>(undefined);
 	const positionedAtLatest = useRef(false);
 	const followingLatest = useRef(true);
 	const lastScrollTop = useRef(Number.NEGATIVE_INFINITY);
 	// Where the log was last scrolled to. `followingLatest` is the intent to stay
 	// at the latest message, which can be set before the scroll that gets there.
 	const [latestInView, setLatestInView] = useState(true);
-	const details = mainThread.data;
-	const agent = conversation.kind === "botThread" ? conversation.agent : null;
-	const isPodChat = conversation.kind === "podChat";
+	const details = opened.data;
+	const bot = conversation.kind === "botConversation" ? conversation.bot : null;
+	const isChannelConversation = conversation.kind === "channelConversation";
 	// In a channel, the bots people name reply; in a task its own bot does,
 	// asking any other bot named for its help.
-	const namedBotsReply = isPodChat;
+	const namedBotsReply = isChannelConversation;
 	// A direct message between people goes by the others' names.
-	const peopleName = conversation.kind === "direct" ? directPeopleTitle(conversation) : undefined;
-	const host = agent
+	const peopleName =
+		conversation.kind === "directMessage" ? directPeopleTitle(conversation) : undefined;
+	const host = bot
 		? details?.participants.find(
-				(participant): participant is AgentParticipant =>
-					participant.kind === "agent" && participant.id === agent.id,
+				(participant): participant is BotParticipant =>
+					participant.kind === "bot" && participant.id === bot.id,
 			)
 		: undefined;
 	const entries = history.entries;
-	const selectedEntry = threadId ? entries.find((entry) => entry.threadId === threadId) : undefined;
+	const selectedEntry = itemConversationId
+		? entries.find((entry) => entry.conversationId === itemConversationId)
+		: undefined;
 	const items = mergeChatItems(messages.items, optimistic, details?.messages ?? []);
 	const sending = sendingIds(optimistic, messages.items, details?.messages ?? []);
-	const routineFeed = details?.thread.type === "routine_feed";
-	const groups = chatGroupsOf(items, routineFeed);
+	const automationFeed = details?.conversation.kind === "automation_feed";
+	const groups = chatGroupsOf(items, automationFeed);
 	const latestItemRevision = chatItemRevision(items.at(-1));
 	const newest = items.at(-1);
 	useMarkReadWhileSeen(conversationId, newest, latestInView && !covered);
 	const shownMessages = items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
 	// Found across all the messages, not in each part they're shown in, or each part would bring a face of its own alive.
 	const answeringFace = findAnsweringFace(shownMessages, false);
-	// The routine runs the messages shown are the results of, by the run's thread.
+	// The automation runs the messages shown are the results of, by the run's conversation.
 	const runsResulting = new Map(
 		shownMessages.flatMap((message) =>
-			message.routineResultOf ? [[message.routineResultOf.threadId, message.routineResultOf]] : [],
+			message.automationResultOf
+				? [[message.automationResultOf.conversationId, message.automationResultOf]]
+				: [],
 		),
 	);
-	// Every run shown here, as a result or a row of its own, by the run's thread.
-	const runThreadIds = new Set([
+	// Every run shown here, as a result or a row of its own, by the run's conversation.
+	const runConversationIds = new Set([
 		...runsResulting.keys(),
-		...items.flatMap((item) => (item.kind === "routine" ? [item.threadId] : [])),
+		...items.flatMap((item) => (item.kind === "run" ? [item.conversationId] : [])),
 	]);
-	const threadActivityAt = new Map(
-		entries.map((entry) => [entry.threadId, entry.latestActivityAt]),
+	const itemActivityAt = new Map(
+		entries.map((entry) => [entry.conversationId, entry.latestActivityAt]),
 	);
 	const queued = queuedBehindReply(shownMessages, details?.queuedSince ?? null);
 	// Where named bots reply, the bots the person's last message went to stay
 	// addressed until they take them off: talking to a bot is a conversation,
 	// not a mention every time. Taking one off lasts until they send again.
-	const crew = namedBotsReply ? (details?.crew ?? []) : [];
+	const channelBots = namedBotsReply ? (details?.channelBots ?? []) : [];
 	const lastOwnMessage = namedBotsReply
 		? shownMessages.findLast(
 				(message) => message.author.kind === "person" && message.author.id === user.id,
 			)
 		: undefined;
-	const [takenOff, setTakenOff] = useTakenOffRecipients(user.id, podId, conversationId);
+	const [takenOff, setTakenOff] = useTakenOffRecipients(user.id, channelId, conversationId);
 	const takenOffIds = takenOff.after === lastOwnMessage?.id ? takenOff.botIds : [];
-	const named = botsNamed(draft, crew);
-	const repliedToBot = crew.find(
-		(member): member is AgentParticipant =>
-			member.kind === "agent" &&
-			replyingTo?.author.kind === "agent" &&
+	const named = botsNamed(draft, channelBots);
+	const repliedToBot = channelBots.find(
+		(member): member is BotParticipant =>
+			member.kind === "bot" &&
+			replyingTo?.author.kind === "bot" &&
 			member.id === replyingTo.author.id,
 	);
-	const addressedBots = (lastOwnMessage ? botsAddressedBy(lastOwnMessage, crew) : []).filter(
+	const addressedBots = (lastOwnMessage ? botsAddressedBy(lastOwnMessage, channelBots) : []).filter(
 		(bot) =>
 			!takenOffIds.includes(bot.id) &&
 			bot.id !== repliedToBot?.id &&
@@ -281,20 +286,19 @@ export function ConversationChat({
 		setTakenOff({ after: lastOwnMessage?.id, botIds: [...takenOffIds, ...botIds] });
 	}
 	// Taken off wherever it came from: named in the draft, or addressed by the last message.
-	function removeRecipient(bot: AgentParticipant) {
+	function removeRecipient(bot: BotParticipant) {
 		setDraft((current) => withoutMention(current, bot.handle));
 		takeOff([bot.id]);
 	}
 	const answeringBots = [...named, ...addressedBots, ...(repliedToBot ? [repliedToBot] : [])];
-	// Beside an artifact or a computer, the chat is as wide as the viewer last dragged it.
+	// Beside a file or a computer, the chat is as wide as the viewer last dragged it.
 	const [chatWidth, setChatWidth] = usePaneWidth("staged-chat");
 	const chatColumn = useRef<HTMLDivElement>(null);
 	// The model of the bot a message here goes to: the one named in the channel, else this task's own.
-	const { agents } = useAgents();
+	const { bots } = useBots();
 	const answeringModel = useModelName(
-		(namedBotsReply
-			? agents?.find((one) => one.id === answeringBots[0]?.id)?.model
-			: agent?.model) ?? null,
+		(namedBotsReply ? bots?.find((one) => one.id === answeringBots[0]?.id)?.model : bot?.model) ??
+			null,
 	);
 	// Everyone here and the channel's bots, not yourself. Naming a bot has it reply where
 	// people talk among themselves, and asks this chat's own bot to bring it in elsewhere.
@@ -306,7 +310,7 @@ export function ConversationChat({
 						...groupMentionsBy(
 							{ kind: "person", id: user.id },
 							details.members,
-							details.thread.type,
+							details.conversation.kind,
 						),
 					]
 				: [],
@@ -315,12 +319,13 @@ export function ConversationChat({
 
 	useLayoutEffect(() => {
 		if (!details) return;
-		if (threadId && !previousThreadId.current) {
+		if (itemConversationId && !previousItemConversationId.current) {
 			opener.current = document.activeElement as HTMLElement;
 		}
-		if (!threadId && previousThreadId.current) requestAnimationFrame(() => opener.current?.focus());
-		previousThreadId.current = threadId;
-	}, [details, threadId]);
+		if (!itemConversationId && previousItemConversationId.current)
+			requestAnimationFrame(() => opener.current?.focus());
+		previousItemConversationId.current = itemConversationId;
+	}, [details, itemConversationId]);
 
 	useLayoutEffect(() => {
 		if (
@@ -409,17 +414,17 @@ export function ConversationChat({
 	}
 
 	/** Opens a task a bot started from its reply, with whichever bot it is with. */
-	function openStartedTask(started: BotStartedThread) {
+	function openStartedTask(started: BotStartedTask) {
 		const other = started.withBotId
-			? details?.crew.find((member) => member.id === started.withBotId)
+			? details?.channelBots.find((member) => member.id === started.withBotId)
 			: undefined;
-		const withBot = other ?? agent;
+		const withBot = other ?? bot;
 		if (!withBot) return;
-		void navigate(conversationLink({ agent: withBot, conversationId: started.id }));
+		void navigate(conversationLink({ bot: withBot, conversationId: started.id }));
 	}
 
 	function replyTo(message: Message) {
-		if (message.author.kind === "routine_trigger") return;
+		if (message.author.kind === "automation_trigger") return;
 		setReplyingTo({ id: message.id, author: message.author, preview: quotedPreview(message) });
 	}
 
@@ -440,30 +445,30 @@ export function ConversationChat({
 		});
 	}
 
-	function openThread(nextThreadId: string) {
-		// A run's own thread is never opened beside a chat: its routine's thread
-		// opens in its place, unless that is the chat already open.
-		if (runThreadIds.has(nextThreadId)) {
-			const run = runsResulting.get(nextThreadId);
-			if (run && agent && run.routineId !== details?.routine?.id) {
-				void navigate(routineThreadLink(agent, run.routineId));
+	function openItem(nextItemConversationId: string) {
+		// A run's own conversation is never opened beside a chat: its automation's
+		// feed opens in its place, unless that is the chat already open.
+		if (runConversationIds.has(nextItemConversationId)) {
+			const run = runsResulting.get(nextItemConversationId);
+			if (run && bot && run.automationId !== details?.automation?.id) {
+				void navigate(automationFeedLink(bot, run.automationId));
 			}
 			return;
 		}
 		opener.current = document.activeElement as HTMLElement;
-		onThreadChange(nextThreadId);
+		onItemChange(nextItemConversationId);
 	}
 
-	const title = details?.thread.title;
-	const chats = useChatList(pod?.slug).data?.chats;
+	const title = details?.conversation.title;
+	const chats = useChatList(channel?.slug).data?.chats;
 	const listedChat = chats?.find((chat) => chat.conversation.id === conversationId)?.conversation;
 	// An archived thread is not listed, so it goes by the name it was archived with.
-	const podChatName = listedChat?.title ?? title ?? "";
-	// Only a task is ever done: not a channel, nor an automation's thread.
+	const channelConversationName = listedChat?.title ?? title ?? "";
+	// Only a task is ever done: not a channel's conversation, nor an automation's feed.
 	const done =
-		details?.thread.type === "conversation"
+		details?.conversation.kind === "task"
 			? {
-					isDone: details.thread.doneAt !== null,
+					isDone: details.conversation.doneAt !== null,
 					onChange: (to: boolean) =>
 						setDone.mutateAsync(to).then(
 							() => true,
@@ -472,10 +477,10 @@ export function ConversationChat({
 				}
 			: undefined;
 	// Back returns to where the conversation lives: its bot, its channel, or the direct messages.
-	const back: BackTo = agent
-		? { to: "bot", agent }
-		: pod
-			? { to: "pod", pod }
+	const back: BackTo = bot
+		? { to: "bot", bot }
+		: channel
+			? { to: "channel", channel }
 			: { to: "directMessages" };
 	const headerPlace: HeaderPlace =
 		place.kind === "away"
@@ -489,35 +494,39 @@ export function ConversationChat({
 						: { open: place.detailsOpen, onChange: place.onDetailsChange },
 				};
 	const header =
-		conversation.kind === "botThread" && details?.routine ? (
-			<PeopleChatHeader {...headerPlace} title={title ?? details.thread.title} mark="routine" />
-		) : conversation.kind === "botThread" ? (
+		conversation.kind === "botConversation" && details?.automation ? (
+			<PeopleChatHeader
+				{...headerPlace}
+				title={title ?? details.conversation.title}
+				mark="automation"
+			/>
+		) : conversation.kind === "botConversation" ? (
 			<ChatHeader
 				{...headerPlace}
-				agent={conversation.agent}
+				bot={conversation.bot}
 				title={title}
 				done={done}
 				conversationId={conversationId}
 				onOpenDesktop={openDesktop}
-				onOpenRoutines={() => openRoutines()}
+				onOpenAutomations={() => openAutomations()}
 			/>
-		) : conversation.kind === "podChat" ? (
+		) : conversation.kind === "channelConversation" ? (
 			<PeopleChatHeader
 				{...headerPlace}
-				title={podChatName}
+				title={channelConversationName}
 				menu={
 					listedChat &&
-					pod?.permissions.rename && (
+					channel?.permissions.rename && (
 						<ChatMenu
-							pod={pod}
+							channel={channel}
 							conversationId={conversationId}
-							name={podChatName}
+							name={channelConversationName}
 							archivable={!listedChat.main}
 						/>
 					)
 				}
 			/>
-		) : conversation.kind === "direct" ? (
+		) : conversation.kind === "directMessage" ? (
 			<PeopleChatHeader
 				{...headerPlace}
 				// Nothing opens beside a direct message: who is in a group drops down from its members' count.
@@ -531,11 +540,11 @@ export function ConversationChat({
 				}
 			/>
 		) : null;
-	if (!details || (agent && !host))
+	if (!details || (bot && !host))
 		return (
 			<div className="flex min-w-0 flex-1 flex-col">
 				{!headerless && header}
-				{!mainThread.isPending && (
+				{!opened.isPending && (
 					<EmptyState title="Could not load this conversation">
 						The API did not answer. Reload this page to try again.
 					</EmptyState>
@@ -544,23 +553,23 @@ export function ConversationChat({
 		);
 
 	const mentionable = mentionableIn(details);
-	// A bot's thread goes to its bot unless the message mentions only people.
+	// A bot's conversation goes to its bot unless the message mentions only people.
 	const draftHandles = mentionedHandles(draft);
 	const draftMentions = mentionable.filter((member) => draftHandles.includes(member.handle));
 	const botStaysOut =
 		host !== undefined &&
 		mentionsOnlyPeople(draftHandles, {
-			botHandles: handlesOf(mentionable, "agent"),
+			botHandles: handlesOf(mentionable, "bot"),
 			peopleHandles: handlesOf(mentionable, "person"),
 		});
 	const composerLabel =
 		botStaysOut && draftMentions.length > 0
 			? `Message ${listNames(draftMentions.map((person) => person.name))}`
-			: details.routine && agent
-				? `Message ${agent.name} about this routine`
-				: `Message ${agent?.name ?? peopleName ?? (isPodChat ? podChatName : (pod?.name ?? podChatName))}`;
+			: details.automation && bot
+				? `Message ${bot.name} about this automation`
+				: `Message ${bot?.name ?? peopleName ?? (isChannelConversation ? channelConversationName : (channel?.name ?? channelConversationName))}`;
 	const typers = typersAfter(shownMessages, peopleTyping);
-	const contents: ThreadContents = {
+	const contents: ConversationContents = {
 		participants: details.participants,
 		files: shownMessages.flatMap((message) =>
 			message.parts.filter((part): part is FilePart => part.type === "file"),
@@ -568,7 +577,7 @@ export function ConversationChat({
 		fileUrlOf: (fileId) => chatFileUrl(conversationId, fileId),
 	};
 	const askedForHelp = draftMentions.filter(
-		(member) => member.kind === "agent" && member.id !== host?.id,
+		(member) => member.kind === "bot" && member.id !== host?.id,
 	);
 	const hint = namedBotsReply
 		? answeringBots.length > 0
@@ -592,7 +601,7 @@ export function ConversationChat({
 				}
 				className={cn(
 					"relative flex min-w-0 flex-1 flex-col",
-					staged && "md:w-thread-pane md:flex-none md:border-border md:border-r",
+					staged && "md:w-conversation-pane md:flex-none md:border-border md:border-r",
 				)}
 			>
 				{staged && (
@@ -615,7 +624,7 @@ export function ConversationChat({
 					</div>
 				)}
 				<FileDropTarget
-					onDropFiles={agent?.model === null ? undefined : attachments.attach}
+					onDropFiles={bot?.model === null ? undefined : attachments.attach}
 					className="flex min-h-0 flex-1 flex-col"
 				>
 					<div
@@ -659,30 +668,38 @@ export function ConversationChat({
 							)}
 							{messages.isSuccess &&
 								!messages.hasNextPage &&
-								(isPodChat && pod ? (
-									<PodChatIntro pod={pod} name={podChatName} details={details} />
-								) : conversation.kind === "direct" ? (
+								(isChannelConversation && channel ? (
+									<ChannelConversationIntro
+										channel={channel}
+										name={channelConversationName}
+										details={details}
+									/>
+								) : conversation.kind === "directMessage" ? (
 									<DirectIntro {...conversation} />
-								) : details.thread.type === "routine_feed" ? (
-									agent && <RoutineIntro title={details.thread.title} agent={agent} />
+								) : details.conversation.kind === "automation_feed" ? (
+									bot && <AutomationIntro title={details.conversation.title} bot={bot} />
 								) : (
-									agent && <ChatIntro agent={agent} title={title} />
+									bot && <ChatIntro bot={bot} title={title} />
 								))}
 							{groups.map((group) => (
 								<Fragment key={group.key}>
 									{group.separated &&
-										(routineFeed ? <RunDivider at={group.at} /> : <DaySeparator at={group.at} />)}
+										(automationFeed ? (
+											<RunDivider at={group.at} />
+										) : (
+											<DaySeparator at={group.at} />
+										))}
 									{group.kind === "messages" ? (
-										<ThreadConversation
+										<ConversationMessages
 											messages={group.messages}
 											host={host}
 											isRunning={false}
 											participants={mentionable}
 											members={details.members}
-											threadType={details.thread.type}
+											conversationKind={details.conversation.kind}
 											dividers={false}
-											onOpenThread={openThread}
-											onOpenArtifact={openArtifact}
+											onOpenItem={openItem}
+											onOpenFile={openFile}
 											onOpenDesktop={openDesktop}
 											fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
 											previews={!staged}
@@ -693,17 +710,17 @@ export function ConversationChat({
 											answeringFace={answeringFace}
 											viewerWriting={draft.trim() !== ""}
 											highlightedMessageId={jump.pointedOut}
-											threadActivityAt={threadActivityAt}
+											itemActivityAt={itemActivityAt}
 											authorLinkOf={authorLinkOf}
 											onReply={replyTo}
-											inRoutineThread={routineFeed}
-											threadLinesOf={(message) =>
-												threadsStartedBy(message).map((started) => (
-													<BotStartedThreadLine
+											inAutomationFeed={automationFeed}
+											sideLinesOf={(message) =>
+												tasksStartedBy(message).map((started) => (
+													<BotStartedTaskLine
 														key={started.id}
 														started={started}
 														startedBy={message.author}
-														crew={details?.crew ?? []}
+														channelBots={details?.channelBots ?? []}
 														onOpen={() => openStartedTask(started)}
 													/>
 												))
@@ -711,23 +728,23 @@ export function ConversationChat({
 											onJumpToMessage={jumpTo}
 											reacting={reacting}
 										/>
-									) : group.item.kind === "routine_paused" ? (
+									) : group.item.kind === "automation_paused" ? (
 										<PausedLine at={group.item.createdAt} />
-									) : details.routine && host && agent ? (
+									) : details.automation && host && bot ? (
 										<RunMessage
 											item={group.item}
-											agent={host}
-											routine={details.routine}
+											bot={host}
+											automation={details.automation}
 											conversationId={conversationId}
-											latest={details.routine.failed && group.item.id === latestRunId(items)}
+											latest={details.automation.failed && group.item.id === latestRunId(items)}
 											mentionable={mentionable}
 										/>
 									) : (
-										<ActivityLine item={group.item} entries={entries} onOpenThread={openThread} />
+										<ActivityLine item={group.item} entries={entries} onOpenItem={openItem} />
 									)}
 								</Fragment>
 							))}
-							{details.routine && <NextRunDivider routine={details.routine} />}
+							{details.automation && <NextRunDivider automation={details.automation} />}
 							{jump.notFound && (
 								<p
 									role="status"
@@ -736,12 +753,12 @@ export function ConversationChat({
 									Could not find the message you opened in this chat.
 								</p>
 							)}
-							<ThreadNotices notices={notices} />
+							<ConversationNotices notices={notices} />
 						</div>
 					</div>
 					<div className="shrink-0 px-4 max-md:pb-tab-bar md:px-5">
-						{agent?.model === null ? (
-							<AgentNotSetUp agent={agent} />
+						{bot?.model === null ? (
+							<BotNotSetUp bot={bot} />
 						) : (
 							<ChatComposer
 								label={composerLabel}
@@ -771,7 +788,7 @@ export function ConversationChat({
 									onClearInherited: () => takeOff(addressedBots.map((bot) => bot.id)),
 								}}
 								attachments={attachments}
-								notice={agent && <ConnectionsNotice agent={agent} />}
+								notice={bot && <ConnectionsNotice bot={bot} />}
 							/>
 						)}
 						{/*
@@ -789,90 +806,97 @@ export function ConversationChat({
 					</div>
 				</FileDropTarget>
 			</div>
-			{/* One beside the chat at a time: what is staged, else a thread, else Details. */}
-			{staged?.kind === "artifact" && (pod || agent) ? (
-				<ArtifactStage
-					owner={pod ? { pod } : { agent: agent as Agent }}
-					artifactId={staged.artifactId}
+			{/* One beside the chat at a time: what is staged, else an item, else Details. */}
+			{staged?.kind === "file" && (channel || bot) ? (
+				<FileStage
+					owner={channel ? { channel } : { bot: bot as Bot }}
+					fileId={staged.fileId}
 					version={staged.version}
 					onVersionChange={(version) => onStagedChange({ ...staged, version })}
 					// Leaving in its place, as a deleted one is left, goes back to the chat when that is behind.
 					onClose={(how) =>
 						how?.replace
 							? leaveFor(
-									(page) => page.pathname === pathname && page.search.artifact === undefined,
+									(page) => page.pathname === pathname && page.search.file === undefined,
 									() => onStagedChange(undefined, how),
 								)
 							: onStagedChange(undefined)
 					}
 				/>
-			) : staged?.kind === "desktop" && agent ? (
+			) : staged?.kind === "desktop" && bot ? (
 				<DesktopStage
-					threadId={details.thread.id}
-					agent={agent}
-					mayUse={agent.permissions.useDesktop}
+					conversationId={details.conversation.id}
+					bot={bot}
+					mayUse={bot.permissions.useDesktop}
 					onClose={() => onStagedChange(undefined)}
 				/>
-			) : staged?.kind === "threads" && agent ? (
-				<ThreadsStage
-					agent={agent}
+			) : staged?.kind === "tasks" && bot ? (
+				<TasksStage
+					bot={bot}
 					tab={staged.tab}
-					onTabChange={(tab) => onStagedChange({ kind: "threads", tab }, { replace: true })}
+					onTabChange={(tab) => onStagedChange({ kind: "tasks", tab }, { replace: true })}
 					onClose={() => onStagedChange(undefined)}
 				/>
-			) : staged?.kind === "routines" && agent ? (
-				<RoutinesStage
-					agent={agent}
+			) : staged?.kind === "automations" && bot ? (
+				<AutomationsStage
+					bot={bot}
 					user={user}
 					view={staged.view}
-					onViewChange={openRoutines}
+					onViewChange={openAutomations}
 					onStagedChange={onStagedChange}
 					onClose={() => onStagedChange(undefined)}
 				/>
-			) : threadId && agent && selectedEntry?.type !== "routine" ? (
-				<ChatThreadPanel
+			) : itemConversationId &&
+				conversation.kind !== "directMessage" &&
+				selectedEntry?.kind !== "run" ? (
+				<ItemPanel
 					conversationId={conversationId}
-					chatAgentId={agent.id}
-					threadId={threadId}
+					chatBotId={bot?.id}
+					itemConversationId={itemConversationId}
 					entry={selectedEntry}
 					history={entries}
-					frame={{ kind: "sidebar", onClose: () => onThreadChange(undefined) }}
-					onOpenThread={openThread}
-					onOpenArtifact={openArtifact}
+					frame={{ kind: "sidebar", onClose: () => onItemChange(undefined) }}
+					onOpenItem={openItem}
+					onOpenFile={openFile}
 				/>
 			) : (
 				place.kind === "own" &&
 				place.detailsOpen &&
-				conversation.kind !== "direct" &&
-				(isPodChat ? (
+				conversation.kind !== "directMessage" &&
+				(isChannelConversation ? (
 					<ChannelDetails
-						name={podChatName}
+						name={channelConversationName}
 						people={details.members.length}
-						bots={details.crew.filter((member) => member.kind === "agent").length}
+						bots={details.channelBots.filter((member) => member.kind === "bot").length}
 						channel={
-							listedChat && pod?.permissions.rename
-								? { pod, conversationId, name: podChatName, archivable: !listedChat.main }
+							listedChat && channel?.permissions.rename
+								? {
+										channel,
+										conversationId,
+										name: channelConversationName,
+										archivable: !listedChat.main,
+									}
 								: undefined
 						}
 						user={user}
 						contents={contents}
 						onClose={() => place.onDetailsChange(false)}
 					/>
-				) : details.routine && agent ? (
-					<RoutinePanel
-						agent={agent}
+				) : details.automation && bot ? (
+					<AutomationPanel
+						bot={bot}
 						conversationId={conversationId}
-						standing={details.routine}
+						standing={details.automation}
 						onClose={() => place.onDetailsChange(false)}
 					/>
-				) : agent ? (
+				) : bot ? (
 					<DetailsSidebar
-						agent={agent}
-						threadId={details.thread.id}
+						bot={bot}
+						conversationId={details.conversation.id}
 						user={user}
 						contents={contents}
-						onOpenRoutines={(routineId) =>
-							openRoutines(routineId ? { kind: "routine", routineId } : undefined)
+						onOpenAutomations={(automationId) =>
+							openAutomations(automationId ? { kind: "automation", automationId } : undefined)
 						}
 						onClose={() => place.onDetailsChange(false)}
 					/>
@@ -902,27 +926,27 @@ function sendFailureMessage(failure: unknown): string {
 	return "Message not sent. Your draft is still here.";
 }
 
-type ChatActivityItem = Extract<ChatMessageItem, { kind: "routine" | "routine_paused" }>;
+type ChatActivityItem = Extract<ChatMessageItem, { kind: "run" | "automation_paused" }>;
 
 /** An automation run, as a row among the messages. */
 function ActivityLine({
 	item,
 	entries,
-	onOpenThread,
+	onOpenItem,
 }: {
-	item: Extract<ChatMessageItem, { kind: "routine" }>;
-	/** The threads opened beside the chat, where how a run stands is read. */
+	item: Extract<ChatMessageItem, { kind: "run" }>;
+	/** The runs and collaborations opened beside the chat, where how a run stands is read. */
 	entries: readonly ChatHistoryEntry[];
-	onOpenThread: (threadId: string) => void;
+	onOpenItem: (itemConversationId: string) => void;
 }) {
 	return (
 		<ChatActivityRow
-			type="routine"
-			routineName={item.routineName}
+			type="run"
+			automationName={item.automationName}
 			triggerKind={item.triggerKind}
-			state={activityStateOf(entries.find((entry) => entry.threadId === item.threadId))}
+			state={activityStateOf(entries.find((entry) => entry.conversationId === item.conversationId))}
 			at={item.createdAt}
-			onOpen={() => onOpenThread(item.threadId)}
+			onOpen={() => onOpenItem(item.conversationId)}
 		/>
 	);
 }
@@ -935,7 +959,7 @@ type ChatGroup = { key: string; at: string; separated: boolean } & (
 
 /**
  * The chat's items as they are drawn: runs of messages together, so one
- * author's messages in a row read as a run, and each collaboration or routine
+ * author's messages in a row read as a run, and each collaboration or automation
  * row on its own. A new day starts a new group behind a separator.
  */
 function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean): ChatGroup[] {
@@ -943,8 +967,8 @@ function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean): ChatGr
 	let previousAt: string | undefined;
 	for (const item of items) {
 		const at = item.kind === "message" ? item.message.createdAt : item.createdAt;
-		// A routine's thread is marked where each run starts; any other, where each day does.
-		const separated = byRun ? startsRoutineRun(item) : startsNewDay(previousAt, at);
+		// An automation's feed is marked where each run starts; any other, where each day does.
+		const separated = byRun ? startsAutomationRun(item) : startsNewDay(previousAt, at);
 		previousAt = at;
 		const last = groups.at(-1);
 		if (item.kind === "message") {
@@ -969,7 +993,7 @@ function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean): ChatGr
 function mergeChatItems(
 	pageItems: ChatMessageItem[],
 	optimistic: ChatMessageItem[],
-	liveMessages: NonNullable<ReturnType<typeof useThread>["data"]>["messages"],
+	liveMessages: NonNullable<ReturnType<typeof useConversation>["data"]>["messages"],
 ): ChatMessageItem[] {
 	const items = new Map<string, ChatMessageItem>();
 	for (const item of [...pageItems, ...optimistic]) {
@@ -1111,12 +1135,12 @@ function centreIn(scroller: HTMLElement, row: HTMLElement) {
 	scroller.scrollTop += box.top - frame.top - (frame.height - box.height) / 2;
 }
 
-/** The newest routine run in `items`, which is the one that can be tried again. */
+/** The newest automation run in `items`, which is the one that can be tried again. */
 function latestRunId(items: readonly ChatMessageItem[]): string | undefined {
-	return items.findLast((item) => item.kind === "routine")?.id;
+	return items.findLast((item) => item.kind === "run")?.id;
 }
 
-/** In a routine's thread: that it paused itself after failing twice in a row, and when. */
+/** In an automation's feed: that it paused itself after failing twice in a row, and when. */
 function PausedLine({ at }: { at: string }) {
 	return (
 		<p className="m-0 flex items-center gap-2 px-5 py-2 pl-17.5 font-medium text-xs text-muted-foreground">
@@ -1130,27 +1154,28 @@ function PausedLine({ at }: { at: string }) {
 }
 
 /**
- * A task a bot started with `start_thread` in its reply, shown from the call,
+ * A task a bot started with `start_task` in its reply, shown from the call,
  * under the reply that names it.
  */
-function BotStartedThreadLine({
+function BotStartedTaskLine({
 	started,
 	startedBy,
-	crew,
+	channelBots,
 	onOpen,
 }: {
-	started: BotStartedThread;
+	started: BotStartedTask;
 	startedBy: Message["author"];
-	crew: readonly ThreadParticipant[];
+	channelBots: readonly Participant[];
 	onOpen: () => void;
 }) {
-	const otherBot = started.withBotId && crew.find((member) => member.id === started.withBotId);
+	const otherBot =
+		started.withBotId && channelBots.find((member) => member.id === started.withBotId);
 	const faces = [
-		...(startedBy.kind === "routine_trigger" ? [] : [startedBy]),
+		...(startedBy.kind === "automation_trigger" ? [] : [startedBy]),
 		...(otherBot ? [otherBot] : []),
 	];
 	return (
-		<SideThreadLine
+		<SideConversationLine
 			faces={faces}
 			label={started.title}
 			description={`Open task: ${started.title}`}
@@ -1159,41 +1184,55 @@ function BotStartedThreadLine({
 	);
 }
 
-const decodeStartThreadOutput = Schema.decodeUnknownOption(
-	Schema.Struct({ thread: botStartedThreadSchema }),
+const decodeStartTaskOutput = Schema.decodeUnknownOption(
+	Schema.Union([
+		Schema.Struct({ task: botStartedTaskSchema }),
+		// What the tool answered under its name before tasks were called that, which earlier calls record.
+		Schema.Struct({ thread: botStartedTaskSchema }),
+	]),
 );
 
-/** The tasks a bot's message started with `start_thread`, in the order it started them. */
-function threadsStartedBy(message: Message): BotStartedThread[] {
+/** The tool's name before tasks were called that, which earlier calls record. */
+const START_THREAD_TOOL = "start_thread";
+
+/** The tasks a bot's message started with `start_task`, in the order it started them. */
+function tasksStartedBy(message: Message): BotStartedTask[] {
 	return message.parts.flatMap((part) => {
-		if (part.type !== "tool_call" || part.tool !== START_THREAD_TOOL) return [];
+		if (part.type !== "tool_call") return [];
+		if (part.tool !== START_TASK_TOOL && part.tool !== START_THREAD_TOOL) return [];
 		if (part.status !== "completed") return [];
-		return Option.match(decodeStartThreadOutput(part.output), {
+		return Option.match(decodeStartTaskOutput(part.output), {
 			onNone: () => [],
-			onSome: (output) => [output.thread],
+			onSome: (output) => ["task" in output ? output.task : output.thread],
 		});
 	});
 }
 
-/** The top of an automation's own thread: what the automation is called, and the bot that runs it. */
-function RoutineIntro({ title, agent }: { title: string; agent: Agent }) {
+/** The top of an automation's feed: what the automation is called, and the bot that runs it. */
+function AutomationIntro({ title, bot }: { title: string; bot: Bot }) {
 	return (
 		<div className="flex flex-col gap-1.5 px-5 pt-6 pb-4">
 			<h2 className="m-0 font-bold text-xl text-foreground leading-tight">{title}</h2>
-			<p className="m-0 text-xs text-muted-foreground">
-				Runs as {agent.name}. Each run posts here.
-			</p>
+			<p className="m-0 text-xs text-muted-foreground">Runs as {bot.name}. Each run posts here.</p>
 		</div>
 	);
 }
 
 /** The top of a channel's conversation: how many are in it, and what it is for. */
-function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details: ThreadDetails }) {
+function ChannelConversationIntro({
+	channel,
+	name,
+	details,
+}: {
+	channel: Channel;
+	name: string;
+	details: ConversationDetails;
+}) {
 	const people = details.members.length;
-	const bots = details.crew.filter((member) => member.kind === "agent").length;
+	const bots = details.channelBots.filter((member) => member.kind === "bot").length;
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
-			<PodChatTile color={pod.color} size={64} />
+			<ChannelConversationTile color={channel.color} size={64} />
 			<h2 className="m-0 pt-1 font-bold text-2xl text-foreground tracking-normal">{name}</h2>
 			<p className="m-0 max-w-140 text-sm text-muted-foreground leading-normal">
 				This is the start of {name}, with {countOf(people, "person", "people")} and{" "}
@@ -1207,7 +1246,7 @@ function PodChatIntro({ pod, name, details }: { pod: Pod; name: string; details:
  * The top of a task, once there is nothing older to load: what it is about,
  * with whom, or, before it has a name, whom it is with.
  */
-function ChatIntro({ agent, title }: { agent: Agent; title: string | undefined }) {
+function ChatIntro({ bot, title }: { bot: Bot; title: string | undefined }) {
 	// A task is about something, so its name leads and the bot is beside it, smaller.
 	if (title) {
 		return (
@@ -1216,19 +1255,18 @@ function ChatIntro({ agent, title }: { agent: Agent; title: string | undefined }
 					{title}
 				</h2>
 				<p className="m-0 flex max-w-140 items-center gap-2 text-sm text-muted-foreground leading-normal">
-					<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={20} />
-					With {agent.name}
+					<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={20} />
+					With {bot.name}
 				</p>
 			</div>
 		);
 	}
 	return (
 		<div className="flex flex-col gap-2 px-5 pt-2 pb-3.5">
-			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
-			<h2 className="m-0 pt-1 font-bold text-2xl text-foreground tracking-normal">{agent.name}</h2>
+			<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={64} />
+			<h2 className="m-0 pt-1 font-bold text-2xl text-foreground tracking-normal">{bot.name}</h2>
 			<p className="m-0 max-w-140 text-sm text-muted-foreground leading-normal">
-				This is the start of your task with {agent.name}.
-				{agent.description && ` ${agent.description}`}
+				This is the start of your task with {bot.name}.{bot.description && ` ${bot.description}`}
 			</p>
 		</div>
 	);
@@ -1263,19 +1301,19 @@ function everyoneNamed(others: readonly string[]): string {
 }
 
 /**
- * Stands in for the composer while the agent has no model. The API refuses the
+ * Stands in for the composer while the bot has no model. The API refuses the
  * message anyway, so offering a box to type into would only lose the draft.
- * Only somebody who may edit the agent is offered the way to fix it.
+ * Only somebody who may edit the bot is offered the way to fix it.
  */
-function AgentNotSetUp({ agent }: { agent: Agent }) {
+function BotNotSetUp({ bot }: { bot: Bot }) {
 	const backToChat = useBackToHere("Chat");
 	return (
 		<p className="mx-auto m-0 w-full max-w-190 rounded-2xl border border-border-strong px-4 py-3.5 text-sm text-muted-foreground leading-relaxed">
-			{agent.name} has no model yet, so it cannot answer.{" "}
-			{agent.permissions.update ? (
+			{bot.name} has no model yet, so it cannot answer.{" "}
+			{bot.permissions.update ? (
 				<>
 					<Link
-						{...agentSettingsLink(agent)}
+						{...botSettingsLink(bot)}
 						state={backToChat}
 						className={buttonStyles({ variant: "link", size: "bare" })}
 					>
@@ -1290,28 +1328,24 @@ function AgentNotSetUp({ agent }: { agent: Agent }) {
 	);
 }
 
-/** Whether `item` is where a run starts in an automation's thread: its result, or the run itself when it posted none. */
-function startsRoutineRun(item: ChatMessageItem): boolean {
-	return item.kind === "routine" || (item.kind === "message" && !!item.message.routineResultOf);
+/** Whether `item` is where a run starts in an automation's feed: its result, or the run itself when it posted none. */
+function startsAutomationRun(item: ChatMessageItem): boolean {
+	return item.kind === "run" || (item.kind === "message" && !!item.message.automationResultOf);
 }
 
-/** The handles of those in `participants` who are bots (`"agent"`) or people (`"person"`). */
-function handlesOf(
-	participants: readonly ThreadParticipant[],
-	kind: ThreadParticipant["kind"],
-): Set<string> {
+/** The handles of those in `participants` who are bots (`"bot"`) or people (`"person"`). */
+function handlesOf(participants: readonly Participant[], kind: Participant["kind"]): Set<string> {
 	return new Set(participants.filter((one) => one.kind === kind).map((one) => one.handle));
 }
 
-/** The bots among `crew` that `message` went to: those it names, and the one it replied to. */
-function botsAddressedBy(message: Message, crew: readonly ThreadParticipant[]): AgentParticipant[] {
-	const named = botsNamed(message.content, crew);
+/** The bots among `channelBots` that `message` went to: those it names, and the one it replied to. */
+function botsAddressedBy(message: Message, channelBots: readonly Participant[]): BotParticipant[] {
+	const named = botsNamed(message.content, channelBots);
 	const repliedTo = message.replyTo?.author;
 	const replied =
-		repliedTo?.kind === "agent" && !named.some((bot) => bot.id === repliedTo.id)
-			? crew.filter(
-					(member): member is AgentParticipant =>
-						member.kind === "agent" && member.id === repliedTo.id,
+		repliedTo?.kind === "bot" && !named.some((bot) => bot.id === repliedTo.id)
+			? channelBots.filter(
+					(member): member is BotParticipant => member.kind === "bot" && member.id === repliedTo.id,
 				)
 			: [];
 	return [...named, ...replied];

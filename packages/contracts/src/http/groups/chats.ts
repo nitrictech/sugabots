@@ -2,27 +2,27 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import { uploadAttachmentQuerySchema, uploadedAttachmentSchema } from "../../attachments.ts";
 import {
-	activityFeedSchema,
 	approvalInboxSchema,
+	automationFeedSchema,
 	botTaskListSchema,
+	channelConversationMarkersSchema,
+	channelConversationSchema,
 	chatHistoryPageSchema,
 	chatListQuerySchema,
 	chatListSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
-	conversationThreadSchema,
 	directMessageListItemSchema,
 	directMessageListSchema,
+	inboxFeedSchema,
 	newChatSchema,
 	newDirectMessageSchema,
-	newThreadSchema,
-	podChatMarkersSchema,
-	podChatSchema,
-	routineFeedSchema,
+	newTaskSchema,
 	sentDirectMessageSchema,
-	startedThreadSchema,
+	startedTaskSchema,
+	taskSchema,
 } from "../../chats.ts";
-import { messageSchema, newMessageSchema } from "../../threads.ts";
+import { messageSchema, newMessageSchema } from "../../conversations.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, PayloadTooLarge, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
@@ -35,14 +35,14 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: chatListSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.get("podMarkers", "/workspaces/:workspace/chats/pod-markers", {
+		HttpApiEndpoint.get("channelMarkers", "/workspaces/:workspace/chats/channel-markers", {
 			params: { workspace: workspaceIdOrSlugSchema },
-			success: podChatMarkersSchema,
+			success: channelConversationMarkersSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.get("activity", "/workspaces/:workspace/chats/activity", {
+		HttpApiEndpoint.get("inbox", "/workspaces/:workspace/chats/inbox", {
 			params: { workspace: workspaceIdOrSlugSchema },
-			success: activityFeedSchema,
+			success: inboxFeedSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.get("approvals", "/workspaces/:workspace/chats/approvals", {
@@ -51,25 +51,25 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			error: refused,
 		}),
 		/** A bot's tasks and automations. */
-		HttpApiEndpoint.get("botTasks", "/agents/:agentId/tasks", {
-			params: { agentId: Schema.String },
+		HttpApiEndpoint.get("botTasks", "/bots/:botId/tasks", {
+			params: { botId: Schema.String },
 			success: botTaskListSchema,
 			error: refused,
 		}),
 		/** Starts a task with a bot, with its first message. */
-		HttpApiEndpoint.post("startTask", "/agents/:agentId/tasks", {
-			params: { agentId: Schema.String },
-			payload: newThreadSchema,
-			success: startedThreadSchema.pipe(HttpApiSchema.status(201)),
+		HttpApiEndpoint.post("startTask", "/bots/:botId/tasks", {
+			params: { botId: Schema.String },
+			payload: newTaskSchema,
+			success: startedTaskSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
 		}),
 		/**
 		 * Starts the task in which a bot the caller just made interviews them to
 		 * write its own instructions. Null when the bot is not due one.
 		 */
-		HttpApiEndpoint.post("startInterview", "/agents/:agentId/interview", {
-			params: { agentId: Schema.String },
-			success: Schema.NullOr(conversationThreadSchema),
+		HttpApiEndpoint.post("startInterview", "/bots/:botId/interview", {
+			params: { botId: Schema.String },
+			success: Schema.NullOr(taskSchema),
 			error: refused,
 		}),
 		/** The caller's direct messages with other people, the most recent first. */
@@ -94,23 +94,27 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: directMessageListItemSchema,
 			error: refused,
 		}),
-		/** The routine's own thread, where its runs post, opened on first use. */
-		HttpApiEndpoint.post("openRoutineFeed", "/workspaces/:workspace/routines/:routineId/thread", {
-			params: { workspace: workspaceIdOrSlugSchema, routineId: Schema.String },
-			success: routineFeedSchema,
-			error: refused,
-		}),
+		/** The automation's feed, where its runs post, opened on first use. */
+		HttpApiEndpoint.post(
+			"openAutomationFeed",
+			"/workspaces/:workspace/automations/:automationId/feed",
+			{
+				params: { workspace: workspaceIdOrSlugSchema, automationId: Schema.String },
+				success: automationFeedSchema,
+				error: refused,
+			},
+		),
 		/** The channel's main chat, opened on first use. */
-		HttpApiEndpoint.post("openPodChat", "/workspaces/:workspace/pods/:podId/chat", {
-			params: { workspace: workspaceIdOrSlugSchema, podId: Schema.String },
-			success: podChatSchema,
+		HttpApiEndpoint.post("openMainChat", "/workspaces/:workspace/channels/:channelId/chat", {
+			params: { workspace: workspaceIdOrSlugSchema, channelId: Schema.String },
+			success: channelConversationSchema,
 			error: refused,
 		}),
 		/** Starts another thread in the channel, for everyone in it. */
-		HttpApiEndpoint.post("startChat", "/pods/:podId/chats", {
-			params: { podId: Schema.String },
+		HttpApiEndpoint.post("startChat", "/channels/:channelId/chats", {
+			params: { channelId: Schema.String },
 			payload: newChatSchema,
-			success: podChatSchema.pipe(HttpApiSchema.status(201)),
+			success: channelConversationSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, ...refused],
 		}),
 		/** Renames one of the channel's conversations that is not archived. */
@@ -155,9 +159,12 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
-		/** Reads one routine run or collaboration, by its thread, and nothing else in its conversation. */
-		HttpApiEndpoint.post("markItemRead", "/threads/:threadId/read", {
-			params: { threadId: Schema.String },
+		/**
+		 * Reads one automation run or collaboration, by its own conversation, and
+		 * nothing else in the conversation it is in.
+		 */
+		HttpApiEndpoint.post("markItemRead", "/items/:conversationId/read", {
+			params: { conversationId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),

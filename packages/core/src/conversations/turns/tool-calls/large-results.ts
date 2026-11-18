@@ -1,11 +1,14 @@
 import { Effect, Stream } from "effect";
-import type { ThreadFiles } from "../../thread-files/thread-files.ts";
+import type { ConversationFiles } from "../../../files/conversation-files.ts";
 import { hasImages } from "../../tools/images.ts";
-import { READ_THREAD_FILE_TOOL, splitLines } from "../../tools/read-thread-file/tool.ts";
+import {
+	READ_CONVERSATION_FILE_TOOL,
+	splitLines,
+} from "../../tools/read-conversation-file/tool.ts";
 
 /**
  * Results longer than this, as JSON, are kept as a file and the model is given
- * their start. About 12,500 tokens: the other agents we compared cap at about
+ * their start. About 12,500 tokens: the other bots we compared cap at about
  * 50 KB, and a turn resends every result it has had at each step.
  */
 export const MAX_RESULT_CHARACTERS = 50_000;
@@ -26,8 +29,8 @@ export type LongResult = {
 
 /**
  * `output` as the model should get it: unchanged, or past
- * `MAX_RESULT_CHARACTERS` kept as a file in the thread, with its start and how
- * to read the rest with `read_thread_file`. Only its start when the blob store
+ * `MAX_RESULT_CHARACTERS` kept as a file in the conversation, with its start and how
+ * to read the rest with `read_conversation_file`. Only its start when the blob store
  * can't keep it.
  */
 export const forModel = (output: unknown, keeping: Keeping): Effect.Effect<unknown> => {
@@ -42,10 +45,10 @@ export const forModel = (output: unknown, keeping: Keeping): Effect.Effect<unkno
 	);
 };
 
-/** Where a long result is kept: the thread, and the call whose result it is. */
+/** Where a long result is kept: the conversation, and the call whose result it is. */
 interface Keeping {
-	files: Pick<ThreadFiles.Interface, "write">;
-	threadId: string;
+	files: Pick<ConversationFiles.Interface, "write">;
+	conversationId: string;
 	toolCallId: string;
 }
 
@@ -54,7 +57,7 @@ interface Keeping {
 /** What the model is given in place of `output`, or `undefined` when `output` is short enough to give whole. */
 const longResultFor = (
 	output: unknown,
-	{ files, threadId, toolCallId }: Keeping,
+	{ files, conversationId, toolCallId }: Keeping,
 ): Effect.Effect<LongResult | undefined> =>
 	Effect.gen(function* () {
 		const sent = JSON.stringify(output) ?? "";
@@ -63,17 +66,17 @@ const longResultFor = (
 		const preview = text.slice(0, PREVIEW_CHARACTERS);
 		const write = (kept: string) =>
 			files.write({
-				threadId,
+				conversationId,
 				toolCallId,
 				content: { stream: Stream.succeed(new TextEncoder().encode(kept)), contentType },
 			});
 		const stored = yield* write(text).pipe(
 			Effect.map((file) => ({ file, kept: text, complete: true })),
-			Effect.catchTag("ThreadFileTooLarge", ({ maxSize }) => {
+			Effect.catchTag("FileTooLarge", ({ maxSize }) => {
 				const kept = startWithin(text, maxSize);
 				return write(kept).pipe(
 					// `startWithin` keeps the file under the limit just reported.
-					Effect.catchTag("ThreadFileTooLarge", Effect.die),
+					Effect.catchTag("FileTooLarge", Effect.die),
 					Effect.map((file) => ({ file, kept, complete: false })),
 				);
 			}),
@@ -105,7 +108,7 @@ const longResultFor = (
 			characters: sent.length,
 			lines,
 			preview,
-			note: `The result was ${sent.length} characters, too long to give you whole. ${keptAs}, ${lines} lines, and \`preview\` is its start. Read on with ${READ_THREAD_FILE_TOOL}, by line or by searching it with a pattern, rather than calling the tool again.`,
+			note: `The result was ${sent.length} characters, too long to give you whole. ${keptAs}, ${lines} lines, and \`preview\` is its start. Read on with ${READ_CONVERSATION_FILE_TOOL}, by line or by searching it with a pattern, rather than calling the tool again.`,
 		} satisfies LongResult;
 	});
 

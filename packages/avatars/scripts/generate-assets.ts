@@ -17,7 +17,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import opentype from "opentype.js";
-import { botColors } from "../src/bot-colors.ts";
+import { botPalettes } from "../src/bot-colors.ts";
 import { botCrowd as crowd } from "../src/bot-crowd.ts";
 import type { BotLook } from "../src/bot-face.tsx";
 import { FACE_VIEWBOX_SIZE, type FaceMark, faceMarks } from "../src/face-marks.ts";
@@ -42,8 +42,8 @@ function partElement(part: HeadPart, fill: string): string {
 }
 
 function faceElements({ color, face, shape = "circle" }: BotLook): string {
-	const faceHex = botColors[color].face;
-	const eyesHex = botColors[color].eyes;
+	const faceHex = botPalettes[color].face;
+	const eyesHex = botPalettes[color].eyes;
 	const head = headShape(shape);
 	const centre = FACE_VIEWBOX_SIZE / 2;
 	const { x, y, scale } = head.eyes;

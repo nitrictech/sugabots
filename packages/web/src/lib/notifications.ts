@@ -48,10 +48,10 @@ export function useUpdateNotificationPreferences() {
 }
 
 /**
- * Where a level applies in place of the one above it: a pod, in place of the
- * person's own, or one of its bots, in place of the pod's.
+ * Where a level applies in place of the one above it: a channel, in place of the
+ * person's own, or one of its bots, in place of the channel's.
  */
-export type NotificationPlace = { kind: "pod"; id: string } | { kind: "bot"; id: string };
+export type NotificationPlace = { kind: "channel"; id: string } | { kind: "bot"; id: string };
 
 /** Sets the level for a place, or with null goes back to the one above it. */
 export function useSetNotificationLevel() {
@@ -96,7 +96,7 @@ function paramsOf(place: NotificationPlace) {
 
 /** Where a place's own choices are kept in the settings, and its id there. */
 function fieldOf(place: NotificationPlace) {
-	return [place.kind === "pod" ? "pods" : "bots", place.id] as const;
+	return [place.kind === "channel" ? "channels" : "bots", place.id] as const;
 }
 
 /** `record` with `id` set to `value`, or without it when `value` is null. */

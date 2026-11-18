@@ -1,5 +1,5 @@
 /**
- * An agent's turn, as a durable workflow: its definition and the order of its
+ * A bot's turn, as a durable workflow: its definition and the order of its
  * steps. What each step does lives behind `TurnSteps`, implemented in
  * `turn.steps.ts`.
  *
@@ -15,7 +15,12 @@ import { Lanes } from "../../workflows/lanes.ts";
 import type { TurnReason } from "../sql.ts";
 import { ApprovalDecision, DecidedApproval } from "./tool-calls/lifecycle.ts";
 
-export const TurnRequest = Schema.Struct({
+/**
+ * A turn as its workflow's payload. The workflow engine and the lanes store
+ * payloads, so the conversation's and the bot's ids keep the keys the first
+ * turns were stored with.
+ */
+export const StoredTurn = Schema.Struct({
 	threadId: Schema.String,
 	agentId: Schema.String,
 	triggerMessageId: Schema.String,
@@ -24,23 +29,43 @@ export const TurnRequest = Schema.Struct({
 		"reply",
 		"default",
 		"collaboration",
+		// Stored in the payloads of running turns: see `TurnReason`.
 		"routine",
 		"resume",
 		"interview",
 		"brief",
 	]) satisfies Schema.Codec<TurnReason>,
 });
-export type TurnRequest = typeof TurnRequest.Type;
+export type StoredTurn = typeof StoredTurn.Type;
 
-/** A turn is one agent answering one message, so that is what identifies its execution. */
-export const Turn = Workflow.make("turn", {
-	payload: TurnRequest,
-	idempotencyKey: (request) => `${request.threadId}/${request.agentId}/${request.triggerMessageId}`,
+/** The turn a workflow carries out: which bot answers which message in which conversation, and why. */
+export interface TurnRequest {
+	readonly conversationId: string;
+	readonly botId: string;
+	readonly triggerMessageId: string;
+	readonly reason: TurnReason;
+}
+
+export const storedTurn = ({ conversationId, botId, ...request }: TurnRequest): StoredTurn => ({
+	...request,
+	threadId: conversationId,
+	agentId: botId,
 });
 
-/** One turn per agent per thread at a time; the turn reads everything posted while it waited. */
-export const turnLane = (request: Pick<TurnRequest, "threadId" | "agentId">) =>
-	`turn:${request.threadId}:${request.agentId}`;
+export const turnOfStored = (stored: StoredTurn): TurnRequest => {
+	const { agentId, threadId, ...request } = stored;
+	return { ...request, conversationId: threadId, botId: agentId };
+};
+
+/** A turn is one bot answering one message, so that is what identifies its execution. */
+export const Turn = Workflow.make("turn", {
+	payload: StoredTurn,
+	idempotencyKey: (stored) => `${stored.threadId}/${stored.agentId}/${stored.triggerMessageId}`,
+});
+
+/** One turn per bot per conversation at a time; the turn reads everything posted while it waited. */
+export const turnLane = (request: Pick<TurnRequest, "conversationId" | "botId">) =>
+	`turn:${request.conversationId}:${request.botId}`;
 
 /**
  * Asks for the turn in its lane, joining the caller's transaction, and says
@@ -50,9 +75,9 @@ export const turnLane = (request: Pick<TurnRequest, "threadId" | "agentId">) =>
 export const admitTurn = (lanes: Lanes.Interface, request: TurnRequest) =>
 	lanes.admit({
 		key: turnLane(request),
-		subject: request.threadId,
+		subject: request.conversationId,
 		workflow: Turn,
-		payload: request,
+		payload: storedTurn(request),
 		whenBusy: "coalesce",
 	});
 
@@ -87,21 +112,21 @@ export class TurnSteps extends Context.Service<
 	TurnSteps,
 	{
 		/** Runs the turn from where it stands until it ends, waits for approvals, or fails and may run again. */
-		readonly segment: (request: TurnRequest) => Effect.Effect<SegmentOutcome>;
+		readonly segment: (turn: StoredTurn) => Effect.Effect<SegmentOutcome>;
 		/** Records the waiting turn as cancelled. Does nothing if it is no longer waiting. */
-		readonly cancelWaiting: (request: TurnRequest) => Effect.Effect<void>;
+		readonly cancelWaiting: (turn: StoredTurn) => Effect.Effect<void>;
 		/** Ends the turn as failed when its workflow fails. */
-		readonly abandon: (request: TurnRequest) => Effect.Effect<void>;
+		readonly abandon: (turn: StoredTurn) => Effect.Effect<void>;
 		/**
-		 * Announces that the turn's lane is free. A routine run cannot settle
+		 * Announces that the turn's lane is free. An automation run cannot settle
 		 * while any of its lanes is busy, so this may let it.
 		 */
-		readonly announceReleased: (request: TurnRequest) => Effect.Effect<void>;
+		readonly announceReleased: (turn: StoredTurn) => Effect.Effect<void>;
 	}
 >()("@sugabots/core/TurnSteps") {}
 
 /** Each run of a segment is a separate activity, numbered from 0 within the execution. */
-const turnActivities = Activities.fromService<TurnRequest>()(TurnSteps, {
+const turnActivities = Activities.fromService<StoredTurn>()(TurnSteps, {
 	segment: { input: Schema.Int, success: SegmentOutcome },
 	cancelWaiting: {},
 	abandon: {},
@@ -112,7 +137,7 @@ const turnActivities = Activities.fromService<TurnRequest>()(TurnSteps, {
 const RETRY_DELAY = Duration.seconds(2);
 
 export const turnWorkflow = Lanes.workflow(Turn, {
-	lane: turnLane,
+	lane: (stored) => turnLane(turnOfStored(stored)),
 	activities: turnActivities,
 	body: (request) =>
 		Effect.gen(function* () {

@@ -338,9 +338,9 @@ docker compose up -d
 
 Sugabots applies any database migrations when it starts.
 
-### Updating from a version with pods
+### Updating from a version where bots shared computers
 
-Each bot now has a computer of its own, so the computers that pods shared are
+Each bot now has a computer of its own, so the computers bots used to share are
 destroyed when you update. Destroy them with the new image before it starts,
 while the database still records where they are:
 
@@ -348,19 +348,20 @@ while the database still records where they are:
 docker compose pull
 docker compose stop sugabots
 docker compose run --rm -e SUGABOTS_SKIP_MIGRATIONS=true sugabots \
-  node packages/core/src/sandboxes/destroy-pod-sandboxes.ts
+  node packages/core/src/computers/destroy-pod-computers.ts
 docker compose up -d
 ```
 
 If it reports a computer it couldn't destroy, delete that machine in its
-provider's console, then remove its record so the update can go ahead:
+provider's console, then remove its record so the update can go ahead. The
+database hasn't been updated yet, so its table still has its old name:
 
 ```sh
 docker compose exec -T postgres psql -U sugabots -d sugabots \
   -c "DELETE FROM sandbox WHERE provider_sandbox_id = 'the-id-it-reported'"
 ```
 
-Until every pod computer is destroyed, the new version won't start: it stops
+Until every shared computer is destroyed, the new version won't start: it stops
 before changing the database and says so in `docker compose logs sugabots`.
 
 To try changes before they're released, use `ghcr.io/nitrictech/sugabots:edge`

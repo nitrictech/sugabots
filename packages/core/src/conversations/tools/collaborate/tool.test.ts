@@ -1,4 +1,4 @@
-import { type CollaborationPart, streamEvent, threadChannel } from "@sugabots/contracts";
+import { type CollaborationPart, conversationChannel, streamEvent } from "@sugabots/contracts";
 import { type Duration, Effect, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { effectRunner } from "../../../database/database.ts";
@@ -15,13 +15,13 @@ import { collaborateTool } from "./tool.ts";
  */
 
 const run = effectRunner(ManagedRuntime.make(noDatabase));
-const from = { threadId: "t-root", agentId: "a-host", turnId: "turn-1", messageId: "m-reply" };
+const from = { conversationId: "t-root", botId: "a-host", turnId: "turn-1", messageId: "m-reply" };
 const collaboration: CollaborationPart = {
 	type: "collaboration",
 	id: "d-1",
-	agentId: "a-helper",
-	agentName: "Helper",
-	threadId: "t-child",
+	botId: "a-helper",
+	botName: "Helper",
+	conversationId: "t-child",
 	brief: "Look",
 	status: "waiting",
 	answer: null,
@@ -29,7 +29,7 @@ const collaboration: CollaborationPart = {
 };
 const opened = { collaboration, collaborator: { id: "a-helper", name: "Helper" } };
 const answered = streamEvent("collaboration.updated", {
-	threadId: "t-root",
+	conversationId: "t-root",
 	messageId: "m-reply",
 	collaboration: { ...collaboration, status: "answered", answer: "All good." },
 });
@@ -91,7 +91,7 @@ describe("collaborate tool", () => {
 		const pending = call(tool, { to: "Helper", brief: "Look" });
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		answer = "All good.";
-		await bus.publish(threadChannel("t-root"), answered);
+		await bus.publish(conversationChannel("t-root"), answered);
 
 		expect(await pending).toEqual({ status: "answered", answer: "All good." });
 		expect(collaborations.open).toHaveBeenCalledWith({
@@ -111,15 +111,19 @@ describe("collaborate tool", () => {
 		const pending = call(tool, { to: "Helper", brief: "Look" });
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		await bus.publish(
-			threadChannel("t-child"),
-			streamEvent("turn.completed", { threadId: "t-child", turnId: "turn-2", status: "cancelled" }),
+			conversationChannel("t-child"),
+			streamEvent("turn.completed", {
+				conversationId: "t-child",
+				turnId: "turn-2",
+				status: "cancelled",
+			}),
 		);
-		await bus.publish(threadChannel("t-root"), {
+		await bus.publish(conversationChannel("t-root"), {
 			...answered,
 			collaboration: { ...answered.collaboration, id: "d-2" },
 		});
 
-		expect(await pending).toMatchObject({ status: "pending", threadId: "t-child" });
+		expect(await pending).toMatchObject({ status: "pending", conversationId: "t-child" });
 		expect(Date.now() - started).toBeGreaterThanOrEqual(190);
 	});
 
@@ -129,20 +133,20 @@ describe("collaborate tool", () => {
 
 		const result = await call(tool, { to: "Helper", brief: "Look" });
 
-		expect(result).toMatchObject({ status: "pending", threadId: "t-child" });
+		expect(result).toMatchObject({ status: "pending", conversationId: "t-child" });
 		expect(collaborations.collectAnswer).toHaveBeenCalledWith("d-1");
 	});
 
 	it("hands a refusal back to the model rather than failing the turn", async () => {
 		const collaborations = fakeCollaborations(() => undefined);
 		vi.mocked(collaborations.open).mockReturnValueOnce(
-			Effect.fail(new CollaborationRefused({ reason: "An agent cannot collaborate with itself" })),
+			Effect.fail(new CollaborationRefused({ reason: "A bot cannot collaborate with itself" })),
 		);
 		const { tool, noted } = toolWith(collaborations);
 
 		expect(await call(tool, { to: "Host", brief: "Look" })).toEqual({
 			status: "refused",
-			reason: "An agent cannot collaborate with itself",
+			reason: "A bot cannot collaborate with itself",
 		});
 		expect(noted).toEqual([]);
 	});
@@ -167,7 +171,7 @@ describe("collaborate tool", () => {
 				await vi.waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
 				controller.abort();
 			}
-			expect(await pending).toMatchObject({ status: "pending", threadId: "t-child" });
+			expect(await pending).toMatchObject({ status: "pending", conversationId: "t-child" });
 			expect(collaborations.collectAnswer).toHaveBeenCalledWith("d-1");
 			if (alreadyAborted) {
 				expect(subscribe).not.toHaveBeenCalled();

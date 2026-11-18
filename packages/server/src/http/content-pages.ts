@@ -4,15 +4,15 @@ import {
 	PAGE_HEIGHT_REPORT,
 	PAGE_THEME_FROM_FRAGMENT,
 	withLeadingTags,
-} from "@sugabots/contracts/artifact-pages";
-import { ArtifactPages } from "@sugabots/core/artifacts/pages";
+} from "@sugabots/contracts/file-pages";
+import { FilePages } from "@sugabots/core/files/pages";
 import { Installation } from "@sugabots/core/installation/installation";
 import { Effect, Layer, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 /**
  * Bot-made HTML pages, served from the installation's content origin when
- * one is set, at addresses `ArtifactPages` seals. Only the content origin
+ * one is set, at addresses `FilePages` seals. Only the content origin
  * answers here, and it answers nothing else (see `onlyPagesOnContentHost`).
  *
  * The page's policy comes as a header, which the page cannot remove, and
@@ -25,7 +25,7 @@ export const contentPageRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const router = yield* HttpRouter.HttpRouter;
 		const installation = yield* Installation.Service;
-		const pages = yield* ArtifactPages.Service;
+		const pages = yield* FilePages.Service;
 		const { contentOrigin } = installation;
 		if (!contentOrigin) return;
 		const sentToContentOrigin = contentOriginMatcher(contentOrigin);
@@ -34,7 +34,7 @@ export const contentPageRoutes = Layer.effectDiscard(
 			"allow-csp-from": new URL(installation.webAppUrl).origin,
 			"x-content-type-options": "nosniff",
 			"referrer-policy": "no-referrer",
-			// The address stops working within minutes, and the page is the pod's.
+			// The address stops working within minutes, and the page is for whoever may see its file.
 			"cache-control": "private, no-store",
 		};
 
@@ -42,7 +42,7 @@ export const contentPageRoutes = Layer.effectDiscard(
 		// parameter over 100 characters, and a sealed token is longer.
 		yield* router.add(
 			"GET",
-			`${ArtifactPages.PAGE_PATH}/*`,
+			`${FilePages.PAGE_PATH}/*`,
 			Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest;
 				if (!sentToContentOrigin(request)) return HttpServerResponse.empty({ status: 404 });
@@ -54,7 +54,7 @@ export const contentPageRoutes = Layer.effectDiscard(
 							`${withLeadingTags(html, PAGE_THEME_FROM_FRAGMENT)}${PAGE_HEIGHT_REPORT}`,
 						).pipe(HttpServerResponse.setHeaders(headers)),
 					),
-					Effect.catchTag("ArtifactPageUnavailable", () =>
+					Effect.catchTag("FilePageUnavailable", () =>
 						Effect.succeed(
 							HttpServerResponse.text(
 								"This page's address has expired. Open it again in Sugabots.",
@@ -79,7 +79,7 @@ const pageTokenSchema = Schema.String.check(
 /** The token in a page's path, `/pages/<token>`, without any query. */
 function tokenIn(url: string): string | undefined {
 	const path = url.split("?")[0] ?? "";
-	const token = path.slice(`${ArtifactPages.PAGE_PATH}/`.length);
+	const token = path.slice(`${FilePages.PAGE_PATH}/`.length);
 	return Option.getOrUndefined(Schema.decodeUnknownOption(pageTokenSchema)(token));
 }
 
@@ -100,8 +100,7 @@ export function onlyPagesOnContentHost(contentOrigin: string | undefined) {
 		Effect.gen(function* () {
 			if (!sentToContentOrigin) return yield* effect;
 			const request = yield* HttpServerRequest.HttpServerRequest;
-			const isPage =
-				request.method === "GET" && request.url.startsWith(`${ArtifactPages.PAGE_PATH}/`);
+			const isPage = request.method === "GET" && request.url.startsWith(`${FilePages.PAGE_PATH}/`);
 			if (sentToContentOrigin(request) && !isPage) {
 				return HttpServerResponse.empty({ status: 404 });
 			}

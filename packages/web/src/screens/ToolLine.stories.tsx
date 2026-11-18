@@ -148,7 +148,7 @@ export const AFailedCall = meta.story({
 	},
 });
 
-/** Browser calls read as one app, the agent's browser, each step named by what it does. */
+/** Browser calls read as one app, the bot's browser, each step named by what it does. */
 export const Browser = meta.story({
 	args: {
 		parts: [
@@ -178,11 +178,11 @@ export const Narrated = meta.story({
 		fileNames: new Map([[SCREENSHOT_ID, "sugabots-tools.png"]]),
 		parts: [
 			said("Let me look at the screenshot you attached:"),
-			call("read_thread_file", {
+			call("read_conversation_file", {
 				input: { file: SCREENSHOT_ID },
 				output: { text: "The image sugabots-tools.png." },
 			}),
-			said("Checking which packages the sandbox has:"),
+			said("Checking which packages the computer has:"),
 			call("run_command", {
 				input: { command: "pip list 2>/dev/null | grep -i cadquery\nls -la" },
 				output: { exitCode: 1, stdout: "", stderr: "" },
@@ -193,8 +193,8 @@ export const Narrated = meta.story({
 				finishedAt: "2026-09-25T06:04:09.000Z",
 			}),
 			said("Now I'll log it in the feedback doc."),
-			call("artifact_edit", {
-				input: { artifactId: "a1", oldText: "x", newText: "y" },
+			call("file_edit", {
+				input: { fileId: "a1", oldText: "x", newText: "y" },
 				output: { status: "written", title: "Sugabots Feedback: Living Document", version: 4 },
 			}),
 			said("Logged it as **F-008**."),
@@ -255,7 +255,9 @@ export const OutputCut = meta.story({
 /** A call whose input names nothing it can be shown by says what it did in general. */
 export const WithoutASubject = meta.story({
 	args: {
-		parts: [call("read_thread_file", { input: { file: "result-file" }, output: { lines: "" } })],
+		parts: [
+			call("read_conversation_file", { input: { file: "result-file" }, output: { lines: "" } }),
+		],
 	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: /Used/ }));

@@ -1,10 +1,10 @@
 import {
-	BotFace,
 	type BotLook,
 	defaultLiveliness,
 	LivelinessContext,
 	LivelyBotFace,
 	type LivelyFace,
+	StillBotFace,
 } from "@sugabots/avatars";
 import { cn } from "cn";
 import { motion } from "motion/react";
@@ -85,7 +85,7 @@ function PeekingBotFace({ look, place }: PeekingBot) {
 			 * An unseen copy of the head that takes the pointer where it's painted. It
 			 * stays put as the head hops, so the head doesn't slip out from under the pointer.
 			 */}
-			<BotFace
+			<StillBotFace
 				{...look}
 				className="absolute inset-0 size-full opacity-0 [&_*]:pointer-events-auto"
 			/>

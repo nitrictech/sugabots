@@ -1,19 +1,20 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { Artifacts } from "@sugabots/core/artifacts/artifacts";
-import { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { BlobDeletions } from "@sugabots/core/blob-store/deletions";
+import { BotComputerSetup } from "@sugabots/core/computers/bot-computer-setup";
+import { BotComputers } from "@sugabots/core/computers/bot-computers";
+import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
+import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
+import { Automations } from "@sugabots/core/conversations/automations/automations";
+import { AutomationRuns } from "@sugabots/core/conversations/automations/runs";
 import { Conversations } from "@sugabots/core/conversations/conversations";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
-import { Routines } from "@sugabots/core/conversations/routines/routines";
-import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
-import { UnsentUploads } from "@sugabots/core/conversations/thread-files/unsent-uploads";
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
+import { ComputerTools } from "@sugabots/core/conversations/tools/computer";
 import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
-import { SandboxTools } from "@sugabots/core/conversations/tools/sandbox";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
 import { Credentials } from "@sugabots/core/credentials/credentials";
@@ -23,6 +24,9 @@ import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventPruning } from "@sugabots/core/database/events/prune";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
+import { Files } from "@sugabots/core/files/files";
+import { FilePages } from "@sugabots/core/files/pages";
+import { UnsentUploads } from "@sugabots/core/files/unsent-uploads";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { Notifications } from "@sugabots/core/notifications/notifications";
@@ -35,14 +39,10 @@ import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-s
 import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
-import { AgentSandboxSetup } from "@sugabots/core/sandboxes/agent-sandbox-setup";
-import { AgentSandboxes } from "@sugabots/core/sandboxes/agent-sandboxes";
-import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
-import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
-import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
+import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
+import { ChannelAdministration } from "@sugabots/core/workspaces/channels/channel-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
@@ -84,31 +84,31 @@ const OutsideSystems = Layer.mergeAll(
 	Email.layer,
 	Models.layer,
 	BuiltInTools.layer,
-	SandboxTools.layer,
+	ComputerTools.layer,
 	DesktopViewer.layer,
 	ConnectionTools.layer,
 );
 
 /**
- * Accounts, members, pods, agents, their artifacts and the providers they
+ * Accounts, members, channels, bots, their files and the providers they
  * use, trying a model, and notifying people.
  */
 const WorkspacesAndProviders = Layer.mergeAll(
 	Membership.layer,
 	Notifications.layer,
 	Onboarding.layer,
-	PodAdministration.layer,
-	AgentAdministration.layer,
+	ChannelAdministration.layer,
+	BotAdministration.layer,
 	ModelProviderSetup.layer,
 	SearchProviderSetup.layer,
-	SandboxProviderSetup.layer,
-	SandboxNetwork.layer,
-	AgentSandboxSetup.layer,
+	ComputerProviderSetup.layer,
+	ComputerNetwork.layer,
+	BotComputerSetup.layer,
 	GitHubApps.layer,
 	GitHubConnections.layer,
 	ConnectionSetup.layer,
-	Artifacts.layer,
-	ArtifactPages.layer,
+	Files.layer,
+	FilePages.layer,
 	ModelTrials.layer,
 	Usage.layer,
 ).pipe(Layer.provideMerge(Accounts.layer));
@@ -118,23 +118,23 @@ const WorkspacesAndProviders = Layer.mergeAll(
  * events go through the outbox.
  */
 const ConversationServices = Conversations.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(Turns.signalsLayer, RoutineRuns.layer)),
+	Layer.provideMerge(Layer.mergeAll(Turns.signalsLayer, AutomationRuns.layer)),
 );
 
 /**
- * What runs without a request: the workflows, the routine scheduler, the
+ * What runs without a request: the workflows, the automation scheduler, the
  * nightly event prune, deleting queued blobs, seeding the preset providers
- * into every workspace, pausing idle sandboxes, and measuring running ones'
+ * into every workspace, pausing idle computers, and measuring running ones'
  * disks.
  */
 const Background = Layer.mergeAll(
 	ConversationWorkflows.layer,
-	Routines.schedulerLayer,
+	Automations.schedulerLayer,
 	EventPruning.layer,
 	BlobDeletions.layer,
 	UnsentUploads.layer,
 	PresetSeeding.layer,
-	AgentSandboxes.sweepLayer,
+	BotComputers.sweepLayer,
 );
 
 /** The API and the web app on `PORT`, with better-auth answering who is calling. */
@@ -155,7 +155,7 @@ const Main = Layer.mergeAll(Http, Background).pipe(
 	Layer.provide(ConversationServices),
 	Layer.provide(WorkspacesAndProviders),
 	Layer.provide(OutsideSystems),
-	// What pods' sandboxes are signed in to, which sandboxes leave to the edge.
+	// What bots' computers are signed in to, which computers leave to the edge.
 	Layer.provide(GitHubSignIn.layer),
 	Layer.provide(Infrastructure),
 	Layer.provide(observabilityLayer),

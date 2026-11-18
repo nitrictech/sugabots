@@ -5,7 +5,7 @@ import {
 	type PageTheme,
 	pageThemeCss,
 	withLeadingTags,
-} from "@sugabots/contracts/artifact-pages";
+} from "@sugabots/contracts/file-pages";
 import { cn } from "cn";
 import {
 	type CSSProperties,
@@ -19,7 +19,7 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
-import { type PageAt, usePageAddress } from "@/lib/artifacts.ts";
+import { type PageAt, usePageAddress } from "@/lib/files.ts";
 import { FIT_HEIGHT_PX, FRAME_TOKENS } from "@/lib/page-frame.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";

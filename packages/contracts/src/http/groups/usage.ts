@@ -5,8 +5,8 @@ import { refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /**
- * What the workspace's models cost. Admin only: it shows every pod's and every
- * bot's spend, personal pods included.
+ * What the workspace's models cost. Admin only: it shows every bot's spend,
+ * private bots and Personal Assistants included.
  */
 export class UsageApi extends HttpApiGroup.make("usage")
 	.add(

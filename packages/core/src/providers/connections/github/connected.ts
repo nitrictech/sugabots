@@ -1,7 +1,7 @@
 import { type DomainError, userText } from "@sugabots/errors";
 import { Effect, ErrorReporter, Schema } from "effect";
+import type { Computers } from "../../../computers/computers.ts";
 import type { ConnectionRow, GitHubConnectionSettings } from "../../../database/schema.ts";
-import type { Sandboxes } from "../../../sandboxes/sandboxes.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 import * as GitHub from "./github.ts";
 import * as GitHubReads from "./github-reads.ts";
@@ -77,17 +77,17 @@ export class Connected {
 
 	/**
 	 * What the bot's computer reads the repositories with: git's sign-in to the
-	 * account's paths, added outside the sandbox by its provider. Nothing for
+	 * account's paths, added outside the computer by its provider. Nothing for
 	 * GitHub's API, whose paths don't all name the account: bots read through
 	 * the connection's tools instead.
 	 */
-	sandboxSignIn() {
+	computerSignIn() {
 		return Effect.map(
 			GitHub.accessToken(this.http, this.app, {
 				repositoryIds: [...this.ids.values()],
 				permissions: { contents: "read", metadata: "read" },
 			}),
-			(token): SandboxSignIn => ({
+			(token): ComputerSignIn => ({
 				credentials: [
 					{
 						host: new URL(GitHub.WEB_URL).host,
@@ -361,12 +361,15 @@ export class Connected {
 		const { http } = this;
 		return Effect.flatMap(this.tokenFor(request.repository, { pull_requests: "write" }), (token) =>
 			Effect.gen(function* () {
-				const { threadId } = yield* GitHub.findComment(http, token, {
+				const { conversationId } = yield* GitHub.findComment(http, token, {
 					repository: request.repository,
 					kind: "code_comment",
 					commentId: request.commentId,
 				});
-				return yield* GitHub.replyToCodeComment(http, token, { ...request, commentId: threadId });
+				return yield* GitHub.replyToCodeComment(http, token, {
+					...request,
+					commentId: conversationId,
+				});
 			}),
 		);
 	}
@@ -387,8 +390,8 @@ export class Connected {
 }
 
 /** What a bot's computer is signed in to GitHub with, and when it must be replaced. */
-export interface SandboxSignIn {
-	readonly credentials: readonly Sandboxes.Credential[];
+export interface ComputerSignIn {
+	readonly credentials: readonly Computers.Credential[];
 	readonly expiresAt: GitHub.AccessToken["expiresAt"];
 }
 

@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { type CastName, cast } from "@/docs/cast";
 import { Say } from "@/docs/components/chat-demo";
 
-/** How the system bot that compacts a bot's history looks, as packages/core/src/workspaces/agents/system-agents.ts defines it. */
+/** How the system bot that compacts a bot's history looks, as packages/core/src/workspaces/bots/system-bots.ts defines it. */
 const compactorLook: BotLook = { color: "purple", face: "square" };
 
 /** Where a message ends up once the chat has been compacted. */

@@ -1,15 +1,15 @@
 import { Schema } from "effect";
-import { notificationContentSchema, presenceSchema } from "./notifications.ts";
 import {
 	collaborationPartSchema,
+	conversationReadSchema,
 	filePartSchema,
 	messageReactionsSchema,
 	messageSchema,
 	messageStatusSchema,
 	personParticipantSchema,
-	threadReadSchema,
 	toolCallPartSchema,
-} from "./threads.ts";
+} from "./conversations.ts";
+import { notificationContentSchema, presenceSchema } from "./notifications.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
@@ -25,7 +25,7 @@ import { uuidSchema } from "./uuid.ts";
 /** Bumped only for a change no existing client could read. */
 export const EVENT_VERSION = 1;
 
-const threadId = uuidSchema;
+const conversationId = uuidSchema;
 const messageId = Schema.String.check(Schema.isMinLength(1));
 /** Events that carry nothing agreed yet. Open, so a payload can be added without a version bump. */
 const nothing = Schema.StructWithRest(Schema.Struct({}), [
@@ -38,22 +38,22 @@ const nothing = Schema.StructWithRest(Schema.Struct({}), [
  * both derived from these.
  */
 export const eventPayloadSchemas = {
-	"message.created": Schema.Struct({ threadId, message: messageSchema }),
+	"message.created": Schema.Struct({ conversationId, message: messageSchema }),
 	/** `offset` is how much of the message came before this text, so a client can tell a duplicate from a gap. */
 	"message.delta": Schema.Struct({
-		threadId,
+		conversationId,
 		messageId,
 		offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 		text: Schema.String,
 	}),
 	"message.completed": Schema.Struct({
-		threadId,
+		conversationId,
 		messageId,
 		content: Schema.String,
 		status: messageStatusSchema,
 	}),
 	"message.failed": Schema.Struct({
-		threadId,
+		conversationId,
 		messageId,
 		turnId: uuidSchema,
 		willRetry: Schema.Boolean,
@@ -61,76 +61,75 @@ export const eventPayloadSchemas = {
 	}),
 	/** Somebody reacted to the message or took a reaction back; `reactions` is all it has now. */
 	"message.reactions_changed": Schema.Struct({
-		threadId,
+		conversationId,
 		messageId,
 		reactions: messageReactionsSchema,
 	}),
 	/**
-	 * An agent attached a file to its reply; `files` is all the reply carries
+	 * A bot attached a file to its reply; `files` is all the reply carries
 	 * now. A reply that starts again comes with `turn.started`, without them.
 	 */
 	"message.files_changed": Schema.Struct({
-		threadId,
+		conversationId,
 		messageId,
 		files: Schema.Array(filePartSchema),
 	}),
-	/** An agent's reply called a built-in tool; the part is `running`. */
-	"tool_call.started": Schema.Struct({ threadId, messageId, toolCall: toolCallPartSchema }),
+	/** A bot's reply called a built-in tool; the part is `running`. */
+	"tool_call.started": Schema.Struct({ conversationId, messageId, toolCall: toolCallPartSchema }),
 	/** The tool returned or failed; the part carries its output or error. */
-	"tool_call.completed": Schema.Struct({ threadId, messageId, toolCall: toolCallPartSchema }),
-	"tool_call.updated": Schema.Struct({ threadId, messageId, toolCall: toolCallPartSchema }),
+	"tool_call.completed": Schema.Struct({ conversationId, messageId, toolCall: toolCallPartSchema }),
+	"tool_call.updated": Schema.Struct({ conversationId, messageId, toolCall: toolCallPartSchema }),
 	"turn.started": Schema.Struct({
-		threadId,
+		conversationId,
 		turnId: uuidSchema,
-		agentId: uuidSchema,
+		botId: uuidSchema,
 	}),
 	/** Somebody asked a running turn to stop; `turn.completed` follows once it has. */
-	"turn.cancel_requested": Schema.Struct({ threadId, turnId: uuidSchema }),
+	"turn.cancel_requested": Schema.Struct({ conversationId, turnId: uuidSchema }),
 	"turn.completed": Schema.Struct({
-		threadId,
+		conversationId,
 		turnId: uuidSchema,
 		status: Schema.Literals(["done", "cancelled"]),
 	}),
 	/**
-	 * What people watching the thread should know that no message in it
-	 * records, such as why an agent they asked did not reply. `notice` is
-	 * written for people; it is not kept in the thread's history.
+	 * What people watching the conversation should know that no message in it
+	 * records, such as why a bot they asked did not reply. `notice` is
+	 * written for people; it is not kept in the conversation's history.
 	 */
-	"thread.notice": Schema.Struct({ threadId, notice: Schema.String }),
+	"conversation.notice": Schema.Struct({ conversationId, notice: Schema.String }),
 	/**
-	 * `person` is writing in the thread's composer. Sent again every few
+	 * `person` is writing in the conversation's composer. Sent again every few
 	 * seconds while they keep typing, and never to say they stopped: a
 	 * watcher stops showing them when these stop coming, or when their
 	 * message arrives.
 	 */
-	"person.typing": Schema.Struct({ threadId, person: personParticipantSchema }),
-	/** Someone read further into the thread. A read never moves anyone back. */
-	"thread.read": Schema.Struct({ threadId, ...threadReadSchema.fields }),
-	"thread.created": Schema.Struct({ threadId }),
+	"person.typing": Schema.Struct({ conversationId, person: personParticipantSchema }),
+	/** Someone read further into the conversation. A read never moves anyone back. */
+	"conversation.read": Schema.Struct({ conversationId, ...conversationReadSchema.fields }),
+	"conversation.created": Schema.Struct({ conversationId }),
 	/**
-	 * Something about the thread no more specific event describes. On the
-	 * thread's channel it means refetch the thread; on its workspace's channel,
-	 * that what lists show of the thread may be out of date.
+	 * Something about the conversation no more specific event describes. On
+	 * the conversation's stream channel it means refetch the conversation; on
+	 * its workspace's, that what lists show of it may be out of date.
 	 */
-	"thread.changed": Schema.Struct({ threadId }),
+	"conversation.changed": Schema.Struct({ conversationId }),
 	/**
-	 * A thread opened beside the conversation `conversationId` changed: a
-	 * routine run or collaboration in it, or, in a pod's chat, a thread
-	 * somebody started from it.
+	 * A conversation opened beside `rootConversationId` changed: an automation
+	 * run or collaboration in it.
 	 */
-	"conversation.thread_changed": Schema.Struct({ conversationId: uuidSchema, threadId }),
+	"conversation.item_changed": Schema.Struct({ rootConversationId: uuidSchema, conversationId }),
 	/** Something to tell the person about, which their open tabs show. */
 	notification: notificationContentSchema,
 	/** One of the person's tabs says what it is looking at, so their other tabs hold back notifications about it. */
 	presence: presenceSchema,
 	/** A collaboration in `messageId` changed: opened, gave up waiting, answered, failed. */
 	"collaboration.updated": Schema.Struct({
-		threadId,
+		conversationId,
 		messageId,
 		collaboration: collaborationPartSchema,
 	}),
-	"agent.updated": nothing,
-	"pod.updated": nothing,
+	"bot.updated": nothing,
+	"channel.updated": nothing,
 	/**
 	 * The one control event. Sent when the server cannot give the client a
 	 * continuous history: the resume point was pruned, the replay is too long
@@ -162,14 +161,14 @@ export const durableEventTypeSchema = Schema.Literals([
 	"turn.started",
 	"turn.cancel_requested",
 	"turn.completed",
-	"thread.notice",
-	"thread.read",
-	"thread.created",
-	"thread.changed",
-	"conversation.thread_changed",
+	"conversation.notice",
+	"conversation.read",
+	"conversation.created",
+	"conversation.changed",
+	"conversation.item_changed",
 	"collaboration.updated",
-	"agent.updated",
-	"pod.updated",
+	"bot.updated",
+	"channel.updated",
 ] satisfies KnownEventType[]);
 
 export type DurableEventType = typeof durableEventTypeSchema.Type;
@@ -270,8 +269,8 @@ function withEnvelope<T extends KnownEventType, Fields extends Schema.Struct.Fie
 
 const P = eventPayloadSchemas;
 
-/** Everything a thread channel can carry. */
-export const threadUpdateEventSchema = Schema.Union([
+/** Everything a conversation's stream channel can carry. */
+export const conversationUpdateEventSchema = Schema.Union([
 	withEnvelope("message.created", P["message.created"]),
 	withEnvelope("message.delta", P["message.delta"]),
 	withEnvelope("message.completed", P["message.completed"]),
@@ -284,21 +283,21 @@ export const threadUpdateEventSchema = Schema.Union([
 	withEnvelope("turn.started", P["turn.started"]),
 	withEnvelope("turn.cancel_requested", P["turn.cancel_requested"]),
 	withEnvelope("turn.completed", P["turn.completed"]),
-	withEnvelope("thread.changed", P["thread.changed"]),
-	withEnvelope("thread.notice", P["thread.notice"]),
-	withEnvelope("thread.read", P["thread.read"]),
+	withEnvelope("conversation.changed", P["conversation.changed"]),
+	withEnvelope("conversation.notice", P["conversation.notice"]),
+	withEnvelope("conversation.read", P["conversation.read"]),
 	withEnvelope("person.typing", P["person.typing"]),
-	withEnvelope("conversation.thread_changed", P["conversation.thread_changed"]),
+	withEnvelope("conversation.item_changed", P["conversation.item_changed"]),
 	withEnvelope("collaboration.updated", P["collaboration.updated"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
-export type ThreadUpdateEvent = typeof threadUpdateEventSchema.Type;
+export type ConversationUpdateEvent = typeof conversationUpdateEventSchema.Type;
 
 /** Everything a workspace channel can carry. */
 export const workspaceUpdateEventSchema = Schema.Union([
-	withEnvelope("thread.changed", P["thread.changed"]),
-	withEnvelope("conversation.thread_changed", P["conversation.thread_changed"]),
+	withEnvelope("conversation.changed", P["conversation.changed"]),
+	withEnvelope("conversation.item_changed", P["conversation.item_changed"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
@@ -315,14 +314,16 @@ export type PersonUpdateEvent = typeof personUpdateEventSchema.Type;
 
 /**
  * A stream carries exactly one channel, and there are three kinds: a
- * workspace, a thread, and a person, which only that person hears. A thread's
- * system agents work in child threads but publish on the thread they act on,
- * so a client watching a thread holds one connection.
+ * workspace, a conversation, and a person, which only that person hears. A
+ * conversation's system bots work in conversations of their own but publish on
+ * the one they act on, so a client watching a conversation holds one
+ * connection.
  */
-export type Channel = `workspace:${string}` | `thread:${string}` | `person:${string}`;
+export type StreamChannel = `workspace:${string}` | `conversation:${string}` | `person:${string}`;
 
-export const workspaceChannel = (workspaceId: string): Channel => `workspace:${workspaceId}`;
+export const workspaceChannel = (workspaceId: string): StreamChannel => `workspace:${workspaceId}`;
 
-export const threadChannel = (threadId: string): Channel => `thread:${threadId}`;
+export const conversationChannel = (conversationId: string): StreamChannel =>
+	`conversation:${conversationId}`;
 
-export const personChannel = (userId: string): Channel => `person:${userId}`;
+export const personChannel = (userId: string): StreamChannel => `person:${userId}`;

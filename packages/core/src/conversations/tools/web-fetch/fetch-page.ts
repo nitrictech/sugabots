@@ -3,7 +3,7 @@ import { type EgressHttpClient, EgressRefused } from "../../../providers/network
 import { readablePage } from "./readable.ts";
 
 /**
- * Fetching one public web page for an agent to read.
+ * Fetching one public web page for a bot to read.
  *
  * The page is fetched through the installation's egress policy, so a private
  * or reserved address is refused before a connection is made. Redirects are
@@ -17,7 +17,7 @@ import { readablePage } from "./readable.ts";
  * refuses plain HTTP off private networks, and a public page that is only on
  * HTTP is rare enough that an upgrade serves better than a refusal.
  *
- * Every way a fetch can go wrong is an answer, not an error: the agent is
+ * Every way a fetch can go wrong is an answer, not an error: the bot is
  * told why and can try another address or tell the person.
  */
 

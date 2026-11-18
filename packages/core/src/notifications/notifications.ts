@@ -13,8 +13,8 @@ import {
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
-	agentStandingFor,
-	podStandingFor,
+	botStandingFor,
+	channelStandingFor,
 	type ResourceHidden,
 	requireReach,
 } from "../authorization/access.ts";
@@ -32,14 +32,14 @@ import type { DomainEvents } from "../database/events/domain-events.ts";
 import { notificationOverride, notificationSettings } from "../database/schema.ts";
 import {
 	type Addressed,
+	DEFAULT_AUTOMATION_RUNS,
 	DEFAULT_LEVEL,
-	DEFAULT_ROUTINE_RUNS,
 	DEFAULT_TURN_FAILURES,
 	forApprovals,
+	forAutomationRun,
 	forFailedReply,
 	forMessage,
 	forReply,
-	forRoutineRun,
 } from "./recipients.ts";
 
 /**
@@ -55,14 +55,14 @@ export interface Interface {
 		preferences: NotificationPreferences,
 	) => Effect.Effect<NotificationSettings, never, CurrentActor.Service>;
 	/**
-	 * Sets the actor's level for a pod or bot they reach, or with null goes
+	 * Sets the actor's level for a channel or bot they reach, or with null goes
 	 * back to the one above it, which also ends its mute.
 	 */
 	readonly setLevel: (
 		place: Place,
 		level: NotificationLevel | null,
 	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
-	/** Mutes a pod or bot the actor reaches until `until`, or with null, or a time passed, ends its mute. */
+	/** Mutes a channel or bot the actor reaches until `until`, or with null, or a time passed, ends its mute. */
 	readonly mute: (
 		place: Place,
 		until: Date | null,
@@ -120,14 +120,17 @@ export const make = Effect.gen(function* () {
 			);
 			const now = yield* DateTime.nowAsDate;
 			const levels = {
-				pods: {} as Record<string, NotificationLevel>,
+				channels: {} as Record<string, NotificationLevel>,
 				bots: {} as Record<string, NotificationLevel>,
 			};
-			const mutedUntil = { pods: {} as Record<string, string>, bots: {} as Record<string, string> };
+			const mutedUntil = {
+				channels: {} as Record<string, string>,
+				bots: {} as Record<string, string>,
+			};
 			for (const override of overrides) {
-				const [kind, id] = override.podId
-					? (["pods", override.podId] as const)
-					: (["bots", override.agentId] as const);
+				const [kind, id] = override.channelId
+					? (["channels", override.channelId] as const)
+					: (["bots", override.botId] as const);
 				if (!id) continue;
 				if (override.level) levels[kind][id] = override.level;
 				if (override.mutedUntil && override.mutedUntil > now) {
@@ -139,7 +142,7 @@ export const make = Effect.gen(function* () {
 				pausedUntil: own?.pausedUntil?.toISOString() ?? null,
 				quietHours: own?.quietHours ?? null,
 				turnFailures: own?.turnFailures ?? DEFAULT_TURN_FAILURES,
-				routineRuns: own?.routineRuns ?? DEFAULT_ROUTINE_RUNS,
+				automationRuns: own?.automationRuns ?? DEFAULT_AUTOMATION_RUNS,
 				...levels,
 				mutedUntil,
 			} satisfies NotificationSettings;
@@ -163,7 +166,7 @@ export const make = Effect.gen(function* () {
 							: null,
 						quietHours: preferences.quietHours,
 						turnFailures: preferences.turnFailures,
-						routineRuns: preferences.routineRuns,
+						automationRuns: preferences.automationRuns,
 					};
 					yield* query((db) =>
 						db
@@ -268,12 +271,7 @@ export const layer = Layer.effect(Service, make);
 type NotifyingEvent = Extract<
 	ConversationEvent,
 	{
-		_tag:
-			| "MessagePosted"
-			| "TurnCompleted"
-			| "TurnSuspended"
-			| "TurnFailed"
-			| "RoutineExecutionSettled";
+		_tag: "MessagePosted" | "TurnCompleted" | "TurnSuspended" | "TurnFailed" | "RunSettled";
 	}
 >;
 
@@ -282,7 +280,7 @@ function isNotifying(event: ConversationEvent): event is NotifyingEvent {
 		case "MessagePosted":
 		case "TurnCompleted":
 		case "TurnSuspended":
-		case "RoutineExecutionSettled":
+		case "RunSettled":
 			return true;
 		// A turn that will run again has not failed yet, as far as anybody waiting on it knows.
 		case "TurnFailed":
@@ -303,27 +301,27 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 			return yield* forMessage(
 				db,
 				{
-					threadId: event.threadId,
+					conversationId: event.conversationId,
 					messageId: event.message.id,
 					author:
 						author.kind === "person"
 							? { kind: "person", userId: author.id }
-							: author.kind === "agent"
-								? { kind: "bot", agentId: author.id }
-								: { kind: "routine" },
+							: author.kind === "bot"
+								? { kind: "bot", botId: author.id }
+								: { kind: "automation" },
 					authorName: messageAuthorName(author),
 					content: event.message.content,
 					fileNames: event.message.parts.flatMap((part) =>
 						part.type === "file" ? [part.name] : [],
 					),
-					artifactTitles: event.message.parts.flatMap((part) =>
-						part.type === "artifact" ? [part.title] : [],
+					fileTitles: event.message.parts.flatMap((part) =>
+						part.type === "written_file" ? [part.title] : [],
 					),
 					repliesTo:
 						event.message.replyTo?.author.kind === "person"
 							? event.message.replyTo.author.id
 							: null,
-					resultOf: event.message.routineResultOf ?? null,
+					resultOf: event.message.automationResultOf ?? null,
 				},
 				now,
 			);
@@ -334,12 +332,12 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 			return yield* forApprovals(db, event, now);
 		case "TurnFailed":
 			return yield* forFailedReply(db, event, now);
-		case "RoutineExecutionSettled":
-			return yield* forRoutineRun(db, event, now);
+		case "RunSettled":
+			return yield* forAutomationRun(db, event, now);
 	}
 });
 
-/** A pod, or one of its bots, where a person chooses in place of the level above. */
+/** A channel, or one of its bots, where a person chooses in place of the level above. */
 export interface Place {
 	kind: NotificationPlaceKind;
 	id: string;
@@ -347,19 +345,20 @@ export interface Place {
 
 /** The person's override row for `place`: how to find it, make it, and update it in place. */
 function overrideOf(userId: string, place: Place) {
-	const column = place.kind === "pod" ? notificationOverride.podId : notificationOverride.agentId;
+	const column =
+		place.kind === "channel" ? notificationOverride.channelId : notificationOverride.botId;
 	return {
 		where: and(eq(notificationOverride.userId, userId), eq(column, place.id)),
-		row: place.kind === "pod" ? { userId, podId: place.id } : { userId, agentId: place.id },
+		row: place.kind === "channel" ? { userId, channelId: place.id } : { userId, botId: place.id },
 		conflict: { target: [notificationOverride.userId, column], targetWhere: isNotNull(column) },
 	};
 }
 
 const requireReachOf = (userId: string, place: Place) =>
-	place.kind === "pod"
-		? query((db) => podStandingFor(db, place.id, userId)).pipe(
-				Effect.flatMap((standing) => requireReach(standing, "pod")),
+	place.kind === "channel"
+		? query((db) => channelStandingFor(db, place.id, userId)).pipe(
+				Effect.flatMap((standing) => requireReach(standing, "channel")),
 			)
-		: query((db) => agentStandingFor(db, place.id, userId)).pipe(
-				Effect.flatMap((standing) => requireReach(standing, "agent")),
+		: query((db) => botStandingFor(db, place.id, userId)).pipe(
+				Effect.flatMap((standing) => requireReach(standing, "bot")),
 			);

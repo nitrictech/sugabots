@@ -1,7 +1,7 @@
-import { type Channel, type StreamEvent, streamEvent } from "@sugabots/contracts";
+import { type StreamChannel, type StreamEvent, streamEvent } from "@sugabots/contracts";
 import { CurrentUser, NotFound } from "@sugabots/contracts/http";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { toPerson } from "@sugabots/core/conversations/threads/participants";
+import { toPerson } from "@sugabots/core/conversations/repository/participants";
 import { Audience } from "@sugabots/core/database/events/audience";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { userText } from "@sugabots/errors";
@@ -70,7 +70,7 @@ export const StreamTiming = Context.Reference<Timing>("@sugabots/server/StreamTi
 	defaultValue: () => ({ ping: PING, maxAge: MAX_AGE, recheck: RECHECK }),
 });
 
-/** The workspace, thread and personal streams, with authorization resolved before streaming. */
+/** The workspace, conversation and personal streams, with authorization resolved before streaming. */
 export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) =>
 	Effect.gen(function* () {
 		const bus = yield* EventBus.Service;
@@ -78,7 +78,7 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 		const timing = yield* StreamTiming;
 		const streamFor = (
 			request: HttpServerRequest.HttpServerRequest,
-			channelFor: () => Effect.Effect<Channel | undefined, never, CurrentActor.Service>,
+			channelFor: () => Effect.Effect<StreamChannel | undefined, never, CurrentActor.Service>,
 		) =>
 			Effect.gen(function* () {
 				const channel = yield* channelFor();
@@ -105,19 +105,19 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 			.handle("workspace", ({ params, request }) =>
 				streamFor(request, () => access.workspace(params.workspace)),
 			)
-			.handle("thread", ({ params, request }) =>
-				streamFor(request, () => access.thread(params.threadId)),
+			.handle("conversation", ({ params, request }) =>
+				streamFor(request, () => access.conversation(params.conversationId)),
 			)
 			.handle("me", ({ request }) => streamFor(request, access.me))
 			.handle("typing", ({ params }) =>
 				Effect.gen(function* () {
-					const channel = yield* access.thread(params.threadId);
+					const channel = yield* access.conversation(params.conversationId);
 					if (!channel) {
-						return yield* new NotFound({ message: userText`No such thread` });
+						return yield* new NotFound({ message: userText`No such conversation` });
 					}
 					const user = yield* CurrentUser;
 					const typing = streamEvent("person.typing", {
-						threadId: params.threadId,
+						conversationId: params.conversationId,
 						person: toPerson(user),
 					});
 					yield* Effect.promise(() => bus.publish(channel, typing));
@@ -138,7 +138,7 @@ function frame(seq: number | undefined, event: StreamEvent): string {
  * Streams a channel the caller's authorisation resolved to.
  *
  * A channel the caller may not have is answered with 404 before this, rather
- * than 403: a stream for a thread you cannot see should not confirm the thread
+ * than 403: a stream for a conversation you cannot see should not confirm the conversation
  * exists.
  */
 const streamChannel = Effect.fnUntraced(function* ({
@@ -150,7 +150,7 @@ const streamChannel = Effect.fnUntraced(function* ({
 	mayHear,
 }: {
 	bus: EventBus.Interface;
-	channel: Channel;
+	channel: StreamChannel;
 	since: number | undefined;
 	timing: Timing;
 	/**

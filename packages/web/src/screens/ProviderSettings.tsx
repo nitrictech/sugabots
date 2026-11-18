@@ -1,6 +1,6 @@
 import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
-	type Agent,
+	type Bot,
 	effectiveCapabilities,
 	type ModelProvider,
 	type ProviderModel,
@@ -41,8 +41,8 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useAgents, useModels } from "@/lib/agents.ts";
-import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
+import { useBots, useModels } from "@/lib/bots.ts";
+import { useBuiltInBots } from "@/lib/built-in-bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
@@ -51,7 +51,7 @@ import { searchModels } from "@/lib/model-search.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
-import { AgentAvatar, TurnTakingAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar, TurnTakingAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -121,14 +121,14 @@ export function ProviderTile({
 }
 
 /** The bots on a model, as overlapping faces with a count past the first few. */
-export function BotFaces({ bots }: { bots: readonly Agent[] }) {
+export function BotFaces({ bots }: { bots: readonly Bot[] }) {
 	if (bots.length === 0) return null;
 	const shown = bots.slice(0, bots.length > 3 ? 2 : 3);
 	const more = bots.length - shown.length;
 	return (
 		<span aria-hidden className="flex shrink-0 items-center">
 			{shown.map((bot, index) => (
-				<AgentAvatar
+				<BotAvatar
 					key={bot.id}
 					color={bot.color}
 					face={bot.face}
@@ -166,7 +166,7 @@ function NamedBotFaces({
 	label,
 	layout = "dialog",
 }: {
-	bots: readonly Agent[];
+	bots: readonly Bot[];
 	label: string;
 	layout?: keyof typeof FACE_ROWS;
 }) {
@@ -196,7 +196,7 @@ function NamedBotFaces({
 }
 
 /** "N others", naming them on hover or keyboard focus. */
-function OtherBots({ bots }: { bots: readonly Agent[] }) {
+function OtherBots({ bots }: { bots: readonly Bot[] }) {
 	return (
 		<Tooltip
 			label={<OtherBotsList bots={bots} />}
@@ -222,7 +222,7 @@ const LIST = new Intl.ListFormat("en", { type: "conjunction" });
  * the bottom while there are more below, as the scrollbar shows only while
  * scrolling.
  */
-function OtherBotsList({ bots }: { bots: readonly Agent[] }) {
+function OtherBotsList({ bots }: { bots: readonly Bot[] }) {
 	const list = useRef<HTMLUListElement>(null);
 	const [moreBelow, setMoreBelow] = useState(false);
 	const checkMoreBelow = () => {
@@ -244,7 +244,7 @@ function OtherBotsList({ bots }: { bots: readonly Agent[] }) {
 		>
 			{bots.map((bot) => (
 				<li key={bot.id} className="flex items-center gap-1.5">
-					<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
+					<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
 					<span className="truncate">{bot.name}</span>
 				</li>
 			))}
@@ -267,7 +267,7 @@ function nameOnKeyboardFocusOnly(
 }
 
 /** One bot's face, which hops as the pointer or keyboard comes onto it and names the bot. */
-function NamedBotFace({ bot, size }: { bot: Agent; size: number }) {
+function NamedBotFace({ bot, size }: { bot: Bot; size: number }) {
 	const face = useRef<LivelyFace>(null);
 	return (
 		<Tooltip label={bot.name} side="top" onOpenChange={nameOnKeyboardFocusOnly}>
@@ -288,15 +288,15 @@ function NamedBotFace({ bot, size }: { bot: Agent; size: number }) {
 	);
 }
 
-/** The crew bots on each model id, which is what a bot's `model` names. */
-export function useBotsByModel(): (modelId: string) => Agent[] {
-	const { agents } = useAgents();
-	return (modelId) => crewBotsOn(agents ?? [], modelId);
+/** The bots people talk to on each model id, which is what a bot's `model` names. */
+export function useBotsByModel(): (modelId: string) => Bot[] {
+	const { bots } = useBots();
+	return (modelId) => personFacingBotsOn(bots ?? [], modelId);
 }
 
-/** The crew bots among `agents` on `modelId`. */
-function crewBotsOn(agents: readonly Agent[], modelId: string): Agent[] {
-	return agents.filter((agent) => agent.systemAgentKey === null && agent.model === modelId);
+/** The bots people talk to among `bots` on `modelId`. */
+function personFacingBotsOn(bots: readonly Bot[], modelId: string): Bot[] {
+	return bots.filter((bot) => bot.systemBotKey === null && bot.model === modelId);
 }
 
 /**
@@ -307,10 +307,10 @@ function crewBotsOn(agents: readonly Agent[], modelId: string): Agent[] {
  */
 export function useModelHolders(): (modelId: string) => ModelHolders | undefined {
 	const defaultModel = useModels().data?.defaultModel ?? null;
-	const systemAgents = useBuiltInAgents().data ?? [];
+	const builtInBots = useBuiltInBots().data ?? [];
 	return (modelId) => {
 		const newBots = modelId === defaultModel;
-		const systemBots = systemAgents.some((agent) => agent.model === modelId);
+		const systemBots = builtInBots.some((bot) => bot.model === modelId);
 		return newBots || systemBots ? { newBots, systemBots } : undefined;
 	};
 }
@@ -324,10 +324,10 @@ export interface ModelHolders {
 export function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
 	const holders =
 		newBots && systemBots
-			? "New bots and system agents use"
+			? "New bots and system bots use"
 			: newBots
 				? "New bots use"
-				: "System agents use";
+				: "System bots use";
 	return `${holders} ${subject}. Choose another model for them under Models → Default first.`;
 }
 
@@ -771,14 +771,14 @@ function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefine
  * may predate another tab's changes.
  */
 function useModelUsage() {
-	const agents = useAgents();
+	const bots = useBots();
 	const models = useModels();
 	return {
-		agents: agents.agents ?? [],
-		known: agents.agents !== undefined && models.data !== undefined,
-		latest: async (): Promise<readonly Agent[]> => {
-			const [latestAgents] = await Promise.all([agents.refetch(), models.refetch()]);
-			return latestAgents.data ?? [];
+		bots: bots.bots ?? [],
+		known: bots.bots !== undefined && models.data !== undefined,
+		latest: async (): Promise<readonly Bot[]> => {
+			const [latestBots] = await Promise.all([bots.refetch(), models.refetch()]);
+			return latestBots.data ?? [];
 		},
 	};
 }
@@ -915,13 +915,13 @@ function SettingMoveRows({
 
 interface StrandedModel {
 	model: ProviderModel;
-	bots: Agent[];
+	bots: Bot[];
 }
 
 /** The provider's offered models that bots would be left on if it went off. */
-function strandedModelsOf(provider: ModelProvider, agents: readonly Agent[]): StrandedModel[] {
+function strandedModelsOf(provider: ModelProvider, workspaceBots: readonly Bot[]): StrandedModel[] {
 	return offeredModelsOf(provider).flatMap((model) => {
-		const bots = crewBotsOn(agents, model.modelId);
+		const bots = personFacingBotsOn(workspaceBots, model.modelId);
 		return bots.length > 0 ? [{ model, bots }] : [];
 	});
 }
@@ -1050,7 +1050,7 @@ function MoveBotsOffProviderDialog({
 	);
 }
 
-/** The models the provider offers agents: none unless it is usable, connected and switched on. */
+/** The models the provider offers bots: none unless it is usable, connected and switched on. */
 function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
 	return providerIsUsable(provider) ? provider.models.filter((model) => model.enabled) : [];
 }
@@ -1284,7 +1284,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 	async function switchOff(model: ProviderModel) {
 		setCheckingUsage(true);
 		const latest = await usage.latest().finally(() => setCheckingUsage(false));
-		const strandsBots = crewBotsOn(latest, model.modelId).length > 0;
+		const strandsBots = personFacingBotsOn(latest, model.modelId).length > 0;
 		if (strandsBots || holdersOf(model.modelId) !== undefined) {
 			setMovingOff(model);
 			return;
@@ -1377,7 +1377,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 					<MoveBotsDialog
 						provider={provider}
 						model={movingOff}
-						bots={crewBotsOn(usage.agents, movingOff.modelId)}
+						bots={personFacingBotsOn(usage.bots, movingOff.modelId)}
 						held={holdersOf(movingOff.modelId)}
 						done={() => setMovingOff(undefined)}
 					/>
@@ -1413,7 +1413,7 @@ function MoveBotsDialog({
 }: {
 	provider: ModelProvider;
 	model: ProviderModel;
-	bots: readonly Agent[];
+	bots: readonly Bot[];
 	held: ModelHolders | undefined;
 	done: () => void;
 }) {

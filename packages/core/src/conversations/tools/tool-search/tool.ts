@@ -118,7 +118,7 @@ export function callToolTool({
 /**
  * toolCatalogNote tells the model how to reach the tools in `catalog`, or
  * nothing when there are none. It goes in the turn's note rather than the
- * tools sent, so a pod gaining or losing tools leaves the provider's cached
+ * tools sent, so a bot gaining or losing tools leaves the provider's cached
  * prompt intact.
  */
 export function toolCatalogNote({
@@ -157,7 +157,7 @@ export function toolCatalogNote({
 		.join("\n");
 }
 
-/** Tells the model how to point the person at a server the pod has not added. */
+/** Tells the model how to point the person at a server the bot has not added. */
 function missingServerNote(
 	addable: readonly ConnectionPreset[],
 	connectionsPageUrl: string,

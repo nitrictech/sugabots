@@ -6,7 +6,7 @@ import { noDatabase } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
-import type { ThreadId } from "../threads/rooms.ts";
+import type { BotConversationId } from "../repository/rooms.ts";
 import { Turns } from "../turns/turns.ts";
 import { type PreparedBotSummary, type PreparedSummary, Summaries } from "./summaries.ts";
 import { summarise } from "./summary.steps.ts";
@@ -19,37 +19,37 @@ import type { SummaryRequest } from "./summary.workflow.ts";
 const runWithServices = effectRunner(ManagedRuntime.make(noDatabase));
 
 const request: SummaryRequest = {
-	threadId: "0199a3a0-0000-7000-8000-000000000002",
-	agentId: "0199a3a0-0000-7000-8000-000000000003",
+	conversationId: "0199a3a0-0000-7000-8000-000000000002",
+	botId: "0199a3a0-0000-7000-8000-000000000003",
 	sourceMessageId: "0199a3a0-0000-7000-8000-000000000004",
 };
 
 const prepared: PreparedSummary = {
 	_tag: "Prepared",
 	request,
-	scribe: {
-		threadId: "0199a3a0-0000-7000-8000-000000000005",
-		agentId: "0199a3a0-0000-7000-8000-000000000008",
+	summariser: {
+		conversationId: "0199a3a0-0000-7000-8000-000000000005",
+		botId: "0199a3a0-0000-7000-8000-000000000008",
 	},
-	// A thread, as `Summaries.prepare` would have found it.
-	threadId: request.threadId as ThreadId,
+	// A conversation, as `Summaries.prepare` would have found it.
+	conversationId: request.conversationId as BotConversationId,
 	workspaceId: "0199a3a0-0000-7000-8000-000000000006",
 	sourceMessageId: request.sourceMessageId,
-	threadTitle: "Prepare release notes",
+	conversationTitle: "Prepare release notes",
 	model: "claude-sonnet-4-20250514",
 	transcript: [
 		{ author: "Sam", kind: "person", content: "Prepare release notes" },
-		{ author: "Release Agent", kind: "agent", content: "The notes are ready." },
+		{ author: "Release Bot", kind: "bot", content: "The notes are ready." },
 	],
 };
 
 const bot: PreparedBotSummary = {
-	agentId: request.agentId,
-	botName: "Release Agent",
+	botId: request.botId,
+	botName: "Release Bot",
 	workspaceId: prepared.workspaceId,
 	model: prepared.model,
 	previousContent: undefined,
-	threads: [
+	conversations: [
 		{
 			title: "Prepare release notes",
 			summary: "Notes are ready.",
@@ -79,7 +79,7 @@ function answering(...answers: string[]) {
 }
 
 describe("summarise", () => {
-	it("rewrites the bot's summary after the thread's", async () => {
+	it("rewrites the bot's summary after the conversation's", async () => {
 		const { summaries, turns, ended } = fakes();
 		vi.mocked(summaries.prepareBotSummary).mockReturnValue(Effect.succeed(bot));
 
@@ -93,7 +93,7 @@ describe("summarise", () => {
 			).pipe(Effect.provide(services(summaries, turns))),
 		);
 
-		expect(summaries.prepareBotSummary).toHaveBeenCalledWith(prepared.threadId);
+		expect(summaries.prepareBotSummary).toHaveBeenCalledWith(prepared.conversationId);
 		expect(summaries.completeBotSummary).toHaveBeenCalledWith(
 			bot,
 			"Release notes for 2.4 are ready.",
@@ -101,7 +101,7 @@ describe("summarise", () => {
 		expect(ended).toEqual([{ completed: 20 }]);
 	});
 
-	it("keeps the thread's summary when the bot's can't be written", async () => {
+	it("keeps the conversation's summary when the bot's can't be written", async () => {
 		const { summaries, turns, ended } = fakes();
 		vi.mocked(summaries.prepareBotSummary).mockReturnValue(Effect.succeed(bot));
 
@@ -160,7 +160,7 @@ describe("summarise", () => {
 
 		expect(recorded).toEqual([
 			{
-				...prepared.scribe,
+				...prepared.summariser,
 				triggerMessageId: request.sourceMessageId,
 				model: prepared.model,
 				name: "summary",
@@ -183,7 +183,7 @@ describe("summarise", () => {
 			),
 		);
 
-		// Three asks, then the thread is left without a summary rather than the
+		// Three asks, then the conversation is left without a summary rather than the
 		// whole summary being retried over one bad answer.
 		expect(stream).toHaveBeenCalledTimes(3);
 		expect(summaries.complete).not.toHaveBeenCalled();
@@ -246,7 +246,7 @@ describe("summarise", () => {
 			),
 		);
 
-		// Asking again would cost the same and fail the same way. The thread's
+		// Asking again would cost the same and fail the same way. The conversation's
 		// next turn asks for a summary again.
 		expect(stream).toHaveBeenCalledTimes(1);
 		expect(ended).toEqual([{ failed: unreachable.userMessage }]);
@@ -258,7 +258,7 @@ describe("summarise", () => {
 		vi.mocked(summaries.prepare).mockReturnValueOnce(
 			Effect.succeed({
 				_tag: "Skipped",
-				reason: "The thread is already summarised to this message",
+				reason: "The conversation is already summarised to this message",
 			}),
 		);
 
@@ -283,7 +283,7 @@ describe("summarise", () => {
 });
 
 /**
- * Prepares `prepared` and records nothing. The Scribe's turn is recorded as
+ * Prepares `prepared` and records nothing. The Summariser's turn is recorded as
  * how its work ended, as `Turns.recordSystemTurn` would write it: completed
  * with the prompt size measured, or failed with what people are told.
  */

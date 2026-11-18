@@ -9,10 +9,10 @@ import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { message } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
-import { ThreadRepository } from "../threads/repository.ts";
+import { ConversationRepository } from "../repository/repository.ts";
 
 /**
- * People reacting to messages with emoji. Whoever sees a message's thread may
+ * People reacting to messages with emoji. Whoever sees a message's conversation may
  * react to it, and take their own reactions back. Bots never react.
  */
 export interface Interface {
@@ -25,7 +25,9 @@ export interface Interface {
 		emoji: string,
 	) => Effect.Effect<
 		MessageReaction[],
-		ResourceHidden | ThreadRepository.MessageNotFinished | ThreadRepository.TooManyReactionEmoji,
+		| ResourceHidden
+		| ConversationRepository.MessageNotFinished
+		| ConversationRepository.TooManyReactionEmoji,
 		CurrentActor.Service
 	>;
 	/** Takes the actor's `emoji` off the message, if it is there, answering with what is left. */
@@ -40,7 +42,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Reactions");
 	const visibility = yield* Visibility.Service;
-	const threads = yield* ThreadRepository.Service;
+	const conversations = yield* ConversationRepository.Service;
 
 	/** The actor's reaction with `emoji` to the message, once they are known to see it. */
 	const actorReaction = (messageId: string, emoji: string) =>
@@ -48,31 +50,33 @@ export const make = Effect.gen(function* () {
 			if (!isUuid(messageId)) return yield* new ResourceHidden({ resource: "message" });
 			const [found] = yield* query((db) =>
 				db
-					.select({ threadId: message.threadId })
+					.select({ conversationId: message.conversationId })
 					.from(message)
 					.where(eq(message.id, messageId))
 					.limit(1),
 			);
 			if (!found) return yield* new ResourceHidden({ resource: "message" });
-			yield* visibility.thread(found.threadId);
+			yield* visibility.conversationStanding(found.conversationId);
 			const { userId } = yield* CurrentActor.Service;
-			return { threadId: found.threadId, messageId, userId, emoji };
+			return { conversationId: found.conversationId, messageId, userId, emoji };
 		});
 
 	return Service.of({
 		add: (messageId, emoji) =>
 			operation(
 				"add",
-				transaction(Effect.flatMap(actorReaction(messageId, emoji), threads.addReaction)),
+				transaction(Effect.flatMap(actorReaction(messageId, emoji), conversations.addReaction)),
 			),
 		remove: (messageId, emoji) =>
 			operation(
 				"remove",
-				transaction(Effect.flatMap(actorReaction(messageId, emoji), threads.removeReaction)),
+				transaction(Effect.flatMap(actorReaction(messageId, emoji), conversations.removeReaction)),
 			),
 	});
 });
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([Visibility.layer, ThreadRepository.layer]));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([Visibility.layer, ConversationRepository.layer]),
+);

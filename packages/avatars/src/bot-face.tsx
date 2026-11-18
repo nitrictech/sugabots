@@ -1,16 +1,16 @@
-import type { AgentColor, AgentFace, AgentShape } from "@sugabots/contracts";
+import type { BotColor, BotFace, BotShape } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { ComponentProps } from "react";
-import { botColors } from "./bot-colors.ts";
+import { botPalettes } from "./bot-colors.ts";
 import { Mark, markKey, Part, partKey } from "./face-drawing.tsx";
 import { FACE_VIEWBOX_SIZE, faceMarks } from "./face-marks.ts";
 import { headShape } from "./head-shapes.ts";
 
 /** How a bot looks. A look without a shape is a circle, as every bot was before shapes. */
 export interface BotLook {
-	color: AgentColor;
-	face: AgentFace;
-	shape?: AgentShape;
+	color: BotColor;
+	face: BotFace;
+	shape?: BotShape;
 }
 
 type BotFaceProps = BotLook &
@@ -27,7 +27,7 @@ type BotFaceProps = BotLook &
  * intrinsic size, so size it with `className` (e.g. `size-8`) or `width` and
  * `height`.
  */
-export function BotFace({
+export function StillBotFace({
 	color,
 	face,
 	shape = "circle",
@@ -35,7 +35,7 @@ export function BotFace({
 	className,
 	...props
 }: BotFaceProps) {
-	const { face: faceColor, eyes } = botColors[color];
+	const { face: faceColor, eyes } = botPalettes[color];
 	const head = headShape(shape);
 	const { x, y, scale } = head.eyes;
 	return (

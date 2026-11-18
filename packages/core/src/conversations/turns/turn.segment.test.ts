@@ -6,24 +6,17 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
-import {
-	agent,
-	message,
-	toolCall,
-	turn,
-	workspace,
-	workspaceMember,
-} from "../../database/schema.ts";
+import { bot, message, toolCall, turn, workspace, workspaceMember } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed } from "../../providers/models/testing.ts";
-import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
+import { INTERVIEW_PROMPT } from "../../workspaces/bots/interview-prompt.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
 import { conversationsForTests } from "../testing.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
+import { ComputerTools } from "../tools/computer.ts";
 import { ConnectionTools } from "../tools/connections.ts";
-import { SandboxTools } from "../tools/sandbox.ts";
 import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
 import { CALL_TOOL } from "../tools/tool-search/tool.ts";
 import { type PreparedTurn, TurnExecution } from "./execution.ts";
@@ -34,7 +27,7 @@ import { runSegment } from "./turn.steps.ts";
 /**
  * A turn's segment run through the real conversation services on Postgres:
  * what it leaves in the turn, its reply and its tool calls, and what it tells
- * the thread. The model, the tools and the event bus stand in for the outside.
+ * the conversation. The model, the tools and the event bus stand in for the outside.
  * `turn.steps.test.ts` covers what cannot be produced against a database.
  */
 describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres", async () => {
@@ -57,7 +50,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		...testProvider,
 		cause: new Error("provider down"),
 	});
-	let threadId: string;
+	let conversationId: string;
 	let connectionId: string;
 	let hostId: string;
 	let prepared: PreparedTurn;
@@ -68,8 +61,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 	// Each case's turn is already prepared, so the segment opens it again for its own run.
 	beforeEach(async () => {
-		({ threadId, connectionId, hostId } = await aChatAwaitingReply(chatsAs));
-		const [run] = await runOnPostgres(runningTurns(threadId));
+		({ conversationId, connectionId, hostId } = await aChatAwaitingReply(chatsAs));
+		const [run] = await runOnPostgres(runningTurns(conversationId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);
 		delivered = [];
@@ -93,7 +86,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 							outside.events ?? EventBus.inProcess({ store: EventStore.inMemory() }),
 						),
 						Layer.succeed(BuiltInTools.Service, outside.builtInTools ?? BuiltInTools.none),
-						Layer.succeed(SandboxTools.Service, SandboxTools.none),
+						Layer.succeed(ComputerTools.Service, ComputerTools.none),
 						Layer.succeed(ConnectionTools.Service, outside.connectionTools ?? ConnectionTools.none),
 					),
 				),
@@ -117,7 +110,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 	const deliveredEvents = () => delivered.map(({ event }) => event);
 
-	it("prepares, streams and completes the reply, and tells the thread", async () => {
+	it("prepares, streams and completes the reply, and tells the conversation", async () => {
 		const events = EventBus.inProcess({ store: EventStore.inMemory() });
 		const publish = vi.fn(events.publish);
 		const outcome = await segmentWith(
@@ -312,7 +305,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		const outcome = await segmentWith(model, {
 			connectionTools: {
-				forAgent: () =>
+				forBot: () =>
 					Effect.succeed({
 						tools: {
 							wiki__wipe: {
@@ -377,7 +370,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		await segmentWith(model, {
 			connectionTools: {
-				forAgent: () =>
+				forBot: () =>
 					Effect.succeed({
 						tools: {
 							wiki__wipe: {
@@ -418,16 +411,16 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 	describe("saving its own instructions", () => {
 		beforeEach(async () => {
 			await onDatabase((db) =>
-				db.update(agent).set({ prompt: INTERVIEW_PROMPT }).where(eq(agent.id, hostId)),
+				db.update(bot).set({ prompt: INTERVIEW_PROMPT }).where(eq(bot.id, hostId)),
 			);
 		});
 
-		const storedAgent = async () => {
+		const storedBot = async () => {
 			const [row] = await onDatabase((db) =>
 				db
-					.select({ prompt: agent.prompt, description: agent.description })
-					.from(agent)
-					.where(eq(agent.id, hostId)),
+					.select({ prompt: bot.prompt, description: bot.description })
+					.from(bot)
+					.where(eq(bot.id, hostId)),
 			);
 			return row;
 		};
@@ -453,16 +446,16 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		it("saves its instructions as the person it answers, and links to them", async () => {
 			await segmentWith(savingInstructions());
 
-			expect(await storedAgent()).toEqual({
+			expect(await storedBot()).toEqual({
 				prompt: "You triage support tickets.",
 				description: "Sorts support tickets by urgency.",
 			});
 			const [place] = await onDatabase((db) =>
 				db
-					.select({ workspace: workspace.slug, handle: agent.handle })
-					.from(agent)
-					.innerJoin(workspace, eq(workspace.id, agent.workspaceId))
-					.where(eq(agent.id, hostId)),
+					.select({ workspace: workspace.slug, handle: bot.handle })
+					.from(bot)
+					.innerJoin(workspace, eq(workspace.id, bot.workspaceId))
+					.where(eq(bot.id, hostId)),
 			);
 			const settingsUrl = `http://sugabots.test/${place?.workspace}/settings/bots/${place?.handle}`;
 			expect(await storedReply()).toMatchObject({
@@ -475,12 +468,12 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 				db
 					.update(workspaceMember)
 					.set({ role: "viewer" })
-					.where(eq(workspaceMember.workspaceId, prepared.context.thread.workspaceId)),
+					.where(eq(workspaceMember.workspaceId, prepared.context.conversation.workspaceId)),
 			);
 
 			await segmentWith(savingInstructions());
 
-			expect(await storedAgent()).toMatchObject({ prompt: INTERVIEW_PROMPT });
+			expect(await storedBot()).toMatchObject({ prompt: INTERVIEW_PROMPT });
 			expect(await storedReply()).toMatchObject({
 				content: expect.stringContaining('"refused"'),
 			});
@@ -488,15 +481,12 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		it("saves new instructions straight away once the bot is set up", async () => {
 			await onDatabase((db) =>
-				db
-					.update(agent)
-					.set({ prompt: "You answer billing questions." })
-					.where(eq(agent.id, hostId)),
+				db.update(bot).set({ prompt: "You answer billing questions." }).where(eq(bot.id, hostId)),
 			);
 
 			await segmentWith(savingInstructions());
 
-			expect(await storedAgent()).toEqual({
+			expect(await storedBot()).toEqual({
 				prompt: "You triage support tickets.",
 				description: "Sorts support tickets by urgency.",
 			});

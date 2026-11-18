@@ -4,16 +4,16 @@ import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 
 /**
  * The unsent message in one person's chat, kept in localStorage
- * so it survives switching chats, pods, or reloading. A blank draft removes
+ * so it survives switching chats, channels, or reloading. A blank draft removes
  * its key, so only chats with something waiting to be sent take up room. Two
  * tabs on the same chat do not sync; whichever wrote last is what comes back.
  */
 export function useChatDraft(
 	userId: string,
-	podId: string | null,
+	channelId: string | null,
 	conversationId: string,
 ): [string, Dispatch<SetStateAction<string>>] {
-	const key = draftKey(userId, podId, conversationId);
+	const key = draftKey(userId, channelId, conversationId);
 	const [draft, setDraft] = useState(() => read(key));
 
 	useEffect(() => {
@@ -30,10 +30,10 @@ export function useChatDraft(
  */
 export function takeChatDraft(
 	userId: string,
-	podId: string | null,
+	channelId: string | null,
 	conversationId: string,
 ): string {
-	const key = draftKey(userId, podId, conversationId);
+	const key = draftKey(userId, channelId, conversationId);
 	const draft = read(key);
 	write(key, "");
 	return draft;
@@ -46,11 +46,11 @@ export function takeChatDraft(
  */
 export function addToChatDraft(
 	userId: string,
-	podId: string | null,
+	channelId: string | null,
 	conversationId: string,
 	text: string,
 ): void {
-	const key = draftKey(userId, podId, conversationId);
+	const key = draftKey(userId, channelId, conversationId);
 	write(key, joinDrafts(read(key), text));
 }
 
@@ -83,10 +83,10 @@ export function splitDraft(before: string, current: string): { kept: string; add
  */
 export function useChatReplyDraft(
 	userId: string,
-	podId: string | null,
+	channelId: string | null,
 	conversationId: string,
 ): [MessageReplyTo | undefined, Dispatch<SetStateAction<MessageReplyTo | undefined>>] {
-	const key = `sugabots-draft-reply:${draftPlace(userId, podId, conversationId)}`;
+	const key = `sugabots-draft-reply:${draftPlace(userId, channelId, conversationId)}`;
 	const [replyTo, setReplyTo] = useState(() => decodeReplyTo(read(key)));
 
 	useEffect(() => {
@@ -103,10 +103,10 @@ export function useChatReplyDraft(
  */
 export function useTakenOffRecipients(
 	userId: string,
-	podId: string | null,
+	channelId: string | null,
 	conversationId: string,
 ): [TakenOffRecipients, Dispatch<SetStateAction<TakenOffRecipients>>] {
-	const key = `sugabots-draft-taken-off:${draftPlace(userId, podId, conversationId)}`;
+	const key = `sugabots-draft-taken-off:${draftPlace(userId, channelId, conversationId)}`;
 	const [takenOff, setTakenOff] = useState(() => decodeTakenOff(read(key)));
 
 	useEffect(() => {
@@ -160,14 +160,14 @@ function write(key: string, value: string): void {
 }
 
 /** Where `useChatDraft` keeps one person's draft in one chat. */
-function draftKey(userId: string, podId: string | null, conversationId: string): string {
-	return `sugabots-draft:${draftPlace(userId, podId, conversationId)}`;
+function draftKey(userId: string, channelId: string | null, conversationId: string): string {
+	return `sugabots-draft:${draftPlace(userId, channelId, conversationId)}`;
 }
 
 /**
  * Whose draft in which chat a stored key holds: the person's, in the
- * conversation, under its pod; a direct message between people is in none.
+ * conversation, under its channel; a direct message between people is in none.
  */
-function draftPlace(userId: string, podId: string | null, conversationId: string): string {
-	return [userId, ...(podId === null ? [] : [podId]), conversationId].join(":");
+function draftPlace(userId: string, channelId: string | null, conversationId: string): string {
+	return [userId, ...(channelId === null ? [] : [channelId]), conversationId].join(":");
 }

@@ -25,7 +25,7 @@ const augmentationToolBuilders: AugmentationToolBuilders = { linear: linearAugme
 /**
  * The augmentation tools of the MCP connection `target`, whose server listed
  * `listed` for the turn, offered under its handle like the server's own, so
- * the pod's choice for each, and its approvals, apply the same way.
+ * the bot's choice for each, and its approvals, apply the same way.
  */
 export function offerAugmentationTools(
 	target: ConnectionTarget,

@@ -1,13 +1,13 @@
 /**
- * An agent's turn: one agent answering one message, from being asked until
+ * A bot's turn: one bot answering one message, from being asked until
  * its reply is complete, failed or cancelled. Hidden behind this module are
  * the turn's durable workflow, its lifecycle, the reply streamed and saved as
  * it arrives, the tools it calls and the approvals people give them, and the
  * signals that reach a turn while it runs or waits.
  *
  * Two services. `Service` is for the rest of the system and acts for no one:
- * asking for a turn, stopping the turns under a routine run, and recording a
- * system agent's work as a turn. `Controls` is for people, and checks what
+ * asking for a turn, stopping the turns under an automation run, and recording a
+ * system bot's work as a turn. `Controls` is for people, and checks what
  * the current actor may do: cancelling a turn and deciding its tool approvals.
  *
  * This is the only file outside `turns/` may import.
@@ -17,16 +17,16 @@ export * as Turns from "./turns.ts";
 import type { ToolApprovalDecision } from "@sugabots/contracts";
 import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Context, type Effect, Layer } from "effect";
-import { Artifacts } from "../../artifacts/artifacts.ts";
 import type { AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { ACTIVE_TURN_STATUSES, turn } from "../../database/schema.ts";
+import { ConversationFiles } from "../../files/conversation-files.ts";
+import { Files } from "../../files/files.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { laneBusy, waitingSince } from "../../workflows/lanes.ts";
-import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
-import { ThreadFiles } from "../thread-files/thread-files.ts";
+import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import {
 	makeControls,
@@ -58,13 +58,13 @@ export {
 export type { Ended } from "./lifecycle.ts";
 export { WorkAdmission } from "./work-admission.ts";
 
-/** Which agent answers which message in which thread, and why it was asked. */
+/** Which bot answers which message in which conversation, and why it was asked. */
 export type Request = TurnRequest;
 
-/** A system agent's piece of work, recorded as its turn in its own thread. */
+/** A system bot's piece of work, recorded as its turn in its own conversation. */
 export interface SystemTurn {
-	readonly threadId: string;
-	readonly agentId: string;
+	readonly conversationId: string;
+	readonly botId: string;
 	readonly triggerMessageId: string;
 	readonly model: string;
 	/** What the work is, as the logs name it: "summary", "compaction". */
@@ -83,20 +83,20 @@ export type SystemTurnOutcome<A> =
 
 export interface Interface {
 	/**
-	 * Asks for an agent's turn, in the caller's transaction; it starts once
-	 * that commits. A turn already asked for, for the same agent in the same
-	 * thread, is kept, because it will read every message posted since.
+	 * Asks for a bot's turn, in the caller's transaction; it starts once
+	 * that commits. A turn already asked for, for the same bot in the same
+	 * conversation, is kept, because it will read every message posted since.
 	 */
 	readonly ask: (request: Request) => Effect.Effect<void>;
 	/**
-	 * Stops the turns in the threads `threadIds`, in the caller's transaction:
+	 * Stops the turns in the conversations `conversationIds`, in the caller's transaction:
 	 * cancels those waiting for approvals, tells their workflows once it
 	 * commits, and drops the turns still waiting to start. A running turn is
 	 * left to finish.
 	 */
-	readonly stopUnder: (threadIds: readonly string[]) => Effect.Effect<void>;
+	readonly stopUnder: (conversationIds: readonly string[]) => Effect.Effect<void>;
 	/**
-	 * Records `work` as a system agent's turn: opens the turn, runs `work` with
+	 * Records `work` as a system bot's turn: opens the turn, runs `work` with
 	 * its id, and completes it with the prompt size `work` measured, or fails
 	 * it with what went wrong. Only `work` may be interrupted; how it ended is
 	 * always written.
@@ -111,11 +111,11 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 /** What people may do to a turn, as the current actor. */
 export interface ControlsInterface {
-	/** Asks a turn in a thread the actor can see to stop. `false` when it is no longer running. */
+	/** Asks a turn in a conversation the actor can see to stop. `false` when it is no longer running. */
 	readonly cancel: (turnId: string) => Effect.Effect<boolean, ResourceHidden, CurrentActor.Service>;
 	/**
 	 * Decides a tool call a turn is waiting on, as the actor, once they may.
-	 * The decision is recorded, so the thread's watchers see it at once, and
+	 * The decision is recorded, so the conversation's watchers see it at once, and
 	 * sent to the turn's workflow, which runs what was allowed.
 	 */
 	readonly decide: (input: {
@@ -152,9 +152,9 @@ export const stepsLayer = turnStepsLayer.pipe(
 		Layer.mergeAll(
 			TurnExecution.layer,
 			ApprovedToolCalls.layer,
-			AgentRepository.layer,
-			ThreadFiles.layer,
-			Artifacts.authoringLayer,
+			BotRepository.layer,
+			ConversationFiles.layer,
+			Files.authoringLayer,
 		),
 	),
 	Layer.provide(internals),
@@ -170,18 +170,18 @@ export const signalsLayer = TurnSignals.layer;
 export { cancelSweepLayer, resendLostCancels } from "./cancel-sweep.ts";
 
 /**
- * busyIn reports, as a condition for a query, whether an agent's turn in the
- * thread `threadId` is running or waiting to start.
+ * busyIn reports, as a condition for a query, whether a bot's turn in the
+ * conversation `conversationId` is running or waiting to start.
  */
-export const busyIn = (threadId: SQLWrapper) => laneBusy(threadId, [Turn._tag]);
+export const busyIn = (conversationId: SQLWrapper) => laneBusy(conversationId, [Turn._tag]);
 
 /**
- * When a turn in the thread `threadId` started waiting to start, as a value
+ * When a turn in the conversation `conversationId` started waiting to start, as a value
  * for a query; null when none waits. It is asked for in the transaction that
  * posts the message asking, so that message has the same time, and the turn
  * reads it and everything posted after it once it starts.
  */
-export const queuedSince = (threadId: SQLWrapper) => waitingSince(threadId, Turn._tag);
+export const queuedSince = (conversationId: SQLWrapper) => waitingSince(conversationId, Turn._tag);
 
 /** isActive reports, as a condition for a query, whether a turn is running or waiting on approvals. */
 export const isActive = inArray(turn.status, [...ACTIVE_TURN_STATUSES]);

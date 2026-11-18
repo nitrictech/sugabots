@@ -32,13 +32,15 @@ const user = {
 const resolveUser: UserResolver = async (headers) =>
 	headers.get("cookie") === "session=good" ? user : null;
 const PATH =
-	"/api/threads/0199a3a0-0000-7000-8000-000000000001/agents/0199a3a0-0000-7000-8000-000000000002/desktop";
+	"/api/conversations/0199a3a0-0000-7000-8000-000000000001/bots/0199a3a0-0000-7000-8000-000000000002/desktop";
 
 const PASSWORD = "Abc-12_x";
 const CHALLENGE = Uint8Array.from({ length: 16 }, (_, index) => index * 7);
 
 const scope = Effect.runSync(Scope.make());
 let apiPort: number;
+/** Whether the person the next desktop is opened for loses access to it at once. */
+let losesAccess = false;
 
 /** Serves `routes` on an ephemeral port until the tests end, and answers the port. */
 const served = <E, R>(routes: Layer.Layer<never, E, R>) =>
@@ -106,6 +108,7 @@ beforeAll(async () => {
 						Effect.succeed({
 							endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
 							password: PASSWORD,
+							accessLost: losesAccess ? Effect.void : Effect.never,
 						}),
 				}),
 			),
@@ -143,6 +146,22 @@ describe("the desktop viewer's WebSocket", () => {
 			"\u0000\u0000\u0000\u0000",
 			"hello",
 		]);
+	});
+
+	it("closes the socket once the person may no longer see the desktop", async () => {
+		losesAccess = true;
+		try {
+			const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${PATH}`, {
+				headers: { origin: WEB_ORIGIN, cookie: "session=good" },
+			} as unknown as string[]);
+			await new Promise<void>((resolve, reject) => {
+				socket.onclose = () => resolve();
+				socket.onerror = () => reject(new Error("The socket failed"));
+				setTimeout(() => reject(new Error("The socket stayed open")), 5_000);
+			});
+		} finally {
+			losesAccess = false;
+		}
 	});
 
 	it("refuses a page on another origin, cookie or not", async () => {

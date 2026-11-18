@@ -10,8 +10,8 @@ import {
 	useImperativeHandle,
 	useRef,
 } from "react";
-import { botColors } from "./bot-colors.ts";
-import { BotFace, type BotLook } from "./bot-face.tsx";
+import { botPalettes } from "./bot-colors.ts";
+import { type BotLook, StillBotFace } from "./bot-face.tsx";
 import { LivelyEyes, ThinkingDots } from "./eyes.tsx";
 import { Part, partKey } from "./face-drawing.tsx";
 import { FACE_VIEWBOX_SIZE, viewboxPercentage } from "./face-marks.ts";
@@ -55,13 +55,13 @@ type LivelyBotFaceProps = BotLook &
  * A bot's face that seems alive, in a mood (see `moods`), and playing actions
  * through its `ref`. Its eyes slide across the head and narrow towards its
  * edge while the head leans after them, which makes the flat head read as
- * round. It hops when pressed. Sized like `BotFace`. Where faces may not move
- * (see `useLiveliness`) it is the still `BotFace`, and off screen it holds still.
+ * round. It hops when pressed. Sized like `StillBotFace`. Where faces may not move
+ * (see `useLiveliness`) it is the still `StillBotFace`, and off screen it holds still.
  */
 export function LivelyBotFace(props: LivelyBotFaceProps) {
 	if (useLiveliness() === "off") {
 		const { color, face, shape, width, height, className } = props;
-		return <BotFace {...{ color, face, shape, width, height, className }} />;
+		return <StillBotFace {...{ color, face, shape, width, height, className }} />;
 	}
 	return <AnimatedBotFace {...props} />;
 }
@@ -103,7 +103,7 @@ function AnimatedBotFace({
 		};
 	}, [shown, controls]);
 
-	const { face: faceColor, eyes: eyeColor } = botColors[color];
+	const { face: faceColor, eyes: eyeColor } = botPalettes[color];
 	const head = headShape(shape);
 	const { layers } = drawing;
 	const clipId = useId();

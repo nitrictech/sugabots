@@ -6,7 +6,7 @@ import { Cause, Effect, Exit } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUNDLE_REF, pushBundle } from "./push.ts";
 
-/** Pushing a sandbox's bundle with real git, to a bare repository standing in for GitHub. */
+/** Pushing a computer's bundle with real git, to a bare repository standing in for GitHub. */
 describe("pushing a bundle", () => {
 	let root: string;
 	let remote: string;
@@ -27,7 +27,7 @@ describe("pushing a bundle", () => {
 			},
 		}).trim();
 
-	/** A commit in the checkout, and the bundle the sandbox would make of it. */
+	/** A commit in the checkout, and the bundle the computer would make of it. */
 	const committed = (file: string) => {
 		writeFileSync(join(checkout, file), file);
 		git(checkout, "add", file);

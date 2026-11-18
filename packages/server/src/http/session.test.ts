@@ -15,40 +15,38 @@ import { createTestApp, identifiedBy } from "./app.test-support.ts";
 /** Public by intent. Anything else reaching here without credentials is a bug. */
 const OPEN_ENDPOINTS = new Set([
 	"GET /health",
-	"POST /hooks/routines/:routineId",
+	"POST /hooks/routines/:automationId",
 	"POST /hooks/triggers/:triggerId",
 	"POST /hooks/connections/:connectionId",
 ]);
 
 const PLACEHOLDERS: Record<string, string> = {
 	workspace: "0199a3a0-0000-7000-8000-000000000001",
-	podId: "0199a3a0-0000-7000-8000-000000000002",
-	agentId: "0199a3a0-0000-7000-8000-000000000003",
+	channelId: "0199a3a0-0000-7000-8000-000000000002",
+	botId: "0199a3a0-0000-7000-8000-000000000003",
 	providerId: "0199a3a0-0000-7000-8000-000000000004",
-	threadId: "0199a3a0-0000-7000-8000-000000000005",
-	conversationId: "0199a3a0-0000-7000-8000-000000000008",
+	conversationId: "0199a3a0-0000-7000-8000-000000000005",
 	turnId: "0199a3a0-0000-7000-8000-000000000006",
 	modelId: "some-model",
 	userId: "0199a3a0-0000-7000-8000-000000000007",
 	connectionId: "0199a3a0-0000-7000-8000-000000000008",
-	routineId: "0199a3a0-0000-7000-8000-000000000009",
+	automationId: "0199a3a0-0000-7000-8000-000000000009",
 	toolCallId: "0199a3a0-0000-7000-8000-00000000000a",
 	ruleId: "0199a3a0-0000-7000-8000-00000000000b",
-	// A system agent is addressed by its key, not by an id.
+	// A system bot is addressed by its key, not by an id.
 	key: "summarise",
 	id: "0199a3a0-0000-7000-8000-000000000008",
 	memberId: "0199a3a0-0000-7000-8000-00000000000c",
 	invitationId: "0199a3a0-0000-7000-8000-00000000000d",
 	host: "api.example.com",
-	artifactId: "0199a3a0-0000-7000-8000-00000000000e",
 	version: "1",
 	messageId: "0199a3a0-0000-7000-8000-00000000000f",
 	// 👍, as a client puts it in the address.
 	emoji: "%F0%9F%91%8D",
 	fileId: "0199a3a0-0000-7000-8000-000000000010",
 	triggerId: "0199a3a0-0000-7000-8000-000000000011",
-	// Whether a notification choice is for a pod or a bot.
-	kind: "pod",
+	// Whether a notification choice is for a channel or a bot.
+	kind: "channel",
 };
 
 function fill(pattern: string): string {

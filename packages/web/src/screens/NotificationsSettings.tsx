@@ -1,10 +1,11 @@
 import type {
+	AutomationRunNotifications,
 	NotificationPreferences,
 	NotificationSettings,
 	QuietHours,
-	RoutineRunNotifications,
 } from "@sugabots/contracts";
 import { useId } from "react";
+import { useChannels } from "@/lib/channels.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	DEFAULT_QUIET_HOURS,
@@ -18,7 +19,6 @@ import {
 	useNotificationSettings,
 	useUpdateNotificationPreferences,
 } from "@/lib/notifications.ts";
-import { usePods } from "@/lib/pods.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import {
@@ -51,7 +51,7 @@ export function NotificationsSettings() {
 					<AlsoNotifyAbout settings={settings} />
 					<Pause settings={settings} />
 					<QuietHoursSettings settings={settings} />
-					<PodLevels settings={settings} />
+					<ChannelLevels settings={settings} />
 				</>
 			)}
 		</SettingsPage>
@@ -123,7 +123,7 @@ function preferencesOf(settings: NotificationSettings): NotificationPreferences 
 		pausedUntil: settings.pausedUntil,
 		quietHours: settings.quietHours,
 		turnFailures: settings.turnFailures,
-		routineRuns: settings.routineRuns,
+		automationRuns: settings.automationRuns,
 	};
 }
 
@@ -181,7 +181,7 @@ function Pause({ settings }: { settings: NotificationSettings }) {
 	);
 }
 
-const ROUTINE_RUN_OPTIONS: { value: RoutineRunNotifications; label: string }[] = [
+const AUTOMATION_RUN_OPTIONS: { value: AutomationRunNotifications; label: string }[] = [
 	{ value: "failures", label: "Failed" },
 	{ value: "all", label: "Every run" },
 	{ value: "none", label: "None" },
@@ -206,10 +206,10 @@ function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
 				}
 			/>
 			<SettingsChoiceRow
-				label="My routines run"
-				options={ROUTINE_RUN_OPTIONS}
-				value={settings.routineRuns}
-				onChange={(routineRuns) => update.mutate({ ...preferencesOf(settings), routineRuns })}
+				label="My automations run"
+				options={AUTOMATION_RUN_OPTIONS}
+				value={settings.automationRuns}
+				onChange={(automationRuns) => update.mutate({ ...preferencesOf(settings), automationRuns })}
 			/>
 		</SettingsGroup>
 	);
@@ -288,24 +288,24 @@ function TimeInput({
 	);
 }
 
-/** A level for each pod, in place of the person's own, as Slack sets one per channel. */
-function PodLevels({ settings }: { settings: NotificationSettings }) {
-	const { data: pods } = usePods();
-	if (!pods || pods.length === 0) return null;
+/** A level for each channel, in place of the person's own, as Slack sets one per channel. */
+function ChannelLevels({ settings }: { settings: NotificationSettings }) {
+	const { data: channels } = useChannels();
+	if (!channels || channels.length === 0) return null;
 	return (
 		<SettingsGroup
 			label="Channels"
 			note="A channel or bot set to Default follows what you chose above. Right-click a channel or a bot in the sidebar to change it there."
 		>
-			{pods.map((pod) => (
+			{channels.map((channel) => (
 				<SettingsRow
-					key={pod.id}
-					label={pod.name}
+					key={channel.id}
+					label={channel.name}
 					trailing={
 						<NotificationLevelPicker
 							settings={settings}
-							place={{ kind: "pod", id: pod.id }}
-							name={pod.name}
+							place={{ kind: "channel", id: channel.id }}
+							name={channel.name}
 						/>
 					}
 				/>

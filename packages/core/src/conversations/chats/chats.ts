@@ -1,16 +1,16 @@
 export * as Chats from "./chats.ts";
 
 import type {
-	ConversationThread,
-	Direct,
+	AutomationFeed,
+	ChannelConversation,
+	ConversationKind,
+	DirectMessage,
 	Message,
-	PodChat,
-	RoutineFeed,
-	ThreadType,
+	Task,
 } from "@sugabots/contracts";
 import { MAX_DIRECT_MESSAGE_PEOPLE } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, eq, inArray, isNotNull, isNull, notExists } from "drizzle-orm";
+import { and, eq, getColumns, inArray, isNotNull, isNull, notExists } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -18,24 +18,30 @@ import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import {
-	agent,
+	automation,
+	bot,
+	channel,
 	message,
-	pod,
-	routine,
-	type ThreadRow,
-	thread,
+	type PlacedConversationRow,
+	placedConversation,
+	task,
 	workspaceMember,
 } from "../../database/schema.ts";
+import type { ConversationFiles } from "../../files/conversation-files.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { INTERVIEW_PROMPT } from "../../workspaces/agents/interview-prompt.ts";
+import { INTERVIEW_PROMPT } from "../../workspaces/bots/interview-prompt.ts";
 import { FloorControl } from "../floor/floor-control.ts";
-import type { ThreadFiles } from "../thread-files/thread-files.ts";
-import { crewAgent, personColumns } from "../threads/participants.ts";
-import { lockMessageId, ThreadRepository } from "../threads/repository.ts";
+import { madeByPeople, personColumns } from "../repository/participants.ts";
+import { ConversationRepository, lockMessageId } from "../repository/repository.ts";
 import { Turns } from "../turns/turns.ts";
-import { toConversationThread, toDirect, toPodChat, toRoutineFeed } from "./conversation.ts";
-import { threadTitleFrom } from "./thread-title.ts";
+import {
+	toAutomationFeed,
+	toChannelConversation,
+	toDirectMessage,
+	toTask,
+} from "./conversation.ts";
+import { taskTitleFrom } from "./task-title.ts";
 
 /**
  * Talking in conversations: the current actor starts tasks with bots, talks in
@@ -44,29 +50,29 @@ import { threadTitleFrom } from "./thread-title.ts";
  */
 export interface Interface {
 	/**
-	 * Starts a task for the actor with the bot `agentId`, titled from its first
+	 * Starts a task for the actor with the bot `botId`, titled from its first
 	 * message, which the bot answers. Hidden unless the actor reaches the bot;
 	 * refused when it has no model. Starting it again with the same message
 	 * returns the task it started. Files are added once it has started, since
 	 * an upload belongs to a conversation.
 	 */
 	readonly startTask: (input: {
-		agentId: string;
+		botId: string;
 		messageId: string;
 		content: string;
 	}) => Effect.Effect<
-		StartedThread,
-		AuthorizationDenied | HostHasNoModel | ThreadRepository.MessageIdConflict,
+		StartedTask,
+		AuthorizationDenied | HostHasNoModel | ConversationRepository.MessageIdConflict,
 		CurrentActor.Service
 	>;
 	/**
-	 * Starts the task in which the bot `agentId` interviews the actor, who made
+	 * Starts the task in which the bot `botId` interviews the actor, who made
 	 * it, to write its own instructions: once, while it still has the
 	 * interview's prompt, a model and no tasks. Null when it is not due one.
 	 */
 	readonly startInterview: (
-		agentId: string,
-	) => Effect.Effect<ConversationThread | null, AuthorizationDenied, CurrentActor.Service>;
+		botId: string,
+	) => Effect.Effect<Task | null, AuthorizationDenied, CurrentActor.Service>;
 	/**
 	 * Posts the actor's message to `userIds`, other members of the workspace
 	 * named by its id or its slug, in the direct message between them and the
@@ -83,26 +89,34 @@ export interface Interface {
 		messageId: string;
 		content: string;
 	}) => Effect.Effect<
-		{ conversation: Direct; message: Message },
-		AuthorizationDenied | DirectToSelf | TooManyInDirect | ThreadRepository.MessageIdConflict,
+		{ conversation: DirectMessage; message: Message },
+		AuthorizationDenied | DirectToSelf | TooManyInDirect | ConversationRepository.MessageIdConflict,
 		CurrentActor.Service
 	>;
 	/**
 	 * The channel's main chat, opened on first use, in a workspace named by its
 	 * id or its slug. Hidden unless the actor reaches the channel.
 	 */
-	readonly openPodChat: (input: {
+	readonly openMainChat: (input: {
 		workspace: string;
-		podId: string;
-	}) => Effect.Effect<PodChat, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
+		channelId: string;
+	}) => Effect.Effect<
+		ChannelConversation,
+		AuthorizationDenied | ResourceHidden,
+		CurrentActor.Service
+	>;
 	/**
-	 * Starts a thread in the channel `podId`, called `name`, for everyone in
+	 * Starts a thread in the channel `channelId`, called `name`, for everyone in
 	 * it. Anyone in the channel may.
 	 */
 	readonly startChat: (input: {
-		podId: string;
+		channelId: string;
 		name: string;
-	}) => Effect.Effect<PodChat, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
+	}) => Effect.Effect<
+		ChannelConversation,
+		AuthorizationDenied | ResourceHidden,
+		CurrentActor.Service
+	>;
 	/**
 	 * Renames the channel's thread `conversationId`, or archives it, for
 	 * whoever may change the channel. An archived thread is changed no more,
@@ -117,13 +131,13 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * The automation's own thread, where its runs post, opened on first use.
+	 * The automation's feed, where its runs post, opened on first use.
 	 * Hidden unless the actor reaches the bot that runs it.
 	 */
-	readonly openRoutineFeed: (input: {
+	readonly openAutomationFeed: (input: {
 		workspace: string;
-		routineId: string;
-	}) => Effect.Effect<RoutineFeed, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
+		automationId: string;
+	}) => Effect.Effect<AutomationFeed, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
 	/**
 	 * Posts the actor's message into the conversation, with the files
 	 * they uploaded to it, and gives the floor. Posting the same message again
@@ -141,28 +155,29 @@ export interface Interface {
 	}) => Effect.Effect<
 		Message,
 		| ResourceHidden
-		| ThreadRepository.MessageIdConflict
-		| ThreadRepository.ReplyTargetNotFound
-		| ThreadFiles.UploadsNotFound
+		| ConversationRepository.MessageIdConflict
+		| ConversationRepository.ReplyTargetNotFound
+		| ConversationFiles.UploadsNotFound
 		| HostHasNoModel,
 		CurrentActor.Service
 	>;
 	/**
-	 * Starts a task for the actor with the bot `hostAgentId`, which takes its
-	 * turn on `brief`, the first message, written by the bot `briefingAgentId`
-	 * that started it for them. Refused unless the actor reaches the host and
+	 * Starts a task for the actor with the bot `botId`, which takes its
+	 * turn on `brief`, the first message, written by the bot `briefingBotId`
+	 * that started it for them. Refused unless the actor reaches that bot and
 	 * it has a model.
 	 */
-	readonly startBriefedThread: (input: {
+	readonly startBriefedTask: (input: {
 		workspaceId: string;
-		hostAgentId: string;
-		briefingAgentId: string;
+		botId: string;
+		briefingBotId: string;
 		title: string;
 		brief: string;
-	}) => Effect.Effect<ConversationThread, HostNotCrew | HostHasNoModel, CurrentActor.Service>;
+	}) => Effect.Effect<Task, HostUnavailable | HostHasNoModel, CurrentActor.Service>;
 	/**
-	 * Marks the task `conversationId` done, or reopens it. A channel and an
-	 * automation's thread are never done, so they are hidden from this.
+	 * Marks the task `conversationId` done, or reopens it. A channel's
+	 * conversation and an automation's feed are never done, so they are hidden
+	 * from this.
 	 */
 	readonly setDone: (input: {
 		conversationId: string;
@@ -174,12 +189,12 @@ export interface Interface {
 	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 	/**
 	 * Records that the actor has read one automation run or collaboration as an
-	 * Inbox item, by its thread `threadId`, leaving the rest of its
-	 * conversation, and what was written in the item since it began, unread.
-	 * Other threads are hidden from this.
+	 * Inbox item, by its own conversation `itemConversationId`, leaving the
+	 * conversation it is listed in, and what was written in the item since it
+	 * began, unread. Other conversations are hidden from this.
 	 */
 	readonly markItemRead: (
-		threadId: string,
+		itemConversationId: string,
 	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 }
 
@@ -189,29 +204,26 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Chats");
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
-	const threads = yield* ThreadRepository.Service;
+	const conversations = yield* ConversationRepository.Service;
 	const floor = yield* FloorControl.Service;
 	const turns = yield* Turns.Service;
 	const ids = yield* Ids.Service;
 
-	/** The bot `agentId`, when `userId` made it and it is still due its interview. */
-	const dueInterview = (agentId: string, userId: string) =>
+	/** The bot `botId`, when `userId` made it and it is still due its interview. */
+	const dueInterview = (botId: string, userId: string) =>
 		Effect.map(
 			query((db) =>
 				db
-					.select({ id: agent.id, name: agent.name, workspaceId: agent.workspaceId })
-					.from(agent)
+					.select({ id: bot.id, name: bot.name, workspaceId: bot.workspaceId })
+					.from(bot)
 					.where(
 						and(
-							eq(agent.id, agentId),
-							eq(agent.createdById, userId),
-							eq(agent.prompt, INTERVIEW_PROMPT),
-							isNotNull(agent.model),
+							eq(bot.id, botId),
+							eq(bot.createdById, userId),
+							eq(bot.prompt, INTERVIEW_PROMPT),
+							isNotNull(bot.model),
 							notExists(
-								db
-									.select({ id: thread.id })
-									.from(thread)
-									.where(and(eq(thread.hostAgentId, agentId), eq(thread.type, "conversation"))),
+								db.select({ id: task.conversationId }).from(task).where(eq(task.botId, botId)),
 							),
 						),
 					)
@@ -226,7 +238,7 @@ export const make = Effect.gen(function* () {
 	 * no bots. Posting the same message again returns it unchanged.
 	 */
 	const postIn = (
-		conversation: ThreadRow,
+		conversation: PlacedConversationRow,
 		input: {
 			messageId: string;
 			content: string;
@@ -236,9 +248,9 @@ export const make = Effect.gen(function* () {
 	) =>
 		Effect.gen(function* () {
 			const sender = yield* senderOf(yield* CurrentActor.Service);
-			const posted = yield* threads.post({
+			const posted = yield* conversations.post({
 				id: input.messageId,
-				threadId: conversation.id,
+				conversationId: conversation.id,
 				author: sender,
 				content: input.content,
 				replyTo: input.replyTo,
@@ -246,17 +258,17 @@ export const make = Effect.gen(function* () {
 			});
 			if (posted._tag === "AlreadyPosted") return posted.message;
 			// A direct message is between people only: it is never done, and no bot is there to answer.
-			if (conversation.type === "direct") return posted.message;
-			// Something new in a done conversation is not left where nobody looks.
-			yield* threads.setDone(conversation, false);
+			if (conversation.kind === "direct_message") return posted.message;
+			// Something new in a done task is not left where nobody looks.
+			yield* conversations.setDone(conversation, false);
 			// Checked once the message is known to be new, so sending it again
 			// still returns it; refusing here rolls the post back.
-			if (conversation.hostAgentId && (yield* hostModelOf(conversation.hostAgentId)) === null) {
+			if (conversation.botId && (yield* hostModelOf(conversation.botId)) === null) {
 				return yield* new HostHasNoModel();
 			}
 			yield* floor.giveFloor({
 				id: posted.message.id,
-				threadId: conversation.id,
+				conversationId: conversation.id,
 				content: posted.message.content,
 			});
 			return posted.message;
@@ -298,15 +310,18 @@ export const make = Effect.gen(function* () {
 				"startTask",
 				transaction(
 					Effect.gen(function* () {
-						const { agent: host, actor } = yield* authorization.agent(input.agentId, "agent.read");
+						const { bot: host, actor } = yield* authorization.bot(input.botId, "bot.read");
 						// A retry waits for the first send, and then finds the task it started.
 						yield* lockMessageId(input.messageId);
 						const [sent] = isUuid(input.messageId)
 							? yield* query((db) =>
 									db
-										.select({ thread })
+										.select({ conversation: getColumns(placedConversation) })
 										.from(message)
-										.innerJoin(thread, eq(thread.id, message.threadId))
+										.innerJoin(
+											placedConversation,
+											eq(placedConversation.id, message.conversationId),
+										)
 										.where(
 											and(eq(message.id, input.messageId), eq(message.authorUserId, actor.userId)),
 										)
@@ -314,52 +329,52 @@ export const make = Effect.gen(function* () {
 								)
 							: [];
 						if (sent) {
-							if (sent.thread.type !== "conversation" || sent.thread.hostAgentId !== host.id) {
-								return yield* new ThreadRepository.MessageIdConflict();
+							if (sent.conversation.kind !== "task" || sent.conversation.botId !== host.id) {
+								return yield* new ConversationRepository.MessageIdConflict();
 							}
-							const posted = yield* postIn(sent.thread, input).pipe(
+							const posted = yield* postIn(sent.conversation, input).pipe(
 								// It neither quotes a message nor carries files, so neither can be missing.
 								Effect.catchTags({ ReplyTargetNotFound: Effect.die, UploadsNotFound: Effect.die }),
 							);
-							return { conversation: toConversationThread(sent.thread), message: posted };
+							return { conversation: toTask(sent.conversation), message: posted };
 						}
 						if (host.model === null) return yield* new HostHasNoModel();
-						const task = yield* threads.startTask({
+						const started = yield* conversations.startTask({
 							workspaceId: host.workspaceId,
-							hostAgentId: host.id,
-							initiatorUserId: actor.userId,
-							title: threadTitleFrom(input.content),
+							botId: host.id,
+							startedById: actor.userId,
+							title: taskTitleFrom(input.content),
 						});
-						const posted = yield* postIn(task, input).pipe(
+						const posted = yield* postIn(started, input).pipe(
 							// It neither quotes a message nor carries files, so neither can be missing.
 							Effect.catchTags({ ReplyTargetNotFound: Effect.die, UploadsNotFound: Effect.die }),
 						);
-						return { conversation: toConversationThread(task), message: posted };
+						return { conversation: toTask(started), message: posted };
 					}),
 				),
 			),
 
-		startInterview: (agentId) =>
+		startInterview: (botId) =>
 			operation(
 				"startInterview",
 				transaction(
 					Effect.gen(function* () {
-						const { actor } = yield* authorization.agent(agentId, "agent.update");
-						const due = yield* dueInterview(agentId, actor.userId);
+						const { actor } = yield* authorization.bot(botId, "bot.update");
+						const due = yield* dueInterview(botId, actor.userId);
 						if (!due) return null;
-						const task = yield* threads.startTask({
+						const interview = yield* conversations.startTask({
 							workspaceId: due.workspaceId,
-							hostAgentId: due.id,
-							initiatorUserId: actor.userId,
+							botId: due.id,
+							startedById: actor.userId,
 							title: `Setting up ${due.name}`,
 						});
 						yield* turns.ask({
-							threadId: task.id,
-							agentId: due.id,
+							conversationId: interview.id,
+							botId: due.id,
 							triggerMessageId: yield* ids.next,
 							reason: "interview",
 						});
-						return toConversationThread(task);
+						return toTask(interview);
 					}),
 				),
 			),
@@ -374,10 +389,10 @@ export const make = Effect.gen(function* () {
 							"workspace.read",
 						);
 						const otherIds = yield* directMessageOthers(workspaceId, actor.userId, input.userIds);
-						const conversation = yield* threads.openDirect({
+						const conversation = yield* conversations.openDirectMessage({
 							workspaceId,
 							memberIds: [actor.userId, ...otherIds],
-							initiatorUserId: actor.userId,
+							startedById: actor.userId,
 						});
 						// It neither quotes a message nor carries files, so neither can be
 						// missing, and it has no bot, so none can be without a model.
@@ -391,42 +406,42 @@ export const make = Effect.gen(function* () {
 								HostHasNoModel: Effect.die,
 							}),
 						);
-						return { conversation: toDirect(conversation), message };
+						return { conversation: toDirectMessage(conversation), message };
 					}),
 				),
 			),
 
-		openPodChat: (input) =>
+		openMainChat: (input) =>
 			operation(
-				"openPodChat",
+				"openMainChat",
 				transaction(
 					Effect.gen(function* () {
 						const { workspaceId, actor } = yield* authorization.workspace(
 							input.workspace,
 							"workspace.read",
 						);
-						const reachesPod = yield* visibility.reachesPod;
-						const [reached] = isUuid(input.podId)
+						const reachesChannel = yield* visibility.reachesChannel;
+						const [reached] = isUuid(input.channelId)
 							? yield* query((db) =>
 									db
-										.select({ id: pod.id })
-										.from(pod)
+										.select({ id: channel.id })
+										.from(channel)
 										.where(
 											and(
-												eq(pod.id, input.podId),
-												eq(pod.workspaceId, workspaceId),
-												reachesPod(pod.id),
+												eq(channel.id, input.channelId),
+												eq(channel.workspaceId, workspaceId),
+												reachesChannel(channel.id),
 											),
 										)
 										.limit(1),
 								)
 							: [];
-						if (!reached) return yield* new ResourceHidden({ resource: "pod" });
-						return toPodChat(
-							yield* threads.openPodChat({
+						if (!reached) return yield* new ResourceHidden({ resource: "channel" });
+						return toChannelConversation(
+							yield* conversations.openMainChat({
 								workspaceId,
-								podId: reached.id,
-								initiatorUserId: actor.userId,
+								channelId: reached.id,
+								startedById: actor.userId,
 							}),
 						);
 					}),
@@ -437,12 +452,12 @@ export const make = Effect.gen(function* () {
 			operation(
 				"startChat",
 				Effect.gen(function* () {
-					const { pod: channel, actor } = yield* authorization.pod(input.podId, "pod.read");
-					return toPodChat(
-						yield* threads.startChat({
+					const { channel, actor } = yield* authorization.channel(input.channelId, "channel.read");
+					return toChannelConversation(
+						yield* conversations.startChat({
 							workspaceId: channel.workspaceId,
-							podId: channel.id,
-							initiatorUserId: actor.userId,
+							channelId: channel.id,
+							startedById: actor.userId,
 							title: input.name,
 						}),
 					);
@@ -454,47 +469,47 @@ export const make = Effect.gen(function* () {
 				"changeChat",
 				Effect.gen(function* () {
 					const chat = yield* visibility.conversation(input.conversationId);
-					if (chat.type !== "pod_chat" || chat.podId === null) {
+					if (chat.kind !== "channel_conversation" || chat.channelId === null) {
 						return yield* new ResourceHidden({ resource: "conversation" });
 					}
-					yield* authorization.pod(chat.podId, "pod.update");
+					yield* authorization.channel(chat.channelId, "channel.update");
 					if (chat.archivedAt) return yield* new ChatArchived();
 					if ("archived" in input.change && chat.main) return yield* new FirstChatNotArchivable();
-					yield* threads.changeChat(
+					yield* conversations.changeChat(
 						chat,
 						"name" in input.change ? { title: input.change.name } : { archived: true },
 					);
 				}),
 			),
 
-		openRoutineFeed: (input) =>
+		openAutomationFeed: (input) =>
 			operation(
-				"openRoutineFeed",
+				"openAutomationFeed",
 				transaction(
 					Effect.gen(function* () {
 						const { workspaceId } = yield* authorization.workspace(
 							input.workspace,
 							"workspace.read",
 						);
-						const reachesAgent = yield* visibility.reachesAgent;
-						const [owned] = isUuid(input.routineId)
+						const reachesBot = yield* visibility.reachesBot;
+						const [owned] = isUuid(input.automationId)
 							? yield* query((db) =>
 									db
-										.select({ routine })
-										.from(routine)
+										.select({ automation })
+										.from(automation)
 										.where(
 											and(
-												eq(routine.id, input.routineId),
-												eq(routine.workspaceId, workspaceId),
-												isNull(routine.deletedAt),
-												reachesAgent(routine.agentId),
+												eq(automation.id, input.automationId),
+												eq(automation.workspaceId, workspaceId),
+												isNull(automation.deletedAt),
+												reachesBot(automation.botId),
 											),
 										)
 										.limit(1),
 								)
 							: [];
-						if (!owned) return yield* new ResourceHidden({ resource: "routine" });
-						return toRoutineFeed(yield* threads.openRoutineFeed(owned.routine));
+						if (!owned) return yield* new ResourceHidden({ resource: "automation" });
+						return toAutomationFeed(yield* conversations.openAutomationFeed(owned.automation));
 					}),
 				),
 			),
@@ -509,21 +524,19 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		startBriefedThread: (input) =>
+		startBriefedTask: (input) =>
 			operation(
-				"startBriefedThread",
+				"startBriefedTask",
 				transaction(
 					Effect.gen(function* () {
-						if (!(yield* hostReached(input, yield* visibility.reachesAgent))) {
-							return yield* new HostNotCrew();
+						if (!(yield* hostReached(input, yield* visibility.reachesBot))) {
+							return yield* new HostUnavailable();
 						}
-						if ((yield* hostModelOf(input.hostAgentId)) === null) {
+						if ((yield* hostModelOf(input.botId)) === null) {
 							return yield* new HostHasNoModel();
 						}
 						const { userId } = yield* CurrentActor.Service;
-						return toConversationThread(
-							yield* threads.startBriefedThread({ ...input, initiatorUserId: userId }),
-						);
+						return toTask(yield* conversations.startBriefedTask({ ...input, startedById: userId }));
 					}),
 				),
 			),
@@ -534,11 +547,11 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const visible = yield* visibility.conversation(input.conversationId);
-						// Only a task is ever done: not a channel, nor an automation's thread.
-						if (visible.type !== "conversation") {
+						// Only a task is ever done: not a channel's conversation, nor an automation's feed.
+						if (visible.kind !== "task") {
 							return yield* new ResourceHidden({ resource: "conversation" });
 						}
-						yield* threads.setDone(visible, input.done);
+						yield* conversations.setDone(visible, input.done);
 					}),
 				),
 			),
@@ -550,22 +563,22 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const visible = yield* visibility.conversation(conversationId);
 						const { userId } = yield* CurrentActor.Service;
-						yield* threads.markRead(userId, visible.id);
+						yield* conversations.markRead(userId, visible.id);
 					}),
 				),
 			),
 
-		markItemRead: (threadId) =>
+		markItemRead: (itemConversationId) =>
 			operation(
 				"markItemRead",
 				transaction(
 					Effect.gen(function* () {
-						const { thread } = yield* visibility.thread(threadId);
-						if (!ITEM_THREAD_TYPES.has(thread.type)) {
-							return yield* new ResourceHidden({ resource: "thread" });
+						const { conversation } = yield* visibility.conversationStanding(itemConversationId);
+						if (!ITEM_CONVERSATION_KINDS.has(conversation.kind)) {
+							return yield* new ResourceHidden({ resource: "conversation" });
 						}
 						const { userId } = yield* CurrentActor.Service;
-						yield* threads.markItemRead(userId, thread.id);
+						yield* conversations.markItemRead(userId, conversation.id);
 					}),
 				),
 			),
@@ -578,13 +591,13 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
 		Visibility.layer,
-		ThreadRepository.layer,
+		ConversationRepository.layer,
 		FloorControl.layer,
 	]),
 );
 
-/** The threads that are an item of their own in Inbox: an automation run's and a collaboration's. */
-const ITEM_THREAD_TYPES: ReadonlySet<ThreadType> = new Set(["routine", "collaboration"]);
+/** The conversations that are an item of their own in Inbox: an automation run's and a collaboration's. */
+const ITEM_CONVERSATION_KINDS: ReadonlySet<ConversationKind> = new Set(["run", "collaboration"]);
 
 /** Somebody tried to open a direct message with themselves. */
 export class DirectToSelf extends Data.TaggedError("DirectToSelf") implements UserFacing {
@@ -601,14 +614,14 @@ export class TooManyInDirect extends Data.TaggedError("TooManyInDirect") impleme
 }
 
 /** The bot asked to host the task is out of the actor's reach, or not one people make. */
-export class HostNotCrew extends Data.TaggedError("HostNotCrew") implements UserFacing {
+export class HostUnavailable extends Data.TaggedError("HostUnavailable") implements UserFacing {
 	get userMessage() {
 		return userText`That bot isn't available for this task`;
 	}
 }
 
 /**
- * The conversation's agent has no model, so nothing could answer. The message is not
+ * The conversation's bot has no model, so nothing could answer. The message is not
  * kept, rather than kept with a turn that will never run.
  */
 export class HostHasNoModel extends Data.TaggedError("HostHasNoModel") implements UserFacing {
@@ -633,27 +646,27 @@ export class FirstChatNotArchivable
 }
 
 /** A task started with a bot, and the message it was started with. */
-export interface StartedThread {
-	conversation: ConversationThread;
+export interface StartedTask {
+	conversation: Task;
 	message: Message;
 }
 
-/** Whether `reachesAgent` reaches the bot, which is in the workspace and one people make. */
+/** Whether `reachesBot` reaches the bot, which is in the workspace and one people make. */
 const hostReached = (
-	input: { workspaceId: string; hostAgentId: string },
-	reachesAgent: Visibility.ReachesAgent,
+	input: { workspaceId: string; botId: string },
+	reachesBot: Visibility.ReachesBot,
 ) =>
 	Effect.map(
 		query((db) =>
 			db
-				.select({ id: agent.id })
-				.from(agent)
+				.select({ id: bot.id })
+				.from(bot)
 				.where(
 					and(
-						eq(agent.id, input.hostAgentId),
-						eq(agent.workspaceId, input.workspaceId),
-						crewAgent,
-						reachesAgent(agent.id),
+						eq(bot.id, input.botId),
+						eq(bot.workspaceId, input.workspaceId),
+						madeByPeople,
+						reachesBot(bot.id),
 					),
 				)
 				.limit(1),
@@ -669,10 +682,8 @@ const senderOf = ({ userId }: CurrentActor.Interface) =>
 			sender ? Effect.succeed(sender) : Effect.die(new Error("The current actor has no account")),
 	);
 
-const hostModelOf = (agentId: string) =>
+const hostModelOf = (botId: string) =>
 	Effect.map(
-		query((db) =>
-			db.select({ model: agent.model }).from(agent).where(eq(agent.id, agentId)).limit(1),
-		),
+		query((db) => db.select({ model: bot.model }).from(bot).where(eq(bot.id, botId)).limit(1)),
 		([row]) => row?.model ?? null,
 	);

@@ -4,18 +4,18 @@ import { Schema } from "effect";
  * The built-in tools the product ships: tools that do work for a bot,
  * offered to every bot unless its creator or an admin switches one off for it
  * (ADR 005). A key is what a bot's `disabledTools` lists; for every tool but
- * `routines` it is also what the model calls and what a `tool_call` records,
- * and `routines` covers the tools a bot reads and changes its own automations
+ * `automations` it is also what the model calls and what a `tool_call` records,
+ * and `automations` covers the tools a bot reads and changes its own automations
  * with. The names and descriptions are for the bot's settings page.
  */
 export const builtInToolKeySchema = Schema.Literals([
 	"web_fetch",
 	"web_search",
-	"routines",
-	"artifact_list",
-	"artifact_read",
-	"artifact_write",
-	"artifact_edit",
+	"automations",
+	"file_list",
+	"file_read",
+	"file_write",
+	"file_edit",
 ]);
 export type BuiltInToolKey = typeof builtInToolKeySchema.Type;
 
@@ -42,31 +42,32 @@ export const builtInToolCatalog: readonly BuiltInToolEntry[] = [
 		usesWeb: true,
 	},
 	{
-		key: "routines",
+		key: "automations",
 		name: "Manage its automations",
 		description: "Lists, sets up and changes its own automations when someone who manages it asks.",
 		usesWeb: false,
 	},
 	{
-		key: "artifact_list",
+		key: "file_list",
 		name: "List files",
-		description: "Lists the files it made, and those made in the channel it is in.",
+		description:
+			"Lists the documents and pages it wrote, and those written in the channel it is in.",
 		usesWeb: false,
 	},
 	{
-		key: "artifact_read",
+		key: "file_read",
 		name: "Read files",
-		description: "Reads a file it made, or one made in the channel it is in.",
+		description: "Reads a document or page it wrote, or one written in the channel it is in.",
 		usesWeb: false,
 	},
 	{
-		key: "artifact_write",
+		key: "file_write",
 		name: "Write files",
 		description: "Makes a document or HTML page, or saves a new version of one.",
 		usesWeb: false,
 	},
 	{
-		key: "artifact_edit",
+		key: "file_edit",
 		name: "Edit files",
 		description: "Changes part of a document or HTML page, as a new version.",
 		usesWeb: false,

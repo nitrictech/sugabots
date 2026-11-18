@@ -48,17 +48,17 @@ describe("starting a task with a bot", () => {
 				asked = input;
 				return Effect.fail(new Chats.HostHasNoModel());
 			},
-		}).request(`/agents/${BOT}/tasks`, startTask({ attachments: [UPLOAD] }));
+		}).request(`/bots/${BOT}/tasks`, startTask({ attachments: [UPLOAD] }));
 
-		expect(asked).toEqual({ agentId: BOT, messageId: MESSAGE, content: "Hi" });
+		expect(asked).toEqual({ botId: BOT, messageId: MESSAGE, content: "Hi" });
 	});
 
 	it("is a conflict with a bot that has no model, and not found with one the person cannot see", async () => {
 		const refusing = (failure: Chats.HostHasNoModel | ResourceHidden) =>
-			app({ startTask: () => Effect.fail(failure) }).request(`/agents/${BOT}/tasks`, startTask());
+			app({ startTask: () => Effect.fail(failure) }).request(`/bots/${BOT}/tasks`, startTask());
 
 		expect((await refusing(new Chats.HostHasNoModel())).status).toBe(409);
-		expect((await refusing(new ResourceHidden({ resource: "agent" }))).status).toBe(404);
+		expect((await refusing(new ResourceHidden({ resource: "bot" }))).status).toBe(404);
 	});
 });
 

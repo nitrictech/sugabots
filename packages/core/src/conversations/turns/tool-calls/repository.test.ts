@@ -5,7 +5,7 @@ import { WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
 import {
-	agent,
+	bot,
 	connection,
 	toolCall,
 	turn,
@@ -22,8 +22,8 @@ import {
 import { Lanes } from "../../../workflows/lanes.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Chats } from "../../chats/chats.ts";
+import { ConversationView } from "../../conversation-view.ts";
 import { conversationsForTests } from "../../testing.ts";
-import { ThreadView } from "../../thread-view.ts";
 import { ApprovedToolCalls } from "../approvals/approved-calls.ts";
 import { ToolApprovalConflict, ToolApprovalForbidden } from "../controls.ts";
 import { type PreparedTurn, replyTurnOf, TurnExecution } from "../execution.ts";
@@ -32,9 +32,11 @@ import { TurnSignals } from "../signals.ts";
 import { aChatAwaitingReply, prepareRunnable, runningTurns } from "../testing.ts";
 import {
 	type SegmentOutcome,
+	type StoredTurn,
+	storedTurn,
 	Turn,
-	type TurnRequest,
 	TurnSteps,
+	turnOfStored,
 	turnWorkflow,
 } from "../turn.workflow.ts";
 import { Turns } from "../turns.ts";
@@ -68,8 +70,8 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	const approvals = onPostgres({
 		beginExecution: Context.get(conversations, ApprovedToolCalls.Service).beginExecution,
 	});
-	const threadsAs = (userId: string) =>
-		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
+	const conversationsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, ConversationView.Service));
 	const chatsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
 	const execution = onPostgres({
@@ -78,14 +80,14 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	let workspaceId: string;
 	let hostId: string;
 	let memberId: string;
-	let threadId: string;
+	let conversationId: string;
 	let connectionId: string;
 	let prepared: PreparedTurn;
 
 	/** Records a person allowing the call, as the turn's workflow does once told. */
 	const allow = (pending: PendingToolApproval) =>
 		calls.recordDecision({
-			threadId,
+			conversationId,
 			approvalId: pending.approvalId,
 			decision: { decision: "allow_once", userId: memberId },
 		});
@@ -95,15 +97,16 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, hostId, memberId, threadId, connectionId } = await aChatAwaitingReply(chatsAs));
-		const [run] = await runOnPostgres(runningTurns(threadId));
+		({ workspaceId, hostId, memberId, conversationId, connectionId } =
+			await aChatAwaitingReply(chatsAs));
+		const [run] = await runOnPostgres(runningTurns(conversationId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);
 		delivered = [];
 	});
 
 	const from = (atOffset: number) => ({
-		threadId,
+		conversationId,
 		messageId: prepared.responseMessage.id,
 		turnId: prepared.turnId,
 		tool: "web_fetch",
@@ -170,7 +173,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await allow(pending);
 		prepared = await prepareRunnable(execution, prepared.run);
 		return {
-			threadId,
+			conversationId,
 			messageId: prepared.responseMessage.id,
 			turnId: prepared.turnId,
 			sdkToolCallId: pending.sdkToolCallId,
@@ -236,7 +239,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			toolCalls: [{ id: opened.id, atOffset: 7 }],
 		});
 
-		const details = await threadsAs(memberId).get(threadId);
+		const details = await conversationsAs(memberId).get(conversationId);
 		const reply = details?.messages.find((message) => message.id === prepared.responseMessage.id);
 
 		expect(reply?.parts).toEqual([
@@ -351,7 +354,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		await park(pending);
 		// A private bot, which only its creator reaches.
 		await onDatabase((db) =>
-			db.update(agent).set({ visibility: "private" }).where(eq(agent.id, hostId)),
+			db.update(bot).set({ visibility: "private" }).where(eq(bot.id, hostId)),
 		);
 		const [stranger] = await onDatabase((db) =>
 			db
@@ -432,13 +435,13 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	describe("when a workflow owns the turn", () => {
-		const segment = vi.fn((_request: TurnRequest) =>
+		const segment = vi.fn((_turn: StoredTurn) =>
 			Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
 		);
 		// Recording cancellations is real; the segments are not.
 		const steps = TurnSteps.of({
 			segment,
-			cancelWaiting: (request) => Effect.promise(() => turns.cancelWaiting(request)),
+			cancelWaiting: (stored) => Effect.promise(() => turns.cancelWaiting(turnOfStored(stored))),
 			abandon: () => Effect.void,
 			announceReleased: () => Effect.void,
 		});
@@ -468,7 +471,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				Effect.succeed({ _tag: "Suspended", approvals: [pending.approvalId] }),
 			);
 			const executionId = await workflows.runPromise(
-				Turn.execute(prepared.run.request, { discard: true }),
+				Turn.execute(storedTurn(prepared.run.request), { discard: true }),
 			);
 			await vi.waitFor(() => expect(segment).toHaveBeenCalledTimes(1));
 			await onDatabase((db) =>
@@ -535,7 +538,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			await expect(decide("deny")).rejects.toBeInstanceOf(ToolApprovalConflict);
 		});
 
-		it("tells the thread's watchers of a decision before the workflow hears it", async () => {
+		it("tells the conversation's watchers of a decision before the workflow hears it", async () => {
 			const pending = workflowCall();
 			const signals = await parkInWorkflow(pending);
 			const unheard = TurnSignals.Service.of({ ...signals, decide: () => Effect.void });

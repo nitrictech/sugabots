@@ -14,12 +14,12 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Code } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { useModels } from "@/lib/agents.ts";
+import { useModels } from "@/lib/bots.ts";
 import {
-	BUILT_IN_AGENT_KEYS,
-	useBuiltInAgents,
-	useChooseBuiltInAgentModel,
-} from "@/lib/built-in-agents.ts";
+	BUILT_IN_BOT_KEYS,
+	useBuiltInBots,
+	useChooseBuiltInBotModel,
+} from "@/lib/built-in-bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	useChooseDefaultModel,
@@ -116,7 +116,7 @@ export function ModelsSettings() {
 		>
 			<SettingsGroup label="Defaults">
 				<DefaultModelRow providers={all} />
-				{may.configureBuiltInAgents && <SystemModelRow providers={all} />}
+				{may.configureBuiltInBots && <SystemModelRow providers={all} />}
 			</SettingsGroup>
 			<SettingsGroup label="Providers">
 				{providers.error && (
@@ -296,15 +296,15 @@ function DefaultRow({
 	);
 }
 
-/** The Scribe's model stands for the system bots', since choosing one sets them all. */
+/** The Summariser's model stands for the system bots', since choosing one sets them all. */
 function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) {
 	const backToModels = useBackToHere("Models");
-	const systemAgents = useBuiltInAgents();
-	const current = systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null;
+	const systemBots = useBuiltInBots();
+	const current = systemBots.data?.find((bot) => bot.key === "summarise")?.model ?? null;
 	return (
 		<DefaultRow
 			label="Summaries"
-			description="Used for thread summaries, chat titles and compacting long chats"
+			description="Used for conversation summaries, chat titles and compacting long chats"
 			model={chosenModelName(providers, current)}
 			render={<Link from="/$workspace" to="./settings/providers/system" state={backToModels} />}
 		/>
@@ -339,23 +339,23 @@ export function DefaultModelSettings() {
 }
 
 /**
- * One model for everything Sugabots does behind the scenes: thread summaries,
+ * One model for everything Sugabots does behind the scenes: conversation summaries,
  * chat titles and compacting long chats. Choosing it sets it for every system
  * bot at once.
  */
 export function SystemModelSettings() {
-	const systemAgents = useBuiltInAgents();
-	const summarise = useChooseBuiltInAgentModel("summarise");
-	const compact = useChooseBuiltInAgentModel("compact");
+	const systemBots = useBuiltInBots();
+	const summarise = useChooseBuiltInBotModel("summarise");
+	const compact = useChooseBuiltInBotModel("compact");
 	const choosers = { summarise, compact };
 	return (
 		<ModelChoicePage
 			title="Summaries"
 			description="The model Sugabots uses behind the scenes: summaries, chat titles and compacting long chats. A fast, cheap model works best."
-			current={systemAgents.data?.find((agent) => agent.key === "summarise")?.model ?? null}
+			current={systemBots.data?.find((bot) => bot.key === "summarise")?.model ?? null}
 			pending={summarise.isPending || compact.isPending}
 			choose={(modelId) =>
-				Promise.all(BUILT_IN_AGENT_KEYS.map((key) => choosers[key].mutateAsync(modelId)))
+				Promise.all(BUILT_IN_BOT_KEYS.map((key) => choosers[key].mutateAsync(modelId)))
 			}
 		/>
 	);

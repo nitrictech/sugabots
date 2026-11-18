@@ -29,7 +29,7 @@ export interface Screenshot {
 	description: string;
 	/**
 	 * A 16:10 capture of the app, as WebP at 2240×1400: `/screenshots/one-thread.webp`.
-	 * `bun run capture screenshots` makes them all; Sandboxes needs the image from `bun run build:sandbox`.
+	 * `bun run capture screenshots` makes them all; Computers needs the image from `bun run build:computer`.
 	 */
 	image?: string;
 	/** What the screenshot should show, named on its placeholder until it exists. */
@@ -44,22 +44,22 @@ export const screenshots: readonly [Screenshot, ...Screenshot[]] = [
 		shows: "A thread with two people and a bot",
 	},
 	{
-		title: "Routines",
+		title: "Automations",
 		description: "Scheduled work posts where the whole team sees it, not to one person’s inbox.",
-		image: "/screenshots/routines.webp",
-		shows: "Routines",
+		image: "/screenshots/automations.webp",
+		shows: "Automations",
 	},
 	{
-		title: "Sandboxes",
+		title: "Computers",
 		description: "Each bot runs code in its own isolated environment, never on your machine.",
-		image: "/screenshots/sandboxes.webp",
-		shows: "The sandbox viewer",
+		image: "/screenshots/computers.webp",
+		shows: "The computer viewer",
 	},
 	{
-		title: "Artifacts",
-		description: "Files and outputs bots make are saved for the team, ready to open and review.",
-		image: "/screenshots/artifacts.webp",
-		shows: "The artifacts viewer",
+		title: "Files",
+		description: "What people upload and bots make is kept for the team, ready to open and review.",
+		image: "/screenshots/files.webp",
+		shows: "The files viewer",
 	},
 	{
 		title: "Usage",

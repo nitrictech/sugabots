@@ -18,16 +18,22 @@ import { appHandlers, StoryApp, storyUser, storyWorkspace } from "@/story-app.ts
 /*
  * A direct message as the app shows it: between people, one other or a
  * group, which nobody else sees and no bot answers. Each goes by the others'
- * names, with no thread controls, and Back on a phone returns to the list of
+ * names, with no task controls, and Back on a phone returns to the list of
  * them.
  */
 
 const me = testPerson({ id: storyUser.id, name: storyUser.name, email: storyUser.email });
 
-function said(id: string, threadId: string, author: Message["author"], text: string, at: string) {
+function said(
+	id: string,
+	conversationId: string,
+	author: Message["author"],
+	text: string,
+	at: string,
+) {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000007${id}`,
-		threadId,
+		conversationId,
 		author,
 		kind: "text",
 		status: "complete",
@@ -37,30 +43,30 @@ function said(id: string, threadId: string, author: Message["author"], text: str
 	} satisfies Message;
 }
 
-const priyaThread = withPriya.conversation.id;
-const smallGroupThread = withPriyaAndTheo.conversation.id;
+const withPriyaId = withPriya.conversation.id;
+const smallGroupId = withPriyaAndTheo.conversation.id;
 
 const messages: Record<string, Message[]> = {
-	[priyaThread]: [
-		said("01", priyaThread, me, "Morning! How did the Acme call go?", "2026-09-18T05:50:00.000Z"),
+	[withPriyaId]: [
+		said("01", withPriyaId, me, "Morning! How did the Acme call go?", "2026-09-18T05:50:00.000Z"),
 		said(
 			"02",
-			priyaThread,
+			withPriyaId,
 			priya,
 			"Really well. They want the renewal at the same seats.",
 			"2026-09-18T06:05:00.000Z",
 		),
 		said(
 			"03",
-			priyaThread,
+			withPriyaId,
 			priya,
 			"Can you look over the renewal deck before Thursday?",
 			"2026-09-18T06:10:00.000Z",
 		),
 	],
-	[smallGroupThread]: [
-		said("11", smallGroupThread, priya, "Offsite is on for Friday.", "2026-09-18T05:30:00.000Z"),
-		said("12", smallGroupThread, theo, "Who's bringing the projector?", "2026-09-18T05:40:00.000Z"),
+	[smallGroupId]: [
+		said("11", smallGroupId, priya, "Offsite is on for Friday.", "2026-09-18T05:30:00.000Z"),
+		said("12", smallGroupId, theo, "Who's bringing the projector?", "2026-09-18T05:40:00.000Z"),
 	],
 	[withFormerMember.conversation.id]: [
 		said(
@@ -96,7 +102,7 @@ const meta = preview.meta({
  * Mark done; shaded among the sidebar's direct messages while it is open.
  */
 export const WithAPerson = meta.story({
-	render: () => <StoryApp path={dm(priyaThread)} />,
+	render: () => <StoryApp path={dm(withPriyaId)} />,
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(await within(log).findByText(/renewal deck/)).toBeInTheDocument();
@@ -130,7 +136,7 @@ export const EmptyWithAPerson = meta.story({
  * how many are in it, which lists them.
  */
 export const WithTwoOthers = meta.story({
-	render: () => <StoryApp path={dm(smallGroupThread)} />,
+	render: () => <StoryApp path={dm(smallGroupId)} />,
 	play: async ({ canvas }) => {
 		const title = "Priya Shah and Theo Hart";
 		await expect(
@@ -329,7 +335,7 @@ export const PhoneList = meta.story({
 	play: async ({ canvas }) => {
 		const rail = await canvas.findByRole(
 			"navigation",
-			{ name: "Direct messages and pods" },
+			{ name: "Direct messages and channels" },
 			{ timeout: 10_000 },
 		);
 		await expect(within(rail).getByRole("link", { name: /^Direct messages/ })).toHaveAttribute(
@@ -344,7 +350,7 @@ export const PhoneList = meta.story({
 /** On a phone, a direct message covers the list, with Back to it. */
 export const PhoneConversation = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
-	render: () => <StoryApp path={dm(priyaThread)} />,
+	render: () => <StoryApp path={dm(withPriyaId)} />,
 	play: async ({ canvas }) => {
 		await canvas.findByRole("log", { name: "Chat messages" }, { timeout: 10_000 });
 		await expect(canvas.getByRole("link", { name: "Back to Direct messages" })).toBeVisible();

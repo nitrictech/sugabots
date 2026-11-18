@@ -16,9 +16,9 @@ const run = effectRunner(ManagedRuntime.make(noDatabase));
 const PROVIDER_ID = "0199a3a0-0000-7000-8000-000000000001";
 
 const activity: ModelRequests.Activity = {
-	purpose: "agent-turn",
-	agentId: "0199a3a0-0000-7000-8000-000000000003",
-	threadId: "0199a3a0-0000-7000-8000-000000000004",
+	purpose: "bot-turn",
+	botId: "0199a3a0-0000-7000-8000-000000000003",
+	conversationId: "0199a3a0-0000-7000-8000-000000000004",
 	turnId: "0199a3a0-0000-7000-8000-000000000005",
 };
 

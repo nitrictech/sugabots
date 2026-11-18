@@ -1,21 +1,21 @@
 import { DateTime, Effect } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
-import { threadCompaction } from "../../database/schema.ts";
+import { conversationCompaction } from "../../database/schema.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 
 /**
- * The only writer of `thread_compaction`: what each thread's bots read in
- * place of its older messages, written by the Compaction agent.
+ * The only writer of `compaction`: what each conversation's bots read in
+ * place of its older messages, written by the Compaction bot.
  */
 export interface Records {
 	/**
-	 * Replaces the thread's compaction, so its bots read `summary` and then
-	 * every message from `keptFrom` on, and announces it in the thread's workspace.
+	 * Replaces the conversation's compaction, so its bots read `summary` and then
+	 * every message from `keptFrom` on, and announces it in the conversation's workspace.
 	 */
 	readonly save: (compaction: {
 		workspaceId: string;
-		threadId: string;
+		conversationId: string;
 		summary: string;
 		historyStartsAt: Date;
 		keptFrom: Date;
@@ -40,17 +40,17 @@ export const makeRecords = Effect.gen(function* () {
 						};
 						yield* query((db) =>
 							db
-								.insert(threadCompaction)
-								.values({ threadId: compaction.threadId, ...written })
+								.insert(conversationCompaction)
+								.values({ conversationId: compaction.conversationId, ...written })
 								.onConflictDoUpdate({
-									target: threadCompaction.threadId,
+									target: conversationCompaction.conversationId,
 									set: { ...written, updatedAt },
 								}),
 						);
 						yield* emit([
-							ConversationEvent.ThreadCompacted({
+							ConversationEvent.ConversationCompacted({
 								workspaceId: compaction.workspaceId,
-								threadId: compaction.threadId,
+								conversationId: compaction.conversationId,
 							}),
 						]);
 					}),

@@ -11,7 +11,7 @@
 		"db:generate": "drizzle-kit generate",
 		"db:push": "drizzle-kit push",
 		"db:migrate": "node --env-file-if-exists=../../.env src/database/migrate.ts",
-		"destroy-pod-sandboxes": "node --env-file-if-exists=../../.env src/sandboxes/destroy-pod-sandboxes.ts",
+		"destroy-pod-computers": "node --env-file-if-exists=../../.env src/computers/destroy-pod-computers.ts",
 		"db:studio": "drizzle-kit studio",
 		"typecheck": "tsc --noEmit"
 	},

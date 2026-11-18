@@ -1,4 +1,4 @@
-import { BotFace } from "@sugabots/avatars";
+import { StillBotFace } from "@sugabots/avatars";
 import type { ProviderPresetId } from "@sugabots/contracts";
 import { providerLogos } from "@sugabots/provider-logos";
 import { cn } from "cn";
@@ -6,7 +6,7 @@ import { CheckIcon, XIcon } from "lucide-react";
 import { useInView, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { StripeIcon } from "@/components/brand-icons";
-import { arrive, type Bot, crew, MessageRow, people } from "@/landing/chat-parts";
+import { arrive, type Bot, bots, MessageRow, people } from "@/landing/chat-parts";
 
 /*
  * The four card demos. The first two open on a finished moment in the app
@@ -32,7 +32,7 @@ export function ThreadDemo() {
 				text="Fernhill replied about pricing. Can someone draft the answer?"
 			/>
 			<MessageRow
-				author={{ kind: "bot", bot: crew.growthDesk }}
+				author={{ kind: "bot", bot: bots.growthDesk }}
 				time="6:03"
 				text="Drafted. It’s in the thread with their usage numbers."
 			>
@@ -134,16 +134,16 @@ export function ApprovalDemo() {
 /** The bots' exchange. */
 const handoffMessages: readonly { from: Bot; time: string; text: string }[] = [
 	{
-		from: crew.growthDesk,
+		from: bots.growthDesk,
 		time: "6:08",
 		text: "Can Brightwater have 25% off the annual tier and still clear our margin?",
 	},
 	{
-		from: crew.pricingAnalyst,
+		from: bots.pricingAnalyst,
 		time: "6:09",
 		text: "Yes: $36 a seat is a 72% margin. I’ve drafted quote Q-1182.",
 	},
-	{ from: crew.growthDesk, time: "6:09", text: "Thanks. Taking it back to Gary." },
+	{ from: bots.growthDesk, time: "6:09", text: "Thanks. Taking it back to Gary." },
 ];
 
 /** Growth Desk and Pricing Analyst's own exchange, as the app shows a collaboration. */
@@ -152,9 +152,9 @@ export function HandoffDemo() {
 		<div className={cn(demoArea, "overflow-hidden")}>
 			<div className="flex items-center gap-2 border-b border-landing-line px-4 py-2.5 sm:px-5">
 				<span aria-hidden className="flex shrink-0">
-					{[crew.growthDesk, crew.pricingAnalyst].map((bot) => (
+					{[bots.growthDesk, bots.pricingAnalyst].map((bot) => (
 						<span key={bot.name} className="-mr-1.75">
-							<BotFace
+							<StillBotFace
 								{...bot.look}
 								ring={{ color: "var(--color-landing-page)", width: 2 }}
 								className="block size-5"
@@ -163,7 +163,7 @@ export function HandoffDemo() {
 					))}
 				</span>
 				<span className="truncate pl-2 text-xs font-semibold text-landing-text">
-					Collaboration with {crew.pricingAnalyst.name}
+					Collaboration with {bots.pricingAnalyst.name}
 				</span>
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col justify-end gap-3 p-4 sm:px-5">
@@ -190,28 +190,28 @@ interface ModelChoice {
 
 const modelChoices: readonly ModelChoice[] = [
 	{
-		bot: crew.copywriter,
+		bot: bots.copywriter,
 		job: "Drafts replies, posts and invites",
 		model: "ChatGPT",
 		provider: "OpenAI",
 		preset: "chatgpt",
 	},
 	{
-		bot: crew.researcher,
+		bot: bots.researcher,
 		job: "Reads the long stuff so you don’t have to",
 		model: "Claude",
 		provider: "Anthropic",
 		preset: "anthropic",
 	},
 	{
-		bot: crew.inboxSorter,
+		bot: bots.inboxSorter,
 		job: "Triage, reminders and quick jobs",
 		model: "Gemini Flash",
 		provider: "Google",
 		preset: "gemini",
 	},
 	{
-		bot: crew.journal,
+		bot: bots.journal,
 		job: "Private notes that stay private",
 		model: "Llama",
 		provider: "Ollama, local",
@@ -263,7 +263,7 @@ export function ModelsDemo() {
 							: "border-transparent bg-transparent",
 					)}
 				>
-					<BotFace {...choice.bot.look} className="size-7.5" />
+					<StillBotFace {...choice.bot.look} className="size-7.5" />
 					<span className="flex min-w-0 flex-1 flex-col gap-px">
 						<span className="truncate text-sm font-semibold text-landing-text">
 							{choice.bot.name}

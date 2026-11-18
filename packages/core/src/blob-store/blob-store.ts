@@ -6,7 +6,7 @@ import { fromFileSystem } from "./implementations/filesystem.ts";
 import { fromPostgres } from "./implementations/postgres.ts";
 
 /**
- * Bytes kept under path-like keys, such as `threads/<threadId>/files/<fileId>`,
+ * Bytes kept under path-like keys, such as `threads/<conversationId>/files/<fileId>`,
  * for any feature that stores files. The store knows nothing of who owns a
  * blob: each feature keeps its own records, points at blobs by key, and
  * deletes its blobs itself when what owns them goes, usually with

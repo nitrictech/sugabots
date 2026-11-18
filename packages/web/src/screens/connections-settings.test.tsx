@@ -6,18 +6,18 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browser } from "@/lib/connections.ts";
-import { apiAnswers, linear, mount, pods, serveConnections, triager } from "@/test-api.tsx";
+import { apiAnswers, channels, linear, mount, serveConnections, triager } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const pod = pods[0] as (typeof pods)[number];
+const channel = channels[0] as (typeof channels)[number];
 const route = client.api.connections;
 
 const wiki: TestConnection = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
 	workspaceId: linear.workspaceId,
-	agentId: "0199a3a0-0000-7000-8000-00000000b071",
+	botId: "0199a3a0-0000-7000-8000-00000000b071",
 	name: "Wiki",
 	handle: "wiki",
 	url: "https://wiki.wikimple.com/mcp",
@@ -336,7 +336,7 @@ describe("the Connections settings", () => {
 
 		await waitFor(() =>
 			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
-				params: { agentId: linear.id, connectionId: wiki.id },
+				params: { botId: linear.id, connectionId: wiki.id },
 				payload: { toolAccess: { wipe: "off" } },
 			}),
 		);
@@ -532,7 +532,7 @@ describe("the Connections settings", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
 		await waitFor(() =>
 			expect(route.update).toHaveBeenCalledWith({
-				params: { agentId: linear.id, connectionId: wiki.id },
+				params: { botId: linear.id, connectionId: wiki.id },
 				payload: { secret: "new-secret" },
 			}),
 		);
@@ -542,7 +542,7 @@ describe("the Connections settings", () => {
 		fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
 		await waitFor(() =>
 			expect(route.remove).toHaveBeenCalledWith({
-				params: { agentId: linear.id, connectionId: wiki.id },
+				params: { botId: linear.id, connectionId: wiki.id },
 			}),
 		);
 		await waitFor(() => expect(router.state.location.pathname).toBe(connectionsPage));
@@ -582,7 +582,7 @@ describe("coming back from a connection sign-in", () => {
 	it("opens the Connections of the bot the sign-in was for", async () => {
 		serveConnections(wiki);
 		const router = mount(
-			`/connections/oauth/return?workspace=${pod.workspaceId}&agent=${linear.id}`,
+			`/connections/oauth/return?workspace=${channel.workspaceId}&bot=${linear.id}`,
 		);
 
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
@@ -592,7 +592,7 @@ describe("coming back from a connection sign-in", () => {
 	it("says once why a sign-in for a bot did not finish", async () => {
 		serveConnections(wiki);
 		const router = mount(
-			`/connections/oauth/return?workspace=${pod.workspaceId}&agent=${linear.id}&oauth_error=refused`,
+			`/connections/oauth/return?workspace=${channel.workspaceId}&bot=${linear.id}&oauth_error=refused`,
 		);
 
 		expect(

@@ -18,7 +18,7 @@ import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 const widths = {
 	compact: "max-w-105 sm:max-w-105",
 	default: "max-w-115 sm:max-w-115",
-	/** For writing at length, such as a routine's instructions. */
+	/** For writing at length, such as an automation's instructions. */
 	wide: "max-w-160 sm:max-w-160",
 } as const;
 

@@ -2,14 +2,14 @@ import { type UserText, userText } from "@sugabots/errors";
 import type { Tool } from "ai";
 import { Effect } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
-import type { ThreadFiles } from "../../thread-files/thread-files.ts";
+import type { ConversationFiles } from "../../../files/conversation-files.ts";
 import type { ApprovedToolCalls } from "../approvals/approved-calls.ts";
 import { forModel } from "./large-results.ts";
 import type { ToolCallRepository } from "./repository.ts";
 
 /** The turn a recorded tool runs in: where its rows point. */
 export interface RecordingTurn {
-	threadId: string;
+	conversationId: string;
 	messageId: string;
 	turnId: string;
 }
@@ -17,7 +17,7 @@ export interface RecordingTurn {
 export interface RecordingOptions {
 	calls: Pick<ToolCallRepository.Interface, "open" | "close">;
 	/** Where a result too long to give the model whole is kept, for it to read on. */
-	files: Pick<ThreadFiles.Interface, "write">;
+	files: Pick<ConversationFiles.Interface, "write">;
 	/** Runs a service's Effect from the tool's promise. */
 	run: RunEffect;
 	from: RecordingTurn;
@@ -58,10 +58,10 @@ const APPROVAL_NO_LONGER_APPLIES = userText`The tool was not run: its approval n
  *
  * The call's row keeps the whole output. The model is given it whole too,
  * unless it is longer than `MAX_RESULT_CHARACTERS`: then it is kept as a
- * file in the thread and the model gets its start (see `large-results.ts`).
+ * file in the conversation and the model gets its start (see `large-results.ts`).
  *
  * A tool that throws is recorded as failed and the model is told so as an
- * ordinary result, so the agent can recover or explain rather than
+ * ordinary result, so the bot can recover or explain rather than
  * the turn dying. The SDK's own tool-error path would also reach the model,
  * but through a shape this codebase does not otherwise handle, and with
  * whatever text was thrown.
@@ -125,7 +125,7 @@ export function recorded(key: string, tool: Tool, options: RecordingOptions): To
 			}
 			try {
 				return await run(
-					forModel(output, { files, threadId: from.threadId, toolCallId: opened.id }),
+					forModel(output, { files, conversationId: from.conversationId, toolCallId: opened.id }),
 				);
 			} catch (cause) {
 				// The call is already closed with its output, which stays: only

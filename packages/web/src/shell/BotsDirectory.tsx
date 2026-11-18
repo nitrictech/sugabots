@@ -1,11 +1,11 @@
-import type { Agent } from "@sugabots/contracts";
+import type { Bot } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Pin, PinOff, Plus } from "lucide-react";
-import { useAgents, usePinAgent } from "@/lib/agents.ts";
+import { useBots, usePinBot } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { agentSettingsLink, botLink } from "@/lib/links.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
-import { useNewBot } from "@/shell/NewInPod.tsx";
+import { botLink, botSettingsLink } from "@/lib/links.ts";
+import { BotAvatar } from "@/shell/Bot.tsx";
+import { useNewBot } from "@/shell/NewInChannel.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
@@ -18,12 +18,12 @@ import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.ts
  * in the sidebar or takes it out. A + makes another.
  */
 export function BotsDirectory() {
-	const { agents, isPending, error } = useAgents();
-	const pin = usePinAgent();
+	const { bots: reachable, isPending, error } = useBots();
+	const pin = usePinBot();
 	const newBot = useNewBot();
-	const bots = (agents ?? []).filter((agent) => agent.systemAgentKey === null);
-	const assistant = bots.filter((agent) => agent.assistant);
-	const rest = bots.filter((agent) => !agent.assistant);
+	const bots = (reachable ?? []).filter((bot) => bot.systemBotKey === null);
+	const assistant = bots.filter((bot) => bot.assistant);
+	const rest = bots.filter((bot) => !bot.assistant);
 	return (
 		<Page
 			title="Bots"
@@ -41,8 +41,8 @@ export function BotsDirectory() {
 				{pin.error ? <Alert>{failureMessage(pin.error)}</Alert> : null}
 				{assistant.length > 0 && (
 					<SettingsGroup label="Yours" headingLevel={2}>
-						{assistant.map((agent) => (
-							<BotRow key={agent.id} agent={agent} />
+						{assistant.map((bot) => (
+							<BotRow key={bot.id} bot={bot} />
 						))}
 					</SettingsGroup>
 				)}
@@ -53,12 +53,12 @@ export function BotsDirectory() {
 				) : (
 					rest.length > 0 && (
 						<SettingsGroup label="In this workspace" headingLevel={2}>
-							{rest.map((agent) => (
+							{rest.map((bot) => (
 								<BotRow
-									key={agent.id}
-									agent={agent}
-									onPin={(pinned) => pin.mutate({ agentId: agent.id, pinned })}
-									pinning={pin.isPending && pin.variables?.agentId === agent.id}
+									key={bot.id}
+									bot={bot}
+									onPin={(pinned) => pin.mutate({ botId: bot.id, pinned })}
+									pinning={pin.isPending && pin.variables?.botId === bot.id}
 								/>
 							))}
 						</SettingsGroup>
@@ -77,43 +77,43 @@ export function BotsDirectory() {
  * button is inside a link.
  */
 function BotRow({
-	agent,
+	bot,
 	onPin,
 	pinning = false,
 }: {
-	agent: Agent;
+	bot: Bot;
 	/** Pins or unpins it; absent for the Personal Assistant, which is always at the sidebar's top. */
 	onPin?: (pinned: boolean) => void;
 	pinning?: boolean;
 }) {
-	const usable = agent.permissions.talk;
+	const usable = bot.permissions.talk;
 	const nameClassName = "focus-ring rounded-sm hover:underline";
 	return (
 		<SettingsRow
-			icon={<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={24} />}
+			icon={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={24} />}
 			label={
 				usable ? (
-					<Link {...botLink(agent)} className={nameClassName}>
-						{agent.name}
+					<Link {...botLink(bot)} className={nameClassName}>
+						{bot.name}
 					</Link>
-				) : agent.permissions.update ? (
-					<Link {...agentSettingsLink(agent)} className={nameClassName}>
-						{agent.name}
+				) : bot.permissions.update ? (
+					<Link {...botSettingsLink(bot)} className={nameClassName}>
+						{bot.name}
 					</Link>
 				) : (
-					agent.name
+					bot.name
 				)
 			}
 			sub={
-				agent.assistant
+				bot.assistant
 					? "Your Personal Assistant"
 					: [
-							agent.visibility === "private"
+							bot.visibility === "private"
 								? usable
 									? "Private"
 									: "Someone else's private bot"
 								: null,
-							agent.description,
+							bot.description,
 						]
 							.filter(Boolean)
 							.join(" · ") || undefined
@@ -121,12 +121,12 @@ function BotRow({
 			trailing={
 				!usable ? null : onPin ? (
 					<IconButton
-						label={agent.pinned ? `Unpin ${agent.name}` : `Pin ${agent.name}`}
+						label={bot.pinned ? `Unpin ${bot.name}` : `Pin ${bot.name}`}
 						size="sm"
 						disabled={pinning}
-						onClick={() => onPin(!agent.pinned)}
+						onClick={() => onPin(!bot.pinned)}
 					>
-						{agent.pinned ? <PinOff strokeWidth={2} /> : <Pin strokeWidth={2} />}
+						{bot.pinned ? <PinOff strokeWidth={2} /> : <Pin strokeWidth={2} />}
 					</IconButton>
 				) : (
 					<SettingsValue>Always pinned</SettingsValue>

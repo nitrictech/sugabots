@@ -15,15 +15,15 @@ import {
 } from "../../../database/database.ts";
 import {
 	connection,
+	conversation,
 	type ToolCallRow,
-	thread,
 	toolCall,
 	turn,
 	user,
 } from "../../../database/schema.ts";
 import { ConversationEvents } from "../../conversation-events.ts";
 import { ConversationEvent, type ToolCallChange } from "../../events.ts";
-import { toToolCallPart } from "../../threads/tool-calls.ts";
+import { toToolCallPart } from "../../repository/tool-calls.ts";
 import { withImagesCounted } from "../../tools/images.ts";
 import { mayRunTools } from "../lifecycle.ts";
 import { WorkAdmission } from "../work-admission.ts";
@@ -37,7 +37,7 @@ import {
 } from "./lifecycle.ts";
 
 /**
- * The only writer of `tool_call`: what an agent's reply asked a tool, whether
+ * The only writer of `tool_call`: what a bot's reply asked a tool, whether
  * a person allowed it, and what it got.
  *
  * Each command locks the call, asks `lifecycle.ts` what the command makes of
@@ -45,7 +45,7 @@ import {
  * refuses writes nothing.
  *
  * A call is opened when the tool starts and closed when it returns, each in
- * its own transaction, so a reader watching the thread sees the call appear
+ * its own transaction, so a reader watching the conversation sees the call appear
  * and then resolve. The reply keeps a reference to the call among its parts at
  * the point it was made; the input and output live here, so the tool never
  * writes the row the streaming reply is being saved to.
@@ -53,7 +53,7 @@ import {
 export interface Interface {
 	/** Records that a tool needing no approval has been called. */
 	readonly open: (input: {
-		threadId: string;
+		conversationId: string;
 		messageId: string;
 		turnId: string;
 		tool: string;
@@ -70,26 +70,26 @@ export interface Interface {
 	) => Effect.Effect<ToolCallPart | undefined>;
 	/** Parks the calls a reply asked for until people decide them. */
 	readonly requestApprovals: (
-		reply: { threadId: string; messageId: string; turnId: string },
+		reply: { conversationId: string; messageId: string; turnId: string },
 		approvals: readonly PendingToolApproval[],
 	) => Effect.Effect<void>;
 	/**
-	 * Records a decision on an approval in the thread. `false`, changing
+	 * Records a decision on an approval in the conversation. `false`, changing
 	 * nothing, once it is decided: the first decision recorded stands.
 	 */
 	readonly recordDecision: (input: {
-		threadId: string;
+		conversationId: string;
 		approvalId: string;
 		decision: ApprovalDecision;
 	}) => Effect.Effect<boolean>;
 	/**
 	 * Starts an allowed call, if it is exactly the call that was approved, its
 	 * turn may still run tools, its connection is configured as it was when
-	 * approved, and its routine run, if any, still takes work (see
+	 * approved, and its automation run, if any, still takes work (see
 	 * `WorkAdmission`).
 	 */
 	readonly beginExecution: (input: {
-		threadId: string;
+		conversationId: string;
 		messageId: string;
 		turnId: string;
 		sdkToolCallId: string;
@@ -162,7 +162,7 @@ export const make = Effect.gen(function* () {
 							db
 								.insert(toolCall)
 								.values({
-									threadId: input.threadId,
+									conversationId: input.conversationId,
 									messageId: input.messageId,
 									turnId: input.turnId,
 									tool: input.tool,
@@ -214,7 +214,7 @@ export const make = Effect.gen(function* () {
 								.values(
 									approvals.map((approval) => ({
 										id: approval.id,
-										threadId: reply.threadId,
+										conversationId: reply.conversationId,
 										messageId: reply.messageId,
 										turnId: reply.turnId,
 										tool: approval.tool,
@@ -232,7 +232,7 @@ export const make = Effect.gen(function* () {
 								)
 								.returning(),
 						);
-						// In the order the reply asked for them, which is how the thread lists them.
+						// In the order the reply asked for them, which is how the conversation lists them.
 						const byId = new Map(rows.map((row) => [row.id, row]));
 						yield* emit(
 							approvals.flatMap((approval) => {
@@ -250,7 +250,10 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const row = yield* lockedCall(
-							and(eq(toolCall.threadId, input.threadId), eq(toolCall.approvalId, input.approvalId)),
+							and(
+								eq(toolCall.conversationId, input.conversationId),
+								eq(toolCall.approvalId, input.approvalId),
+							),
 						);
 						if (!row) return false;
 						const decided = yield* apply(row, ToolCallEvent.Decide({ decision: input.decision }));
@@ -259,15 +262,16 @@ export const make = Effect.gen(function* () {
 						const [placed] = yield* query((db) =>
 							db
 								.select({
-									workspaceId: thread.workspaceId,
+									workspaceId: conversation.workspaceId,
 									deciderName: user.name,
 								})
-								.from(thread)
+								.from(conversation)
 								.leftJoin(user, eq(user.id, input.decision.userId))
-								.where(eq(thread.id, decided.threadId))
+								.where(eq(conversation.id, decided.conversationId))
 								.limit(1),
 						);
-						if (!placed) return yield* Effect.die(new Error("A decided call's thread is missing"));
+						if (!placed)
+							return yield* Effect.die(new Error("A decided call's conversation is missing"));
 						yield* emit([
 							ConversationEvent.ToolCallDecided({
 								...toolCallChange(decided, placed.deciderName),
@@ -284,20 +288,22 @@ export const make = Effect.gen(function* () {
 				"beginExecution",
 				transaction(
 					Effect.gen(function* (): Effect.fn.Return<BeganExecution, never, Database | Transaction> {
-						if (!(yield* admission.admits(input.threadId))) {
-							return refusedExecution("The routine run takes no more work");
+						if (!(yield* admission.admits(input.conversationId))) {
+							return refusedExecution("The automation run takes no more work");
 						}
 						const [scope] = yield* query((db) =>
 							db
 								.select({
-									workspaceId: thread.workspaceId,
-									agentId: turn.agentId,
+									workspaceId: conversation.workspaceId,
+									botId: turn.botId,
 									status: turn.status,
 									cancelRequested: turn.cancelRequested,
 								})
 								.from(turn)
-								.innerJoin(thread, eq(thread.id, turn.threadId))
-								.where(and(eq(turn.id, input.turnId), eq(turn.threadId, input.threadId)))
+								.innerJoin(conversation, eq(conversation.id, turn.conversationId))
+								.where(
+									and(eq(turn.id, input.turnId), eq(turn.conversationId, input.conversationId)),
+								)
 								.limit(1)
 								.for("update", { of: turn }),
 						);
@@ -312,7 +318,7 @@ export const make = Effect.gen(function* () {
 										and(
 											eq(connection.id, binding.connectionId),
 											eq(connection.workspaceId, scope.workspaceId),
-											eq(connection.agentId, scope.agentId),
+											eq(connection.botId, scope.botId),
 											eq(connection.configurationRevision, binding.connectionRevision),
 										),
 									)
@@ -500,7 +506,7 @@ function sameCallAsApproved(
 	input: Parameters<Interface["beginExecution"]>[0],
 ): boolean {
 	return (
-		row.threadId === input.threadId &&
+		row.conversationId === input.conversationId &&
 		row.messageId === input.messageId &&
 		row.tool === input.tool &&
 		isDeepStrictEqual(
@@ -529,7 +535,7 @@ function bindingColumns(binding: ApprovalBinding) {
 /** The call as an event carries it once it has changed. */
 function toolCallChange(row: ToolCallRow, decidedByName: string | null = null): ToolCallChange {
 	return {
-		threadId: row.threadId,
+		conversationId: row.conversationId,
 		messageId: row.messageId,
 		toolCall: toToolCallPart(row, decidedByName),
 	};

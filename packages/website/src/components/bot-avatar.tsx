@@ -1,4 +1,4 @@
-import { BotFace, type BotLook } from "@sugabots/avatars";
+import { type BotLook, StillBotFace } from "@sugabots/avatars";
 import { cn } from "cn";
 import type { ComponentProps } from "react";
 import { Avatar } from "@/components/ui/avatar";
@@ -9,7 +9,7 @@ type BotAvatarProps = BotLook & Omit<ComponentProps<typeof Avatar>, "color">;
 export function BotAvatar({ color, face, className, ...props }: BotAvatarProps) {
 	return (
 		<Avatar className={cn("after:hidden", className)} {...props}>
-			<BotFace color={color} face={face} className="size-full" />
+			<StillBotFace color={color} face={face} className="size-full" />
 		</Avatar>
 	);
 }

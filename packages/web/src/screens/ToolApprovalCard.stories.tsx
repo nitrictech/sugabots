@@ -60,7 +60,7 @@ const bigLinearIssue = asking({
 		assignee: "Unassigned",
 		project: "Q4 reliability",
 		description:
-			"41 events in the last 24 hours, all on POST /checkout, all hitting the 30s gateway limit. Started at 02:14 UTC, just after the 0.18.2 deploy.\n\nWhat we see\n• p95 latency on /checkout went from 1.2s to 28.4s\n• Every timeout is a cart with more than 20 items\n• The inventory reservation call is retried 6 times before giving up\n\nCustomers affected\nNorthwind (3 failed orders), Acme Retail (11), Globex (2). Two of them have opened support tickets.\n\nLikely cause\nThe batch reservation change in 0.18.2 reserves items one by one instead of in a single call. Reverting it in staging brings p95 back to 1.4s.\n\nSuggested fix\nRevert the change, or restore the batched call behind a flag and add a timeout of 10s on the reservation step.\n\nSentry: PLAT-482, PLAT-487\nRaised by Growth Desk from the Revenue pod.",
+			"41 events in the last 24 hours, all on POST /checkout, all hitting the 30s gateway limit. Started at 02:14 UTC, just after the 0.18.2 deploy.\n\nWhat we see\n• p95 latency on /checkout went from 1.2s to 28.4s\n• Every timeout is a cart with more than 20 items\n• The inventory reservation call is retried 6 times before giving up\n\nCustomers affected\nNorthwind (3 failed orders), Acme Retail (11), Globex (2). Two of them have opened support tickets.\n\nLikely cause\nThe batch reservation change in 0.18.2 reserves items one by one instead of in a single call. Reverting it in staging brings p95 back to 1.4s.\n\nSuggested fix\nRevert the change, or restore the batched call behind a flag and add a timeout of 10s on the reservation step.\n\nSentry: PLAT-482, PLAT-487\nRaised by Growth Desk from the Revenue channel.",
 	},
 });
 
@@ -79,8 +79,8 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: {
 		call: asking(),
-		agent: tripPlanner,
-		threadId: "0199a3a0-0000-7000-8000-0000000000b2",
+		bot: tripPlanner,
+		conversationId: "0199a3a0-0000-7000-8000-0000000000b2",
 		canApprove: true,
 		look: calendar,
 	},
@@ -141,20 +141,20 @@ export const Answered = meta.story({
 	},
 });
 
-/** BigLinearIssueFolded is a long write folded in the card, so it never takes over the thread. */
+/** BigLinearIssueFolded is a long write folded in the card, so it never takes over the conversation. */
 export const BigLinearIssueFolded = meta.story({
-	args: { call: bigLinearIssue, agent: growthDesk, look: linear },
+	args: { call: bigLinearIssue, bot: growthDesk, look: linear },
 });
 
 /** BigLinearIssueUnfolded scrolls inside the card, stopping at its ends rather than scrolling the chat. */
 export const BigLinearIssueUnfolded = meta.story({
-	args: { call: bigLinearIssue, agent: growthDesk, look: linear },
+	args: { call: bigLinearIssue, bot: growthDesk, look: linear },
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "See more" }));
 	},
 });
 
-/** ConnectionSinceRemoved is a call to a connection the pod no longer has: the handle is written out. */
+/** ConnectionSinceRemoved is a call to a connection the bot no longer has: the handle is written out. */
 export const ConnectionSinceRemoved = meta.story({ args: { look: undefined } });
 
 /** OnAPhone shows the start of the request and one Review button, which opens it full screen. */
@@ -171,7 +171,7 @@ export const OnAPhoneInLight = meta.story({ globals: { ...PHONE, theme: "light" 
 /** ReviewOnAPhone is the whole request full screen, with Close at its top right and Deny and Allow pinned under it. */
 export const ReviewOnAPhone = meta.story({
 	globals: PHONE,
-	args: { call: bigLinearIssue, agent: growthDesk, look: linear },
+	args: { call: bigLinearIssue, bot: growthDesk, look: linear },
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog", { name: "Create issue" });
@@ -191,7 +191,7 @@ export const ReviewOnAPhoneAsAViewer = meta.story({
 	},
 });
 
-/** ANetworkRequest is an agent asking for its pod's sandbox to reach a host, which an admin of the pod answers. */
+/** ANetworkRequest is a bot asking for its computer to reach a host, which those who manage its computer answer. */
 export const ANetworkRequest = meta.story({
 	args: {
 		call: asking({
@@ -201,7 +201,7 @@ export const ANetworkRequest = meta.story({
 			},
 			approval: {
 				status: "pending",
-				deciders: "sandbox-managers",
+				deciders: "computer-managers",
 				decidedByName: null,
 				decidedAt: null,
 			},
@@ -210,18 +210,18 @@ export const ANetworkRequest = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			canvas.getByText("Trip Planner wants its sandbox to reach a new host"),
+			canvas.getByText("Trip Planner wants its computer to reach a new host"),
 		).toBeInTheDocument();
 		await expect(canvas.queryByText("RN")).toBeNull();
 	},
 });
 
-/** ANetworkRequestNotYours is that request seen by someone who doesn't decide the pod's network access. */
+/** ANetworkRequestNotYours is that request seen by someone who doesn't decide the bot's network access. */
 export const ANetworkRequestNotYours = meta.story({
 	args: { ...ANetworkRequest.input.args, canApprove: false },
 	play: async ({ canvas }) => {
 		await expect(
-			canvas.getByText("Waiting for an admin of this pod to answer this."),
+			canvas.getByText("Waiting for someone who manages this bot to answer this."),
 		).toBeInTheDocument();
 	},
 });

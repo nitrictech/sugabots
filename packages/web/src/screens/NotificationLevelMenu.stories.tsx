@@ -2,13 +2,13 @@ import type { NotificationLevel, NotificationSettings } from "@sugabots/contract
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, chatPath, StoryApp, storyBots, storyPods } from "@/story-app.tsx";
+import { appHandlers, chatPath, StoryApp, storyBots, storyChannels } from "@/story-app.tsx";
 
 const API = import.meta.env.VITE_API_URL as string;
 
 const bot = storyBots.find((one) => !one.assistant);
-const [pod] = storyPods;
-if (!bot || !pod) throw new Error("The story app has no bot or channel");
+const [channel] = storyChannels;
+if (!bot || !channel) throw new Error("The story app has no bot or channel");
 
 /**
  * Right-clicks `row` until its notifications menu opens: a row only has the
@@ -39,13 +39,13 @@ const meta = preview.meta({
 			pausedUntil: null,
 			quietHours: null,
 			turnFailures: true,
-			routineRuns: "failures",
-			pods: {},
+			automationRuns: "failures",
+			channels: {},
 			bots: {},
-			mutedUntil: { pods: {}, bots: {} },
+			mutedUntil: { channels: {}, bots: {} },
 		};
-		type Field = "pods" | "bots";
-		const fieldOf = (kind: unknown): Field => (kind === "pod" ? "pods" : "bots");
+		type Field = "channels" | "bots";
+		const fieldOf = (kind: unknown): Field => (kind === "channel" ? "channels" : "bots");
 		const without = <T,>(record: Record<string, T>, id: string) => {
 			const { [id]: _previous, ...others } = record;
 			return others;
@@ -85,7 +85,7 @@ const meta = preview.meta({
 
 /**
  * Right-clicking a bot in the sidebar offers what it notifies about. Choosing
- * Nothing marks it muted, until it goes back to following its pod.
+ * Nothing marks it muted, until it goes back to following its channel.
  */
 export const MutingABot = meta.story({
 	render: () => <StoryApp path={chatPath(bot)} />,

@@ -47,7 +47,7 @@ const september: WorkspaceUsage = {
 	],
 	models: [
 		model("claude-sonnet-4-5", "Claude Sonnet", "Anthropic", "anthropic", 47.1),
-		// The bots' $16.01 and the system agents' $5.65, together.
+		// The bots' $16.01 and the system bots' $5.65, together.
 		model("claude-haiku-4-5", "Claude Haiku", "Anthropic", "anthropic", 21.66),
 		model("gpt-5", "GPT-5", "OpenAI", "openai", 18.84),
 		model("deepseek/deepseek-v3", "DeepSeek V3", "OpenRouter", "openrouter", 6.59),
@@ -60,7 +60,7 @@ const september: WorkspaceUsage = {
 		),
 		model("qwen3.5:4b", "Qwen 3.5 4B", "Ollama", "ollama", 0),
 	],
-	systemAgents: { usd: 5.65, unpricedRequests: 0 },
+	systemBots: { usd: 5.65, unpricedRequests: 0 },
 	personalAssistants: { usd: 0, unpricedRequests: 0 },
 };
 
@@ -71,7 +71,7 @@ function bot(
 	usd: number,
 ) {
 	return {
-		agentId: `bot-${name}`,
+		botId: `bot-${name}`,
 		name,
 		color,
 		face,
@@ -121,7 +121,7 @@ const nothingSpent = (month: string): WorkspaceUsage => ({
 	days: days(month, [], 30),
 	bots: [],
 	models: [],
-	systemAgents: { usd: 0, unpricedRequests: 0 },
+	systemBots: { usd: 0, unpricedRequests: 0 },
 	personalAssistants: { usd: 0, unpricedRequests: 0 },
 });
 
@@ -166,13 +166,13 @@ const meta = preview.meta({
 
 /**
  * The design's month: the total, a bar for each day so far, and the month by
- * bot, with the system agents last. The month still going can't be stepped past.
+ * bot, with the system bots last. The month still going can't be stepped past.
  */
 export const ByBot = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("$94.20")).toBeInTheDocument();
 		await expect(canvas.getByText("Growth Desk")).toBeInTheDocument();
-		await expect(canvas.getByText("System agents")).toBeInTheDocument();
+		await expect(canvas.getByText("System bots")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Next month" })).toBeDisabled();
 		await expect(
 			canvas.getByText(
@@ -222,10 +222,10 @@ export const ByModel = meta.story({
 	},
 });
 
-/** By pod, counting each pod's bots, with the system agents' work last. */
-export const ByPod = meta.story({
+/** By channel, counting each channel's bots, with the system bots' work last. */
+export const ByChannel = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("radio", { name: "Pod" }));
+		await userEvent.click(await canvas.findByRole("radio", { name: "Channel" }));
 		await expect(canvas.getByText("Revenue")).toBeInTheDocument();
 		await expect(canvas.getAllByText("3 bots")).toHaveLength(2);
 		await expect(canvas.getByText("$5.65")).toBeInTheDocument();

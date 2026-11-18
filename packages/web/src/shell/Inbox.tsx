@@ -1,28 +1,28 @@
-import type { ActivityItem, Pod } from "@sugabots/contracts";
+import type { Channel, InboxItem } from "@sugabots/contracts";
 import { Link, linkOptions, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { CheckCheck, Inbox as InboxIcon, ListFilter, MessageCircle } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
+import { useChannels } from "@/lib/channels.ts";
 import {
-	useActivityFeed,
 	useAttentionCounts,
 	useDirectMessages,
+	useInboxFeed,
 	useMarkChatsRead,
 } from "@/lib/chats.ts";
-import { activityThreadLink, directMessageLink } from "@/lib/links.ts";
+import { directMessageLink, inboxItemPageLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
-import { usePods } from "@/lib/pods.ts";
 import {
 	type ActivityState,
+	AutomationTriggerIcon,
+	automationText,
 	collaborationText,
-	RoutineTriggerIcon,
-	routineText,
 } from "@/screens/ChatActivityRow.tsx";
-import { collaborationActivityState } from "@/screens/ThreadConversation.tsx";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { collaborationActivityState } from "@/screens/ConversationMessages.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
-import { PodInitial } from "@/shell/SidebarPod.tsx";
+import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import {
 	DropdownMenu,
@@ -36,18 +36,18 @@ import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
 /** A kind of item in the feed, which the filter can narrow Inbox to. */
-type Kind = ActivityItem["kind"];
+type Kind = InboxItem["kind"];
 
 const KINDS: readonly { value: Kind; label: string }[] = [
 	{ value: "mention", label: "Mentions" },
 	{ value: "message", label: "Messages" },
-	{ value: "routine", label: "Routines" },
+	{ value: "run", label: "Automations" },
 	{ value: "collaboration", label: "Collaborations" },
 ];
 
 /**
  * Inbox: what is new across the workspace's chats, newest first, down the
- * left: messages that mention the person or that they have not read, routine
+ * left: messages that mention the person or that they have not read, automation
  * runs, and collaborations one bot opened with another. A filter menu in its
  * header narrows it to the kinds ticked there, shaded while on, and a toggle beside it shows only what is unread, as it
  * does to begin with; Mark all as read reads everything unread at
@@ -56,8 +56,8 @@ const KINDS: readonly { value: Kind; label: string }[] = [
  * the list is the page until one is chosen.
  */
 export function Inbox({ children }: { children: ReactNode }) {
-	const feed = useActivityFeed();
-	const { data: pods } = usePods();
+	const feed = useInboxFeed();
+	const { data: channels } = useChannels();
 	const chosen = useChosenItem();
 	// As wide as the viewer last dragged it.
 	const [width, setWidth] = usePaneWidth("inbox");
@@ -80,23 +80,25 @@ export function Inbox({ children }: { children: ReactNode }) {
 	const directMessages = useDirectMessages();
 	const directIds = new Set(directMessages.data?.items.map((item) => item.conversation.id));
 	// A direct message between people opens among them; the rest open here, in a channel or with a bot.
-	const placeOf = (item: ActivityItem): RowPlace | undefined => {
+	const placeOf = (item: InboxItem): RowPlace | undefined => {
 		// Runs and collaborations are bots' work, never in a direct message.
-		if (item.kind === "routine" || item.kind === "collaboration") return { kind: "bot" };
-		if (item.podId !== null) {
-			const pod = pods?.find((candidate) => candidate.id === item.podId);
-			return pod && { kind: "pod", pod };
+		if (item.kind === "run" || item.kind === "collaboration") return { kind: "bot" };
+		if (item.channelId !== null) {
+			const channel = channels?.find((candidate) => candidate.id === item.channelId);
+			return channel && { kind: "channel", channel };
 		}
 		// Outside a channel, a message is in a task or a direct message: which, once the direct messages are known.
 		if (!directMessages.isSuccess) return undefined;
-		return directIds.has(item.conversationId) ? { kind: "direct" } : { kind: "bot" };
+		return directIds.has(item.rootConversationId) ? { kind: "direct" } : { kind: "bot" };
 	};
 	// Each item is read as its conversation is, so marking those reads them all;
 	// and every direct message with anything unread, which the app's badge counts
 	// however long ago it was written, past what the feed holds.
 	const unreadConversationIds = [
 		...new Set([
-			...(feed.data?.items ?? []).filter((item) => item.unread).map((item) => item.conversationId),
+			...(feed.data?.items ?? [])
+				.filter((item) => item.unread)
+				.map((item) => item.rootConversationId),
 			...(directMessages.data?.items ?? [])
 				.filter((item) => item.unreadMessages > 0)
 				.map((item) => item.conversation.id),
@@ -282,7 +284,7 @@ interface ChosenItem {
 	/** The message jumped to, for a message. */
 	messageId?: string;
 	/** The run or collaboration shown, for one of those. */
-	threadPageId?: string;
+	itemPageId?: string;
 }
 
 function useChosenItem(): ChosenItem | undefined {
@@ -292,43 +294,41 @@ function useChosenItem(): ChosenItem | undefined {
 	return {
 		conversationId: conversation,
 		messageId: search.message,
-		threadPageId: search.threadPage,
+		itemPageId: search.itemPage,
 	};
 }
 
-function isChosen(item: ActivityItem, chosen: ChosenItem | undefined): boolean {
-	if (!chosen || item.conversationId !== chosen.conversationId) return false;
-	return item.kind === "routine" || item.kind === "collaboration"
-		? item.threadId === chosen.threadPageId
+function isChosen(item: InboxItem, chosen: ChosenItem | undefined): boolean {
+	if (!chosen || item.rootConversationId !== chosen.conversationId) return false;
+	return item.kind === "run" || item.kind === "collaboration"
+		? item.conversationId === chosen.itemPageId
 		: item.messageId === chosen.messageId;
 }
 
-/** How a routine run's state reads in its row, as its line in the chat says it. */
-function runState(state: Extract<ActivityItem, { kind: "routine" }>["state"]): ActivityState {
+/** How an automation run's state reads in its row, as its line in the chat says it. */
+function runState(state: Extract<InboxItem, { kind: "run" }>["state"]): ActivityState {
 	if (state === "completed") return "done";
 	if (state === "failed" || state === "cancelled") return "failed";
 	return "running";
 }
 
 /** What a row says happened, and the line under it. */
-function wordsOf(item: ActivityItem): { title: string; detail: string } {
+function wordsOf(item: InboxItem): { title: string; detail: string } {
 	switch (item.kind) {
 		case "mention":
 			return { title: `${item.author.name} mentioned you`, detail: item.preview };
 		case "message":
 			return {
 				title:
-					item.author.kind === "agent"
-						? `${item.author.name} replied`
-						: `${item.author.name} wrote`,
+					item.author.kind === "bot" ? `${item.author.name} replied` : `${item.author.name} wrote`,
 				detail: item.preview,
 			};
-		case "routine":
+		case "run":
 			return {
 				title: item.mentionsYou
-					? `${item.routineName} needs you`
-					: routineText(item.routineName, runState(item.state)),
-				detail: item.preview ?? item.agent.name,
+					? `${item.automationName} needs you`
+					: automationText(item.automationName, runState(item.state)),
+				detail: item.preview ?? item.bot.name,
 			};
 		case "collaboration":
 			return {
@@ -343,34 +343,29 @@ function wordsOf(item: ActivityItem): { title: string; detail: string } {
 }
 
 /** Who or what a row is about, in its face's place. */
-function FaceOf({ item }: { item: ActivityItem }) {
+function FaceOf({ item }: { item: InboxItem }) {
 	switch (item.kind) {
-		case "routine":
+		case "run":
 			// The bot that ran it, with what started the run on its corner.
 			return (
 				<span className="relative size-6">
-					<AgentAvatar
-						color={item.agent.color}
-						face={item.agent.face}
-						shape={item.agent.shape}
-						size={24}
-					/>
+					<BotAvatar color={item.bot.color} face={item.bot.face} shape={item.bot.shape} size={24} />
 					<span className="absolute -right-1.5 -bottom-1.5 grid size-4 place-items-center rounded-full bg-chip-strong text-foreground ring-2 ring-background">
-						<RoutineTriggerIcon kind={item.triggerKind} size={11} strokeWidth={2.4} />
+						<AutomationTriggerIcon kind={item.triggerKind} size={11} strokeWidth={2.4} />
 					</span>
 				</span>
 			);
 		case "collaboration":
 			return (
 				<span className="relative h-6 w-9">
-					<AgentAvatar
+					<BotAvatar
 						color={item.initiator.color}
 						face={item.initiator.face}
 						shape={item.initiator.shape}
 						size={24}
 						className="absolute top-0 left-0"
 					/>
-					<AgentAvatar
+					<BotAvatar
 						color={item.recipient.color}
 						face={item.recipient.face}
 						shape={item.recipient.shape}
@@ -381,8 +376,8 @@ function FaceOf({ item }: { item: ActivityItem }) {
 				</span>
 			);
 		default:
-			return item.author.kind === "agent" ? (
-				<AgentAvatar
+			return item.author.kind === "bot" ? (
+				<BotAvatar
 					color={item.author.color}
 					face={item.author.face}
 					shape={item.author.shape}
@@ -395,30 +390,32 @@ function FaceOf({ item }: { item: ActivityItem }) {
 }
 
 /** The message a row is about, when it is one. */
-function itemMessageId(item: ActivityItem): string | undefined {
+function itemMessageId(item: InboxItem): string | undefined {
 	return item.kind === "mention" || item.kind === "message" ? item.messageId : undefined;
 }
 
-/** The id a row is chosen by: its message's, or its run's or collaboration's thread's. */
-function itemIdOf(item: ActivityItem): string {
-	return item.kind === "routine" || item.kind === "collaboration" ? item.threadId : item.messageId;
+/** The id a row is chosen by: its message's, or its run's or collaboration's own conversation's. */
+function itemIdOf(item: InboxItem): string {
+	return item.kind === "run" || item.kind === "collaboration"
+		? item.conversationId
+		: item.messageId;
 }
 
 /** Where a row's item is: in a channel, with a bot, or in a direct message between people. */
-type RowPlace = { kind: "pod"; pod: Pod } | { kind: "bot" } | { kind: "direct" };
+type RowPlace = { kind: "channel"; channel: Channel } | { kind: "bot" } | { kind: "direct" };
 
 /**
  * Where a row opens: a run or collaboration as a page of its own, and a
  * message in its conversation, jumped to.
  */
-function activityItemLink(item: ActivityItem) {
-	if (item.kind === "routine" || item.kind === "collaboration") {
-		return activityThreadLink(item.conversationId, item.threadId);
+function linkOf(item: InboxItem) {
+	if (item.kind === "run" || item.kind === "collaboration") {
+		return inboxItemPageLink(item.rootConversationId, item.conversationId);
 	}
 	return linkOptions({
 		from: "/$workspace",
-		to: "./activity/$conversation",
-		params: { conversation: item.conversationId },
+		to: "./inbox/$conversation",
+		params: { conversation: item.rootConversationId },
 		search: { message: item.messageId },
 	});
 }
@@ -433,14 +430,14 @@ function InboxRow({
 	place,
 	selected,
 }: {
-	item: ActivityItem;
+	item: InboxItem;
 	/** Where the item is, once the channels are loaded; until then the row cannot open. */
 	place: RowPlace | undefined;
 	/** Whether it is the one open beside the list. */
 	selected: boolean;
 }) {
 	const { title, detail } = wordsOf(item);
-	const pod = place?.kind === "pod" ? place.pod : undefined;
+	const channel = place?.kind === "channel" ? place.channel : undefined;
 	const content = (
 		<>
 			<span className="w-1.5 shrink-0 pt-1.75">
@@ -465,10 +462,10 @@ function InboxRow({
 					>
 						{title}
 					</span>
-					{pod && (
-						<span title={pod.name} className="flex">
-							<PodInitial pod={pod} size="sm" />
-							<span className="sr-only">in {pod.name}</span>
+					{channel && (
+						<span title={channel.name} className="flex">
+							<ChannelInitial channel={channel} size="sm" />
+							<span className="sr-only">in {channel.name}</span>
 						</span>
 					)}
 					{place?.kind === "direct" && (
@@ -490,8 +487,8 @@ function InboxRow({
 	return (
 		<Link
 			{...(place.kind !== "direct"
-				? activityItemLink(item)
-				: directMessageLink(item.conversationId, { message: itemMessageId(item) }))}
+				? linkOf(item)
+				: directMessageLink(item.rootConversationId, { message: itemMessageId(item) }))}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				layout,

@@ -2,20 +2,23 @@ import type { SessionUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { Artifacts } from "@sugabots/core/artifacts/artifacts";
-import { ArtifactPages } from "@sugabots/core/artifacts/pages";
+import { BotComputerSetup } from "@sugabots/core/computers/bot-computer-setup";
+import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
+import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
+import { Automations } from "@sugabots/core/conversations/automations/automations";
 import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
+import { ConversationView } from "@sugabots/core/conversations/conversation-view";
 import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
-import { Routines } from "@sugabots/core/conversations/routines/routines";
-import { ThreadView } from "@sugabots/core/conversations/thread-view";
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
+import { Files } from "@sugabots/core/files/files";
+import { FilePages } from "@sugabots/core/files/pages";
 import { Installation } from "@sugabots/core/installation/installation";
 import { Notifications } from "@sugabots/core/notifications/notifications";
 import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
@@ -23,14 +26,11 @@ import { GitHubApps } from "@sugabots/core/providers/connections/github/github-a
 import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
-import { AgentSandboxSetup } from "@sugabots/core/sandboxes/agent-sandbox-setup";
-import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
-import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
 import { unimplemented } from "@sugabots/core/testing";
-import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
+import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
+import { ChannelAdministration } from "@sugabots/core/workspaces/channels/channel-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
 import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import { Effect, Layer } from "effect";
 import { Cookies, HttpRouter, HttpServer } from "effect/unstable/http";
@@ -46,7 +46,7 @@ export const BASE_URL = "http://localhost:3000";
 export const WEB_ORIGIN = "http://localhost:5173";
 
 export interface TestApp {
-	/** A request to `path` under `API_BASE_PATH`, e.g. `/agents/…`. */
+	/** A request to `path` under `API_BASE_PATH`, e.g. `/bots/…`. */
 	request(path: string, init?: RequestInit): Promise<Response>;
 	/** A request as the server receives it, at any path. */
 	fetch(request: Request): Promise<Response>;
@@ -110,18 +110,18 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Accounts.Service),
 	// `/me` answers with these beside the user; a case about them supplies its own.
 	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
-	unimplemented(PodAdministration.Service),
+	unimplemented(ChannelAdministration.Service),
 	unimplemented(WorkspaceTimeZone.Service),
-	unimplemented(Artifacts.Service),
-	unimplemented(ArtifactPages.Service),
-	unimplemented(AgentAdministration.Service),
+	unimplemented(Files.Service),
+	unimplemented(FilePages.Service),
+	unimplemented(BotAdministration.Service),
 	unimplemented(Onboarding.Service),
 	unimplemented(ModelProviderSetup.Service),
 	unimplemented(SearchProviderSetup.Service),
-	unimplemented(SandboxProviderSetup.Service),
-	unimplemented(SandboxNetwork.Service),
+	unimplemented(ComputerProviderSetup.Service),
+	unimplemented(ComputerNetwork.Service),
 	unimplemented(DesktopViewer.Service),
-	unimplemented(AgentSandboxSetup.Service),
+	unimplemented(BotComputerSetup.Service),
 	unimplemented(GitHubApps.Service),
 	unimplemented(GitHubConnections.Service),
 	unimplemented(ConnectionSetup.Service),
@@ -132,11 +132,11 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(ChatFiles.Service),
 	unimplemented(ChatView.Service),
 	unimplemented(Reactions.Service),
-	unimplemented(ThreadView.Service),
+	unimplemented(ConversationView.Service),
 	unimplemented(Turns.Controls),
-	unimplemented(Routines.Service),
-	unimplemented(Routines.Webhooks),
-	unimplemented(Routines.ConnectionEvents),
+	unimplemented(Automations.Service),
+	unimplemented(Automations.Webhooks),
+	unimplemented(Automations.ConnectionEvents),
 	Layer.succeed(ChannelAccess.Service, closedChannelAccess),
 	identifiedBy(async () => null),
 	installationWithWebAppAt(WEB_ORIGIN),

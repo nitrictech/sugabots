@@ -1,17 +1,17 @@
-import type { ThreadParticipant } from "@sugabots/contracts";
+import type { Participant } from "@sugabots/contracts";
 import type { HistoryState } from "@tanstack/react-router";
-import { agentSettingsLink, memberSettingsLink } from "@/lib/links.ts";
+import { botSettingsLink, memberSettingsLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 
 /** A message's author who has a page: a person or a bot. */
-export type PagedAuthor = Exclude<ThreadParticipant, { kind: "routine_trigger" }>;
+export type PagedAuthor = Exclude<Participant, { kind: "automation_trigger" }>;
 
 type BackState = { state: (state: HistoryState) => HistoryState };
 
 /** Kept apart by kind, because a `Link` takes one route's options, not either of two. */
 export type AuthorLink =
-	| { kind: "agent"; options: ReturnType<typeof agentSettingsLink> & BackState }
+	| { kind: "bot"; options: ReturnType<typeof botSettingsLink> & BackState }
 	| { kind: "person"; options: ReturnType<typeof memberSettingsLink> & BackState };
 
 /**
@@ -25,8 +25,8 @@ export function useAuthorLinks(): (author: PagedAuthor) => AuthorLink | undefine
 	const members = useWorkspaceMembers(workspace?.id);
 	const backToChat = useBackToHere("Chat");
 	return (author) => {
-		if (author.kind === "agent") {
-			return { kind: "agent", options: { ...agentSettingsLink(author), state: backToChat } };
+		if (author.kind === "bot") {
+			return { kind: "bot", options: { ...botSettingsLink(author), state: backToChat } };
 		}
 		const membership = members.data?.find((member) => member.user.id === author.id);
 		if (!membership) return undefined;

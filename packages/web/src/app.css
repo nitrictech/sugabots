@@ -14,8 +14,8 @@
 	color-scheme: dark;
 
 	/*
-	 * Surfaces. The thread and the sidebar share the ground in dark; light gives
-	 * the sidebar its own grey so the white thread reads as the working area.
+	 * Surfaces. The conversation and the sidebar share the ground in dark; light gives
+	 * the sidebar its own grey so the white conversation reads as the working area.
 	 */
 	--background: light-dark(#ffffff, #0a0a0a);
 	--rail: light-dark(#f7f7f8, #000000);
@@ -23,7 +23,7 @@
 	--list: light-dark(#f7f7f8, #0f0f11);
 	/* The column beside a chat: Details, or a collaboration or run. */
 	--aside: light-dark(#ffffff, #0a0a0a);
-	/* Behind a page opened beside a chat, such as an artifact. */
+	/* Behind a page opened beside a chat, such as a file. */
 	--stage: light-dark(#f1f1f3, #0f0f11);
 	/* A card among the messages, such as an approval request. */
 	--card: light-dark(#f7f7f8, #111113);
@@ -79,7 +79,7 @@
 	--glass-edge: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.08));
 	/* The send button with nothing to send. */
 	--chip-strong: light-dark(#e4e4e7, #1f1f23);
-	/* A pod tile, and a slot in one with no bot in it. */
+	/* A channel tile, and a slot in one with no bot in it. */
 	--tile: light-dark(#e4e4e7, #26262a);
 	--tile-empty: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.06));
 
@@ -113,14 +113,14 @@
 	/* Red is only for errors and delete. */
 	--destructive: #f0505e;
 	/*
-	 * Red text, such as Delete pod, and the wash behind it on hover. Light is a
+	 * Red text, such as Delete channel, and the wash behind it on hover. Light is a
 	 * shade darker than the design's #d6384e so it passes AA on a chip.
 	 */
 	--destructive-text: light-dark(#c42d45, #f08a94);
 	--destructive-hover: light-dark(
 		#fde8ea,
 		#2a1a1e
-	); /* A routine's failed run: its card, its edge, its heading, and why it failed. */
+	); /* An automation's failed run: its card, its edge, its heading, and why it failed. */
 	--failed-card: light-dark(#fdf1f3, oklch(0.19 0.03 20));
 	--failed-card-border: light-dark(#f3c4cc, oklch(0.36 0.09 20));
 	--failed-card-heading: light-dark(#8e1f31, #fbd5da);
@@ -739,10 +739,10 @@
 @utility pb-tab-bar-offset-3 {
 	padding-bottom: calc(var(--tab-bar-space, 0px) + 0.75rem);
 }
-@utility w-artifact-pane {
+@utility w-file-pane {
 	width: clamp(360px, var(--pane-width, 58%), calc(100% - 320px));
 }
-@utility w-thread-pane {
+@utility w-conversation-pane {
 	width: clamp(320px, var(--pane-width, 440px), calc(100% - 360px));
 }
 @utility w-inbox-list {
@@ -756,10 +756,10 @@
 	/* One of a phone's four tabs, after the 16px of gaps between them. */
 	width: calc((100% - 16px) / 4);
 }
-@utility w-thread-line {
+@utility w-conversation-line {
 	width: calc(100% - 8px);
 }
-@utility w-thread-popover {
+@utility w-header-popover {
 	width: min(328px, calc(100vw - 2rem));
 }
 @utility min-w-field {

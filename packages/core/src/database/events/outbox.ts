@@ -1,6 +1,6 @@
 export * as EventOutbox from "./outbox.ts";
 
-import type { Channel, DurableEventType, StreamEvent } from "@sugabots/contracts";
+import type { DurableEventType, StreamChannel, StreamEvent } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
@@ -45,7 +45,7 @@ export const make = Effect.map(EventBus.Service, (bus) => {
 export const layer = Layer.effect(Service, make);
 
 export interface PendingEvent {
-	channel: Channel;
+	channel: StreamChannel;
 	event: StreamEvent & { type: DurableEventType };
 }
 

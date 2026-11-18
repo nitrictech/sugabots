@@ -12,7 +12,7 @@ import { BlobStore } from "../blob-store.ts";
  * can name a blob and hold others beneath it at once. Each segment is
  * percent-encoded with its dots too, so no segment can be `..` or start with
  * the `.` that marks the files the store itself keeps. Deleting removes the
- * directories it leaves empty, so deleted threads leave nothing behind.
+ * directories it leaves empty, so deleted conversations leave nothing behind.
  *
  * `put` streams to temporary files, syncs them to disk and renames them into
  * place, so a reader never sees a blob half written and one that was put

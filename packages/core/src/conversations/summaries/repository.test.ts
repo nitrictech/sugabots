@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { agent, agentSummary, workspace } from "../../database/schema.ts";
+import { botSummary, bot as botTable, workspace } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { unimplemented } from "../../testing.ts";
 import { ConversationEvents } from "../conversation-events.ts";
@@ -9,7 +9,7 @@ import { makeRecords } from "./repository.ts";
 
 /** A bot's summary as the Summariser writes it, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)("a bot's summary, against Postgres", () => {
-	let agentId: string;
+	let botId: string;
 
 	afterAll(closeDatabase);
 
@@ -24,7 +24,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a bot's summary, against Postgres", 
 		if (!space) throw new Error("fixture");
 		const [bot] = await onDatabase((db) =>
 			db
-				.insert(agent)
+				.insert(botTable)
 				.values({
 					workspaceId: space.id,
 					name: "Scout",
@@ -35,24 +35,24 @@ describe.skipIf(!process.env.DATABASE_URL)("a bot's summary, against Postgres", 
 				.returning(),
 		);
 		if (!bot) throw new Error("fixture");
-		agentId = bot.id;
+		botId = bot.id;
 	});
 
 	const save = (content: string, coversThrough: Date) =>
 		runOnPostgres(
 			Effect.flatMap(makeRecords, (records) =>
-				records.saveBotSummary({ agentId, content, coversThrough }),
+				records.saveBotSummary({ botId, content, coversThrough }),
 			).pipe(Effect.provide(unimplemented(ConversationEvents.Service, {}))),
 		);
 
 	const saved = async () => {
 		const [row] = await onDatabase((db) =>
-			db.select().from(agentSummary).where(eq(agentSummary.agentId, agentId)),
+			db.select().from(botSummary).where(eq(botSummary.botId, botId)),
 		);
 		return row?.content;
 	};
 
-	it("keeps a summary written from newer threads when an older one arrives after it", async () => {
+	it("keeps a summary written from newer conversations when an older one arrives after it", async () => {
 		await save("Shipping the release.", new Date("2026-11-18T10:00:00Z"));
 		await save("Planning the release.", new Date("2026-11-18T09:00:00Z"));
 

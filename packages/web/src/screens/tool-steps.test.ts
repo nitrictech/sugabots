@@ -75,9 +75,9 @@ describe("a reply's tool line", () => {
 		);
 	});
 
-	it("names the artifact tools together, as one app", () => {
-		expect(
-			toolLineText([call("artifact_edit"), call("artifact_read"), call("artifact_write")], looks),
-		).toBe("Used Artifacts for 6s");
+	it("names the file tools together, as one app", () => {
+		expect(toolLineText([call("file_edit"), call("file_read"), call("file_write")], looks)).toBe(
+			"Used Files for 6s",
+		);
 	});
 });

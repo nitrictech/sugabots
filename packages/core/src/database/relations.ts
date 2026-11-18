@@ -3,56 +3,75 @@ import * as schema from "./schema.ts";
 
 /**
  * The joins relational queries (`db.query`) may follow, which is how a view
- * reads a thread and everything it shows in one statement.
+ * reads a conversation and everything it shows in one statement.
  */
 export const relations = defineRelations(schema, (r) => ({
-	thread: {
-		workspace: r.one.workspace({ from: r.thread.workspaceId, to: r.workspace.id, optional: false }),
-		// None on a direct message between people, which is in no pod.
-		pod: r.one.pod({ from: r.thread.podId, to: r.pod.id }),
+	placedConversation: {
+		workspace: r.one.workspace({
+			from: r.placedConversation.workspaceId,
+			to: r.workspace.id,
+			optional: false,
+		}),
+		// Only on a channel's conversation.
+		channel: r.one.channel({ from: r.placedConversation.channelId, to: r.channel.id }),
 		// On a direct message between people: everybody in it.
-		directMembers: r.many.user({
-			from: r.thread.id.through(r.directMember.threadId),
-			to: r.user.id.through(r.directMember.userId),
+		directMessageMembers: r.many.user({
+			from: r.placedConversation.id.through(r.directMessageMember.conversationId),
+			to: r.user.id.through(r.directMessageMember.userId),
 		}),
-		messages: r.many.message({ from: r.thread.id, to: r.message.threadId }),
-		participants: r.many.threadParticipant({ from: r.thread.id, to: r.threadParticipant.threadId }),
-		reads: r.many.threadRead({ from: r.thread.id, to: r.threadRead.threadId }),
-		routineExecution: r.one.routineExecution({
-			from: r.thread.id,
-			to: r.routineExecution.threadId,
+		messages: r.many.message({ from: r.placedConversation.id, to: r.message.conversationId }),
+		participants: r.many.conversationParticipant({
+			from: r.placedConversation.id,
+			to: r.conversationParticipant.conversationId,
 		}),
-		compaction: r.one.threadCompaction({ from: r.thread.id, to: r.threadCompaction.threadId }),
-		// Every thread opened under this one, whatever its type: collaborations,
-		// and system bots' threads.
-		childThreads: r.many.thread({ from: r.thread.id, to: r.thread.parentThreadId }),
-		hostAgent: r.one.agent({ from: r.thread.hostAgentId, to: r.agent.id }),
-		// On a conversation: every thread in it, the conversation's own included.
-		conversationThreads: r.many.thread({ from: r.thread.id, to: r.thread.conversationId }),
+		reads: r.many.conversationRead({
+			from: r.placedConversation.id,
+			to: r.conversationRead.conversationId,
+		}),
+		automationRun: r.one.automationRun({
+			from: r.placedConversation.id,
+			to: r.automationRun.conversationId,
+		}),
+		compaction: r.one.conversationCompaction({
+			from: r.placedConversation.id,
+			to: r.conversationCompaction.conversationId,
+		}),
+		// Every conversation opened under this one, whatever its kind: collaborations,
+		// and system bots' conversations.
+		childConversations: r.many.placedConversation({
+			from: r.placedConversation.id,
+			to: r.placedConversation.parentConversationId,
+		}),
+		bot: r.one.bot({ from: r.placedConversation.botId, to: r.bot.id }),
+		// On a conversation people open: every conversation in it, its own included.
+		rootedConversations: r.many.placedConversation({
+			from: r.placedConversation.id,
+			to: r.placedConversation.rootConversationId,
+		}),
 	},
-	pod: {
-		agents: r.many.agent({
-			from: r.pod.id.through(r.podAgent.podId),
-			to: r.agent.id.through(r.podAgent.agentId),
+	channel: {
+		bots: r.many.bot({
+			from: r.channel.id.through(r.channelBot.channelId),
+			to: r.bot.id.through(r.channelBot.botId),
 		}),
 		members: r.many.user({
-			from: r.pod.id.through(r.podMember.podId),
-			to: r.user.id.through(r.podMember.userId),
+			from: r.channel.id.through(r.channelMember.channelId),
+			to: r.user.id.through(r.channelMember.userId),
 		}),
 	},
 	message: {
 		authorUser: r.one.user({ from: r.message.authorUserId, to: r.user.id }),
-		authorAgent: r.one.agent({ from: r.message.authorAgentId, to: r.agent.id }),
+		authorBot: r.one.bot({ from: r.message.authorBotId, to: r.bot.id }),
 		turn: r.one.turn({ from: r.message.turnId, to: r.turn.id }),
 		toolCalls: r.many.toolCall({ from: r.message.id, to: r.toolCall.messageId }),
-		files: r.many.threadFile({ from: r.message.id, to: r.threadFile.messageId }),
+		files: r.many.file({ from: r.message.id, to: r.file.messageId }),
 		collaborations: r.many.collaboration({
 			from: r.message.id,
 			to: r.collaboration.parentMessageId,
 		}),
-		routineExecution: r.one.routineExecution({
-			from: r.message.routineExecutionId,
-			to: r.routineExecution.id,
+		automationRun: r.one.automationRun({
+			from: r.message.runId,
+			to: r.automationRun.id,
 		}),
 		replyTo: r.one.message({ from: r.message.replyToMessageId, to: r.message.id }),
 		reactions: r.many.messageReaction({ from: r.message.id, to: r.messageReaction.messageId }),
@@ -60,12 +79,12 @@ export const relations = defineRelations(schema, (r) => ({
 	messageReaction: {
 		user: r.one.user({ from: r.messageReaction.userId, to: r.user.id, optional: false }),
 	},
-	threadRead: {
-		user: r.one.user({ from: r.threadRead.userId, to: r.user.id, optional: false }),
+	conversationRead: {
+		user: r.one.user({ from: r.conversationRead.userId, to: r.user.id, optional: false }),
 	},
-	threadParticipant: {
-		user: r.one.user({ from: r.threadParticipant.userId, to: r.user.id }),
-		agent: r.one.agent({ from: r.threadParticipant.agentId, to: r.agent.id }),
+	conversationParticipant: {
+		user: r.one.user({ from: r.conversationParticipant.userId, to: r.user.id }),
+		bot: r.one.bot({ from: r.conversationParticipant.botId, to: r.bot.id }),
 	},
 	toolCall: {
 		decidedBy: r.one.user({ from: r.toolCall.decidedById, to: r.user.id }),
@@ -76,9 +95,9 @@ export const relations = defineRelations(schema, (r) => ({
 			to: r.message.id,
 			optional: false,
 		}),
-		collaborator: r.one.agent({
-			from: r.collaboration.collaboratorAgentId,
-			to: r.agent.id,
+		collaborator: r.one.bot({
+			from: r.collaboration.collaboratorBotId,
+			to: r.bot.id,
 			optional: false,
 		}),
 	},

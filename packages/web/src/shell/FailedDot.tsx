@@ -2,11 +2,11 @@ import { cn } from "cn";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
 /** What the red dot says, on hover and to a screen reader. */
-export const FAILED_DOT_LABEL = "A routine's latest run failed";
+export const FAILED_DOT_LABEL = "An automation's latest run failed";
 
 /**
- * A red dot while one of a bot's routines' latest run failed, named on hover:
- * at its row's end in the sidebar, and on its Routines button. Inside a
+ * A red dot while one of a bot's automations' latest run failed, named on hover:
+ * at its row's end in the sidebar, and on its automations button. Inside a
  * control that names it already, `labelled` is false and the dot only shows.
  */
 export function FailedDot({

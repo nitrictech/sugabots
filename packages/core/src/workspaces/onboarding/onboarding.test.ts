@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
 import {
-	agent,
+	bot,
 	modelProvider,
 	providerModel,
 	user,
@@ -20,8 +20,8 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
-	let customAgentId: string;
-	let systemAgentId: string;
+	let customBotId: string;
+	let systemBotId: string;
 
 	beforeAll(async () => {
 		onboarding = await runOnPostgres(Effect.provide(Onboarding.Service, Onboarding.layer));
@@ -35,8 +35,7 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		onPostgresAs(userId)({
 			complete: onboarding.complete,
 		});
-	const complete = (userId: string, agentId: string) =>
-		as(userId).complete({ workspaceId, agentId });
+	const complete = (userId: string, botId: string) => as(userId).complete({ workspaceId, botId });
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -91,9 +90,9 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 				source: "manual",
 			}),
 		);
-		const madeAgents = await onDatabase((db) =>
+		const madeBots = await onDatabase((db) =>
 			db
-				.insert(agent)
+				.insert(bot)
 				.values([
 					{
 						workspaceId,
@@ -106,11 +105,11 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 					},
 					{
 						workspaceId,
-						// The workspace's Scribe, with no model until the workspace
+						// The workspace's Summariser, with no model until the workspace
 						// settles on one.
-						name: "Scribe",
-						handle: "scribe",
-						systemAgentKey: "summarise",
+						name: "Summariser",
+						handle: "summariser",
+						systemBotKey: "summarise",
 						color: "orange",
 						face: "arc",
 						model: null,
@@ -119,31 +118,29 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 				])
 				.returning(),
 		);
-		const [custom, system] = madeAgents;
-		if (!custom || !system) throw new Error("could not create onboarding agents");
-		customAgentId = custom.id;
-		systemAgentId = system.id;
+		const [custom, system] = madeBots;
+		if (!custom || !system) throw new Error("could not create onboarding bots");
+		customBotId = custom.id;
+		systemBotId = system.id;
 	});
 
-	it("does not complete for an agent with no model the workspace offers", async () => {
+	it("does not complete for a bot with no model the workspace offers", async () => {
 		await onDatabase((db) =>
-			db.update(agent).set({ model: "not-switched-on" }).where(eq(agent.id, customAgentId)),
+			db.update(bot).set({ model: "not-switched-on" }).where(eq(bot.id, customBotId)),
 		);
-		await expect(complete(adminId, customAgentId)).rejects.toBeInstanceOf(Onboarding.NoModelChosen);
+		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(Onboarding.NoModelChosen);
 
-		await onDatabase((db) =>
-			db.update(agent).set({ model: null }).where(eq(agent.id, customAgentId)),
-		);
-		await expect(complete(adminId, customAgentId)).rejects.toBeInstanceOf(Onboarding.NoModelChosen);
+		await onDatabase((db) => db.update(bot).set({ model: null }).where(eq(bot.id, customBotId)));
+		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(Onboarding.NoModelChosen);
 	});
 
-	it("makes the first bot's model the workspace's default and the Scribe's", async () => {
-		await complete(adminId, customAgentId);
+	it("makes the first bot's model the workspace's default and the Summariser's", async () => {
+		await complete(adminId, customBotId);
 
-		const [scribe] = await onDatabase((db) =>
-			db.select({ model: agent.model }).from(agent).where(eq(agent.id, systemAgentId)),
+		const [summariser] = await onDatabase((db) =>
+			db.select({ model: bot.model }).from(bot).where(eq(bot.id, systemBotId)),
 		);
-		expect(scribe?.model).toBe("model");
+		expect(summariser?.model).toBe("model");
 		const [chosen] = await onDatabase((db) =>
 			db
 				.select({ modelId: workspaceDefaultModel.modelId })
@@ -161,32 +158,32 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 					.from(workspace)
 					.where(eq(workspace.id, workspaceId)),
 			).then(([row]) => row?.at);
-		await expect(complete(adminId, systemAgentId)).rejects.toBeInstanceOf(
+		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(
 			Onboarding.NotReadyToFinish,
 		);
 		expect(await setupCompletedAt()).toBeNull();
 
-		await complete(adminId, customAgentId);
+		await complete(adminId, customBotId);
 		const first = await setupCompletedAt();
-		await complete(adminId, customAgentId);
+		await complete(adminId, customBotId);
 
 		expect(first).toBeInstanceOf(Date);
 		expect(await setupCompletedAt()).toEqual(first);
 	});
 
-	it("does not accept a system agent or a member who may not choose the workspace's models", async () => {
-		await expect(complete(adminId, systemAgentId)).rejects.toBeInstanceOf(
+	it("does not accept a system bot or a member who may not choose the workspace's models", async () => {
+		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(
 			Onboarding.NotReadyToFinish,
 		);
-		await expect(complete(memberId, customAgentId)).rejects.toBeInstanceOf(ActionForbidden);
+		await expect(complete(memberId, customBotId)).rejects.toBeInstanceOf(ActionForbidden);
 	});
 
 	it("does not accept a bot somebody else created", async () => {
 		await onDatabase((db) =>
-			db.update(agent).set({ createdById: memberId }).where(eq(agent.id, customAgentId)),
+			db.update(bot).set({ createdById: memberId }).where(eq(bot.id, customBotId)),
 		);
 
-		await expect(complete(adminId, customAgentId)).rejects.toBeInstanceOf(
+		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(
 			Onboarding.NotReadyToFinish,
 		);
 	});

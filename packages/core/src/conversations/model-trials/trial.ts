@@ -1,13 +1,13 @@
 import { Duration, Effect } from "effect";
 import type { Database } from "../../database/database.ts";
 import type { Models } from "../../providers/models/models.ts";
-import { CASES, type TrialCase, type TrialSystemAgent } from "./cases.ts";
+import { CASES, type TrialCase, type TrialSystemBot } from "./cases.ts";
 
 /**
- * Trying a model out on a system agent before trusting it with one.
+ * Trying a model out on a system bot before trusting it with one.
  *
- * A system agent's model is chosen once and then runs unattended, so the first sign
- * that it cannot follow the prompt is a thread that loops or a summary that
+ * A system bot's model is chosen once and then runs unattended, so the first sign
+ * that it cannot follow the prompt is a conversation that loops or a summary that
  * never appears. This asks it the questions that have gone wrong before, a few
  * times each, and says plainly how often it got them right.
  *
@@ -30,9 +30,9 @@ const ORDER: readonly TrialRating[] = ["terrible", "poor", "good", "excellent"];
 const worse = (a: TrialRating, b: TrialRating) => (ORDER.indexOf(a) <= ORDER.indexOf(b) ? a : b);
 
 /**
- * How often a system agent has to be right, and how quickly.
+ * How often a system bot has to be right, and how quickly.
  *
- * A system agent runs unattended on every message, so being right nine times in ten
+ * A system bot runs unattended on every message, so being right nine times in ten
  * is the floor rather than a good score: the tenth is a summary nobody gets or a
  * compaction a bot cannot carry on from, and no one is watching to catch it.
  *
@@ -42,12 +42,12 @@ const worse = (a: TrialRating, b: TrialRating) => (ORDER.indexOf(a) <= ORDER.ind
  */
 export const ACCURACY_NEEDED = 0.9;
 
-export const BUDGET_MS: Record<TrialSystemAgent, number> = {
+export const BUDGET_MS: Record<TrialSystemBot, number> = {
 	summarise: 20_000,
 	compact: 60_000,
 };
 
-const WHY_IT_MATTERS: Record<TrialSystemAgent, string> = {
+const WHY_IT_MATTERS: Record<TrialSystemBot, string> = {
 	summarise:
 		"it runs in the background, but a summary nobody waits for is still a summary nobody reads",
 	compact: "it runs in the background, but a long chat keeps growing until it finishes",
@@ -79,9 +79,9 @@ export interface TrialSpeed {
 }
 
 export interface TrialReport {
-	readonly systemAgentKey: TrialSystemAgent;
+	readonly systemBotKey: TrialSystemBot;
 	readonly model: string;
-	/** The worse of the two judgements: a system agent that is slow is no use, however right. */
+	/** The worse of the two judgements: a system bot that is slow is no use, however right. */
 	readonly rating: TrialRating;
 	readonly accuracy: TrialAccuracy;
 	readonly speed: TrialSpeed;
@@ -126,7 +126,7 @@ const percent = (share: number) => `${Math.round(share * 100)}%`;
  * guess. Silence about a dimension means it was fine.
  */
 export function explain(
-	systemAgentKey: TrialSystemAgent,
+	systemBotKey: TrialSystemBot,
 	accuracy: TrialAccuracy,
 	speed: TrialSpeed,
 	failing: ReadonlyArray<TrialCaseResult>,
@@ -139,16 +139,16 @@ export function explain(
 	}
 	if (accuracy.share < accuracy.needed) {
 		said.push(
-			`Too often wrong: right ${percent(accuracy.share)} of the time, where a system agent needs at least ${percent(accuracy.needed)}. It runs unattended, so nobody is watching to catch the rest.`,
+			`Too often wrong: right ${percent(accuracy.share)} of the time, where a system bot needs at least ${percent(accuracy.needed)}. It runs unattended, so nobody is watching to catch the rest.`,
 		);
 	} else if (accuracy.rating !== "excellent") {
 		said.push(
-			`Right ${percent(accuracy.share)} of the time, just past the ${percent(accuracy.needed)} a system agent needs. A more capable model would leave more room.`,
+			`Right ${percent(accuracy.share)} of the time, just past the ${percent(accuracy.needed)} a system bot needs. A more capable model would leave more room.`,
 		);
 	}
 	if (speed.rating !== "excellent") {
 		said.push(
-			`Too slow: about ${seconds(speed.typicalMs)} to answer, and slowest ${seconds(speed.slowestMs)}, where this needs to be under ${seconds(speed.budgetMs)} because ${WHY_IT_MATTERS[systemAgentKey]}. A smaller or more local model would help.`,
+			`Too slow: about ${seconds(speed.typicalMs)} to answer, and slowest ${seconds(speed.slowestMs)}, where this needs to be under ${seconds(speed.budgetMs)} because ${WHY_IT_MATTERS[systemBotKey]}. A smaller or more local model would help.`,
 		);
 	}
 	for (const one of failing) {
@@ -170,20 +170,20 @@ function median(values: readonly number[]): number {
 }
 
 interface TrialOptions {
-	readonly systemAgentKey: TrialSystemAgent;
+	readonly systemBotKey: TrialSystemBot;
 	readonly model: string;
 	readonly workspaceId: string;
 	readonly attempts?: number;
 }
 
-/** Runs every case for a system agent and reports how the model did. */
+/** Runs every case for a system bot and reports how the model did. */
 export const runTrial = (
-	{ systemAgentKey, model, workspaceId, attempts = ATTEMPTS }: TrialOptions,
+	{ systemBotKey, model, workspaceId, attempts = ATTEMPTS }: TrialOptions,
 	models: Models.Interface,
 ): Effect.Effect<TrialReport, never, Database> =>
 	Effect.gen(function* () {
 		const cases = yield* Effect.forEach(
-			CASES[systemAgentKey],
+			CASES[systemBotKey],
 			(trialCase) => runCase(trialCase, { model, workspaceId, attempts }, models),
 			// One at a time: a local model serving one request at a time would
 			// otherwise queue, and the numbers would say more about the queue.
@@ -192,7 +192,7 @@ export const runTrial = (
 		const passed = cases.reduce((total, result) => total + result.result.passed, 0);
 		const asked = cases.reduce((total, result) => total + result.result.attempts, 0);
 		const timings = cases.flatMap((one) => one.timings);
-		const budgetMs = BUDGET_MS[systemAgentKey];
+		const budgetMs = BUDGET_MS[systemBotKey];
 		const typicalMs = median(timings);
 
 		const accuracy: TrialAccuracy = {
@@ -213,13 +213,13 @@ export const runTrial = (
 		const results = cases.map((one) => one.result);
 
 		return {
-			systemAgentKey,
+			systemBotKey,
 			model,
 			rating: worse(accuracy.rating, speed.rating),
 			accuracy,
 			speed,
 			verdict: explain(
-				systemAgentKey,
+				systemBotKey,
 				accuracy,
 				speed,
 				results.filter((one) => one.passed < one.attempts),

@@ -4,11 +4,11 @@ import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations } from "../database/database.ts";
 import {
 	ActionForbidden,
-	type AgentStanding,
 	type AuthorizationDenied,
-	agentStandingFor,
-	type PodStanding,
-	podStandingFor,
+	type BotStanding,
+	botStandingFor,
+	type ChannelStanding,
+	channelStandingFor,
 	ResourceHidden,
 	requireReach,
 	type WorkspaceStanding,
@@ -16,9 +16,9 @@ import {
 } from "./access.ts";
 import { CurrentActor } from "./current-actor.ts";
 import {
-	type AgentPermission,
+	type BotPermission,
+	type ChannelPermission,
 	mayInWorkspace,
-	type PodPermission,
 	type WorkspacePermission,
 } from "./permissions.ts";
 
@@ -43,26 +43,26 @@ export interface Interface {
 		permission: WorkspacePermission,
 	) => Effect.Effect<WorkspaceStanding, AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * `podId` names a channel of a workspace the actor belongs to, whether or
+	 * `channelId` names a channel of a workspace the actor belongs to, whether or
 	 * not they are in it, as the directory shows a public one to join.
 	 */
-	readonly podFound: (
-		podId: string,
-	) => Effect.Effect<PodStanding, ResourceHidden, CurrentActor.Service>;
-	/** `podId` names a channel the actor is in, and the action is one they may take in it. */
-	readonly pod: (
-		podId: string,
-		permission: PodPermission,
-	) => Effect.Effect<PodStanding, AuthorizationDenied, CurrentActor.Service>;
+	readonly channelFound: (
+		channelId: string,
+	) => Effect.Effect<ChannelStanding, ResourceHidden, CurrentActor.Service>;
+	/** `channelId` names a channel the actor is in, and the action is one they may take in it. */
+	readonly channel: (
+		channelId: string,
+		permission: ChannelPermission,
+	) => Effect.Effect<ChannelStanding, AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * `agentId` names a bot, and the action is one the actor may take on it.
+	 * `botId` names a bot, and the action is one the actor may take on it.
 	 * A bot they don't reach is hidden, unless the action is one they may take
 	 * anyway, as an administrator changes a private bot.
 	 */
-	readonly agent: (
-		agentId: string,
-		permission: AgentPermission,
-	) => Effect.Effect<AgentStanding, AuthorizationDenied, CurrentActor.Service>;
+	readonly bot: (
+		botId: string,
+		permission: BotPermission,
+	) => Effect.Effect<BotStanding, AuthorizationDenied, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -86,38 +86,39 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		pod: (podId, permission) =>
+		channel: (channelId, permission) =>
 			operation(
-				"pod",
+				"channel",
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => podStandingFor(db, podId, userId));
-					return yield* decideInPod(standing, permission, "pod");
+					const standing = yield* query((db) => channelStandingFor(db, channelId, userId));
+					return yield* decideInChannel(standing, permission, "channel");
 				}),
 			),
 
-		podFound: (podId) =>
+		channelFound: (channelId) =>
 			operation(
-				"podFound",
+				"channelFound",
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => podStandingFor(db, podId, userId));
-					if (!standing?.actor.workspaceRole) return yield* new ResourceHidden({ resource: "pod" });
+					const standing = yield* query((db) => channelStandingFor(db, channelId, userId));
+					if (!standing?.actor.workspaceRole)
+						return yield* new ResourceHidden({ resource: "channel" });
 					return standing;
 				}),
 			),
 
-		agent: (agentId, permission) =>
+		bot: (botId, permission) =>
 			operation(
-				"agent",
+				"bot",
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => agentStandingFor(db, agentId, userId));
-					if (!standing) return yield* new ResourceHidden({ resource: "agent" });
+					const standing = yield* query((db) => botStandingFor(db, botId, userId));
+					if (!standing) return yield* new ResourceHidden({ resource: "bot" });
 					if (standing.may(permission)) return standing;
-					return yield* standing.may("agent.read")
+					return yield* standing.may("bot.read")
 						? new ActionForbidden({ permission })
-						: new ResourceHidden({ resource: "agent" });
+						: new ResourceHidden({ resource: "bot" });
 				}),
 			),
 	});
@@ -126,14 +127,14 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /**
- * Hidden whatever the action, for a pod the actor cannot reach (see
+ * Hidden whatever the action, for a channel the actor cannot reach (see
  * `requireReach`). Only once they reach it does being unable to act become
  * forbidden.
  */
-function decideInPod<Standing extends PodStanding>(
+function decideInChannel<Standing extends ChannelStanding>(
 	standing: Standing | undefined,
-	permission: PodPermission,
-	resource: "pod",
+	permission: ChannelPermission,
+	resource: "channel",
 ): Effect.Effect<Standing, AuthorizationDenied> {
 	return requireReach(standing, resource).pipe(
 		Effect.filterOrFail(

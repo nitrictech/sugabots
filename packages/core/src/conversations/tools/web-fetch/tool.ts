@@ -8,7 +8,7 @@ export const WEB_FETCH_TOOL = "web_fetch";
 /**
  * The `web_fetch` built-in tool: read one public web page.
  *
- * The outcome goes to the model as it is, refusals included, so the agent
+ * The outcome goes to the model as it is, refusals included, so the bot
  * can try another address or say what happened. The recording wrapper in
  * `tools/calls` writes the call down; this tool only fetches.
  */

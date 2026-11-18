@@ -1,8 +1,8 @@
 import type { Message } from "@sugabots/contracts";
 
 /**
- * The ids of people's messages that wait for an agent's next reply: those
- * posted since `queuedSince`, when a turn asked for while the agent was still
+ * The ids of people's messages that wait for a bot's next reply: those
+ * posted since `queuedSince`, when a turn asked for while the bot was still
  * answering started waiting. That turn reads them all once it starts, so they
  * are answered together. The server decides what waits, so a message that
  * asked for no reply, posted before then, does not.

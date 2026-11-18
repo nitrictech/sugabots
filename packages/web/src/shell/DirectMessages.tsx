@@ -52,7 +52,7 @@ export function DirectMessages({
 }
 
 /**
- * Direct messages in the sidebar, under the pods, beneath a heading that
+ * Direct messages in the sidebar, under the channels, beneath a heading that
  * folds them away, most recent first: each with the person's face, or for a
  * group how many others are in it, bold and counted while something in it is
  * unread.
@@ -117,7 +117,7 @@ export function DirectMessagesSection({
 }
 
 /**
- * Direct messages' heading, a row like a pod's, which folds them away or
+ * Direct messages' heading, a row like a channel's, which folds them away or
  * opens them. Folded over something unread, it is bold, and says how much to
  * a screen reader.
  */

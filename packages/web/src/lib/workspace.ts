@@ -113,7 +113,7 @@ export function useUpdateWorkspace(workspaceId: string | undefined) {
 	});
 }
 
-/** The workspace's time zone, and how many routines' schedules would move with it. */
+/** The workspace's time zone, and how many automations' schedules would move with it. */
 export function useWorkspaceTimeZone(workspaceId: string, enabled: boolean) {
 	return useQuery({
 		queryKey: ["workspaces", workspaceId, "time-zone"],
@@ -125,7 +125,7 @@ export function useWorkspaceTimeZone(workspaceId: string, enabled: boolean) {
 	});
 }
 
-/** Moves the workspace, and the routine schedules in its old zone, to another time zone. */
+/** Moves the workspace, and the automation schedules in its old zone, to another time zone. */
 export function useChangeWorkspaceTimeZone(workspaceId: string) {
 	const queries = useQueryClient();
 	return useMutation({
@@ -139,7 +139,7 @@ export function useChangeWorkspaceTimeZone(workspaceId: string) {
 		onSuccess: () =>
 			Promise.all([
 				queries.invalidateQueries({ queryKey: ["workspaces"] }),
-				queries.invalidateQueries({ queryKey: ["routines"] }),
+				queries.invalidateQueries({ queryKey: ["automations"] }),
 			]),
 	});
 }
@@ -189,7 +189,7 @@ export function useCancelWorkspaceInvitation(workspaceId: string) {
 }
 
 /**
- * Leaving takes the whole client with it: every pod, agent and conversation on
+ * Leaving takes the whole client with it: every channel, bot and conversation on
  * screen belonged to a workspace this person is no longer in, so the cache is
  * cleared rather than refetched.
  */
@@ -207,8 +207,8 @@ export function useLeaveWorkspace(workspaceId: string) {
 /**
  * Changing what somebody may do, and taking them out of the workspace.
  *
- * Both invalidate more than the roster: a role decides which pods somebody
- * reaches and what each pod's `permissions` say, so when the person changed is
+ * Both invalidate more than the roster: a role decides which channels somebody
+ * reaches and what each channel's `permissions` say, so when the person changed is
  * the one looking, everything scoped to them is stale. Invalidating on every
  * change rather than working out whether it was you keeps that correct for one
  * refetch nobody will notice.
@@ -221,10 +221,10 @@ function useMemberChange<Input>(workspaceId: string, change: (input: Input) => P
 			Promise.all([
 				queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "members"] }),
 				queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
-				queries.invalidateQueries({ queryKey: ["pods"] }),
-				// Making somebody an administrator or the owner puts them in every shared pod.
-				queries.invalidateQueries({ queryKey: ["pod-members"] }),
-				queries.invalidateQueries({ queryKey: ["agents"] }),
+				queries.invalidateQueries({ queryKey: ["channels"] }),
+				// Making somebody an administrator or the owner puts them in every channel.
+				queries.invalidateQueries({ queryKey: ["channel-members"] }),
+				queries.invalidateQueries({ queryKey: ["bots"] }),
 			]),
 	});
 }
@@ -330,12 +330,12 @@ export function useWorkspaceRole(): WorkspaceRole | undefined {
 }
 
 const NOTHING_YET: WorkspacePermissions = {
-	createPods: false,
-	createAgents: false,
+	createChannels: false,
+	createBots: false,
 	updateWorkspace: false,
 	manageProviders: false,
 	manageMembers: false,
-	configureBuiltInAgents: false,
+	configureBuiltInBots: false,
 	manageUsage: false,
 	manageAdmins: false,
 	transferOwnership: false,

@@ -38,7 +38,7 @@ const jay = person(2, "Jay Young", "jay@nitric.io", "admin");
 const mara = person(3, "Mara Kent", "mara@nitric.io", "member");
 const sam = person(4, "Sam Park", "sam@nitric.io", "viewer");
 
-const inPod = (member: typeof rowan) => ({
+const inChannel = (member: typeof rowan) => ({
 	userId: member.user.id,
 	name: member.user.name,
 	email: member.user.email,
@@ -71,15 +71,18 @@ function SettingsPreview({ children }: { children: ReactNode }) {
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 		});
-		// What a member's page reads besides the roster: the pods, their bots and who is in each.
+		// What a member's page reads besides the roster: the channels, their bots and who is in each.
 		client.setQueryData(["workspaces"], [workspace]);
-		client.setQueryData(["pods", workspace.id], [revenue, engineering]);
+		client.setQueryData(["channels", workspace.id], [revenue, engineering]);
 		client.setQueryData(
-			["agents", workspace.id],
+			["bots", workspace.id],
 			[growthDesk, accountManager, leadResearcher, linearHandler, oncall],
 		);
-		client.setQueryData(["pod-members", revenue.id], [inPod(rowan), inPod(jay), inPod(mara)]);
-		client.setQueryData(["pod-members", engineering.id], [inPod(rowan), inPod(sam)]);
+		client.setQueryData(
+			["channel-members", revenue.id],
+			[inChannel(rowan), inChannel(jay), inChannel(mara)],
+		);
+		client.setQueryData(["channel-members", engineering.id], [inChannel(rowan), inChannel(sam)]);
 		return client;
 	});
 	useEffect(() => () => queryClient.clear(), [queryClient]);
@@ -156,7 +159,7 @@ export const Inviting = meta.story({
 	},
 });
 
-/** Somebody else's page: their role, the pods they are in, when they joined, and removing them. */
+/** Somebody else's page: their role, the channels they are in, when they joined, and removing them. */
 export const Person = meta.story({
 	args: { selectedMemberId: mara.id },
 	play: async ({ canvas }) => {

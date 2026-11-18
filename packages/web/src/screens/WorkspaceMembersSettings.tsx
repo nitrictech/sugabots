@@ -2,17 +2,22 @@ import {
 	ASSIGNABLE_WORKSPACE_ROLES,
 	type AssignableWorkspaceRole,
 	administersWorkspace,
+	type Channel,
 	INVITE_LIFETIME_DAYS,
-	type Pod,
 	workspaceRoleDescription,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
+import {
+	useChannelBots,
+	useChannelMembers,
+	useChannels,
+	usePlaceChannelMember,
+} from "@/lib/channels.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { formatTimeAfterVerb } from "@/lib/list-time.ts";
-import { usePlacePodMember, usePodBots, usePodMembers, usePods } from "@/lib/pods.ts";
 import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import {
 	useCancelWorkspaceInvitation,
@@ -24,7 +29,7 @@ import {
 	useWorkspaceInvitations,
 	useWorkspaceMembers,
 } from "@/lib/workspace.ts";
-import { PodInitial } from "@/shell/SidebarPod.tsx";
+import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
@@ -53,7 +58,7 @@ import { Toggle } from "@/ui/toggle.tsx";
 
 /**
  * The people in a workspace and the invitations still out, each person a
- * click into their own page: their role, the pods they are in, and removing
+ * click into their own page: their role, the channels they are in, and removing
  * them. Whoever may manage members gets the controls, over administrators
  * only when they may manage those too; everybody else reads the same pages
  * without them. The API decides either way.
@@ -303,7 +308,7 @@ function MemberPage({
 	const remove = useRemoveWorkspaceMember(workspaceId);
 	const leave = useLeaveWorkspace(workspaceId);
 	const transfer = useTransferWorkspaceOwnership(workspaceId);
-	const pods = usePods();
+	const channels = useChannels();
 	const router = useRouter();
 	const { leaveForPage } = useLeave();
 	const [confirming, setConfirming] = useState(false);
@@ -314,7 +319,8 @@ function MemberPage({
 	});
 	const role = member.role;
 	const isOwner = role === "owner";
-	const sharedPods = pods.data?.filter((pod) => pod.isMember || pod.visibility === "public") ?? [];
+	const listedChannels =
+		channels.data?.filter((channel) => channel.isMember || channel.visibility === "public") ?? [];
 	// Your own role is not yours to change: demoting yourself takes away the
 	// control you would need to undo it. Leaving stays, behind a confirmation.
 	// The owner's role and place change only by their handing ownership on.
@@ -381,7 +387,7 @@ function MemberPage({
 					</div>
 				)}
 			</SettingsGroup>
-			{sharedPods.length > 0 && (
+			{listedChannels.length > 0 && (
 				<SettingsGroup
 					label="Channels"
 					note={
@@ -390,10 +396,10 @@ function MemberPage({
 							: "The channels they are in, and the public ones they could join."
 					}
 				>
-					{sharedPods.map((pod) => (
-						<PodMembershipRow
-							key={pod.id}
-							pod={pod}
+					{listedChannels.map((channel) => (
+						<ChannelMembershipRow
+							key={channel.id}
+							channel={channel}
 							userId={member.user.id}
 							name={member.user.name}
 							canManage={canManage && !administersWorkspace(role)}
@@ -472,23 +478,23 @@ function joinedDate(joinedAt: string): string {
 	});
 }
 
-/** One shared pod, with whether this person is on its roster and a switch to change that. */
-function PodMembershipRow({
-	pod,
+/** One channel, with whether this person is on its roster and a switch to change that. */
+function ChannelMembershipRow({
+	channel,
 	userId,
 	name,
 	canManage,
 }: {
-	pod: Pod;
+	channel: Channel;
 	userId: string;
 	name: string;
 	canManage: boolean;
 }) {
-	const members = usePodMembers(pod.id);
-	const place = usePlacePodMember(pod.id);
-	const bots = usePodBots(pod.id).data ?? [];
+	const members = useChannelMembers(channel.id);
+	const place = usePlaceChannelMember(channel.id);
+	const bots = useChannelBots(channel.id).data ?? [];
 	const people = members.data?.length;
-	const inPod = members.data?.some((member) => member.userId === userId) ?? false;
+	const inChannel = members.data?.some((member) => member.userId === userId) ?? false;
 	const counts = [
 		`${bots.length} ${bots.length === 1 ? "bot" : "bots"}`,
 		people !== undefined ? `${people} ${people === 1 ? "person" : "people"}` : undefined,
@@ -496,13 +502,13 @@ function PodMembershipRow({
 
 	return (
 		<SettingsRow
-			icon={<PodInitial pod={pod} className="size-7 rounded-sm text-xs" />}
-			label={pod.name}
+			icon={<ChannelInitial channel={channel} className="size-7 rounded-sm text-xs" />}
+			label={channel.name}
 			sub={place.error ? failureMessage(place.error) : counts.join(", ")}
 			trailing={
 				<Toggle
-					label={`${name} is in ${pod.name}`}
-					checked={inPod}
+					label={`${name} is in ${channel.name}`}
+					checked={inChannel}
 					disabled={!canManage || members.isPending || place.isPending}
 					onChange={(member) => place.mutate({ userId, member })}
 				/>

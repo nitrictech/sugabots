@@ -1,8 +1,8 @@
-import { botColors } from "@sugabots/avatars";
+import { botPalettes } from "@sugabots/avatars";
 import {
-	type AgentColor,
-	type AgentFace,
-	type AgentShape,
+	type BotColor,
+	type BotFace,
+	type BotShape,
 	providerPreset,
 	type UsageMonth,
 	type WorkspaceUsage,
@@ -24,8 +24,8 @@ import {
 	useWorkspaceUsage,
 } from "@/lib/usage.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
-import { podPalettes } from "@/shell/PodTile.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
+import { channelPalettes } from "@/shell/ChannelTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -251,7 +251,7 @@ interface Line {
 	unpricedRequests: number;
 }
 
-const SYSTEM_AGENTS_WORK = "Summaries, titles, compaction, model tests";
+const SYSTEM_BOTS_WORK = "Summaries, titles, compaction, model tests";
 
 const PERSONAL_ASSISTANTS_WORK = "Everyone's, together";
 
@@ -345,7 +345,7 @@ function providerColors(models: readonly ModelUsage[]): (model: ModelUsage) => s
 	const order = [...new Set(models.map(providerOf))];
 	return (model) => {
 		const hue = PROVIDER_HUES[order.indexOf(providerOf(model)) % PROVIDER_HUES.length] ?? "blue";
-		return podPalettes[hue].swatch;
+		return channelPalettes[hue].swatch;
 	};
 }
 
@@ -360,27 +360,27 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 		color: NEUTRAL_BAR,
 		...usage.personalAssistants,
 	};
-	const systemAgents: Line = {
-		key: "system-agents",
-		icon: <LetterTile name="System agents" />,
-		label: "System agents",
-		sub: SYSTEM_AGENTS_WORK,
+	const systemBots: Line = {
+		key: "system-bots",
+		icon: <LetterTile name="System bots" />,
+		label: "System bots",
+		sub: SYSTEM_BOTS_WORK,
 		color: NEUTRAL_BAR,
-		...usage.systemAgents,
+		...usage.systemBots,
 	};
-	const withSystemAgents = (lines: Line[]) => [
+	const withSystemBots = (lines: Line[]) => [
 		...lines,
-		...[personalAssistants, systemAgents].filter(spent),
+		...[personalAssistants, systemBots].filter(spent),
 	];
 
 	switch (view) {
 		case "bot":
-			return withSystemAgents(
+			return withSystemBots(
 				usage.bots.map((bot) => ({
-					key: bot.agentId,
+					key: bot.botId,
 					icon: <BotIcon color={bot.color} face={bot.face} shape={bot.shape} name={bot.name} />,
 					label: bot.name ?? "Deleted bot",
-					color: bot.color ? botColors[bot.color].face : NEUTRAL_BAR,
+					color: bot.color ? botPalettes[bot.color].face : NEUTRAL_BAR,
 					usd: bot.usd,
 					unpricedRequests: bot.unpricedRequests,
 				})),
@@ -412,13 +412,13 @@ function BotIcon({
 	shape,
 	name,
 }: {
-	color: AgentColor | null;
-	face: AgentFace | null;
-	shape: AgentShape | null;
+	color: BotColor | null;
+	face: BotFace | null;
+	shape: BotShape | null;
 	name: string | null;
 }) {
 	return color ? (
-		<AgentAvatar color={color} face={face ?? undefined} shape={shape ?? "circle"} size={24} />
+		<BotAvatar color={color} face={face ?? undefined} shape={shape ?? "circle"} size={24} />
 	) : (
 		<LetterTile name={name ?? "Deleted bot"} />
 	);

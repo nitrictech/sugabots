@@ -101,22 +101,22 @@ export function workspaceRoleDescription(role: WorkspaceRole): string {
 /**
  * What the caller may do in the workspace itself, already decided by the API.
  *
- * Answers about one channel travel with it (`podPermissionsSchema`), and
- * about one bot with it (`agentPermissionsSchema`); these are the ones that
+ * Answers about one channel travel with it (`channelPermissionsSchema`), and
+ * about one bot with it (`botPermissionsSchema`); these are the ones that
  * belong to neither. As there, the client draws from these and
  * the API still decides.
  */
 export const workspacePermissionsSchema = Schema.Struct({
-	createPods: Schema.Boolean,
-	createAgents: Schema.Boolean,
+	createChannels: Schema.Boolean,
+	createBots: Schema.Boolean,
 	/** Rename the workspace, change its address, and move it to another time zone. */
 	updateWorkspace: Schema.Boolean,
 	/** Configure the model and search providers the workspace runs on. */
 	manageProviders: Schema.Boolean,
 	/** Invite, remove and set the access of the people in the workspace. */
 	manageMembers: Schema.Boolean,
-	/** Choose the models the Scribe and Compaction run on. */
-	configureBuiltInAgents: Schema.Boolean,
+	/** Choose the models the Summariser and Compaction run on. */
+	configureBuiltInBots: Schema.Boolean,
 	/** See what the workspace's models cost, and limit it. */
 	manageUsage: Schema.Boolean,
 	/** Make somebody an administrator or stop them being one, and remove an administrator. */

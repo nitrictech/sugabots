@@ -34,16 +34,16 @@ import {
  * signed in to only one at GitHub.
  */
 export function GitHubConnectStep({
-	agentId,
+	botId,
 	onBack,
 	done,
 }: {
-	agentId: string;
+	botId: string;
 	onBack: () => void;
 	done: () => void;
 }) {
 	const id = useId();
-	const make = useMakeGitHubApp(agentId);
+	const make = useMakeGitHubApp(botId);
 	const [organization, setOrganization] = useState("");
 
 	function submit(event: FormEvent) {
@@ -94,24 +94,20 @@ export function GitHubConnectStep({
  * the connection's app reaches. Nothing until the app is installed.
  */
 export function GitHubRepositoriesGroup({
-	agentId,
+	botId,
 	connectionId,
 	appSettingsUrl,
 	canManage,
 }: {
-	agentId: string;
+	botId: string;
 	connectionId: string;
 	/** Where the app's owner changes it on GitHub. */
 	appSettingsUrl: string;
 	canManage: boolean;
 }) {
-	const { repositories, add, remove } = useConnectionRepositories(agentId, connectionId);
+	const { repositories, add, remove } = useConnectionRepositories(botId, connectionId);
 	// Listing what the app reaches takes GitHub a while, so it starts before Add repository is chosen.
-	usePrefetchReachableRepositories(
-		agentId,
-		connectionId,
-		canManage && !!repositories.data?.account,
-	);
+	usePrefetchReachableRepositories(botId, connectionId, canManage && !!repositories.data?.account);
 	const [choosing, setChoosing] = useState(false);
 	if (repositories.isPending) return null;
 	if (repositories.isError) return <Alert>{failureMessage(repositories.error)}</Alert>;
@@ -162,7 +158,7 @@ export function GitHubRepositoriesGroup({
 			<Dialog open={choosing} onOpenChange={setChoosing}>
 				{choosing && (
 					<AddRepositoryDialog
-						agentId={agentId}
+						botId={botId}
 						connectionId={connectionId}
 						account={account}
 						accountRepositories={listed.map((one) => one.repository.toLowerCase())}
@@ -177,14 +173,14 @@ export function GitHubRepositoriesGroup({
 
 /** Adding one of the repositories the connection's app reaches that the connection doesn't have yet. */
 function AddRepositoryDialog({
-	agentId,
+	botId,
 	connectionId,
 	account,
 	accountRepositories,
 	onAdd,
 	done,
 }: {
-	agentId: string;
+	botId: string;
 	connectionId: string;
 	account: string;
 	/** The connection's repositories, lowercased, which aren't offered again. */
@@ -192,7 +188,7 @@ function AddRepositoryDialog({
 	onAdd: (repository: string) => Promise<unknown>;
 	done: () => void;
 }) {
-	const reached = useReachableRepositories(agentId, connectionId);
+	const reached = useReachableRepositories(botId, connectionId);
 	const [query, setQuery] = useState("");
 	const [adding, setAdding] = useState<string>();
 	const [error, setError] = useState<unknown>();

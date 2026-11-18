@@ -1,7 +1,7 @@
 export * as GitHubSignIn from "./github-sign-in.ts";
 
 import { Effect, Layer } from "effect";
-import { SandboxCredentials } from "../../../sandboxes/sandbox-credentials.ts";
+import { ComputerCredentials } from "../../../computers/computer-credentials.ts";
 import { GitHubConnections } from "./github-connections.ts";
 
 /**
@@ -11,14 +11,14 @@ import { GitHubConnections } from "./github-connections.ts";
  */
 export const make = Effect.gen(function* () {
 	const connections = yield* GitHubConnections.Service;
-	return SandboxCredentials.Service.of({
-		forAgent: (agent) =>
+	return ComputerCredentials.Service.of({
+		forBot: (bot) =>
 			Effect.gen(function* () {
-				const connected = yield* connections.forAgent(agent);
+				const connected = yield* connections.forBot(bot);
 				if (!connected || connected.repositories.length === 0) {
-					return SandboxCredentials.NOT_SIGNED_IN;
+					return ComputerCredentials.NOT_SIGNED_IN;
 				}
-				const signedIn = yield* connected.sandboxSignIn();
+				const signedIn = yield* connected.computerSignIn();
 				return {
 					credentials: signedIn.credentials,
 					environment: {},
@@ -28,13 +28,13 @@ export const make = Effect.gen(function* () {
 				Effect.catch((failure) =>
 					Effect.as(
 						Effect.logWarning("Couldn't get a read token for a bot's GitHub app", failure),
-						SandboxCredentials.NOT_SIGNED_IN,
+						ComputerCredentials.NOT_SIGNED_IN,
 					),
 				),
 			),
 	});
 });
 
-export const layer = Layer.effect(SandboxCredentials.Service, make).pipe(
+export const layer = Layer.effect(ComputerCredentials.Service, make).pipe(
 	Layer.provide(GitHubConnections.layer),
 );

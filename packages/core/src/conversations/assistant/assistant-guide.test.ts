@@ -2,16 +2,16 @@ import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { noComputers } from "../../computers/testing.ts";
 import {
-	agentSummary,
+	automation,
+	botSummary,
+	channelBot,
+	conversationRead,
+	message,
 	modelProvider,
-	pinnedAgent,
-	podAgent,
+	pinnedBot,
 	providerModel,
-	routine,
-	routineExecution,
-	thread,
-	threadRead,
 	user,
 	workspace,
 	workspaceMember,
@@ -22,9 +22,9 @@ import {
 	type Promised,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { noComputers } from "../../sandboxes/testing.ts";
-import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
+import { seedConversation } from "../seed.test-support.ts";
 import { AssistantGuide } from "./assistant-guide.ts";
 
 /**
@@ -33,7 +33,7 @@ import { AssistantGuide } from "./assistant-guide.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () => {
 	let guide: Promised<AssistantGuide.Interface>;
-	let agentsAs: (userId: string) => Promised<AgentAdministration.Interface>;
+	let botsAs: (userId: string) => Promised<BotAdministration.Interface>;
 
 	let workspaceId: string;
 	let workspaceSlug: string;
@@ -46,9 +46,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 			AssistantGuide.Service,
 			AssistantGuide.layer.pipe(Layer.provide(noComputers)),
 		);
-		agentsAs = await servedOnPostgresAs(
-			AgentAdministration.Service,
-			AgentAdministration.layer.pipe(Layer.provide(noComputers)),
+		botsAs = await servedOnPostgresAs(
+			BotAdministration.Service,
+			BotAdministration.layer.pipe(Layer.provide(noComputers)),
 		);
 	});
 
@@ -109,18 +109,18 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 	});
 
 	const aBot = (creatorId: string, name: string, visibility: "public" | "private" = "public") =>
-		agentsAs(creatorId).create({
+		botsAs(creatorId).create({
 			workspace: workspaceId,
-			agent: { name, model: "test-model", visibility },
+			bot: { name, model: "test-model", visibility },
 		});
 
 	it("shows the person the bots they reach, with what each has been doing, and nothing of others' private ones", async () => {
 		const writer = await aBot(adaId, "Writer");
 		const diary = await aBot(adaId, "Diary", "private");
 		await onDatabase((db) =>
-			db.insert(agentSummary).values([
-				{ agentId: writer.id, content: "Drafting the launch post.", coversThrough: new Date() },
-				{ agentId: diary.id, content: "Ada's private notes.", coversThrough: new Date() },
+			db.insert(botSummary).values([
+				{ botId: writer.id, content: "Drafting the launch post.", coversThrough: new Date() },
+				{ botId: diary.id, content: "Ada's private notes.", coversThrough: new Date() },
 			]),
 		);
 
@@ -144,7 +144,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 
 	it("lists automations failing now, though the person has read their failed runs", async () => {
 		const writer = await aBot(adaId, "Writer");
-		const automation = async (
+		const anAutomation = async (
 			name: string,
 			state: "enabled" | "paused",
 			lastRun: "completed" | "failed",
@@ -152,10 +152,10 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		) => {
 			const [defined] = await onDatabase((db) =>
 				db
-					.insert(routine)
+					.insert(automation)
 					.values({
 						workspaceId,
-						agentId: writer.id,
+						botId: writer.id,
 						name,
 						instructions: "Report",
 						state,
@@ -164,53 +164,54 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 					.returning(),
 			);
 			if (!defined) throw new Error("fixture");
-			const feedId = crypto.randomUUID();
-			await onDatabase((db) =>
-				db.insert(thread).values({
-					id: feedId,
+			const feed = await onDatabase((db) =>
+				seedConversation(db, {
 					workspaceId,
-					hostAgentId: writer.id,
-					conversationId: feedId,
-					routineId: defined.id,
-					type: "routine_feed",
+					kind: "automation_feed",
+					automationId: defined.id,
 					title: name,
 				}),
 			);
 			const requestId = crypto.randomUUID();
 			const finishedAt = new Date();
-			await onDatabase((db) =>
-				db.insert(routineExecution).values({
-					routineId: defined.id,
+			const run = await onDatabase((db) =>
+				seedConversation(db, {
 					workspaceId,
-					agentId: writer.id,
-					threadId: feedId,
-					triggerKind: "manual",
-					triggerIdentity: requestId,
-					trigger: {
-						kind: "manual",
-						requestId,
-						requestedAt: finishedAt.toISOString(),
-						requestedByUserId: samId,
+					kind: "run",
+					title: name,
+					run: {
+						automationId: defined.id,
+						botId: writer.id,
+						triggerKind: "manual",
+						triggerIdentity: requestId,
+						trigger: {
+							kind: "manual",
+							requestId,
+							requestedAt: finishedAt.toISOString(),
+							requestedByUserId: samId,
+						},
+						automationName: name,
+						instructions: "Report",
+						state: lastRun,
+						error: lastRun === "failed" ? userText`It broke` : undefined,
+						startedAt: finishedAt,
+						finishedAt,
 					},
-					routineName: name,
-					instructions: "Report",
-					state: lastRun,
-					error: lastRun === "failed" ? userText`It broke` : undefined,
-					startedAt: finishedAt,
-					finishedAt,
 				}),
 			);
-			// Sam has read every run.
+			// Sam has read every run, and the feed they are posted to.
+			const readThrough = new Date(Date.now() + 1000);
 			await onDatabase((db) =>
-				db
-					.insert(threadRead)
-					.values({ threadId: feedId, userId: samId, readThrough: new Date(Date.now() + 1000) }),
+				db.insert(conversationRead).values([
+					{ conversationId: feed.id, userId: samId, readThrough },
+					{ conversationId: run.id, userId: samId, readThrough },
+				]),
 			);
 		};
-		await automation("Failed last", "enabled", "failed");
-		await automation("Gave up", "paused", "failed", true);
-		await automation("Paused by hand", "paused", "failed");
-		await automation("Fine", "enabled", "completed");
+		await anAutomation("Failed last", "enabled", "failed");
+		await anAutomation("Gave up", "paused", "failed", true);
+		await anAutomation("Paused by hand", "paused", "failed");
+		await anAutomation("Fine", "enabled", "completed");
 
 		const seen = await guide.guide(sam());
 
@@ -235,9 +236,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		await guide.addBotToChannel(sam(), { channel: "#launch", bot: "@writer" });
 		const placed = await onDatabase((db) =>
 			db
-				.select({ agentId: podAgent.agentId })
-				.from(podAgent)
-				.where(eq(podAgent.agentId, writer.id)),
+				.select({ botId: channelBot.botId })
+				.from(channelBot)
+				.where(eq(channelBot.botId, writer.id)),
 		);
 		expect(placed).toHaveLength(1);
 
@@ -249,6 +250,61 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		).rejects.toMatchObject({ _tag: "NothingNamed" });
 	});
 
+	it("lists the person's unread mentions however many newer unread messages there are", async () => {
+		const writer = await aBot(adaId, "Writer");
+		const task = await onDatabase((db) =>
+			seedConversation(db, { workspaceId, kind: "task", botId: writer.id, title: "Launch" }),
+		);
+		const said = (content: string, createdAt: Date) => ({
+			conversationId: task.id,
+			authorUserId: adaId,
+			kind: "text" as const,
+			status: "complete" as const,
+			parts: [{ type: "text" as const, text: content }],
+			content,
+			createdAt,
+		});
+		const start = Date.now() - 60 * 60 * 1000;
+		await onDatabase((db) =>
+			db
+				.insert(message)
+				.values([
+					said("@sam can you look?", new Date(start)),
+					...Array.from({ length: 60 }, (_, index) =>
+						said(`Update ${index}`, new Date(start + (index + 1) * 1000)),
+					),
+				]),
+		);
+
+		const seen = await guide.guide(sam());
+
+		expect(seen.waitingOnYou.unreadMentions).toEqual([
+			expect.objectContaining({ from: "Ada", preview: "@sam can you look?" }),
+		]);
+	});
+
+	it("does for a viewer only what the viewer may do themselves", async () => {
+		await onDatabase((db) =>
+			db.update(workspaceMember).set({ role: "viewer" }).where(eq(workspaceMember.userId, samId)),
+		);
+
+		await expect(guide.createChannel(sam(), { name: "Launch" })).rejects.toMatchObject({
+			_tag: "ActionForbidden",
+		});
+	});
+
+	it("acts only on the channel at exactly the address given, not one by that name", async () => {
+		await aBot(samId, "Writer");
+		await guide.createChannel(sam(), { name: "Launch" });
+
+		await expect(
+			guide.addBotToChannel(sam(), { channel: "Launch", bot: "@writer" }),
+		).rejects.toMatchObject({ _tag: "NothingNamed" });
+		await expect(
+			guide.addBotToChannel(sam(), { channel: "launch", bot: "@Writer" }),
+		).rejects.toMatchObject({ _tag: "NothingNamed" });
+	});
+
 	it("pins and unpins a bot for the person only", async () => {
 		const writer = await aBot(adaId, "Writer");
 
@@ -256,9 +312,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		const pinsOf = () =>
 			onDatabase((db) =>
 				db
-					.select({ userId: pinnedAgent.userId })
-					.from(pinnedAgent)
-					.where(eq(pinnedAgent.agentId, writer.id)),
+					.select({ userId: pinnedBot.userId })
+					.from(pinnedBot)
+					.where(eq(pinnedBot.botId, writer.id)),
 			);
 		expect((await pinsOf()).map(({ userId }) => userId).sort()).toEqual([adaId, samId].sort());
 

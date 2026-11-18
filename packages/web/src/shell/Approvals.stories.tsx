@@ -42,8 +42,8 @@ function call(id: string, tool: string, approval: ToolCallPart["approval"]): Too
 function request(id: string, tool: string, approval: ToolCallPart["approval"]): ApprovalRequest {
 	return {
 		call: call(id, tool, approval),
-		agent: {
-			kind: "agent",
+		bot: {
+			kind: "bot",
 			id: growthDesk.id,
 			name: growthDesk.name,
 			handle: growthDesk.handle,
@@ -51,9 +51,9 @@ function request(id: string, tool: string, approval: ToolCallPart["approval"]): 
 			face: growthDesk.face,
 			shape: "circle",
 		},
-		podId: revenue.id,
-		threadId: storyTaskFor(growthDesk).id,
+		channelId: revenue.id,
 		conversationId: storyTaskFor(growthDesk).id,
+		rootConversationId: storyTaskFor(growthDesk).id,
 	};
 }
 
@@ -123,7 +123,7 @@ export const Opened = meta.story({
 			name: "Approval request: Send quote in Stripe",
 		});
 		await expect(page).toHaveTextContent("Acme Retail");
-		// The link waits for the pods and bots too, which can answer after the request.
+		// The link waits for the channels and bots too, which can answer after the request.
 		await expect(
 			await canvas.findByRole("link", { name: "Open conversation" }),
 		).toBeInTheDocument();

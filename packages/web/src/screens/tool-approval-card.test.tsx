@@ -11,7 +11,7 @@ import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const agent = {
+const bot = {
 	name: "Linear Handler",
 	color: "green" as const,
 	face: "pill" as const,
@@ -48,8 +48,8 @@ function show(call: ToolCallPart, canApprove = true) {
 		<QueryClientProvider client={queries}>
 			<ToolApprovalCard
 				call={shown}
-				agent={agent}
-				threadId="0199a3a0-0000-7000-8000-0000000000b2"
+				bot={bot}
+				conversationId="0199a3a0-0000-7000-8000-0000000000b2"
 				canApprove={canApprove}
 				look={{ name: "Linear", presetId: "linear" }}
 			/>
@@ -66,7 +66,7 @@ function inCard(name: RegExp) {
 }
 
 beforeEach(() => {
-	client.api.toolApprovals.decide.mockReturnValue(Effect.undefined);
+	client.api.approvals.decide.mockReturnValue(Effect.undefined);
 });
 
 afterEach(() => {
@@ -76,7 +76,7 @@ afterEach(() => {
 
 describe("an approval request", () => {
 	it("says who wants to use what, shows the request, and allows it once", async () => {
-		const approval = client.api.toolApprovals.decide;
+		const approval = client.api.approvals.decide;
 		show(asking({ team: "Platform" }));
 
 		const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
@@ -90,7 +90,7 @@ describe("an approval request", () => {
 	});
 
 	it("keeps the answer given once it is accepted, until the turn records it", async () => {
-		const approval = client.api.toolApprovals.decide;
+		const approval = client.api.approvals.decide;
 		show(asking({ team: "Platform" }));
 
 		fireEvent.click(inCard(/^Allow/));
@@ -117,7 +117,7 @@ describe("an approval request", () => {
 	});
 
 	it("lets the answer be given again if sending it failed", async () => {
-		const approval = client.api.toolApprovals.decide;
+		const approval = client.api.approvals.decide;
 		approval.mockReturnValue(
 			Effect.fail(new Conflict({ message: userText`That tool approval has already been decided` })),
 		);
@@ -130,7 +130,7 @@ describe("an approval request", () => {
 	});
 
 	it("denies it", async () => {
-		const approval = client.api.toolApprovals.decide;
+		const approval = client.api.approvals.decide;
 		show(asking({ team: "Platform" }));
 
 		fireEvent.click(inCard(/^Deny/));
@@ -158,7 +158,7 @@ describe("an approval request", () => {
 	});
 
 	it("opens the whole request full screen for review, and closes it once answered", async () => {
-		const approval = client.api.toolApprovals.decide;
+		const approval = client.api.approvals.decide;
 		show(asking({ team: "Platform" }));
 
 		fireEvent.click(screen.getByRole("button", { name: "Review" }));
@@ -179,7 +179,7 @@ describe("an approval request", () => {
 		fireEvent.click(within(request).getByRole("button", { name: "Close" }));
 
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-		expect(client.api.toolApprovals.decide).not.toHaveBeenCalled();
+		expect(client.api.approvals.decide).not.toHaveBeenCalled();
 	});
 
 	it("says it waits on someone with permission when the reader cannot answer", () => {

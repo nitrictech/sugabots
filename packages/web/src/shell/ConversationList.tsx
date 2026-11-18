@@ -1,22 +1,28 @@
 import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
-	type Agent,
+	type Bot,
+	type Channel,
 	type ChatList,
 	type ChatListItem,
 	FIRST_CHAT_NAME,
 	type NotificationSettings,
-	type Pod,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Check, ChevronRight, Hash, Plus, Zap } from "lucide-react";
 import { useRef } from "react";
 import { useBotTasks, useChatList } from "@/lib/chats.ts";
-import { botLink, conversationLink, newTaskLink, podChatLink, routinesLink } from "@/lib/links.ts";
+import {
+	automationsLink,
+	botLink,
+	conversationLink,
+	mainChatLink,
+	newTaskLink,
+} from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
-import { THREADS_SHOWN } from "@/lib/screen-limits.ts";
+import { TASKS_SHOWN } from "@/lib/screen-limits.ts";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
-import { TurnTakingAvatar } from "@/shell/Agent.tsx";
+import { TurnTakingAvatar } from "@/shell/Bot.tsx";
 import { FailedDot } from "@/shell/FailedDot.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -29,16 +35,16 @@ export type ListedChat = ChatList["chats"][number];
  * before anyone opens it, which opens it, then its threads.
  */
 export function ChannelConversations({
-	pod,
+	channel,
 	selectedConversationId,
 }: {
-	pod: Pod;
+	channel: Channel;
 	selectedConversationId?: string;
 }) {
-	const list = useChatList(pod.slug);
+	const list = useChatList(channel.slug);
 	return (
 		<ChannelConversationsView
-			pod={pod}
+			channel={channel}
 			chats={list.data?.chats ?? []}
 			status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
 			selectedConversationId={selectedConversationId}
@@ -47,12 +53,12 @@ export function ChannelConversations({
 }
 
 export function ChannelConversationsView({
-	pod,
+	channel,
 	chats,
 	status,
 	selectedConversationId,
 }: {
-	pod: Pod;
+	channel: Channel;
 	/** Its main chat first, none until somebody opens it, then its threads. */
 	chats: readonly ListedChat[];
 	status: "loading" | "ready" | "failed";
@@ -69,8 +75,8 @@ export function ChannelConversationsView({
 			<ul className="m-0 flex list-none flex-col gap-px p-0">
 				{shown.map((chat) => (
 					<li key={chat === "unopened" ? "unopened" : chat.conversation.id}>
-						<PodChatRow
-							pod={pod}
+						<ChannelConversationRow
+							channel={channel}
 							chat={chat}
 							selected={chat !== "unopened" && chat.conversation.id === selectedConversationId}
 						/>
@@ -93,12 +99,12 @@ export function sidebarRowClassName(selected: boolean): string {
 }
 
 /** One of the channel's conversations, bright and dotted while something there is new. */
-function PodChatRow({
-	pod,
+function ChannelConversationRow({
+	channel,
 	chat,
 	selected,
 }: {
-	pod: Pod;
+	channel: Channel;
 	chat: ListedChat | "unopened";
 	selected: boolean;
 }) {
@@ -106,8 +112,8 @@ function PodChatRow({
 	return (
 		<Link
 			{...(chat === "unopened"
-				? podChatLink(pod)
-				: conversationLink({ pod, conversationId: chat.conversation.id }))}
+				? mainChatLink(channel)
+				: conversationLink({ channel, conversationId: chat.conversation.id }))}
 			aria-current={selected ? "page" : undefined}
 			className={sidebarRowClassName(selected)}
 		>
@@ -129,13 +135,13 @@ function PodChatRow({
 
 /** How a bot stands for the viewer, as the sidebar marks it. */
 export interface BotStanding {
-	agent: Agent;
-	/** How many unread messages its tasks and automation threads hold. */
+	bot: Bot;
+	/** How many unread messages its tasks and automations' feeds hold. */
 	unreadMessages: number;
 	/** Whether one of its conversations waits on the viewer. */
 	needsApproval: boolean;
 	/** How many of its automations failed their latest run. */
-	failedRoutines: number;
+	failedAutomations: number;
 }
 
 /** A row's height and type on a phone, where a thumb taps it rather than a pointer, shaded while pressed. */
@@ -167,14 +173,14 @@ export function SidebarBot({
 	selectedConversationId?: string;
 	notificationSettings?: NotificationSettings;
 }) {
-	const { agent, unreadMessages, needsApproval, failedRoutines } = standing;
+	const { bot, unreadMessages, needsApproval, failedAutomations } = standing;
 	const face = useRef<LivelyFace>(null);
 	const attention = unreadMessages > 0 || needsApproval;
 	const endMark =
-		attention || failedRoutines > 0 ? (
+		attention || failedAutomations > 0 ? (
 			<>
 				<UnreadMarker unreadMessages={unreadMessages} needsYou={needsApproval} />
-				{failedRoutines > 0 &&
+				{failedAutomations > 0 &&
 					(needsApproval ? (
 						<span className="sr-only">, latest automation run failed</span>
 					) : (
@@ -182,7 +188,7 @@ export function SidebarBot({
 					))}
 			</>
 		) : undefined;
-	const notificationPlace = { kind: "bot", id: agent.id } as const;
+	const notificationPlace = { kind: "bot", id: bot.id } as const;
 	const row = (
 		<div
 			onPointerEnter={() => face.current?.play("hop")}
@@ -192,7 +198,7 @@ export function SidebarBot({
 			)}
 		>
 			<Link
-				{...botLink(agent)}
+				{...botLink(bot)}
 				aria-current={selected && !selectedConversationId ? "page" : undefined}
 				className={cn(
 					botClassName,
@@ -201,16 +207,16 @@ export function SidebarBot({
 						: "text-muted-foreground group-hover/bot:text-foreground",
 				)}
 			>
-				<TurnTakingAvatar bot={agent} size={18} faceRef={face} className="shrink-0" />
+				<TurnTakingAvatar bot={bot} size={18} faceRef={face} className="shrink-0" />
 				<span
 					className={cn(
 						"min-w-0 flex-1 truncate-fade",
 						attention && "font-semibold",
 						// Listed only while it is open, as it is not pinned.
-						!agent.pinned && "italic",
+						!bot.pinned && "italic",
 					)}
 				>
-					{agent.name}
+					{bot.name}
 				</span>
 				<MutedMark settings={notificationSettings} place={notificationPlace} />
 			</Link>
@@ -224,9 +230,9 @@ export function SidebarBot({
 				)}
 			>
 				<IconButton
-					label={`New task with ${agent.name}`}
+					label={`New task with ${bot.name}`}
 					size="sm"
-					render={<Link {...newTaskLink(agent)} />}
+					render={<Link {...newTaskLink(bot)} />}
 					className={cn(
 						"size-5.5",
 						!endMark &&
@@ -243,7 +249,7 @@ export function SidebarBot({
 			<NotificationsContextMenu settings={notificationSettings} place={notificationPlace}>
 				{row}
 			</NotificationsContextMenu>
-			{open && <BotTasks agent={agent} selectedConversationId={selectedConversationId} />}
+			{open && <BotTasks bot={bot} selectedConversationId={selectedConversationId} />}
 		</li>
 	);
 }
@@ -252,20 +258,14 @@ export function SidebarBot({
  * A bot's tasks under it: the newest few not done, and the one open on the
  * page wherever it is, done or not, then its automations.
  */
-function BotTasks({
-	agent,
-	selectedConversationId,
-}: {
-	agent: Agent;
-	selectedConversationId?: string;
-}) {
-	const { data } = useBotTasks(agent.id);
+function BotTasks({ bot, selectedConversationId }: { bot: Bot; selectedConversationId?: string }) {
+	const { data } = useBotTasks(bot.id);
 	const tasks = data?.tasks ?? [];
 	const isSelected = (conversationId: string) => conversationId === selectedConversationId;
 	const shown = tasks
 		.filter((row) => row.conversation.doneAt === null || isSelected(row.conversation.id))
-		.filter((row, index) => index < THREADS_SHOWN || isSelected(row.conversation.id));
-	const routines = data?.routines ?? [];
+		.filter((row, index) => index < TASKS_SHOWN || isSelected(row.conversation.id));
+	const automations = data?.automations ?? [];
 	return (
 		<LivelyGroup>
 			<ul
@@ -273,14 +273,14 @@ function BotTasks({
 			>
 				{shown.map((row) => (
 					<li key={row.conversation.id}>
-						<TaskRow row={row} agent={agent} selected={isSelected(row.conversation.id)} />
+						<TaskRow row={row} bot={bot} selected={isSelected(row.conversation.id)} />
 					</li>
 				))}
-				{routines.length > 0 && (
+				{automations.length > 0 && (
 					<li>
 						<Link
-							{...routinesLink(agent)}
-							className={cn(threadRowClassName(false), "text-subtle-foreground")}
+							{...automationsLink(bot)}
+							className={cn(taskRowClassName(false), "text-subtle-foreground")}
 						>
 							<Zap aria-hidden size={12} strokeWidth={2.25} className="shrink-0" />
 							<span className="min-w-0 flex-1 truncate">Automations</span>
@@ -294,7 +294,7 @@ function BotTasks({
 }
 
 /** A row under a bot, shaded while it is the one open. */
-function threadRowClassName(selected: boolean): string {
+function taskRowClassName(selected: boolean): string {
 	return cn(
 		"focus-ring flex h-8 min-w-0 items-center gap-2 rounded-sm pr-1.5 pl-2 text-sm transition-colors max-md:h-10 max-md:text-sm max-md:active:bg-row-selected",
 		selected ? "bg-row-selected text-foreground" : "text-muted-foreground hover:text-foreground",
@@ -306,16 +306,16 @@ function threadRowClassName(selected: boolean): string {
  * its end a dot while it waits on the viewer. A done task is ticked and
  * greyer.
  */
-function TaskRow({ row, agent, selected }: { row: ChatListItem; agent: Agent; selected: boolean }) {
+function TaskRow({ row, bot, selected }: { row: ChatListItem; bot: Bot; selected: boolean }) {
 	const done = row.conversation.doneAt !== null;
 	const needsYou = row.needsApproval || row.mentionsYou;
 	const lit = !done && (row.unreadMessages > 0 || needsYou);
 	return (
 		<Link
-			{...conversationLink({ agent, conversationId: row.conversation.id })}
+			{...conversationLink({ bot, conversationId: row.conversation.id })}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
-				threadRowClassName(selected),
+				taskRowClassName(selected),
 				done && !selected && "text-subtle-foreground",
 				lit && "font-semibold text-foreground",
 			)}
@@ -343,7 +343,13 @@ export const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
  * mention does. Unread messages show in the row's bold name, so they are only
  * counted for a screen reader.
  */
-function UnreadMarker({ unreadMessages, needsYou }: { unreadMessages: number; needsYou: boolean }) {
+export function UnreadMarker({
+	unreadMessages,
+	needsYou,
+}: {
+	unreadMessages: number;
+	needsYou: boolean;
+}) {
 	const unread = unreadMessages > 0 && countOf(unreadMessages, "unread message", "unread messages");
 	if (!needsYou) return unread ? <span className="sr-only">{unread}</span> : null;
 	const label = unread ? `${unread}, needs you` : "Needs you";

@@ -1,9 +1,9 @@
 export * as EventBus from "./bus.ts";
 
 import {
-	type Channel,
 	isDurableEventType,
 	resetEvent,
+	type StreamChannel,
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { Context, Effect, Layer } from "effect";
@@ -22,9 +22,9 @@ import { EventStore } from "./store.ts";
  */
 
 export interface Interface {
-	publish(channel: Channel, event: StreamEvent): Promise<void>;
+	publish(channel: StreamChannel, event: StreamEvent): Promise<void>;
 	publishCommitted(events: CommittedEvent[]): Promise<void>;
-	subscribe(channel: Channel, options?: SubscribeOptions): AsyncIterable<Delivery>;
+	subscribe(channel: StreamChannel, options?: SubscribeOptions): AsyncIterable<Delivery>;
 	/**
 	 * Stops listening to other processes and ends every subscription here.
 	 *
@@ -101,13 +101,13 @@ export function inProcess({
 	maxBuffered = MAX_BUFFERED,
 	log = console.error,
 }: InProcessOptions): Interface {
-	const channels = new Map<Channel, Set<Subscriber>>();
+	const channels = new Map<StreamChannel, Set<Subscriber>>();
 	let closed = false;
 
 	// Failing to tell the other processes must not fail the publish: the change
 	// is committed and this process's subscribers have it.
 	const broadcast = relay
-		? (channel: Channel, delivery: Delivery) =>
+		? (channel: StreamChannel, delivery: Delivery) =>
 				relay
 					.broadcast(channel, delivery)
 					.catch((cause) => log("Relaying an event to other processes failed", cause))
@@ -126,9 +126,9 @@ export function inProcess({
 	 * overlapping publishes could otherwise take their sequence numbers in one
 	 * order and reach subscribers in the other.
 	 */
-	const publishing = new Map<Channel, Promise<void>>();
+	const publishing = new Map<StreamChannel, Promise<void>>();
 
-	function serialize(channel: Channel, thread: () => Promise<void>): Promise<void> {
+	function serialize(channel: StreamChannel, thread: () => Promise<void>): Promise<void> {
 		const done = (publishing.get(channel) ?? Promise.resolve()).then(thread, thread);
 		// The queue holds a promise that never rejects, so one failed publish
 		// does not reject every publish queued behind it.
@@ -144,7 +144,7 @@ export function inProcess({
 		return done;
 	}
 
-	function deliver(channel: Channel, delivery: Delivery): void {
+	function deliver(channel: StreamChannel, delivery: Delivery): void {
 		for (const subscriber of channels.get(channel) ?? []) {
 			if (subscriber.overflowed) {
 				continue;

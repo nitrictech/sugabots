@@ -1,4 +1,10 @@
-import type { Agent, Pod, SessionUser, Workspace, WorkspacePermissions } from "@sugabots/contracts";
+import type {
+	Bot,
+	Channel,
+	SessionUser,
+	Workspace,
+	WorkspacePermissions,
+} from "@sugabots/contracts";
 import {
 	CONNECTION_SIGN_IN_RETURN_PATH,
 	GITHUB_SETUP_RETURN_PATH,
@@ -27,32 +33,40 @@ import { cn } from "cn";
 import { MessageSquareOff } from "lucide-react";
 import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { validate as isUuid } from "uuid";
-import { agentsQuery, useAgents, useAssistant, useBot, useEnsureAssistant } from "@/lib/agents.ts";
+import {
+	botsQuery,
+	useAssistant,
+	useBots,
+	useBotWithHandle,
+	useEnsureAssistant,
+} from "@/lib/bots.ts";
+import { findChannel, useChannels, useJoinChannel } from "@/lib/channels.ts";
 import {
 	type ConversationPlace,
+	placeBot,
 	prefetchConversation,
 	useAnyConversationPlace,
 	useBotConversationPlace,
 	useBotTasks,
 	useChannelConversationPlace,
 	useDirectMessage,
-	useOpenPodChat,
-	useOpenRoutineFeed,
+	useOpenAutomationFeed,
+	useOpenChannelConversation,
 } from "@/lib/chats.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { followTrail, historyIndex } from "@/lib/history-trail.ts";
 import {
-	agentSettingsLink,
+	automationFeedLink,
+	automationsLink,
 	botLink,
+	botSettingsLink,
 	conversationLink,
 	newTaskLink,
-	routineThreadLink,
-	type ThreadsTab,
+	type TasksTab,
 } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
-import { findPod, useJoinPod, usePods } from "@/lib/pods.ts";
 import { loadFailure } from "@/lib/query.ts";
 import { type Session, SessionContext, useSession } from "@/lib/session.ts";
 import {
@@ -63,16 +77,17 @@ import {
 	useWorkspaces,
 } from "@/lib/workspace.ts";
 import {
-	agentSettingsPage,
-	podSettingsPage,
+	botSettingsPage,
+	channelSettingsPage,
 	workspaceSettingSection,
 } from "@/lib/workspace-settings.ts";
 import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
-import { ArtifactsPage } from "@/screens/Artifacts.tsx";
+import type { AutomationsView } from "@/screens/AutomationsStage.tsx";
 import type { Staged } from "@/screens/ConversationChat.tsx";
-import type { RoutinesView } from "@/screens/RoutinesStage.tsx";
+import { FilesPage } from "@/screens/Files.tsx";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { Approvals } from "@/shell/Approvals.tsx";
+import { AutomationsPage, useListedAutomations } from "@/shell/Automations.tsx";
 import { BotsDirectory } from "@/shell/BotsDirectory.tsx";
 import { ChannelsDirectory } from "@/shell/ChannelsDirectory.tsx";
 import { DirectMessagesOverview } from "@/shell/DirectMessages.tsx";
@@ -80,7 +95,6 @@ import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
 import { LoadFailure } from "@/shell/LoadFailure.tsx";
 import { MobileDirectMessages, MobileHome } from "@/shell/MobileHome.tsx";
 import { PageFailure } from "@/shell/PageFailure.tsx";
-import { RoutinesPage } from "@/shell/Routines.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
 import { You } from "@/shell/You.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
@@ -91,20 +105,23 @@ const ConversationPage = lazyNamed(
 	() => import("@/screens/ConversationPage.tsx"),
 	"ConversationPage",
 );
-const NewTask = lazyNamed(() => import("@/screens/NewThread.tsx"), "NewTask");
+const NewTask = lazyNamed(() => import("@/screens/NewTask.tsx"), "NewTask");
 // Lazy as the conversation is: it shows the one there already is with the people chosen.
 const NewDirectMessagePage = lazyNamed(
 	() => import("@/shell/NewDirectMessage.tsx"),
 	"NewDirectMessagePage",
 );
-const ActivityPane = lazyNamed(
-	() => import("@/screens/ActivityPane.tsx").then(({ ActivityPane }) => ({ ActivityPane })),
-	"ActivityPane",
+const InboxPane = lazyNamed(
+	() => import("@/screens/InboxPane.tsx").then(({ InboxPane }) => ({ InboxPane })),
+	"InboxPane",
 );
 // Its own export, or the module's other exports would decide the props.
-const ActivityThread = lazyNamed(
-	() => import("@/screens/ActivityPane.tsx").then(({ ActivityThread }) => ({ ActivityThread })),
-	"ActivityThread",
+const ItemConversationPage = lazyNamed(
+	() =>
+		import("@/screens/InboxPane.tsx").then(({ ItemConversationPage }) => ({
+			ItemConversationPage,
+		})),
+	"ItemConversationPage",
 );
 const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
 const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
@@ -115,9 +132,15 @@ const ResetPassword = lazyNamed(
 );
 const Onboarding = lazyNamed(() => import("@/screens/Onboarding.tsx"), "Onboarding");
 // Its own export, or the module's other exports would decide the props.
-const NewRoutine = lazyNamed(
-	() => import("@/screens/RoutineEditing.tsx").then(({ NewRoutine }) => ({ NewRoutine })),
-	"NewRoutine",
+const AutomationSetup = lazyNamed(
+	() =>
+		import("@/screens/AutomationEditing.tsx").then(({ AutomationSetup }) => ({ AutomationSetup })),
+	"AutomationSetup",
+);
+// Its own export, or the module's other exports would decide the props.
+const NewAutomation = lazyNamed(
+	() => import("@/screens/AutomationEditing.tsx").then(({ NewAutomation }) => ({ NewAutomation })),
+	"NewAutomation",
 );
 /*
  * The settings sections are a chunk of their own; the window they open in is
@@ -189,8 +212,8 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /connections/oauth/return        where a connection's sign-in comes back
  *   /$workspace              the person's Personal Assistant
  *   /$workspace/settings     workspace settings
- *   /$workspace/activity     what is new across the workspace: mentions, unread messages, automation runs and collaborations
- *   /$workspace/activity/$conversation   the conversation, run or collaboration of the one chosen, beside them
+ *   /$workspace/inbox     what is new across the workspace: mentions, unread messages, automation runs and collaborations
+ *   /$workspace/inbox/$conversation   the conversation, run or collaboration of the one chosen, beside them
  *   /$workspace/dm           your direct messages with other people
  *   /$workspace/dm/new       starting one, with one person or a group
  *   /$workspace/dm/$conversation   one of them, by its id, `?message=` jumped to
@@ -199,13 +222,13 @@ function lazyNamed<Name extends string, Props extends object>(
  *   /$workspace/channels     every channel the person is in or could join
  *   /$workspace/channels/$channel   a channel, which opens its main chat
  *   /$workspace/channels/$channel/$conversation   its main chat or one of its threads
- *   /$workspace/channels/$channel/files[/$artifact]   the files made in it
+ *   /$workspace/channels/$channel/files[/$file]   the files made in it
  *   /$workspace/bots         every bot the person reaches
  *   /$workspace/bots/$bot    a bot, which opens its newest task, or a new one
  *   /$workspace/bots/$bot/new   starting a task from its first message
- *   /$workspace/bots/$bot/tasks/$conversation   one of its tasks, or an automation's thread
- *   /$workspace/bots/$bot/files[/$artifact]   the files it made
- *   /$workspace/bots/$bot/automations[/new|/$routine]   its automations
+ *   /$workspace/bots/$bot/tasks/$conversation   one of its tasks, or an automation's feed
+ *   /$workspace/bots/$bot/files[/$file]   the files it made
+ *   /$workspace/bots/$bot/automations[/new|/$automation]   its automations
  *   /$workspace/tasks/$conversation   a task by its id alone, which goes on to its bot's address
  *   /$workspace/settings/members/$member   one person, by membership id
  *   /$workspace/settings/channels/$channel[/$page]   a channel's settings
@@ -217,7 +240,7 @@ function lazyNamed<Name extends string, Props extends object>(
  *
  * A bot's address uses its handle, unique in its workspace, rather than its
  * name, so renaming a bot keeps its links. A collaboration or automation run
- * has no address of its own: it opens beside its conversation, as `?thread=`.
+ * has no address of its own: it opens beside its conversation, as `?item=`.
  */
 
 /**
@@ -409,7 +432,7 @@ function ResetPasswordRoute() {
 
 interface SignInReturnSearch {
 	workspace?: string;
-	agent?: string;
+	bot?: string;
 	/** A code saying why the sign-in did not finish, shown only through `signInFailureReason`. */
 	oauth_error?: string;
 }
@@ -422,7 +445,7 @@ const signInReturnRoute = createRoute({
 	path: CONNECTION_SIGN_IN_RETURN_PATH,
 	validateSearch: (search: Record<string, unknown>): SignInReturnSearch => ({
 		workspace: optionalString(search.workspace),
-		agent: optionalString(search.agent),
+		bot: optionalString(search.bot),
 		oauth_error: optionalString(search.oauth_error),
 	}),
 	beforeLoad: requireUser,
@@ -430,10 +453,10 @@ const signInReturnRoute = createRoute({
 });
 
 function SignInReturnRoute() {
-	const { workspace, agent: agentId, oauth_error: oauthError } = signInReturnRoute.useSearch();
+	const { workspace, bot: botId, oauth_error: oauthError } = signInReturnRoute.useSearch();
 	const workspaces = useWorkspaces();
 	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
-	const { bot, resolving: botResolving } = useBotOf(workspace, agentId);
+	const { bot, resolving: botResolving } = useBotOf(workspace, botId);
 	const navigate = useNavigate();
 
 	useEffect(() => {
@@ -476,7 +499,7 @@ const gitHubSetupReturnRoute = createRoute({
 	path: GITHUB_SETUP_RETURN_PATH,
 	validateSearch: (search: Record<string, unknown>) => ({
 		workspace: optionalString(search.workspace),
-		agent: optionalString(search.agent),
+		bot: optionalString(search.bot),
 		connection: optionalString(search.connection),
 		github_error: optionalString(search.github_error),
 	}),
@@ -487,13 +510,13 @@ const gitHubSetupReturnRoute = createRoute({
 function GitHubSetupReturnRoute() {
 	const {
 		workspace,
-		agent: agentId,
+		bot: botId,
 		connection,
 		github_error: failure,
 	} = gitHubSetupReturnRoute.useSearch();
 	const workspaces = useWorkspaces();
 	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
-	const { bot, resolving: botResolving } = useBotOf(workspace, agentId);
+	const { bot, resolving: botResolving } = useBotOf(workspace, botId);
 	const navigate = useNavigate();
 
 	useEffect(() => {
@@ -533,14 +556,14 @@ function GitHubSetupReturnRoute() {
 }
 
 /**
- * The bot `agentId` of `workspace`, for a page outside any workspace that the
+ * The bot `botId` of `workspace`, for a page outside any workspace that the
  * API sent back with their ids.
  */
-function useBotOf(workspace: string | undefined, agentId: string | undefined) {
-	const agents = useQuery(agentsQuery(workspace));
+function useBotOf(workspace: string | undefined, botId: string | undefined) {
+	const bots = useQuery(botsQuery(workspace));
 	return {
-		bot: agents.data?.find((one) => one.id === agentId),
-		resolving: agents.isPending,
+		bot: bots.data?.find((one) => one.id === botId),
+		resolving: bots.isPending,
 	};
 }
 
@@ -688,7 +711,7 @@ const workspaceIndexRoute = createRoute({
 });
 
 function AssistantRoute() {
-	const { isPending, error } = useAgents();
+	const { isPending, error } = useBots();
 	const assistant = useAssistant();
 	const ensure = useEnsureAssistant();
 	const { mutate } = ensure;
@@ -883,34 +906,39 @@ const settingsDefaultModelRoute = createRoute({
 });
 
 function SettingsChannelRoute() {
-	const { channel } = settingsChannelRoute.useParams();
-	const { data: pods, isPending, error } = usePods();
+	const { channel: slug } = settingsChannelRoute.useParams();
+	const { data: channels, isPending, error } = useChannels();
 	// A channel's settings are for the people in it.
-	const pod = memberPod(pods, channel);
+	const channel = memberChannel(channels, slug);
 	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!pod) return <ChannelSettingsMissing pods={pods} slug={channel} error={error} />;
+	if (!channel) return <ChannelSettingsMissing channels={channels} slug={slug} error={error} />;
 	return (
 		<SettingsLayout>
-			<WorkspaceSettings section="channels" selectedPodId={pod.id} />
+			<WorkspaceSettings section="channels" selectedChannelId={channel.id} />
 		</SettingsLayout>
 	);
 }
 
 function SettingsChannelPageRoute() {
-	const { channel, page: pageSegment } = settingsChannelPageRoute.useParams();
-	const { data: pods, isPending, error } = usePods();
-	const pod = memberPod(pods, channel);
-	const page = podSettingsPage(pageSegment);
+	const { channel: slug, page: pageSegment } = settingsChannelPageRoute.useParams();
+	const { data: channels, isPending, error } = useChannels();
+	const channel = memberChannel(channels, slug);
+	const page = channelSettingsPage(pageSegment);
 	if (!page) {
 		return (
-			<Navigate from="/$workspace" to="./settings/channels/$channel" params={{ channel }} replace />
+			<Navigate
+				from="/$workspace"
+				to="./settings/channels/$channel"
+				params={{ channel: slug }}
+				replace
+			/>
 		);
 	}
 	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!pod) return <ChannelSettingsMissing pods={pods} slug={channel} error={error} />;
+	if (!channel) return <ChannelSettingsMissing channels={channels} slug={slug} error={error} />;
 	return (
 		<SettingsLayout>
-			<WorkspaceSettings section="channels" selectedPodId={pod.id} podPage={page} />
+			<WorkspaceSettings section="channels" selectedChannelId={channel.id} channelPage={page} />
 		</SettingsLayout>
 	);
 }
@@ -920,18 +948,18 @@ function SettingsChannelPageRoute() {
  * here, or the person is not in it, which a public channel's own page joins.
  */
 function ChannelSettingsMissing({
-	pods,
+	channels,
 	slug,
 	error,
 }: {
-	pods: readonly Pod[] | undefined;
+	channels: readonly Channel[] | undefined;
 	slug: string;
 	error: unknown;
 }) {
-	const pod = findPod(pods, slug);
+	const channel = findChannel(channels, slug);
 	return (
 		<Panes>
-			{pod ? (
+			{channel ? (
 				<EmptyState title="You're not in this channel">
 					Join it from its page to see its settings.
 				</EmptyState>
@@ -943,36 +971,33 @@ function ChannelSettingsMissing({
 }
 
 /** The channel at `slug` when the person is in it, as its settings need. */
-function memberPod(pods: readonly Pod[] | undefined, slug: string): Pod | undefined {
-	const pod = findPod(pods, slug);
-	return pod?.isMember ? pod : undefined;
+function memberChannel(
+	channels: readonly Channel[] | undefined,
+	slug: string,
+): Channel | undefined {
+	const channel = findChannel(channels, slug);
+	return channel?.isMember ? channel : undefined;
 }
 
 /** The bot at `handle` for a settings page, once found; while it loads nothing, and if missing, why. */
-function SettingsBot({
-	handle,
-	children,
-}: {
-	handle: string;
-	children: (agent: Agent) => ReactNode;
-}) {
-	const { agent, isPending, error } = useBot(handle);
+function SettingsBot({ handle, children }: { handle: string; children: (bot: Bot) => ReactNode }) {
+	const { bot, isPending, error } = useBotWithHandle(handle);
 	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!agent) {
+	if (!bot) {
 		return (
 			<Panes>
 				<EmptyState title={error ? "Could not load this bot" : "No such bot here"} />
 			</Panes>
 		);
 	}
-	return <SettingsLayout>{children(agent)}</SettingsLayout>;
+	return <SettingsLayout>{children(bot)}</SettingsLayout>;
 }
 
 function SettingsBotRoute() {
 	const { bot } = settingsBotRoute.useParams();
 	return (
 		<SettingsBot handle={bot}>
-			{(agent) => <WorkspaceSettings section="bots" selectedAgent={agent} />}
+			{(bot) => <WorkspaceSettings section="bots" selectedBot={bot} />}
 		</SettingsBot>
 	);
 }
@@ -991,21 +1016,21 @@ function SettingsBotPageRoute() {
 			replace: true,
 		});
 	}, [oauthError, navigate]);
-	const page = agentSettingsPage(pageSegment);
+	const page = botSettingsPage(pageSegment);
 	if (!page) {
 		return <Navigate from="/$workspace" to="./settings/bots/$bot" params={{ bot }} replace />;
 	}
 	return (
 		<SettingsBot handle={bot}>
-			{(agent) =>
+			{(bot) =>
 				// A Personal Assistant's computer is ours to set up; its person changes its look and connections.
-				agent.assistant && page === "computer" ? (
-					<Navigate {...agentSettingsLink(agent)} replace />
+				bot.assistant && page === "computer" ? (
+					<Navigate {...botSettingsLink(bot)} replace />
 				) : (
 					<WorkspaceSettings
 						section="bots"
-						selectedAgent={agent}
-						agentPage={page}
+						selectedBot={bot}
+						botPage={page}
 						connectionSignInError={signInError && signInFailureReason(signInError)}
 					/>
 				)
@@ -1018,11 +1043,11 @@ function SettingsBotConnectionRoute() {
 	const { bot, connection } = settingsBotConnectionRoute.useParams();
 	return (
 		<SettingsBot handle={bot}>
-			{(agent) => (
+			{(bot) => (
 				<WorkspaceSettings
 					section="bots"
-					selectedAgent={agent}
-					agentPage="connections"
+					selectedBot={bot}
+					botPage="connections"
 					selectedConnectionId={connection}
 				/>
 			)}
@@ -1045,9 +1070,9 @@ function SettingsSectionRoute() {
 }
 
 /** Inbox: what is new across the workspace, and the chat, run or collaboration of each, opened in its place. */
-const activityRoute = createRoute({
+const inboxRoute = createRoute({
 	getParentRoute: () => shellRoute,
-	path: "/activity",
+	path: "/inbox",
 	component: () => (
 		<Panes>
 			<Inbox>
@@ -1058,18 +1083,18 @@ const activityRoute = createRoute({
 });
 
 /** With nothing chosen, how much is unread sits beside the list; on a phone the list is the page. */
-const activityIndexRoute = createRoute({
-	getParentRoute: () => activityRoute,
+const inboxIndexRoute = createRoute({
+	getParentRoute: () => inboxRoute,
 	path: "/",
 	component: InboxOverview,
 });
 
-type ActivityChatSearch = ConversationSearch;
+type InboxConversationSearch = ConversationSearch;
 
-const activityChatRoute = createRoute({
-	getParentRoute: () => activityRoute,
+const inboxConversationRoute = createRoute({
+	getParentRoute: () => inboxRoute,
 	path: "/$conversation",
-	validateSearch: (search: Record<string, unknown>): ActivityChatSearch =>
+	validateSearch: (search: Record<string, unknown>): InboxConversationSearch =>
 		validateConversationSearch(search),
 	preloadStaleTime: 0,
 	loader: ({ context, params }) => {
@@ -1077,27 +1102,27 @@ const activityChatRoute = createRoute({
 		return ConversationPage.preload();
 	},
 	component: () => {
-		const { conversation } = activityChatRoute.useParams();
-		const navigate = activityChatRoute.useNavigate();
-		const changeThread = useThreadChange((thread, replace) =>
-			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+		const { conversation } = inboxConversationRoute.useParams();
+		const navigate = inboxConversationRoute.useNavigate();
+		const changeItem = useItemChange((item, replace) =>
+			navigate({ search: (previous) => ({ ...previous, item }), replace }),
 		);
-		const search = activityChatRoute.useSearch();
+		const search = inboxConversationRoute.useSearch();
 		return (
 			<ConversationScreen place={useAnyConversationPlace(conversation)}>
 				{(found, user) => (
-					<ActivityPane
-						pod={found.pod}
+					<InboxPane
+						channel={found.channel}
 						conversation={found.conversation}
 						conversationId={conversation}
 						user={user}
-						threadPageId={search.threadPage}
+						itemPageId={search.itemPage}
 						focusMessageId={search.message}
-						threadId={search.thread}
-						onThreadPageChange={(threadPage) =>
-							void navigate({ search: (previous) => ({ ...previous, threadPage }) })
+						itemConversationId={search.item}
+						onItemPageChange={(itemPage) =>
+							void navigate({ search: (previous) => ({ ...previous, itemPage }) })
 						}
-						onThreadChange={changeThread}
+						onItemChange={changeItem}
 						staged={stagedOf(search)}
 						onStagedChange={(staged, how) =>
 							void navigate({
@@ -1170,8 +1195,8 @@ const directMessageRoute = createRoute({
 	component: () => {
 		const { conversation } = directMessageRoute.useParams();
 		const navigate = directMessageRoute.useNavigate();
-		const changeThread = useThreadChange((thread, replace) =>
-			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+		const changeItem = useItemChange((item, replace) =>
+			navigate({ search: (previous) => ({ ...previous, item }), replace }),
 		);
 		const search = directMessageRoute.useSearch();
 		return (
@@ -1179,12 +1204,12 @@ const directMessageRoute = createRoute({
 				{(found, user) => (
 					<ConversationPage
 						conversation={found.conversation}
-						pod={found.pod}
+						channel={found.channel}
 						conversationId={conversation}
 						user={user}
-						threadId={search.thread}
+						itemConversationId={search.item}
 						focusMessageId={search.message}
-						onThreadChange={changeThread}
+						onItemChange={changeItem}
 						staged={stagedOf(search)}
 						onStagedChange={(staged, how) =>
 							void navigate({
@@ -1274,20 +1299,20 @@ const homeRoute = createRoute({
 	},
 });
 
-const podRoute = createRoute({
+const channelRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/channels/$channel",
 	loader: preloadChatScreenForWideLayout,
-	component: PodRoute,
+	component: ChannelRoute,
 });
 
 /** A channel's page beside the sidebar. */
-function PodRoute() {
-	const { channel } = podRoute.useParams();
-	const { data: pods, isPending, error } = usePods();
-	const pod = findPod(pods, channel);
+function ChannelRoute() {
+	const { channel: slug } = channelRoute.useParams();
+	const { data: channels, isPending, error } = useChannels();
+	const channel = findChannel(channels, slug);
 	if (isPending) return <Panes>{null}</Panes>;
-	if (!pod) {
+	if (!channel) {
 		return (
 			<Panes>
 				<EmptyState title={error ? "Could not load this channel" : "No such channel here"}>
@@ -1299,10 +1324,10 @@ function PodRoute() {
 		);
 	}
 	// A public channel the person isn't in, opened by its address: what it is, and Join.
-	if (!pod.isMember) {
+	if (!channel.isMember) {
 		return (
 			<Panes>
-				<JoinChannel pod={pod} />
+				<JoinChannel channel={channel} />
 			</Panes>
 		);
 	}
@@ -1314,15 +1339,15 @@ function PodRoute() {
 }
 
 /** A channel the person isn't in: its name and what it's for, with Join where they may. */
-function JoinChannel({ pod }: { pod: Pod }) {
-	const join = useJoinPod();
+function JoinChannel({ channel }: { channel: Channel }) {
+	const join = useJoinChannel();
 	return (
-		<EmptyState title={pod.name}>
+		<EmptyState title={channel.name}>
 			<span className="flex flex-col items-center gap-3">
-				<span>{pod.description ?? "You're not in this channel yet."}</span>
-				{pod.permissions.join ? (
-					<Button disabled={join.isPending} onClick={() => join.mutate(pod.id)}>
-						Join {pod.name}
+				<span>{channel.description ?? "You're not in this channel yet."}</span>
+				{channel.permissions.join ? (
+					<Button disabled={join.isPending} onClick={() => join.mutate(channel.id)}>
+						Join {channel.name}
 					</Button>
 				) : (
 					<span>Ask someone in it to add you.</span>
@@ -1334,23 +1359,23 @@ function JoinChannel({ pod }: { pod: Pod }) {
 }
 
 /** A channel opened without a conversation chosen opens its main chat, opened first if nobody has. */
-const podIndexRoute = createRoute({
-	getParentRoute: () => podRoute,
+const channelIndexRoute = createRoute({
+	getParentRoute: () => channelRoute,
 	path: "/",
 	loader: () => ConversationPage.preload(),
 	component: () => {
-		const pod = findPod(usePods().data, podIndexRoute.useParams().channel);
-		return pod ? <OpenPodChat pod={pod} /> : null;
+		const channel = findChannel(useChannels().data, channelIndexRoute.useParams().channel);
+		return channel ? <OpenChannelConversation channel={channel} /> : null;
 	},
 });
 
-function OpenPodChat({ pod }: { pod: Pod }) {
-	const opened = useOpenPodChat(pod);
+function OpenChannelConversation({ channel }: { channel: Channel }) {
+	const opened = useOpenChannelConversation(channel);
 	if (opened.isError) {
 		return <EmptyState title="Could not open this channel">{API_DID_NOT_ANSWER}</EmptyState>;
 	}
 	if (!opened.data) return null;
-	return <Navigate {...conversationLink({ pod, conversationId: opened.data.id })} replace />;
+	return <Navigate {...conversationLink({ channel, conversationId: opened.data.id })} replace />;
 }
 
 /**
@@ -1361,30 +1386,30 @@ function preloadChatScreenForWideLayout() {
 	if (matchesMedia(SIDE_BY_SIDE)) ConversationPage.preload();
 }
 
-const podArtifactsRoute = createRoute({
-	getParentRoute: () => podRoute,
+const channelFilesRoute = createRoute({
+	getParentRoute: () => channelRoute,
 	path: "/files",
 	component: () => {
-		const pod = findPod(usePods().data, podArtifactsRoute.useParams().channel);
-		return pod ? <ArtifactsPage owner={{ pod }} /> : null;
+		const channel = findChannel(useChannels().data, channelFilesRoute.useParams().channel);
+		return channel ? <FilesPage owner={{ channel }} /> : null;
 	},
 });
 
-const podArtifactRoute = createRoute({
-	getParentRoute: () => podRoute,
-	path: "/files/$artifact",
-	validateSearch: (search: Record<string, unknown>) => validateArtifactSearch(search),
+const channelFileRoute = createRoute({
+	getParentRoute: () => channelRoute,
+	path: "/files/$file",
+	validateSearch: (search: Record<string, unknown>) => validateFileSearch(search),
 	component: () => {
-		const { channel, artifact } = podArtifactRoute.useParams();
-		const { version } = podArtifactRoute.useSearch();
-		const pod = findPod(usePods().data, channel);
-		return pod ? <ArtifactsPage owner={{ pod }} selectedId={artifact} version={version} /> : null;
+		const { channel: slug, file } = channelFileRoute.useParams();
+		const { version } = channelFileRoute.useSearch();
+		const channel = findChannel(useChannels().data, slug);
+		return channel ? <FilesPage owner={{ channel }} selectedId={file} version={version} /> : null;
 	},
 });
 
 /** A channel's main chat or one of its threads. */
-const podConversationRoute = createRoute({
-	getParentRoute: () => podRoute,
+const channelConversationRoute = createRoute({
+	getParentRoute: () => channelRoute,
 	path: "/$conversation",
 	validateSearch: (search: Record<string, unknown>) => validateConversationSearch(search),
 	// On every hover, not once per 30 s: the query cache, not the router,
@@ -1396,9 +1421,9 @@ const podConversationRoute = createRoute({
 		return ConversationPage.preload();
 	},
 	component: () => {
-		const { channel, conversation } = podConversationRoute.useParams();
-		const navigate = podConversationRoute.useNavigate();
-		const search = podConversationRoute.useSearch();
+		const { channel, conversation } = channelConversationRoute.useParams();
+		const navigate = channelConversationRoute.useNavigate();
+		const search = channelConversationRoute.useSearch();
 		return (
 			<ConversationScreen place={useChannelConversationPlace(channel, conversation)}>
 				{(found, user) => (
@@ -1424,10 +1449,11 @@ const botRoute = createRoute({
 
 /** A bot's page beside the sidebar. */
 function BotRoute() {
-	const { bot } = botRoute.useParams();
-	const { agent, isPending, error } = useBot(bot);
+	const { bot: handle } = botRoute.useParams();
+	const { bot, isPending, error } = useBotWithHandle(handle);
+	const onAutomations = useMatch({ from: automationsRoute.id, shouldThrow: false }) !== undefined;
 	if (isPending) return <Panes>{null}</Panes>;
-	if (!agent) {
+	if (!bot) {
 		return (
 			<Panes>
 				<EmptyState title={error ? "Could not load this bot" : "No such bot here"}>
@@ -1438,16 +1464,22 @@ function BotRoute() {
 			</Panes>
 		);
 	}
-	// Someone else's private bot, which an administrator sees listed: it exists, and its settings are theirs to read.
-	if (!agent.permissions.talk) {
+	// Someone else's private bot, which an administrator sees listed: it exists, and its settings
+	// and automations are theirs to manage, though its tasks and what its automations posted are not.
+	if (!bot.permissions.talk && !(bot.permissions.manageAutomations && onAutomations)) {
 		return (
 			<Panes>
-				<EmptyState title={agent.name}>
+				<EmptyState title={bot.name}>
 					<span className="flex flex-col items-center gap-3">
 						<span>This is someone else's private bot, so its tasks are theirs alone.</span>
-						{agent.permissions.update && (
-							<Link {...agentSettingsLink(agent)} className="text-link underline">
+						{bot.permissions.update && (
+							<Link {...botSettingsLink(bot)} className="text-link underline">
 								Open its settings
+							</Link>
+						)}
+						{bot.permissions.manageAutomations && (
+							<Link {...automationsLink(bot)} className="text-link underline">
+								Open its automations
 							</Link>
 						)}
 					</span>
@@ -1463,8 +1495,8 @@ function BotRoute() {
 }
 
 /** The bot whose page a route under `/bots/$bot` is on, once the roster has it. */
-function useRoutedBot(handle: string): Agent | undefined {
-	return useBot(handle).agent;
+function useRoutedBot(handle: string): Bot | undefined {
+	return useBotWithHandle(handle).bot;
 }
 
 /** A bot opened without a task chosen opens its newest open task, or a new one where there is room. */
@@ -1472,21 +1504,21 @@ const botIndexRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/",
 	component: () => {
-		const agent = useRoutedBot(botIndexRoute.useParams().bot);
-		return agent ? <OpenNewestTask agent={agent} /> : null;
+		const bot = useRoutedBot(botIndexRoute.useParams().bot);
+		return bot ? <OpenNewestTask bot={bot} /> : null;
 	},
 });
 
-function OpenNewestTask({ agent }: { agent: Agent }) {
-	const { data: list, isError } = useBotTasks(agent.id);
+function OpenNewestTask({ bot }: { bot: Bot }) {
+	const { data: list, isError } = useBotTasks(bot.id);
 	if (isError)
 		return <EmptyState title="Could not load this bot's tasks">{API_DID_NOT_ANSWER}</EmptyState>;
 	if (!list) return null;
 	const newest = list.tasks.find((task) => task.conversation.doneAt === null);
 	return newest ? (
-		<Navigate {...conversationLink({ agent, conversationId: newest.conversation.id })} replace />
+		<Navigate {...conversationLink({ bot, conversationId: newest.conversation.id })} replace />
 	) : (
-		<Navigate {...newTaskLink(agent)} replace />
+		<Navigate {...newTaskLink(bot)} replace />
 	);
 }
 
@@ -1495,13 +1527,13 @@ const newTaskRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/new",
 	component: () => {
-		const agent = useRoutedBot(newTaskRoute.useParams().bot);
+		const bot = useRoutedBot(newTaskRoute.useParams().bot);
 		const { user } = useSession();
-		return agent && user ? <NewTask key={agent.id} agent={agent} userId={user.id} /> : null;
+		return bot && user ? <NewTask key={bot.id} bot={bot} userId={user.id} /> : null;
 	},
 });
 
-/** One of the bot's tasks, or one of its automations' threads. */
+/** One of the bot's tasks, or one of its automations' feeds. */
 const taskRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/tasks/$conversation",
@@ -1512,17 +1544,17 @@ const taskRoute = createRoute({
 		return ConversationPage.preload();
 	},
 	component: () => {
-		const { bot, conversation } = taskRoute.useParams();
-		const agent = useRoutedBot(bot);
-		return agent ? <BotConversation agent={agent} conversationId={conversation} /> : null;
+		const { bot: handle, conversation } = taskRoute.useParams();
+		const bot = useRoutedBot(handle);
+		return bot ? <BotConversation bot={bot} conversationId={conversation} /> : null;
 	},
 });
 
-function BotConversation({ agent, conversationId }: { agent: Agent; conversationId: string }) {
+function BotConversation({ bot, conversationId }: { bot: Bot; conversationId: string }) {
 	const navigate = taskRoute.useNavigate();
 	const search = taskRoute.useSearch();
 	return (
-		<ConversationScreen place={useBotConversationPlace(agent, conversationId)}>
+		<ConversationScreen place={useBotConversationPlace(bot, conversationId)}>
 			{(found, user) => (
 				<RoutedConversation
 					found={found}
@@ -1536,26 +1568,24 @@ function BotConversation({ agent, conversationId }: { agent: Agent; conversation
 	);
 }
 
-const botArtifactsRoute = createRoute({
+const botFilesRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/files",
 	component: () => {
-		const agent = useRoutedBot(botArtifactsRoute.useParams().bot);
-		return agent ? <ArtifactsPage owner={{ agent }} /> : null;
+		const bot = useRoutedBot(botFilesRoute.useParams().bot);
+		return bot ? <FilesPage owner={{ bot }} /> : null;
 	},
 });
 
-const botArtifactRoute = createRoute({
+const botFileRoute = createRoute({
 	getParentRoute: () => botRoute,
-	path: "/files/$artifact",
-	validateSearch: (search: Record<string, unknown>) => validateArtifactSearch(search),
+	path: "/files/$file",
+	validateSearch: (search: Record<string, unknown>) => validateFileSearch(search),
 	component: () => {
-		const { bot, artifact } = botArtifactRoute.useParams();
-		const { version } = botArtifactRoute.useSearch();
-		const agent = useRoutedBot(bot);
-		return agent ? (
-			<ArtifactsPage owner={{ agent }} selectedId={artifact} version={version} />
-		) : null;
+		const { bot: handle, file } = botFileRoute.useParams();
+		const { version } = botFileRoute.useSearch();
+		const bot = useRoutedBot(handle);
+		return bot ? <FilesPage owner={{ bot }} selectedId={file} version={version} /> : null;
 	},
 });
 
@@ -1568,8 +1598,8 @@ const taskByIdRoute = createRoute({
 		const search = useSearch({ strict: false });
 		const { found, isPending, error } = useAnyConversationPlace(conversation);
 		if (isPending) return <Panes>{null}</Panes>;
-		const agent = found?.conversation.kind === "botThread" ? found.conversation.agent : undefined;
-		if (!agent) {
+		const bot = found?.conversation.kind === "botConversation" ? found.conversation.bot : undefined;
+		if (!bot) {
 			return (
 				<Panes>
 					<EmptyState title={error ? "Could not load this task" : "Task not found"} />
@@ -1578,7 +1608,7 @@ const taskByIdRoute = createRoute({
 		}
 		return (
 			<Navigate
-				{...conversationLink({ agent, conversationId: conversation })}
+				{...conversationLink({ bot, conversationId: conversation })}
 				search={search as ConversationSearch}
 				replace
 			/>
@@ -1586,22 +1616,22 @@ const taskByIdRoute = createRoute({
 	},
 });
 
-interface ArtifactSearch {
+interface FileSearch {
 	/** An earlier version to show; the current one when absent. */
 	version?: number;
 }
 
-const validateArtifactSearch = (search: Record<string, unknown>): ArtifactSearch =>
+const validateFileSearch = (search: Record<string, unknown>): FileSearch =>
 	typeof search.version === "number" && Number.isInteger(search.version) && search.version > 0
 		? { version: search.version }
 		: {};
 
 interface ConversationSearch {
-	/** A collaboration or automation run's thread open beside the chat. */
-	thread?: string;
+	/** A collaboration or automation run open beside the chat. */
+	item?: string;
 	/** A file open large beside the chat, in place of the conversation list. */
-	artifact?: string;
-	/** An earlier version of `artifact` to show; the current one when absent. */
+	file?: string;
+	/** An earlier version of `file` to show; the current one when absent. */
 	version?: number;
 	/** The bot's computer's desktop open large beside the chat, when no file is. */
 	desktop?: true;
@@ -1609,68 +1639,68 @@ interface ConversationSearch {
 	 * The bot's automations open large beside the chat, when nothing else is: all
 	 * of them, one by its id, or a new one being made.
 	 */
-	routines?: string;
+	automations?: string;
 	/** The bot's tasks open large beside the chat, those still going or those done, when nothing else is. */
-	threads?: ThreadsTab;
+	tasks?: TasksTab;
 	/** A message to jump to in the conversation, such as the mention a notification is about. */
 	message?: string;
 	/** An automation run or collaboration shown as the page itself, in place of the conversation. */
-	threadPage?: string;
+	itemPage?: string;
 }
 
 const validateConversationSearch = (search: Record<string, unknown>): ConversationSearch => {
-	const { artifact } = idParam(search, "artifact");
+	const { file } = idParam(search, "file");
 	return {
-		...idParam(search, "thread"),
+		...idParam(search, "item"),
 		...idParam(search, "message"),
-		...idParam(search, "threadPage"),
-		...(artifact
-			? { artifact, ...validateArtifactSearch(search) }
+		...idParam(search, "itemPage"),
+		...(file
+			? { file, ...validateFileSearch(search) }
 			: search.desktop === true
 				? { desktop: true }
-				: typeof search.routines === "string" && isRoutinesView(search.routines)
-					? { routines: search.routines }
-					: search.threads === "open" || search.threads === "done"
-						? { threads: search.threads }
+				: typeof search.automations === "string" && isAutomationsView(search.automations)
+					? { automations: search.automations }
+					: search.tasks === "open" || search.tasks === "done"
+						? { tasks: search.tasks }
 						: {}),
 	};
 };
 
 /** How the address says which of a bot's automations are open beside its chat. */
-const ALL_ROUTINES = "all";
-const NEW_ROUTINE = "new";
+const ALL_AUTOMATIONS = "all";
+const NEW_AUTOMATION = "new";
 
-const isRoutinesView = (value: string) =>
-	value === ALL_ROUTINES || value === NEW_ROUTINE || isUuid(value);
+const isAutomationsView = (value: string) =>
+	value === ALL_AUTOMATIONS || value === NEW_AUTOMATION || isUuid(value);
 
-const routinesViewFromSearch = (value: string): RoutinesView =>
-	value === NEW_ROUTINE
+const automationsViewFromSearch = (value: string): AutomationsView =>
+	value === NEW_AUTOMATION
 		? { kind: "new" }
-		: value === ALL_ROUTINES
+		: value === ALL_AUTOMATIONS
 			? { kind: "list" }
-			: { kind: "routine", routineId: value };
+			: { kind: "automation", automationId: value };
 
-const routinesViewSearch = (view: RoutinesView): string =>
-	view.kind === "new" ? NEW_ROUTINE : view.kind === "list" ? ALL_ROUTINES : view.routineId;
+const automationsViewSearch = (view: AutomationsView): string =>
+	view.kind === "new" ? NEW_AUTOMATION : view.kind === "list" ? ALL_AUTOMATIONS : view.automationId;
 
 /** What `search` opens beside a chat, and the search that opens `staged`. */
 const stagedOf = (search: ConversationSearch): Staged | undefined =>
-	search.artifact
-		? { kind: "artifact", artifactId: search.artifact, version: search.version }
+	search.file
+		? { kind: "file", fileId: search.file, version: search.version }
 		: search.desktop
 			? { kind: "desktop" }
-			: search.routines
-				? { kind: "routines", view: routinesViewFromSearch(search.routines) }
-				: search.threads
-					? { kind: "threads", tab: search.threads }
+			: search.automations
+				? { kind: "automations", view: automationsViewFromSearch(search.automations) }
+				: search.tasks
+					? { kind: "tasks", tab: search.tasks }
 					: undefined;
 
 const stagedSearchOf = (staged: Staged | undefined): ConversationSearch => ({
-	artifact: staged?.kind === "artifact" ? staged.artifactId : undefined,
-	version: staged?.kind === "artifact" ? staged.version : undefined,
+	file: staged?.kind === "file" ? staged.fileId : undefined,
+	version: staged?.kind === "file" ? staged.version : undefined,
 	desktop: staged?.kind === "desktop" ? true : undefined,
-	routines: staged?.kind === "routines" ? routinesViewSearch(staged.view) : undefined,
-	threads: staged?.kind === "threads" ? staged.tab : undefined,
+	automations: staged?.kind === "automations" ? automationsViewSearch(staged.view) : undefined,
+	tasks: staged?.kind === "tasks" ? staged.tab : undefined,
 });
 
 /**
@@ -1688,65 +1718,75 @@ function idParam<Name extends string>(
 	};
 }
 
-/** A bot's automations, with the one chosen beside them: its own thread, where its runs post. */
-const routinesRoute = createRoute({
+/** A bot's automations, with the one chosen beside them: its feed, where its runs post. */
+const automationsRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/automations",
 	component: () => {
-		const { bot } = routinesRoute.useParams();
-		const { routine } = useParams({ strict: false });
-		const making = useMatch({ from: newRoutineRoute.id, shouldThrow: false }) !== undefined;
-		const agent = useRoutedBot(bot);
-		return agent ? (
-			<RoutinesPage agent={agent} selectedRoutineId={routine} making={making}>
+		const { bot: handle } = automationsRoute.useParams();
+		const { automation } = useParams({ strict: false });
+		const making = useMatch({ from: newAutomationRoute.id, shouldThrow: false }) !== undefined;
+		const bot = useRoutedBot(handle);
+		return bot ? (
+			<AutomationsPage bot={bot} selectedAutomationId={automation} making={making}>
 				<Outlet />
-			</RoutinesPage>
+			</AutomationsPage>
 		) : null;
 	},
 });
 
 /** An automation being made, beside the bot's automations. */
-const newRoutineRoute = createRoute({
-	getParentRoute: () => routinesRoute,
+const newAutomationRoute = createRoute({
+	getParentRoute: () => automationsRoute,
 	path: "/new",
 	component: () => {
-		const agent = useRoutedBot(newRoutineRoute.useParams().bot);
-		return agent ? <NewRoutine agent={agent} /> : null;
+		const bot = useRoutedBot(newAutomationRoute.useParams().bot);
+		return bot ? <NewAutomation bot={bot} /> : null;
 	},
 });
 
 /** With none chosen, the bot's first automation opens beside the list; on a phone the list is the page. */
-const routinesIndexRoute = createRoute({
-	getParentRoute: () => routinesRoute,
+const automationsIndexRoute = createRoute({
+	getParentRoute: () => automationsRoute,
 	path: "/",
 	component: () => {
-		const agent = useRoutedBot(routinesIndexRoute.useParams().bot);
+		const bot = useRoutedBot(automationsIndexRoute.useParams().bot);
 		const sideBySide = useMediaQuery(SIDE_BY_SIDE);
-		const { data: list } = useBotTasks(agent?.id);
-		const first = list?.routines[0];
-		if (!agent || !sideBySide || !first) return null;
-		return <Navigate {...routineThreadLink(agent, first.routine.id)} replace />;
+		if (!bot || !sideBySide) return null;
+		return <OpenFirstAutomation bot={bot} />;
 	},
 });
 
-/** An automation's own thread, opened first if it has none, beside the bot's automations. */
-const routineThreadRoute = createRoute({
-	getParentRoute: () => routinesRoute,
-	path: "/$routine",
+function OpenFirstAutomation({ bot }: { bot: Bot }) {
+	const first = useListedAutomations(bot).automations?.[0];
+	if (!first) return null;
+	return <Navigate {...automationFeedLink(bot, first.automation.id)} replace />;
+}
+
+/** An automation's feed, opened first if it has none, beside the bot's automations. */
+const automationFeedRoute = createRoute({
+	getParentRoute: () => automationsRoute,
+	path: "/$automation",
 	validateSearch: validateConversationSearch,
 	loader: () => ConversationPage.preload(),
 	component: () => {
-		const { bot, routine } = routineThreadRoute.useParams();
-		const agent = useRoutedBot(bot);
-		return agent ? <RoutineFeed key={routine} agent={agent} routineId={routine} /> : null;
+		const { bot: handle, automation } = automationFeedRoute.useParams();
+		const bot = useRoutedBot(handle);
+		if (!bot) return null;
+		// Somebody who manages the bot without reaching it sees how the automation is set up, not its feed.
+		return bot.permissions.talk ? (
+			<AutomationFeed key={automation} bot={bot} automationId={automation} />
+		) : (
+			<AutomationSetup key={automation} bot={bot} automationId={automation} />
+		);
 	},
 });
 
-/** The automation's own thread, opened first when it has none, as a chat beside the automations. */
-function RoutineFeed({ agent, routineId }: { agent: Agent; routineId: string }) {
-	const opened = useOpenRoutineFeed(agent.id, routineId);
-	const navigate = routineThreadRoute.useNavigate();
-	const search = routineThreadRoute.useSearch();
+/** The automation's feed, opened first when it has none, as a chat beside the automations. */
+function AutomationFeed({ bot, automationId }: { bot: Bot; automationId: string }) {
+	const opened = useOpenAutomationFeed(bot.id, automationId);
+	const navigate = automationFeedRoute.useNavigate();
+	const search = automationFeedRoute.useSearch();
 	if (opened.isError) {
 		return (
 			<EmptyState title="Could not open this automation">
@@ -1757,7 +1797,7 @@ function RoutineFeed({ agent, routineId }: { agent: Agent; routineId: string }) 
 	if (!opened.data) return null;
 	const conversationId = opened.data.id;
 	return (
-		<BotConversationScreen agent={agent} conversationId={conversationId}>
+		<BotConversationScreen bot={bot} conversationId={conversationId}>
 			{(found, user) => (
 				<RoutedConversation
 					found={found}
@@ -1796,44 +1836,55 @@ function RoutedConversation({
 	search: ConversationSearch;
 	navigate: (change: SearchChange) => void;
 }) {
-	const changeThread = useThreadChange((thread, replace) =>
-		navigate({ search: (previous) => ({ ...previous, thread }), replace }),
+	const changeItem = useItemChange((item, replace) =>
+		navigate({ search: (previous) => ({ ...previous, item }), replace }),
 	);
-	// A run or collaboration a notification names is the page itself, with the way back to its bot.
-	if (search.threadPage && found.conversation.kind === "botThread") {
-		const { agent } = found.conversation;
+	// A run or collaboration a notification names is the page itself, with the way back to where it is.
+	if (search.itemPage) {
+		const openClassName = cn(
+			buttonStyles({ variant: "outline", size: "sm" }),
+			"shrink-0 max-md:hidden",
+		);
 		return (
-			<ActivityThread
-				agent={agent}
+			<ItemConversationPage
+				bot={placeBot(found)}
 				conversationId={conversationId}
-				threadId={search.threadPage}
-				back={{ to: "bot", agent }}
+				itemConversationId={search.itemPage}
+				back={
+					found.channel !== null
+						? { to: "channel", channel: found.channel }
+						: { to: "bot", bot: found.conversation.bot }
+				}
 				trailing={
-					<Link
-						{...conversationLink({ agent, conversationId })}
-						className={cn(
-							buttonStyles({ variant: "outline", size: "sm" }),
-							"shrink-0 max-md:hidden",
-						)}
-					>
-						Open conversation
-					</Link>
+					found.channel !== null ? (
+						<Link
+							{...conversationLink({ channel: found.channel, conversationId })}
+							className={openClassName}
+						>
+							Open conversation
+						</Link>
+					) : (
+						<Link
+							{...conversationLink({ bot: found.conversation.bot, conversationId })}
+							className={openClassName}
+						>
+							Open conversation
+						</Link>
+					)
 				}
-				onOpenThread={(threadPage) =>
-					navigate({ search: (previous) => ({ ...previous, threadPage }) })
-				}
+				onOpenItem={(itemPage) => navigate({ search: (previous) => ({ ...previous, itemPage }) })}
 			/>
 		);
 	}
 	return (
 		<ConversationPage
 			conversation={found.conversation}
-			pod={found.pod}
+			channel={found.channel}
 			conversationId={conversationId}
 			user={user}
-			threadId={search.thread}
+			itemConversationId={search.item}
 			focusMessageId={search.message}
-			onThreadChange={changeThread}
+			onItemChange={changeItem}
 			staged={stagedOf(search)}
 			onStagedChange={(staged, how) =>
 				navigate({ search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }), ...how })
@@ -1842,18 +1893,18 @@ function RoutedConversation({
 	);
 }
 
-/** The conversation `conversationId` of the bot `agent`'s, for a screen of it; see `ConversationScreen`. */
+/** The conversation `conversationId` of the bot `bot`'s, for a screen of it; see `ConversationScreen`. */
 function BotConversationScreen({
-	agent,
+	bot,
 	conversationId,
 	children,
 }: {
-	agent: Agent;
+	bot: Bot;
 	conversationId: string;
 	children: (found: ConversationPlace, user: SessionUser) => ReactNode;
 }) {
 	return (
-		<ConversationScreen place={useBotConversationPlace(agent, conversationId)}>
+		<ConversationScreen place={useBotConversationPlace(bot, conversationId)}>
 			{children}
 		</ConversationScreen>
 	);
@@ -1937,7 +1988,7 @@ const routeTree = rootRoute.addChildren([
 		settingsSystemModelRoute,
 		settingsDefaultModelRoute,
 		settingsProviderRoute,
-		activityRoute.addChildren([activityIndexRoute, activityChatRoute]),
+		inboxRoute.addChildren([inboxIndexRoute, inboxConversationRoute]),
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
 		directMessagesRoute.addChildren([
 			directMessagesIndexRoute,
@@ -1949,19 +2000,23 @@ const routeTree = rootRoute.addChildren([
 		channelsRoute,
 		botsRoute,
 		taskByIdRoute,
-		podRoute.addChildren([
-			podIndexRoute,
-			podArtifactsRoute,
-			podArtifactRoute,
-			podConversationRoute,
+		channelRoute.addChildren([
+			channelIndexRoute,
+			channelFilesRoute,
+			channelFileRoute,
+			channelConversationRoute,
 		]),
 		botRoute.addChildren([
 			botIndexRoute,
 			newTaskRoute,
 			taskRoute,
-			botArtifactsRoute,
-			botArtifactRoute,
-			routinesRoute.addChildren([routinesIndexRoute, newRoutineRoute, routineThreadRoute]),
+			botFilesRoute,
+			botFileRoute,
+			automationsRoute.addChildren([
+				automationsIndexRoute,
+				newAutomationRoute,
+				automationFeedRoute,
+			]),
 		]),
 	]),
 ]);
@@ -1970,7 +2025,7 @@ const routeTree = rootRoute.addChildren([
  * Which way a phone slides from one page to the next, as a view transition's
  * type: `forward` into a page further in, as a channel opened from Home or a
  * thread from its channel, and `back` out of one. Switching tabs, or a change
- * that stays on its page, such as opening a thread's computer, does not slide.
+ * that stays on its page, such as opening a bot's computer, does not slide.
  */
 function phoneSlide({
 	fromLocation,
@@ -1998,23 +2053,23 @@ function phoneSlide({
 }
 
 /**
- * Opens a thread over a chat, or closes it, with `go`, which names it in the
- * address. On a phone a thread covers its chat as a page of its own, so
- * closing one shows its chat: back to it when the chat is the page behind,
- * else the chat in the thread's place, as when the thread was opened from
- * Inbox. Opening the chat as a page after the thread would have the chat's
- * own Back return to the thread.
+ * Opens a run or collaboration over a chat, or closes it, with `go`, which
+ * names it in the address. On a phone an item covers its chat as a page of its
+ * own, so closing one shows its chat: back to it when the chat is the page
+ * behind, else the chat in the item's place, as when the item was opened from
+ * Inbox. Opening the chat as a page after the item would have the chat's own
+ * Back return to the item.
  */
-function useThreadChange(go: (thread: string | undefined, replace: boolean) => void) {
+function useItemChange(go: (item: string | undefined, replace: boolean) => void) {
 	const { leaveFor } = useLeave();
 	const { pathname } = useLocation();
-	return (thread: string | undefined) => {
-		if (thread !== undefined || matchesMedia(SIDE_BY_SIDE)) {
-			go(thread, false);
+	return (item: string | undefined) => {
+		if (item !== undefined || matchesMedia(SIDE_BY_SIDE)) {
+			go(item, false);
 			return;
 		}
 		leaveFor(
-			(page) => page.pathname === pathname && page.search.thread === undefined,
+			(page) => page.pathname === pathname && page.search.item === undefined,
 			() => go(undefined, true),
 		);
 	};
@@ -2027,19 +2082,19 @@ function isSettingsPath(pathname: string): boolean {
 }
 
 /**
- * A page's depth, and a step more while a thread is open over it: a thread
- * opened from a chat, or a run or collaboration from Inbox, which the address
- * names in its search rather than its path.
+ * A page's depth, and a step more while an item is open over it: a run or
+ * collaboration opened from a chat or from Inbox, which the address names in
+ * its search rather than its path.
  */
 function locationDepth(location: ParsedLocation): number {
-	const search = location.search as { thread?: unknown; threadPage?: unknown };
-	const threadOpen = search.thread !== undefined || search.threadPage !== undefined;
-	return pageDepth(location.pathname) + (threadOpen ? 1 : 0);
+	const search = location.search as { item?: unknown; itemPage?: unknown };
+	const itemOpen = search.item !== undefined || search.itemPage !== undefined;
+	return pageDepth(location.pathname) + (itemOpen ? 1 : 0);
 }
 
 /**
  * How far into the app a page is on a phone: a tab is 0; what it opens, 1; and
- * so on. A bot's thread is a step past the bot's chat, though its address is
+ * so on. A bot's task is a step past the bot's chat, though its address is
  * no longer, so depth is told from what the address names, not its length.
  */
 function pageDepth(pathname: string): number {
@@ -2048,7 +2103,7 @@ function pageDepth(pathname: string): number {
 	switch (section) {
 		case "channels":
 		case "bots": {
-			// channels/$channel or bots/$bot is one in; what those open, two; files/$artifact or tasks/$task, three.
+			// channels/$channel or bots/$bot is one in; what those open, two; files/$file or tasks/$task, three.
 			const [, place, item] = rest;
 			if (rest.length === 0) return 0;
 			if (place === undefined) return 1;
@@ -2056,7 +2111,7 @@ function pageDepth(pathname: string): number {
 		}
 		case "tasks":
 			return 2;
-		case "activity":
+		case "inbox":
 		case "approvals":
 		case "dm":
 			return rest.length === 0 ? 0 : 1;

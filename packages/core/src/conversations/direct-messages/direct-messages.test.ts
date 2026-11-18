@@ -6,13 +6,13 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Visibility } from "../../authorization/visibility.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { pod, podMember, user, workspace, workspaceMember } from "../../database/schema.ts";
+import { channel, channelMember, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatView } from "../chats/chat-view.ts";
 import { Chats } from "../chats/chats.ts";
+import { ConversationView } from "../conversation-view.ts";
 import { conversationsForTests } from "../testing.ts";
-import { ThreadView } from "../thread-view.ts";
 
 const eventStore = await runOnPostgres(EventStore.make);
 
@@ -24,19 +24,19 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 	const as = (userId: string) => ({
 		chats: onPostgresAs(userId)(Context.get(conversations, Chats.Service)),
 		view: onPostgresAs(userId)(Context.get(conversations, ChatView.Service)),
-		threads: onPostgresAs(userId)(Context.get(conversations, ThreadView.Service)),
-		visibility: onPostgresAs(userId)({ pods: visibility.pods }),
+		conversations: onPostgresAs(userId)(Context.get(conversations, ConversationView.Service)),
+		visibility: onPostgresAs(userId)({ channels: visibility.channels }),
 	});
 
 	let workspaceId: string;
-	let podId: string;
-	/** In the pod. */
+	let channelId: string;
+	/** In the channel. */
 	let member: { id: string; name: string };
-	/** In the pod too. */
+	/** In the channel too. */
 	let colleague: { id: string; name: string };
-	/** An administrator, in every shared pod. */
+	/** An administrator, in every channel. */
 	let administrator: { id: string; name: string };
-	/** In the workspace, not the pod. */
+	/** In the workspace, not the channel. */
 	let outsider: { id: string; name: string };
 
 	afterAll(async () => {
@@ -77,16 +77,16 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 		);
 		const [room] = await onDatabase((db) =>
 			db
-				.insert(pod)
+				.insert(channel)
 				.values({ workspaceId, name: "Ops", slug: `ops-${suffix}` })
 				.returning(),
 		);
-		if (!room) throw new Error("Could not create the pod");
-		podId = room.id;
+		if (!room) throw new Error("Could not create the channel");
+		channelId = room.id;
 		await onDatabase((db) =>
-			db.insert(podMember).values([
-				{ workspaceId, podId, userId: member.id },
-				{ workspaceId, podId, userId: colleague.id },
+			db.insert(channelMember).values([
+				{ workspaceId, channelId, userId: member.id },
+				{ workspaceId, channelId, userId: colleague.id },
 			]),
 		);
 	});
@@ -141,7 +141,7 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 
 			expect(items).toEqual([
 				{
-					conversation: expect.objectContaining({ kind: "direct", id: conversation.id }),
+					conversation: expect.objectContaining({ kind: "direct_message", id: conversation.id }),
 					people: [expect.objectContaining({ id: member.id, name: member.name })],
 					formerMembers: 0,
 					lastMessage: expect.objectContaining({
@@ -154,20 +154,24 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 			expect(await as(colleague.id).view.directMessage(conversation.id)).toEqual(items[0]);
 		});
 
-		it("tells the other person in their activity, as a message in no pod", async () => {
+		it("tells the other person in their inbox, as a message in no channel", async () => {
 			const { conversation } = await send(member.id, [colleague.id], "Ping");
 
-			const { items } = await as(colleague.id).view.activity(workspaceId);
+			const { items } = await as(colleague.id).view.inbox(workspaceId);
 
 			expect(items).toEqual([
-				expect.objectContaining({ conversationId: conversation.id, podId: null, unread: true }),
+				expect.objectContaining({
+					rootConversationId: conversation.id,
+					channelId: null,
+					unread: true,
+				}),
 			]);
 		});
 
 		it("does not take @here or @channel in it as mentioning anybody, as everybody in it is told anyway", async () => {
 			await send(member.id, [colleague.id], "@here can you look");
 
-			const { items } = await as(colleague.id).view.activity(workspaceId);
+			const { items } = await as(colleague.id).view.inbox(workspaceId);
 
 			expect(items).toEqual([expect.objectContaining({ kind: "message" })]);
 		});
@@ -186,24 +190,24 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 					_tag: "ResourceHidden",
 				});
 				expect((await as(other.id).view.directMessages(workspaceId)).items).toEqual([]);
-				expect((await as(other.id).view.activity(workspaceId)).items).toEqual([]);
-				await expect(as(other.id).threads.activity(conversation.id)).rejects.toMatchObject({
+				expect((await as(other.id).view.inbox(workspaceId)).items).toEqual([]);
+				await expect(as(other.id).conversations.activity(conversation.id)).rejects.toMatchObject({
 					_tag: "ResourceHidden",
 				});
-				expect((await as(other.id).threads.list(workspaceId)).map(({ id }) => id)).not.toContain(
-					conversation.id,
-				);
+				expect(
+					(await as(other.id).conversations.list(workspaceId)).map(({ id }) => id),
+				).not.toContain(conversation.id);
 			}
 		});
 
-		it("is a thread its people read like any other: listed, and with its activity", async () => {
+		it("is a conversation its people read like any other: listed, and with its activity", async () => {
 			const { conversation } = await send(member.id, [colleague.id], "Just between us");
 
 			for (const person of [member, colleague]) {
-				expect((await as(person.id).threads.list(workspaceId)).map(({ id }) => id)).toContain(
+				expect((await as(person.id).conversations.list(workspaceId)).map(({ id }) => id)).toContain(
 					conversation.id,
 				);
-				await expect(as(person.id).threads.activity(conversation.id)).resolves.toMatchObject({
+				await expect(as(person.id).conversations.activity(conversation.id)).resolves.toMatchObject({
 					summary: null,
 				});
 			}
@@ -241,13 +245,13 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 			]);
 		});
 
-		it("is in no pod, so the pods its people reach are unchanged", async () => {
+		it("is in no channel, so the channels its people reach are unchanged", async () => {
 			const { conversation } = await send(member.id, [colleague.id], "Hello");
 
-			const pods = await as(member.id).visibility.pods(workspaceId);
+			const channels = await as(member.id).visibility.channels(workspaceId);
 
-			expect(conversation).not.toHaveProperty("podId");
-			expect(pods.map((standing) => standing.pod.id)).toEqual([podId]);
+			expect(conversation).not.toHaveProperty("channelId");
+			expect(channels.map((standing) => standing.channel.id)).toEqual([channelId]);
 		});
 
 		it("refuses a direct message with yourself, or with somebody outside the workspace", async () => {
@@ -322,7 +326,7 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 			await as(administrator.id).chats.markRead(conversation.id);
 			await leaveWorkspace(administrator.id);
 
-			const details = await as(member.id).threads.get(conversation.id);
+			const details = await as(member.id).conversations.get(conversation.id);
 
 			const stillHere = [member.id, colleague.id].sort();
 			expect(details.members.map((person) => person.id).sort()).toEqual(stillHere);

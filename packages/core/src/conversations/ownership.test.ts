@@ -9,20 +9,26 @@ import { shippedSourceFiles } from "../shipped-source.test-support.ts";
  * anywhere else. Tests and their fixtures may write any table.
  */
 const OWNERS: Record<string, readonly string[]> = {
-	thread: ["core/src/conversations/threads/repository.ts"],
-	threadParticipant: ["core/src/conversations/threads/repository.ts"],
-	chat: ["core/src/conversations/threads/repository.ts"],
-	// A turn writes its own reply while it runs; every other message is posted into a thread.
+	conversation: ["core/src/conversations/repository/repository.ts"],
+	task: ["core/src/conversations/repository/repository.ts"],
+	channelConversation: ["core/src/conversations/repository/repository.ts"],
+	directMessage: ["core/src/conversations/repository/repository.ts"],
+	directMessageMember: ["core/src/conversations/repository/repository.ts"],
+	automationFeed: ["core/src/conversations/repository/repository.ts"],
+	systemConversation: ["core/src/conversations/repository/repository.ts"],
+	conversationParticipant: ["core/src/conversations/repository/repository.ts"],
+	chat: ["core/src/conversations/repository/repository.ts"],
+	// A turn writes its own reply while it runs; every other message is posted into a conversation.
 	message: [
-		"core/src/conversations/threads/repository.ts",
+		"core/src/conversations/repository/repository.ts",
 		"core/src/conversations/turns/repository.ts",
 	],
 	collaboration: ["core/src/conversations/tools/collaborate/repository.ts"],
-	routine: ["core/src/conversations/routines/repository.ts"],
-	routineExecution: ["core/src/conversations/routines/repository.ts"],
-	threadSummary: ["core/src/conversations/summaries/repository.ts"],
-	threadCompaction: ["core/src/conversations/compaction/repository.ts"],
-	threadRead: ["core/src/conversations/threads/repository.ts"],
+	automation: ["core/src/conversations/automations/repository.ts"],
+	automationRun: ["core/src/conversations/automations/repository.ts"],
+	conversationSummary: ["core/src/conversations/summaries/repository.ts"],
+	conversationCompaction: ["core/src/conversations/compaction/repository.ts"],
+	conversationRead: ["core/src/conversations/repository/repository.ts"],
 	turn: ["core/src/conversations/turns/repository.ts"],
 	toolCall: ["core/src/conversations/turns/tool-calls/repository.ts"],
 };

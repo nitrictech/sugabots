@@ -2,14 +2,14 @@ import type { AnsweredApproval, ApprovalRequest, ToolCallPart } from "@sugabots/
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, linear, mount, pods } from "@/test-api.tsx";
+import { apiAnswers, channels, linear, mount } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const pod = pods[0] as (typeof pods)[number];
+const channel = channels[0] as (typeof channels)[number];
 const host = {
-	kind: "agent" as const,
+	kind: "bot" as const,
 	id: linear.id,
 	name: linear.name,
 	handle: linear.handle,
@@ -38,10 +38,10 @@ function call(id: string, approval: ToolCallPart["approval"]): ToolCallPart {
 function request(id: string, approval: ToolCallPart["approval"]): ApprovalRequest {
 	return {
 		call: call(id, approval),
-		agent: host,
-		podId: pod.id,
-		threadId: "0199a3a0-0000-7000-8000-0000000003b1",
+		bot: host,
+		channelId: channel.id,
 		conversationId: "0199a3a0-0000-7000-8000-0000000003b1",
+		rootConversationId: "0199a3a0-0000-7000-8000-0000000003b1",
 	};
 }
 
@@ -67,7 +67,7 @@ function inbox(contents: { waiting: ApprovalRequest[]; answered: AnsweredApprova
 beforeEach(() => {
 	apiAnswers();
 	inbox({ waiting: [waiting], answered: [answered] });
-	client.api.toolApprovals.decide.mockReturnValue(Effect.undefined);
+	client.api.approvals.decide.mockReturnValue(Effect.undefined);
 });
 
 afterEach(() => {
@@ -99,10 +99,39 @@ describe("Approvals", () => {
 		});
 		fireEvent.click(within(card).getByRole("button", { name: /^Allow/ }));
 
-		await waitFor(() => expect(client.api.toolApprovals.decide).toHaveBeenCalled());
+		await waitFor(() => expect(client.api.approvals.decide).toHaveBeenCalled());
 		await waitFor(() => expect(screen.queryByRole("article", { name: /Update issue/ })).toBeNull());
 		expect(screen.getAllByRole("link", { name: /Update issue/ })).toHaveLength(2);
 		expect(screen.getByText(/^Nothing waiting/)).toBeDefined();
+	});
+
+	it("opens a request raised in a collaboration at the asker's conversation, not the collaborator's", async () => {
+		const collaboration = "0199a3a0-0000-7000-8000-0000000003d1";
+		const root = "0199a3a0-0000-7000-8000-0000000003d2";
+		const inTask = {
+			...waiting,
+			channelId: null,
+			conversationId: collaboration,
+			rootConversationId: root,
+		};
+		const inChannel = {
+			...request("0199a3a0-0000-7000-8000-0000000003c3", waiting.call.approval),
+			conversationId: collaboration,
+			rootConversationId: root,
+		};
+
+		inbox({ waiting: [inTask], answered: [] });
+		mount(`/suga/approvals/${inTask.call.id}`);
+		expect(
+			(await screen.findByRole("link", { name: "Open conversation" })).getAttribute("href"),
+		).toBe(`/suga/tasks/${root}?item=${collaboration}`);
+		cleanup();
+
+		inbox({ waiting: [inChannel], answered: [] });
+		mount(`/suga/approvals/${inChannel.call.id}`);
+		expect(
+			(await screen.findByRole("link", { name: "Open conversation" })).getAttribute("href"),
+		).toBe(`/suga/channels/${channel.slug}/${root}?item=${collaboration}`);
 	});
 
 	it("says a request is gone when the inbox no longer holds it", async () => {

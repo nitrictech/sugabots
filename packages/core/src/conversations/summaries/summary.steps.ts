@@ -1,27 +1,27 @@
 import {
 	MAX_BOT_SUMMARY_CHARACTERS,
-	MAX_THREAD_SUMMARY_CHARACTERS,
-	MAX_THREAD_TITLE_CHARACTERS,
+	MAX_CONVERSATION_TITLE_CHARACTERS,
+	MAX_SUMMARY_CHARACTERS,
 } from "@sugabots/contracts";
 import { Duration, Effect, Layer, Schema } from "effect";
 import type { Database } from "../../database/database.ts";
 import { Models } from "../../providers/models/models.ts";
 import { Turns } from "../turns/turns.ts";
-import { botSummaryPrompt, threadSummaryPrompt } from "./prompt.ts";
+import { botSummaryPrompt, conversationSummaryPrompt } from "./prompt.ts";
 import { type PreparedBotSummary, type PreparedSummary, Summaries } from "./summaries.ts";
-import { type SummaryRequest, SummarySteps } from "./summary.workflow.ts";
+import { type SummaryRequest, SummarySteps, summaryOfStored } from "./summary.workflow.ts";
 
 const SUMMARY_TIMEOUT = Duration.minutes(2);
 /** Room for the JSON around a title and a summary; anything longer is the model rambling. */
-const MAX_GENERATED_CHARACTERS = MAX_THREAD_SUMMARY_CHARACTERS + MAX_THREAD_TITLE_CHARACTERS + 100;
+const MAX_GENERATED_CHARACTERS = MAX_SUMMARY_CHARACTERS + MAX_CONVERSATION_TITLE_CHARACTERS + 100;
 
-/** The first summary of a thread also titles it. */
+/** The first summary of a conversation also titles it. */
 const firstSummarySchema = Schema.Struct({
-	title: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_THREAD_TITLE_CHARACTERS)),
-	summary: Schema.Trim.check(
+	title: Schema.Trim.check(
 		Schema.isMinLength(1),
-		Schema.isMaxLength(MAX_THREAD_SUMMARY_CHARACTERS),
+		Schema.isMaxLength(MAX_CONVERSATION_TITLE_CHARACTERS),
 	),
+	summary: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_SUMMARY_CHARACTERS)),
 });
 
 /** The summary workflow's step, which its activity reaches through `SummarySteps`. */
@@ -31,16 +31,17 @@ export const summaryStepsLayer = Layer.effect(
 		const model = yield* Models.Service;
 		const services = yield* Effect.context<Summaries.Service | Turns.Service | Database>();
 		return SummarySteps.of({
-			summarise: (request) => summarise(request, model).pipe(Effect.provideContext(services)),
+			summarise: (stored) =>
+				summarise(summaryOfStored(stored), model).pipe(Effect.provideContext(services)),
 		});
 	}),
 );
 
 /**
- * Prepares, generates and records one summary, as the Scribe's turn. Nothing
- * to do (the thread is gone, or already summarised this far) is not an
+ * Prepares, generates and records one summary, as the Summariser's turn. Nothing
+ * to do (the conversation is gone, or already summarised this far) is not an
  * error. A failed generation is recorded on the turn and not retried: the
- * thread's next reply asks for a summary again.
+ * conversation's next reply asks for a summary again.
  */
 export const summarise = (
 	request: SummaryRequest,
@@ -53,7 +54,7 @@ export const summarise = (
 		if (prepared._tag === "Skipped") return;
 		yield* turns.recordSystemTurn(
 			{
-				...prepared.scribe,
+				...prepared.summariser,
 				triggerMessageId: prepared.sourceMessageId,
 				model: prepared.model,
 				name: "summary",
@@ -69,17 +70,17 @@ export const summarise = (
 	});
 
 /**
- * Rewrites what the thread's bot has been doing lately, from its threads'
+ * Rewrites what the conversation's bot has been doing lately, from its conversations'
  * summaries, the one just written among them. A bot's summary that can't be
- * written is logged and left as it was: the thread's summary stands, and the
- * bot's next summarised thread writes it again.
+ * written is logged and left as it was: the conversation's summary stands, and the
+ * bot's next summarised conversation writes it again.
  */
 const summariseBot = (prepared: PreparedSummary, turnId: string, model: Models.Interface) =>
 	Effect.gen(function* () {
 		const summaries = yield* Summaries.Service;
-		const bot = yield* summaries.prepareBotSummary(prepared.threadId);
+		const bot = yield* summaries.prepareBotSummary(prepared.conversationId);
 		if (!bot) return;
-		const content = yield* generateBotSummary(bot, prepared.threadId, turnId, model);
+		const content = yield* generateBotSummary(bot, prepared.conversationId, turnId, model);
 		yield* summaries.completeBotSummary(bot, content);
 	}).pipe(
 		Effect.catch((failure) =>
@@ -89,14 +90,14 @@ const summariseBot = (prepared: PreparedSummary, turnId: string, model: Models.I
 
 const generateBotSummary = (
 	bot: PreparedBotSummary,
-	threadId: string,
+	conversationId: string,
 	turnId: string,
 	model: Models.Interface,
 ) =>
 	Effect.gen(function* () {
 		const answer = yield* model.answer({
 			...botSummaryPrompt(bot),
-			activity: { purpose: "summary", threadId, turnId },
+			activity: { purpose: "summary", conversationId, turnId },
 			maxCharacters: MAX_BOT_SUMMARY_CHARACTERS,
 			timeout: SUMMARY_TIMEOUT,
 		});
@@ -121,10 +122,10 @@ const generate = (
 > =>
 	Effect.gen(function* () {
 		const answer = yield* model.answer({
-			...threadSummaryPrompt(prepared),
+			...conversationSummaryPrompt(prepared),
 			activity: {
 				purpose: "summary",
-				threadId: prepared.threadId,
+				conversationId: prepared.conversationId,
 				turnId,
 			},
 			maxCharacters: MAX_GENERATED_CHARACTERS,
@@ -151,24 +152,23 @@ export function parseGenerated(
 ): Effect.Effect<{ content: string; title?: string }, Models.UnusableAnswer> {
 	const trimmed = content.trim();
 	if (!trimmed) {
-		return new Models.UnusableAnswer({ reason: "Thread summary model returned no text" });
+		return new Models.UnusableAnswer({ reason: "Summary model returned no text" });
 	}
 	if (!includeTitle) {
-		return trimmed.length > MAX_THREAD_SUMMARY_CHARACTERS
-			? new Models.UnusableAnswer({ reason: "Thread summary model returned too much text" })
+		return trimmed.length > MAX_SUMMARY_CHARACTERS
+			? new Models.UnusableAnswer({ reason: "Summary model returned too much text" })
 			: Effect.succeed({ content: trimmed });
 	}
 	return Effect.try({
 		try: () => JSON.parse(stripFence(trimmed)) as unknown,
-		catch: () =>
-			new Models.UnusableAnswer({ reason: "Thread summary model returned invalid JSON" }),
+		catch: () => new Models.UnusableAnswer({ reason: "Summary model returned invalid JSON" }),
 	}).pipe(
 		Effect.flatMap((parsed) =>
 			Schema.decodeUnknownEffect(firstSummarySchema)(parsed).pipe(
 				Effect.mapError(
 					() =>
 						new Models.UnusableAnswer({
-							reason: "Thread summary model returned an invalid title or summary",
+							reason: "Summary model returned an invalid title or summary",
 						}),
 				),
 				Effect.map((first) => ({ title: first.title, content: first.summary })),

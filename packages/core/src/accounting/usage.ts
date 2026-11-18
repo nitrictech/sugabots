@@ -12,13 +12,7 @@ import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
 import { query, serviceOperations } from "../database/database.ts";
-import {
-	agent,
-	modelProvider,
-	modelRequest,
-	providerModel,
-	workspace,
-} from "../database/schema.ts";
+import { bot, modelProvider, modelRequest, providerModel, workspace } from "../database/schema.ts";
 
 /** What a workspace's models cost, from the request ledger. */
 export interface Interface {
@@ -83,11 +77,11 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 		),
 		or(ne(modelRequest.outcome, "started"), lt(modelRequest.startedAt, interruptedBefore)),
 	);
-	const byBots = eq(modelRequest.purpose, "agent-turn");
-	const bySystemAgents = ne(modelRequest.purpose, "agent-turn");
+	const byBots = eq(modelRequest.purpose, "bot-turn");
+	const bySystemBots = ne(modelRequest.purpose, "bot-turn");
 	const byPersonalAssistants = sql`exists (
-		select 1 from ${agent}
-		where ${agent.id} = ${modelRequest.agentId} and ${agent.assistantOf} is not null
+		select 1 from ${bot}
+		where ${bot.id} = ${modelRequest.botId} and ${bot.assistantOf} is not null
 	)`;
 	const spend = {
 		usd: sql<number>`coalesce(sum(${modelRequest.costUsd}), 0)`.mapWith(Number),
@@ -106,7 +100,7 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 	// One query at a time: inside a transaction the executor is one connection,
 	// which runs them one after another anyway.
 	const total = yield* spendWhere(inMonth);
-	const systemAgents = yield* spendWhere(and(inMonth, bySystemAgents));
+	const systemBots = yield* spendWhere(and(inMonth, bySystemBots));
 	const personalAssistants = yield* spendWhere(and(inMonth, byBots, byPersonalAssistants));
 	const dayRows = yield* query((db) =>
 		db
@@ -123,17 +117,17 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 	const bots = yield* query((db) =>
 		db
 			.select({
-				agentId: modelRequest.agentId,
-				name: agent.name,
-				color: agent.color,
-				face: agent.face,
-				shape: agent.shape,
+				botId: modelRequest.botId,
+				name: bot.name,
+				color: bot.color,
+				face: bot.face,
+				shape: bot.shape,
 				...spend,
 			})
 			.from(modelRequest)
-			.leftJoin(agent, eq(agent.id, modelRequest.agentId))
-			.where(and(inMonth, byBots, isNull(agent.assistantOf)))
-			.groupBy(modelRequest.agentId, agent.name, agent.color, agent.face, agent.shape),
+			.leftJoin(bot, eq(bot.id, modelRequest.botId))
+			.where(and(inMonth, byBots, isNull(bot.assistantOf)))
+			.groupBy(modelRequest.botId, bot.name, bot.color, bot.face, bot.shape),
 	);
 	const models = yield* query((db) =>
 		db
@@ -169,10 +163,10 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 		...total,
 		days: datesIn(month).map((date) => ({ date, usd: spentByDay.get(date) ?? 0 })),
 		bots: mostExpensiveFirst(
-			bots.flatMap(({ agentId, ...rest }) => (agentId ? [{ agentId, ...rest }] : [])),
+			bots.flatMap(({ botId, ...rest }) => (botId ? [{ botId, ...rest }] : [])),
 		),
 		models: mostExpensiveFirst(models),
-		systemAgents,
+		systemBots,
 		personalAssistants,
 	} satisfies WorkspaceUsage;
 });

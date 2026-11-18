@@ -4,7 +4,7 @@ import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { BlobStore } from "../../blob-store/blob-store.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
-import { agent, turn } from "../../database/schema.ts";
+import { bot, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
@@ -35,7 +35,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 	const emptyReply = { content: "", collaborations: [], toolCalls: [] };
 	const providerDown = userText`The model provider could not answer.`;
-	let threadId: string;
+	let conversationId: string;
 	let prepared: PreparedTurn;
 
 	afterAll(async () => {
@@ -43,8 +43,8 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 
 	beforeEach(async () => {
-		({ threadId } = await aChatAwaitingReply(chatsAs));
-		const [run] = await runOnPostgres(runningTurns(threadId));
+		({ conversationId } = await aChatAwaitingReply(chatsAs));
+		const [run] = await runOnPostgres(runningTurns(conversationId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);
 		delivered = [];
@@ -68,10 +68,10 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 	});
 
 	it("runs a failed turn again, starting its reply over, while no change stands in the way", async () => {
-		const blobsInThread = () =>
+		const blobsInConversation = () =>
 			runOnPostgres(
 				Effect.flatMap(BlobStore.Service, (store) =>
-					store.list(BlobStore.key("threads", prepared.context.thread.id)),
+					store.list(BlobStore.key("threads", prepared.context.conversation.id)),
 				),
 			);
 		const shared = await turns.attachFile(replyTurnOf(prepared), {
@@ -82,7 +82,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(deliveredEvents()).toContainEqual(
 			expect.objectContaining({ type: "message.files_changed", files: [shared] }),
 		);
-		expect(await blobsInThread()).toHaveLength(1);
+		expect(await blobsInConversation()).toHaveLength(1);
 		expect(
 			await turns.fail(replyTurnOf(prepared), emptyReply, {
 				userMessage: providerDown,
@@ -100,7 +100,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(await storedTurn()).toMatchObject({ status: "running", runs: 2, error: null });
 		// The reply starts over without the file its last run shared, blob and all.
 		expect(await turns.replyFiles(replyTurnOf(second))).toEqual([]);
-		expect(await blobsInThread()).toEqual([]);
+		expect(await blobsInConversation()).toEqual([]);
 		// Running again could act again, so the turn stops here for a person.
 		await turns.markActed(second.turnId);
 		expect(
@@ -137,7 +137,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		expect(
 			await runOnPostgres(
 				Effect.flatMap(BlobStore.Service, (store) =>
-					store.list(BlobStore.key("threads", prepared.context.thread.id)),
+					store.list(BlobStore.key("threads", prepared.context.conversation.id)),
 				),
 			),
 		).toEqual([]);
@@ -210,9 +210,9 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		);
 	});
 
-	it("tells the thread that a turn its workflow gave up on failed, calls and all", async () => {
+	it("tells the conversation that a turn its workflow gave up on failed, calls and all", async () => {
 		const opened = await calls.open({
-			threadId,
+			conversationId,
 			messageId: prepared.responseMessage.id,
 			turnId: prepared.turnId,
 			tool: "web_fetch",
@@ -237,7 +237,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 				willRetry: false,
 				error: "The reply stopped unexpectedly.",
 			}),
-			expect.objectContaining({ type: "thread.changed", threadId }),
+			expect.objectContaining({ type: "conversation.changed", conversationId }),
 		]);
 	});
 
@@ -253,14 +253,14 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 		);
 	});
 
-	describe("an agent with no model chosen", () => {
+	describe("a bot with no model chosen", () => {
 		const noModel = async () => {
 			const [host] = await onDatabase((db) =>
 				db
-					.update(agent)
+					.update(bot)
 					.set({ model: null })
-					.where(eq(agent.id, prepared.run.request.agentId))
-					.returning({ name: agent.name }),
+					.where(eq(bot.id, prepared.run.request.botId))
+					.returning({ name: bot.name }),
 			);
 			if (!host) throw new Error("no host");
 			return userText`${UserText.unchecked(host.name)} has no model chosen, so it cannot reply. Choose one in its settings.`;
@@ -276,13 +276,13 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			);
 		});
 
-		it("tells the thread why it cannot reply when it has no turn to end", async () => {
+		it("tells the conversation why it cannot reply when it has no turn to end", async () => {
 			const told = await noModel();
 			const unowned = { ...prepared.run, executionId: crypto.randomUUID() };
 
 			expect(await execution.prepare(unowned)).toMatchObject({ _tag: "NotRunnable" });
 			expect(deliveredEvents()).toContainEqual(
-				expect.objectContaining({ type: "thread.notice", threadId, notice: told }),
+				expect.objectContaining({ type: "conversation.notice", conversationId, notice: told }),
 			);
 		});
 	});

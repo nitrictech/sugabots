@@ -306,14 +306,14 @@ export function NewDirectMessagePage() {
 					{ready === existing.conversation.id && (
 						<ConversationPage
 							conversation={{
-								kind: "direct",
+								kind: "directMessage",
 								people: existing.people,
 								formerMembers: existing.formerMembers,
 							}}
-							pod={null}
+							channel={null}
 							conversationId={existing.conversation.id}
 							user={user}
-							onThreadChange={openConversation}
+							onItemChange={openConversation}
 							onStagedChange={openConversation}
 							headerless
 							onSent={openConversation}

@@ -27,7 +27,7 @@ import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
 import { Egress } from "../network/egress.ts";
 import { changesAddress, requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import {
@@ -59,7 +59,7 @@ import {
  * only `workspace.read`.
  *
  * The first model a workspace offers becomes its default and every system
- * agent's. After that, a change that would stop it offering a model one of
+ * bot's. After that, a change that would stop it offering a model one of
  * them runs on fails with `ModelInUse`, so a workspace never goes from some
  * models back to none. A new key or sign-in is not refused: the provider is
  * off only until it has been tried, which happens in the same request.
@@ -195,7 +195,7 @@ export interface Interface {
 	>;
 	/**
 	 * Switches a model off and moves the bots on it to `moveBotsTo`, returning
-	 * how many moved, and the default and the system agents to `newBotsTo` and
+	 * how many moved, and the default and the system bots to `newBotsTo` and
 	 * `summariesTo`, as {@link SettingMoves} says.
 	 */
 	readonly switchOffModel: (
@@ -231,7 +231,7 @@ export interface Interface {
 		AuthorizationDenied | ProviderModelRemovalNotAllowed | ModelInUse,
 		CurrentActor.Service
 	>;
-	/** Makes `model`, which the workspace must offer, the one its new agents start on. */
+	/** Makes `model`, which the workspace must offer, the one its new bots start on. */
 	readonly setDefaultModel: (
 		input: InWorkspace & { model: string },
 	) => Effect.Effect<
@@ -242,7 +242,7 @@ export interface Interface {
 }
 
 /**
- * Where the workspace's default and its system agents move as a switch-off
+ * Where the workspace's default and its system bots move as a switch-off
  * stops offering the model they run on. Every model moved to must still be
  * offered afterwards. One left out stays put, and the switch-off fails with
  * `ModelInUse` if that leaves it on a model no longer offered.
@@ -270,7 +270,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ModelProviderSetup");
 	const authorization = yield* Authorization.Service;
 	const providers = yield* ModelProviderRepository.Service;
-	const agents = yield* AgentRepository.Service;
+	const bots = yield* BotRepository.Service;
 	const egress = yield* Egress.Service;
 	/** Seals a sign-in in progress; the same key as the stored credentials'. */
 	const cipher = yield* Credentials.Service;
@@ -299,10 +299,10 @@ export const make = Effect.gen(function* () {
 		);
 
 	/**
-	 * Runs `switchOff`, then moves the crew agents on each `from` the workspace
+	 * Runs `switchOff`, then moves the bots on each `from` the workspace
 	 * no longer offers to its `to`, which it must, and returns how many moved.
 	 * A `from` the workspace still offers was named in error, and keeps its bots.
-	 * The default and the system agents move as {@link SettingMoves} says.
+	 * The default and the system bots move as {@link SettingMoves} says.
 	 */
 	const movingOffSwitchedOff = <E, R>(
 		workspaceId: string,
@@ -319,13 +319,13 @@ export const make = Effect.gen(function* () {
 				}
 				if (summariesTo !== undefined) {
 					yield* providers.requireEnabled(workspaceId, summariesTo);
-					yield* agents.setAllSystemAgentModels(workspaceId, summariesTo);
+					yield* bots.setAllSystemBotModels(workspaceId, summariesTo);
 				}
 				const moved = yield* Effect.forEach(moves, ({ from, to }) =>
 					Effect.gen(function* () {
 						if (yield* providers.isEnabled(workspaceId, from)) return 0;
 						yield* providers.requireEnabled(workspaceId, to);
-						return yield* agents.moveCrewAgentsToModel(workspaceId, from, to);
+						return yield* bots.movePersonFacingBotsToModel(workspaceId, from, to);
 					}),
 				);
 				return moved.reduce((total, count) => total + count, 0);
@@ -366,8 +366,8 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Gives a workspace that has started offering a model its default, and
-	 * every system agent without a model that default. Run after anything that
-	 * can switch a model or a provider on.
+	 * every system bot and Personal Assistant without a model that default.
+	 * Run after anything that can switch a model or a provider on.
 	 */
 	const adoptFirstModel = (workspaceId: string) =>
 		withHeldModelsLocked(
@@ -375,7 +375,8 @@ export const make = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const model = yield* providers.ensureDefaultModel(workspaceId);
 				if (model !== undefined) {
-					yield* agents.fillMissingSystemAgentModels(workspaceId, model);
+					yield* bots.fillMissingSystemBotModels(workspaceId, model);
+					yield* bots.fillMissingAssistantModels(workspaceId, model);
 				}
 			}),
 		);
@@ -712,7 +713,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, ModelProviderRepository.layer, AgentRepository.layer]),
+	Layer.provide([Authorization.layer, ModelProviderRepository.layer, BotRepository.layer]),
 );
 
 /** A device code in progress, sealed and handed to the page so the server keeps no state for it. */

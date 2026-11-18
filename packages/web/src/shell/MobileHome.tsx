@@ -2,11 +2,11 @@ import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Bot, Hash, Plus } from "lucide-react";
 import type { ReactNode } from "react";
-import { useAgents, useAssistant } from "@/lib/agents.ts";
-import { useDirectMessages, usePodChatMarkers } from "@/lib/chats.ts";
-import { botLink, botsLink, channelsLink, newDirectMessageLink, podLink } from "@/lib/links.ts";
-import { usePods } from "@/lib/pods.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { useAssistant, useBots } from "@/lib/bots.ts";
+import { useChannels } from "@/lib/channels.ts";
+import { useChannelConversationMarkers, useDirectMessages } from "@/lib/chats.ts";
+import { botLink, botsLink, channelLink, channelsLink, newDirectMessageLink } from "@/lib/links.ts";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import {
 	ChannelConversations,
 	SidebarBot,
@@ -14,7 +14,7 @@ import {
 } from "@/shell/ConversationList.tsx";
 import { DirectMessageCards } from "@/shell/DirectMessages.tsx";
 import { sidebarBots, useEnsuredAssistant } from "@/shell/Sidebar.tsx";
-import { PodInitial } from "@/shell/SidebarPod.tsx";
+import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
 /** A page of Home on a phone, under its title, with `action` beside it. */
@@ -79,18 +79,18 @@ export function MobileDirectMessages({ className }: { className?: string }) {
  * each with its conversations, and the bots they pinned.
  */
 export function MobileHome({ className }: { className?: string }) {
-	const { data: pods } = usePods();
-	const { agents, isPending, error } = useAgents();
+	const { data: channels } = useChannels();
+	const { bots, isPending, error } = useBots();
 	const assistant = useAssistant();
 	useEnsuredAssistant(!isPending && !error && !assistant);
-	const { data: markers } = usePodChatMarkers();
-	const nothing = { unreadMessages: 0, needsApproval: false, failedRoutines: 0 };
-	const pinned = sidebarBots(agents ?? [], undefined);
+	const { data: markers } = useChannelConversationMarkers();
+	const nothing = { unreadMessages: 0, needsApproval: false, failedAutomations: 0 };
+	const pinned = sidebarBots(bots ?? [], undefined);
 	return (
 		<MobilePage title="Home" className={className}>
 			{assistant && (
 				<Link {...botLink(assistant)} className={sidebarRowClassName(false)}>
-					<AgentAvatar
+					<BotAvatar
 						color={assistant.color}
 						face={assistant.face}
 						shape={assistant.shape}
@@ -100,16 +100,16 @@ export function MobileHome({ className }: { className?: string }) {
 				</Link>
 			)}
 			<HomeSection label="Channels">
-				{pods
-					?.filter((pod) => pod.isMember)
-					.map((pod) => (
-						<div key={pod.id} className="flex flex-col gap-px">
-							<Link {...podLink(pod)} className={sidebarRowClassName(false)}>
-								<PodInitial pod={pod} />
-								<span className="min-w-0 flex-1 truncate font-medium">{pod.name}</span>
+				{channels
+					?.filter((channel) => channel.isMember)
+					.map((channel) => (
+						<div key={channel.id} className="flex flex-col gap-px">
+							<Link {...channelLink(channel)} className={sidebarRowClassName(false)}>
+								<ChannelInitial channel={channel} />
+								<span className="min-w-0 flex-1 truncate font-medium">{channel.name}</span>
 							</Link>
 							<div className="pl-4">
-								<ChannelConversations pod={pod} />
+								<ChannelConversations channel={channel} />
 							</div>
 						</div>
 					))}
@@ -120,10 +120,10 @@ export function MobileHome({ className }: { className?: string }) {
 			</HomeSection>
 			<HomeSection label="Bots">
 				<ul className="m-0 flex list-none flex-col gap-px p-0">
-					{pinned.map((agent) => (
+					{pinned.map((bot) => (
 						<SidebarBot
-							key={agent.id}
-							standing={{ agent, ...(markers?.agents[agent.id] ?? nothing) }}
+							key={bot.id}
+							standing={{ bot, ...(markers?.bots[bot.id] ?? nothing) }}
 							open={false}
 							selected={false}
 						/>

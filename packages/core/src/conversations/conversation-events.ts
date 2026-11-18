@@ -9,7 +9,7 @@ import type { ConversationEvent } from "./events.ts";
  * `Conversations.layer` gives it, in order, inside the emitting transaction
  * (see `DomainEvents.emitTo`).
  *
- * There is no `layer` here: the handlers include routine settlement, which is
+ * There is no `layer` here: the handlers include automation settlement, which is
  * built from the services that emit, so `Conversations.layer` builds both and
  * provides this.
  */

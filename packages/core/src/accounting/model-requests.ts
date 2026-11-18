@@ -32,8 +32,9 @@ export const make = Effect.gen(function* () {
 						.values({
 							workspaceId: request.workspaceId,
 							purpose: request.activity.purpose,
-							agentId: "agentId" in request.activity ? request.activity.agentId : null,
-							threadId: "threadId" in request.activity ? request.activity.threadId : null,
+							botId: "botId" in request.activity ? request.activity.botId : null,
+							conversationId:
+								"conversationId" in request.activity ? request.activity.conversationId : null,
 							turnId: "turnId" in request.activity ? request.activity.turnId : null,
 							step: request.step,
 							providerId: request.providerId,
@@ -73,26 +74,26 @@ export const make = Effect.gen(function* () {
 
 /**
  * What a model request was made for, which is whose spend it is. System work
- * names the conversation it served and no agent: it is never charged to a bot
+ * names the conversation it served and no bot: it is never charged to a bot
  * that did not make it.
  */
 export type Activity =
 	| {
-			readonly purpose: "agent-turn";
-			readonly agentId: string;
-			readonly threadId: string;
+			readonly purpose: "bot-turn";
+			readonly botId: string;
+			readonly conversationId: string;
 			readonly turnId: string;
 	  }
-	| { readonly purpose: "facilitation"; readonly threadId: string }
+	| { readonly purpose: "facilitation"; readonly conversationId: string }
 	| {
 			readonly purpose: "summary" | "compaction";
-			readonly threadId: string;
-			/** The system agent's own turn, in its child thread. */
+			readonly conversationId: string;
+			/** The system bot's own turn, in a conversation of its own. */
 			readonly turnId: string;
 	  }
 	/**
 	 * Trying a model out from settings: a trial before giving it to a system
-	 * agent, or checking that a provider's enabled model answers at all.
+	 * bot, or checking that a provider's enabled model answers at all.
 	 */
 	| { readonly purpose: "trial" | "provider-check" };
 

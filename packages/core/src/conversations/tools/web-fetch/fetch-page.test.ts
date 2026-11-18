@@ -5,7 +5,7 @@ import { type FetchPage, MAX_REDIRECTS, pageFetcher } from "./fetch-page.ts";
 /**
  * The fetcher against a fake `fetch`: what it follows, what it refuses, and
  * what it hands back. One case runs it through the real egress client to show
- * the network policy reaches the agent as a reason rather than an error.
+ * the network policy reaches the bot as a reason rather than an error.
  */
 
 type FakeFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -199,7 +199,7 @@ describe("fetching a page", () => {
 		});
 	});
 
-	it("tells the agent when the network policy refuses an address", async () => {
+	it("tells the bot when the network policy refuses an address", async () => {
 		const dispatch = vi.fn<EgressDispatch>();
 		const client = createEgressHttpClient({
 			lookup: async () => [{ address: "10.0.0.8", family: 4 }],

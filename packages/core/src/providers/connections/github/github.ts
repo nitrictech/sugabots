@@ -51,7 +51,7 @@ const APP_PERMISSIONS = {
 
 export type Permissions = { readonly [K in keyof typeof APP_PERMISSIONS]?: "read" | "write" };
 
-/** What a sandbox's reads are signed in with: enough to clone, fetch, and look at issues, pull requests and CI. */
+/** What a computer's reads are signed in with: enough to clone, fetch, and look at issues, pull requests and CI. */
 export const READ_PERMISSIONS: Permissions = {
 	contents: "read",
 	pull_requests: "read",
@@ -429,7 +429,7 @@ const FoundComment = Schema.Struct({
 
 /**
  * Who wrote a comment, by login, undefined for a deleted account; and the
- * thread it is in, by its first comment's id, which for a comment on code
+ * conversation it is in, by its first comment's id, which for a comment on code
  * that answers another is that other's.
  */
 export const findComment = (
@@ -443,7 +443,7 @@ export const findComment = (
 		Effect.flatMap(decoded(FoundComment)),
 		Effect.map((found) => ({
 			author: found.user?.login,
-			threadId: found.in_reply_to_id ?? request.commentId,
+			conversationId: found.in_reply_to_id ?? request.commentId,
 		})),
 	);
 
@@ -638,7 +638,7 @@ export const reviewPullRequest = (
 	);
 };
 
-/** Replies in the thread of `commentId`, a comment on pull request `number`'s code. */
+/** Replies in the conversation of `commentId`, a comment on pull request `number`'s code. */
 export const replyToCodeComment = (
 	http: EgressHttpClient,
 	token: string,

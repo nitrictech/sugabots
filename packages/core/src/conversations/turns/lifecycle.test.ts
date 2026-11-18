@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	FollowUp,
 	MAX_TURN_RUNS,
-	ROUTINE_EXECUTION_ENDED,
+	RUN_ENDED,
 	runsAgainAfterFailure,
 	TURN_CANCELLED,
 	TurnEvent,
@@ -199,13 +199,13 @@ describe("cancelling", () => {
 		expect(transition(turn(), TurnEvent.CancelWaiting())._tag).toBe("Refused");
 	});
 
-	it("cancels a waiting turn when its routine run ends, and only asks a running one to stop", () => {
-		expect(transition(turn({ status: "waiting" }), TurnEvent.RoutineEnded())).toEqual({
+	it("cancels a waiting turn when its automation run ends, and only asks a running one to stop", () => {
+		expect(transition(turn({ status: "waiting" }), TurnEvent.AutomationEnded())).toEqual({
 			_tag: "Next",
 			state: turn({ status: "cancelled", cancelRequested: true }),
-			followUp: FollowUp.End({ userMessage: ROUTINE_EXECUTION_ENDED }),
+			followUp: FollowUp.End({ userMessage: RUN_ENDED }),
 		});
-		expect(transition(turn(), TurnEvent.RoutineEnded())).toEqual({
+		expect(transition(turn(), TurnEvent.AutomationEnded())).toEqual({
 			_tag: "Next",
 			state: turn({ cancelRequested: true }),
 			followUp: FollowUp.AnnounceCancelRequest(),

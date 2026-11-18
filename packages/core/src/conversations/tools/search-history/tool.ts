@@ -3,10 +3,14 @@ import { tool } from "ai";
 import { and, asc, desc, eq, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
 import { DateTime, Effect, Schema } from "effect";
 import { type Executor, query, type RunEffect } from "../../../database/database.ts";
-import { agent, type MessageRow, message, threadFile, user } from "../../../database/schema.ts";
-import { loadFileParts } from "../../threads/file-parts.ts";
-import { describeAttachment, formatHistoryTime } from "../../threads/message-text.ts";
-import { type ParticipantRow, participantColumns, toMessage } from "../../threads/participants.ts";
+import { bot, file, type MessageRow, message, user } from "../../../database/schema.ts";
+import { loadFileParts } from "../../repository/file-parts.ts";
+import { describeAttachment, formatHistoryTime } from "../../repository/message-text.ts";
+import {
+	type ParticipantRow,
+	participantColumns,
+	toMessage,
+} from "../../repository/participants.ts";
 
 const MAX_MATCHES = 10;
 /** Enough of a message to answer from; the whole of a long one would crowd out the others. */
@@ -34,20 +38,20 @@ interface HistorySearch {
 }
 
 /**
- * The `search_history` tool: find what was said in this thread before the
+ * The `search_history` tool: find what was said in this conversation before the
  * part the bot reads word for word, which compaction summarises or leaves out.
  */
 export function searchHistoryTool({
-	threadId,
+	conversationId,
 	before: keptFrom,
-	usesSandbox,
+	usesComputer,
 	run,
 }: {
-	threadId: string;
+	conversationId: string;
 	/** Where the history the bot reads word for word starts, once compacted; nothing from then on is searched. */
 	before: Date | undefined;
-	/** Whether the agent works in the pod's sandbox, so is told it can copy attachments into it. */
-	usesSandbox: boolean;
+	/** Whether the bot works in the bot's computer, so is told it can copy attachments into it. */
+	usesComputer: boolean;
 	run: RunEffect;
 }) {
 	return tool({
@@ -84,22 +88,22 @@ export function searchHistoryTool({
 				...(after ? { after: DateTime.toDate(DateTime.makeUnsafe(after)) } : {}),
 				...(before ? { before: DateTime.toDate(DateTime.makeUnsafe(before)) } : {}),
 			};
-			return run(query((db) => searchHistory(db, threadId, keptFrom, search, usesSandbox)));
+			return run(query((db) => searchHistory(db, conversationId, keptFrom, search, usesComputer)));
 		},
 	});
 }
 
 const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 	db: Executor,
-	threadId: string,
+	conversationId: string,
 	keptFrom: Date,
 	{ words, after, before }: HistorySearch,
-	usesSandbox: boolean,
+	usesComputer: boolean,
 ) {
 	const until = before && before < keptFrom ? before : keptFrom;
 	const matching = words ? wordMatch(words) : undefined;
 	const conditions: SQL[] = [
-		eq(message.threadId, threadId),
+		eq(message.conversationId, conversationId),
 		eq(message.status, "complete"),
 		lt(message.createdAt, until),
 		...(after ? [gte(message.createdAt, after)] : []),
@@ -109,7 +113,7 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 		.select({ message, ...participantColumns })
 		.from(message)
 		.leftJoin(user, eq(user.id, message.authorUserId))
-		.leftJoin(agent, eq(agent.id, message.authorAgentId))
+		.leftJoin(bot, eq(bot.id, message.authorBotId))
 		.where(and(...conditions))
 		.orderBy(
 			...(matching
@@ -129,7 +133,7 @@ const searchHistory = Effect.fn("SearchHistory.searchHistory")(function* (
 			toHistoryMatch(
 				row,
 				author,
-				(files.get(row.id) ?? []).map((file) => describeAttachment(file, { usesSandbox })),
+				(files.get(row.id) ?? []).map((file) => describeAttachment(file, { usesComputer })),
 			),
 		),
 		more: rows.length > MAX_MATCHES,
@@ -151,7 +155,8 @@ export function toHistoryMatch(
 			? row.content
 			: `${row.content.slice(0, MATCH_CHARACTERS)}…`;
 	return {
-		author: found.author.kind === "routine_trigger" ? found.author.routineName : found.author.name,
+		author:
+			found.author.kind === "automation_trigger" ? found.author.automationName : found.author.name,
 		at: formatHistoryTime(row.createdAt),
 		text: [said, ...attachmentLines].filter((line) => line !== "").join("\n"),
 	};
@@ -182,8 +187,8 @@ export function wordMatch(words: string): { where: SQL; best: SQL[] } {
 	// A file is found by its name too, as a message with only files says nothing else.
 	const carriesNamed =
 		terms.length > 0
-			? sql`exists (select 1 from ${threadFile} where ${threadFile.messageId} = ${message.id} and ${and(
-					...terms.map((term) => ilike(threadFile.name, `%${escapeLike(term)}%`)),
+			? sql`exists (select 1 from ${file} where ${file.messageId} = ${message.id} and ${and(
+					...terms.map((term) => ilike(file.name, `%${escapeLike(term)}%`)),
 				)})`
 			: undefined;
 	const rank = sql`greatest(

@@ -32,7 +32,7 @@ export function ToolLine({
 	/** The reply's parts: its calls, and the narration that introduced them. */
 	parts: readonly MessagePart[];
 	looks: ReadonlyMap<string, ConnectionLook>;
-	/** The thread's files by id, for the calls that read them. */
+	/** The conversation's files by id, for the calls that read them. */
 	fileNames: ReadonlyMap<string, string>;
 	className?: string;
 }) {

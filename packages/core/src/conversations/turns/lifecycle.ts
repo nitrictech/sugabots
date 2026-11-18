@@ -22,13 +22,13 @@ export const MAX_TURN_RUNS = 3;
 /** What people are told of a cancelled turn's tool calls that were cut short. */
 export const TURN_CANCELLED = userText`Turn cancelled`;
 
-/** What people are told of a turn's tool calls cut short because its routine run ended. */
-export const ROUTINE_EXECUTION_ENDED = userText`Routine execution ended`;
+/** What people are told of a turn's tool calls cut short because its automation run ended. */
+export const RUN_ENDED = userText`Automation run ended`;
 
 /** What people are told of a turn a defect ended, rather than a failure it expects. */
 export const TURN_STOPPED_UNEXPECTEDLY = userText`The reply stopped unexpectedly.`;
 
-/** What people are told of a system agent's turn cut short by its process stopping. */
+/** What people are told of a system bot's turn cut short by its process stopping. */
 export const SYSTEM_TURN_INTERRUPTED = userText`It was interrupted before it finished.`;
 
 /** What the lifecycle knows of a turn besides its status. */
@@ -52,7 +52,7 @@ export type TurnState = TurnFacts &
 	);
 
 /**
- * How a turn ended part-way through a run, which is how a routine run it
+ * How a turn ended part-way through a run, which is how an automation run it
  * belonged to settles.
  */
 export type Ended =
@@ -82,8 +82,8 @@ export type TurnEvent = Data.TaggedEnum<{
 	RequestCancel: Record<never, never>;
 	/** The workflow of a waiting turn heard the cancellation, and stops waiting. */
 	CancelWaiting: Record<never, never>;
-	/** The routine run the turn works for ended. */
-	RoutineEnded: Record<never, never>;
+	/** The automation run the turn works for ended. */
+	AutomationEnded: Record<never, never>;
 }>;
 
 export const TurnEvent = Data.taggedEnum<TurnEvent>();
@@ -154,11 +154,11 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 				: refused("The turn is not waiting"),
 		// A running turn is only asked to stop: its workflow holds the reply, and
 		// records how it ended. A waiting one has nobody to do that.
-		RoutineEnded: () => {
+		AutomationEnded: () => {
 			if (state.status === "waiting") {
 				return next(
 					{ ...cancelled(state), cancelRequested: true },
-					FollowUp.End({ userMessage: ROUTINE_EXECUTION_ENDED }),
+					FollowUp.End({ userMessage: RUN_ENDED }),
 				);
 			}
 			if (state.status === "running") {
@@ -189,7 +189,7 @@ export const mayRunTools = (state: Pick<TurnState, "status" | "cancelRequested">
 export const awaitsDecisions = (state: Pick<TurnState, "status" | "cancelRequested">): boolean =>
 	state.status === "waiting" && !state.cancelRequested;
 
-/** endedAs returns how a turn in the ended `state` settles its routine run. */
+/** endedAs returns how a turn in the ended `state` settles its automation run. */
 export function endedAs(state: TurnState): Ended {
 	return state.status === "failed"
 		? { state: "failed", error: state.userMessage }

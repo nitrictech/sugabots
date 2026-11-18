@@ -85,11 +85,11 @@ export function ChatToolLine({ className, ...props }: ComponentProps<"p">) {
 	);
 }
 
-/** Under a routine's result: the routine it came from. */
-export function ChatRoutineNote({ routine }: { routine: string }) {
+/** Under an automation's result: the automation it came from. */
+export function ChatAutomationNote({ automation }: { automation: string }) {
 	return (
 		<p className="flex items-center gap-0.5 pt-1 text-xs font-medium text-muted-foreground">
-			From {routine}
+			From {automation}
 			<ChevronRightIcon aria-hidden className="size-3" strokeWidth={2.4} />
 		</p>
 	);
@@ -116,7 +116,7 @@ interface ChatCollaborationProps {
 }
 
 /**
- * The collaboration a bot's message opened with another bot, as a thread line
+ * The collaboration a bot's message opened with another bot, as a line
  * under its words. The faces are ringed in the card's colour, which every demo
  * chat sits on, so the ring only shows where they overlap.
  */

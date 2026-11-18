@@ -1,0 +1,722 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "c7ffddc7-22c7-4909-b5bc-af0fc78360fa",
+  "prevIds": [
+    "fdf13ae5-bf98-45c8-bf86-178d82f79c45"
+  ],
+  "footprints": [
+    {
+      "statementType": "rename_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "pod"
+      ],
+      "writes": [
+        "s|tbl|public.pod",
+        "n|tbl|public.pod",
+        "n|rel|public.pod",
+        "n|type|public.pod",
+        "s|tbl|public.channel",
+        "n|tbl|public.channel",
+        "n|rel|public.channel",
+        "n|type|public.channel"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "pod_agent"
+      ],
+      "writes": [
+        "s|tbl|public.pod_agent",
+        "n|tbl|public.pod_agent",
+        "n|rel|public.pod_agent",
+        "n|type|public.pod_agent",
+        "s|tbl|public.channel_bot",
+        "n|tbl|public.channel_bot",
+        "n|rel|public.channel_bot",
+        "n|type|public.channel_bot"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "pod_member"
+      ],
+      "writes": [
+        "s|tbl|public.pod_member",
+        "n|tbl|public.pod_member",
+        "n|rel|public.pod_member",
+        "n|type|public.pod_member",
+        "s|tbl|public.channel_member",
+        "n|tbl|public.channel_member",
+        "n|rel|public.channel_member",
+        "n|type|public.channel_member"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "thread",
+        "pod_id"
+      ],
+      "writes": [
+        "s|col|public.thread.pod_id",
+        "n|col|public.thread.pod_id",
+        "s|col|public.thread.channel_id",
+        "n|col|public.thread.channel_id"
+      ],
+      "reads": [
+        "n|tbl|public.thread",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "notification_override",
+        "pod_id"
+      ],
+      "writes": [
+        "s|col|public.notification_override.pod_id",
+        "n|col|public.notification_override.pod_id",
+        "s|col|public.notification_override.channel_id",
+        "n|col|public.notification_override.channel_id"
+      ],
+      "reads": [
+        "n|tbl|public.notification_override",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "channel_bot",
+        "pod_id"
+      ],
+      "writes": [
+        "s|col|public.channel_bot.pod_id",
+        "n|col|public.channel_bot.pod_id",
+        "s|col|public.channel_bot.channel_id",
+        "n|col|public.channel_bot.channel_id"
+      ],
+      "reads": [
+        "n|tbl|public.channel_bot",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "channel_member",
+        "pod_id"
+      ],
+      "writes": [
+        "s|col|public.channel_member.pod_id",
+        "n|col|public.channel_member.pod_id",
+        "s|col|public.channel_member.channel_id",
+        "n|col|public.channel_member.channel_id"
+      ],
+      "reads": [
+        "n|tbl|public.channel_member",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "thread"
+      ],
+      "writes": [
+        "s|ck|public.thread.thread_pod_valid",
+        "n|ck|public.thread.thread_pod_valid",
+        "n|con|public.thread.thread_pod_valid",
+        "s|ck|public.thread.thread_channel_valid",
+        "n|ck|public.thread.thread_channel_valid",
+        "n|con|public.thread.thread_channel_valid"
+      ],
+      "reads": [
+        "n|tbl|public.thread",
+        "n|sch|public",
+        "e|col|public.thread.type",
+        "e|col|public.thread.channel_id"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "channel"
+      ],
+      "writes": [
+        "s|ck|public.channel.pod_visibility_check",
+        "n|ck|public.channel.pod_visibility_check",
+        "n|con|public.channel.pod_visibility_check",
+        "s|ck|public.channel.channel_visibility_check",
+        "n|ck|public.channel.channel_visibility_check",
+        "n|con|public.channel.channel_visibility_check"
+      ],
+      "reads": [
+        "n|tbl|public.channel",
+        "n|sch|public",
+        "e|col|public.channel.visibility"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "thread",
+        "thread_pod_updated_at_idx"
+      ],
+      "writes": [
+        "s|idx|public.thread_pod_updated_at_idx",
+        "n|idx|public.thread_pod_updated_at_idx",
+        "n|rel|public.thread_pod_updated_at_idx",
+        "s|idx|public.thread_channel_updated_at_idx",
+        "n|idx|public.thread_channel_updated_at_idx",
+        "n|rel|public.thread_channel_updated_at_idx"
+      ],
+      "reads": [
+        "e|tbl|public.thread",
+        "n|sch|public",
+        "e|col|public.thread.channel_id",
+        "e|col|public.thread.updated_at"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "thread",
+        "thread_pod_chat_idx"
+      ],
+      "writes": [
+        "s|idx|public.thread_pod_chat_idx",
+        "n|idx|public.thread_pod_chat_idx",
+        "n|rel|public.thread_pod_chat_idx",
+        "s|idx|public.thread_channel_main_idx",
+        "n|idx|public.thread_channel_main_idx",
+        "n|rel|public.thread_channel_main_idx"
+      ],
+      "reads": [
+        "e|tbl|public.thread",
+        "n|sch|public",
+        "e|col|public.thread.channel_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "notification_override",
+        "notification_override_pod_idx"
+      ],
+      "writes": [
+        "s|idx|public.notification_override_pod_idx",
+        "n|idx|public.notification_override_pod_idx",
+        "n|rel|public.notification_override_pod_idx",
+        "s|idx|public.notification_override_channel_idx",
+        "n|idx|public.notification_override_channel_idx",
+        "n|rel|public.notification_override_channel_idx"
+      ],
+      "reads": [
+        "e|tbl|public.notification_override",
+        "n|sch|public",
+        "e|col|public.notification_override.user_id",
+        "e|col|public.notification_override.channel_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "channel",
+        "pod_slug_idx"
+      ],
+      "writes": [
+        "s|idx|public.pod_slug_idx",
+        "n|idx|public.pod_slug_idx",
+        "n|rel|public.pod_slug_idx",
+        "s|idx|public.channel_slug_idx",
+        "n|idx|public.channel_slug_idx",
+        "n|rel|public.channel_slug_idx"
+      ],
+      "reads": [
+        "e|tbl|public.channel",
+        "n|sch|public",
+        "e|col|public.channel.workspace_id",
+        "e|col|public.channel.slug"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "channel",
+        "pod_id_workspace_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.pod_id_workspace_id_idx",
+        "n|idx|public.pod_id_workspace_id_idx",
+        "n|rel|public.pod_id_workspace_id_idx",
+        "s|idx|public.channel_id_workspace_id_idx",
+        "n|idx|public.channel_id_workspace_id_idx",
+        "n|rel|public.channel_id_workspace_id_idx"
+      ],
+      "reads": [
+        "e|tbl|public.channel",
+        "n|sch|public",
+        "e|col|public.channel.id",
+        "e|col|public.channel.workspace_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "channel_bot",
+        "pod_agent_agent_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.pod_agent_agent_id_idx",
+        "n|idx|public.pod_agent_agent_id_idx",
+        "n|rel|public.pod_agent_agent_id_idx",
+        "s|idx|public.channel_bot_agent_id_idx",
+        "n|idx|public.channel_bot_agent_id_idx",
+        "n|rel|public.channel_bot_agent_id_idx"
+      ],
+      "reads": [
+        "e|tbl|public.channel_bot",
+        "n|sch|public",
+        "e|col|public.channel_bot.agent_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "channel_member",
+        "pod_member_idx"
+      ],
+      "writes": [
+        "s|idx|public.pod_member_idx",
+        "n|idx|public.pod_member_idx",
+        "n|rel|public.pod_member_idx",
+        "s|idx|public.channel_member_idx",
+        "n|idx|public.channel_member_idx",
+        "n|rel|public.channel_member_idx"
+      ],
+      "reads": [
+        "e|tbl|public.channel_member",
+        "n|sch|public",
+        "e|col|public.channel_member.channel_id",
+        "e|col|public.channel_member.user_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "channel_member",
+        "pod_member_user_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.pod_member_user_id_idx",
+        "n|idx|public.pod_member_user_id_idx",
+        "n|rel|public.pod_member_user_id_idx",
+        "s|idx|public.channel_member_user_id_idx",
+        "n|idx|public.channel_member_user_id_idx",
+        "n|rel|public.channel_member_user_id_idx"
+      ],
+      "reads": [
+        "e|tbl|public.channel_member",
+        "n|sch|public",
+        "e|col|public.channel_member.user_id"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "thread"
+      ],
+      "writes": [
+        "s|fk|public.thread.thread_pod_workspace_fkey",
+        "n|fk|public.thread.thread_pod_workspace_fkey",
+        "n|con|public.thread.thread_pod_workspace_fkey",
+        "s|fk|public.thread.thread_channel_workspace_fkey",
+        "n|fk|public.thread.thread_channel_workspace_fkey",
+        "n|con|public.thread.thread_channel_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.thread",
+        "n|sch|public",
+        "e|col|public.thread.channel_id",
+        "e|col|public.thread.workspace_id"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "channel_bot"
+      ],
+      "writes": [
+        "s|fk|public.channel_bot.pod_agent_pod_workspace_fkey",
+        "n|fk|public.channel_bot.pod_agent_pod_workspace_fkey",
+        "n|con|public.channel_bot.pod_agent_pod_workspace_fkey",
+        "s|fk|public.channel_bot.channel_bot_channel_workspace_fkey",
+        "n|fk|public.channel_bot.channel_bot_channel_workspace_fkey",
+        "n|con|public.channel_bot.channel_bot_channel_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.channel_bot",
+        "n|sch|public",
+        "e|col|public.channel_bot.channel_id",
+        "e|col|public.channel_bot.workspace_id"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "channel_bot"
+      ],
+      "writes": [
+        "s|fk|public.channel_bot.pod_agent_agent_workspace_fkey",
+        "n|fk|public.channel_bot.pod_agent_agent_workspace_fkey",
+        "n|con|public.channel_bot.pod_agent_agent_workspace_fkey",
+        "s|fk|public.channel_bot.channel_bot_agent_workspace_fkey",
+        "n|fk|public.channel_bot.channel_bot_agent_workspace_fkey",
+        "n|con|public.channel_bot.channel_bot_agent_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.channel_bot",
+        "n|sch|public",
+        "e|col|public.channel_bot.agent_id",
+        "e|col|public.channel_bot.workspace_id"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "channel_member"
+      ],
+      "writes": [
+        "s|fk|public.channel_member.pod_member_pod_workspace_fkey",
+        "n|fk|public.channel_member.pod_member_pod_workspace_fkey",
+        "n|con|public.channel_member.pod_member_pod_workspace_fkey",
+        "s|fk|public.channel_member.channel_member_channel_workspace_fkey",
+        "n|fk|public.channel_member.channel_member_channel_workspace_fkey",
+        "n|con|public.channel_member.channel_member_channel_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.channel_member",
+        "n|sch|public",
+        "e|col|public.channel_member.channel_id",
+        "e|col|public.channel_member.workspace_id"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "channel_member"
+      ],
+      "writes": [
+        "s|fk|public.channel_member.pod_member_workspace_member_fkey",
+        "n|fk|public.channel_member.pod_member_workspace_member_fkey",
+        "n|con|public.channel_member.pod_member_workspace_member_fkey",
+        "s|fk|public.channel_member.channel_member_workspace_member_fkey",
+        "n|fk|public.channel_member.channel_member_workspace_member_fkey",
+        "n|con|public.channel_member.channel_member_workspace_member_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.channel_member",
+        "n|sch|public",
+        "e|col|public.channel_member.workspace_id",
+        "e|col|public.channel_member.user_id"
+      ]
+    },
+    {
+      "statementType": "recreate_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "notification_override",
+        "notification_override_channel_idx"
+      ],
+      "writes": [
+        "s|idx|public.notification_override_channel_idx",
+        "n|idx|public.notification_override_channel_idx",
+        "e|idx|public.notification_override_channel_idx",
+        "n|rel|public.notification_override_channel_idx"
+      ],
+      "reads": [
+        "n|tbl|public.notification_override",
+        "n|sch|public",
+        "n|col|public.notification_override.user_id",
+        "n|col|public.notification_override.channel_id"
+      ],
+      "sharedWrites": [],
+      "sqlHash": "8d744896fe0e718e"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "notification_override"
+      ],
+      "writes": [
+        "s|ck|public.notification_override.notification_override_one_place"
+      ],
+      "reads": [
+        "n|tbl|public.notification_override",
+        "n|sch|public",
+        "n|col|public.notification_override.channel_id",
+        "n|col|public.notification_override.agent_id",
+        "e|col|public.notification_override.agent_id"
+      ],
+      "sqlHash": "965d1b0b28d46d26"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "thread"
+      ],
+      "writes": [
+        "s|ck|public.thread.thread_channel_valid"
+      ],
+      "reads": [
+        "n|tbl|public.thread",
+        "n|sch|public",
+        "n|col|public.thread.type",
+        "n|col|public.thread.channel_id",
+        "e|col|public.thread.type"
+      ],
+      "sqlHash": "df6520e200447214"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "rename",
+      "key": "tables\u0000[\"public\",\"pod\"]",
+      "set": {
+        "name": "channel"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "tables\u0000[\"public\",\"pod_agent\"]",
+      "set": {
+        "name": "channel_bot"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "tables\u0000[\"public\",\"pod_member\"]",
+      "set": {
+        "name": "channel_member"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"thread\",\"pod_id\"]",
+      "set": {
+        "name": "channel_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"notification_override\",\"pod_id\"]",
+      "set": {
+        "name": "channel_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"channel_bot\",\"pod_id\"]",
+      "set": {
+        "name": "channel_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"channel_member\",\"pod_id\"]",
+      "set": {
+        "name": "channel_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "checks\u0000[\"public\",\"thread\",\"thread_pod_valid\"]",
+      "set": {
+        "name": "thread_channel_valid"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "checks\u0000[\"public\",\"channel\",\"pod_visibility_check\"]",
+      "set": {
+        "name": "channel_visibility_check"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"thread_pod_updated_at_idx\"]",
+      "set": {
+        "name": "thread_channel_updated_at_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"thread_pod_chat_idx\"]",
+      "set": {
+        "name": "thread_channel_main_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"notification_override_pod_idx\"]",
+      "set": {
+        "name": "notification_override_channel_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"pod_slug_idx\"]",
+      "set": {
+        "name": "channel_slug_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"pod_id_workspace_id_idx\"]",
+      "set": {
+        "name": "channel_id_workspace_id_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"pod_agent_agent_id_idx\"]",
+      "set": {
+        "name": "channel_bot_agent_id_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"pod_member_idx\"]",
+      "set": {
+        "name": "channel_member_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"pod_member_user_id_idx\"]",
+      "set": {
+        "name": "channel_member_user_id_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "fks\u0000[\"public\",\"thread\",\"thread_pod_workspace_fkey\"]",
+      "set": {
+        "name": "thread_channel_workspace_fkey"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "fks\u0000[\"public\",\"channel_bot\",\"pod_agent_pod_workspace_fkey\"]",
+      "set": {
+        "name": "channel_bot_channel_workspace_fkey"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "fks\u0000[\"public\",\"channel_bot\",\"pod_agent_agent_workspace_fkey\"]",
+      "set": {
+        "name": "channel_bot_agent_workspace_fkey"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "fks\u0000[\"public\",\"channel_member\",\"pod_member_pod_workspace_fkey\"]",
+      "set": {
+        "name": "channel_member_channel_workspace_fkey"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "fks\u0000[\"public\",\"channel_member\",\"pod_member_workspace_member_fkey\"]",
+      "set": {
+        "name": "channel_member_workspace_member_fkey"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "indexes\u0000[\"public\",\"notification_override_channel_idx\"]",
+      "set": {
+        "where": "\"channel_id\" is not null"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"notification_override\",\"notification_override_one_place\"]",
+      "set": {
+        "value": "num_nonnulls(\"channel_id\", \"agent_id\") = 1"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"thread\",\"thread_channel_valid\"]",
+      "set": {
+        "value": "(\"type\" = 'pod_chat') = (\"channel_id\" is not null)"
+      }
+    }
+  ]
+}

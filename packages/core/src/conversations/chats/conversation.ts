@@ -1,52 +1,54 @@
-import type { ConversationThread, Direct, PodChat, RoutineFeed } from "@sugabots/contracts";
+import type { AutomationFeed, ChannelConversation, DirectMessage, Task } from "@sugabots/contracts";
 import type * as schema from "../../database/schema.ts";
 
-/** A channel's main chat or thread as the API describes it. Throws on a thread of another type. */
-export function toPodChat(row: schema.ThreadRow): PodChat {
-	if (row.type !== "pod_chat" || !row.podId)
-		throw new Error(`Thread ${row.id} is not in a channel`);
+/** A channel's main chat or thread as the API describes it. Throws on a conversation of another kind. */
+export function toChannelConversation(row: schema.PlacedConversationRow): ChannelConversation {
+	if (row.kind !== "channel_conversation" || !row.channelId)
+		throw new Error(`Conversation ${row.id} is not in a channel`);
 	return {
-		kind: "pod_chat",
+		kind: "channel_conversation",
 		...commonFields(row),
-		podId: row.podId,
+		channelId: row.channelId,
 		main: row.main,
 		archivedAt: row.archivedAt?.toISOString() ?? null,
 	};
 }
 
-/** A bot's task as the API describes it. Throws on a thread of another type. */
-export function toConversationThread(row: schema.ThreadRow): ConversationThread {
-	if (row.type !== "conversation" || !row.hostAgentId) {
-		throw new Error(`Thread ${row.id} is not a task`);
+/** A bot's task as the API describes it. Throws on a conversation of another kind. */
+export function toTask(row: schema.PlacedConversationRow): Task {
+	if (row.kind !== "task" || !row.botId) {
+		throw new Error(`Conversation ${row.id} is not a task`);
 	}
 	return {
-		kind: "thread",
+		kind: "task",
 		...commonFields(row),
-		hostAgentId: row.hostAgentId,
+		botId: row.botId,
 		doneAt: row.doneAt?.toISOString() ?? null,
 	};
 }
 
-/** An automation's own thread as the API describes it. Throws on a thread of another type. */
-export function toRoutineFeed(row: schema.ThreadRow): RoutineFeed {
-	if (row.type !== "routine_feed" || !row.routineId || !row.hostAgentId) {
-		throw new Error(`Thread ${row.id} is not an automation's thread`);
+/** An automation's feed as the API describes it. Throws on a conversation of another kind. */
+export function toAutomationFeed(row: schema.PlacedConversationRow): AutomationFeed {
+	if (row.kind !== "automation_feed" || !row.automationId || !row.botId) {
+		throw new Error(`Conversation ${row.id} is not an automation's feed`);
 	}
 	return {
-		kind: "routine_feed",
+		kind: "automation_feed",
 		...commonFields(row),
-		hostAgentId: row.hostAgentId,
-		routineId: row.routineId,
+		botId: row.botId,
+		automationId: row.automationId,
 	};
 }
 
-/** A direct message between people as the API describes it. Throws on a thread of another type. */
-export function toDirect(row: schema.ThreadRow): Direct {
-	if (row.type !== "direct") throw new Error(`Thread ${row.id} is not a direct message`);
-	return { kind: "direct", ...commonFields(row) };
+/** A direct message between people as the API describes it. Throws on a conversation of another kind. */
+export function toDirectMessage(row: schema.PlacedConversationRow): DirectMessage {
+	if (row.kind !== "direct_message") {
+		throw new Error(`Conversation ${row.id} is not a direct message`);
+	}
+	return { kind: "direct_message", ...commonFields(row) };
 }
 
-function commonFields(row: schema.ThreadRow) {
+function commonFields(row: schema.PlacedConversationRow) {
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,

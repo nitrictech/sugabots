@@ -4,7 +4,7 @@ import preview from "#storybook/preview";
 import { type Typer, TypingIndicator } from "./TypingIndicator.tsx";
 
 const growthDesk: Typer = {
-	kind: "agent",
+	kind: "bot",
 	id: "0199a3a0-0000-7000-8000-0000000000a1",
 	name: "Growth Desk",
 	color: "green",

@@ -1,24 +1,23 @@
-import { type ConnectionAccess, streamEvent, threadChannel } from "@sugabots/contracts";
+import { type ConnectionAccess, conversationChannel, streamEvent } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { Artifacts } from "../../artifacts/artifacts.ts";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { noDatabase } from "../../database/testing.ts";
+import { ConversationFiles } from "../../files/conversation-files.ts";
+import { Files } from "../../files/files.ts";
 import { Ids } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed, unusedModel } from "../../providers/models/testing.ts";
 import { unimplemented } from "../../testing.ts";
-import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
+import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import { AssistantGuide } from "../assistant/assistant-guide.ts";
-import { BotThreads } from "../chats/bot-threads.ts";
-import { BotRoutines } from "../routines/bot-routines.ts";
-import { ThreadFiles } from "../thread-files/thread-files.ts";
-import { SEARCH_HISTORY_TOOL } from "../threads/message-text.ts";
-import { ARTIFACT_TOOLS } from "../tools/artifacts/tool.ts";
+import { BotAutomations } from "../automations/bot-automations.ts";
+import { BotTasks } from "../chats/bot-tasks.ts";
+import { SEARCH_HISTORY_TOOL } from "../repository/message-text.ts";
 import {
 	ADD_BOT_TO_CHANNEL_TOOL,
 	CREATE_CHANNEL_TOOL,
@@ -26,16 +25,18 @@ import {
 	PIN_BOT_TOOL,
 	WORKSPACE_GUIDE_TOOL,
 } from "../tools/assistant/tool.ts";
+import { AUTOMATION_TOOLS } from "../tools/automations/tool.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { Collaborations } from "../tools/collaborate/collaborations.ts";
+import { COLLABORATE_TOOL } from "../tools/collaborate/tool.ts";
+import { ComputerTools } from "../tools/computer.ts";
 import { ConnectionTools } from "../tools/connections.ts";
+import { FILE_TOOLS } from "../tools/files/tool.ts";
 import { MARK_DONE_TOOL } from "../tools/mark-done/tool.ts";
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "../tools/network-access/tool.ts";
-import { READ_THREAD_FILE_TOOL } from "../tools/read-thread-file/tool.ts";
-import { ROUTINE_TOOLS } from "../tools/routines/tool.ts";
-import { SandboxTools } from "../tools/sandbox.ts";
+import { READ_CONVERSATION_FILE_TOOL } from "../tools/read-conversation-file/tool.ts";
 import { SAVE_INSTRUCTIONS_TOOL } from "../tools/save-instructions/tool.ts";
-import { START_THREAD_TOOL } from "../tools/start-thread/tool.ts";
+import { START_TASK_TOOL } from "../tools/start-task/tool.ts";
 import { CALL_TOOL, TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import {
 	ApprovedToolCalls,
@@ -60,8 +61,8 @@ const runWithServices: RunEffect = effectRunner(ManagedRuntime.make(noDatabase))
 const run: TurnRun = {
 	executionId: "0199a3a0-0000-7000-8000-000000000010",
 	request: {
-		threadId: "0199a3a0-0000-7000-8000-000000000001",
-		agentId: "0199a3a0-0000-7000-8000-000000000003",
+		conversationId: "0199a3a0-0000-7000-8000-000000000001",
+		botId: "0199a3a0-0000-7000-8000-000000000003",
 		triggerMessageId: "0199a3a0-0000-7000-8000-000000000006",
 		reason: "default",
 	},
@@ -73,12 +74,12 @@ const prepared: PreparedTurn = {
 	turnId: "0199a3a0-0000-7000-8000-000000000011",
 	responseMessage: {
 		id: "0199a3a0-0000-7000-8000-000000000012",
-		threadId: run.request.threadId,
+		conversationId: run.request.conversationId,
 		author: {
-			kind: "agent",
-			id: run.request.agentId,
-			name: "Host Agent",
-			handle: "host-agent",
+			kind: "bot",
+			id: run.request.botId,
+			name: "Host Bot",
+			handle: "host-bot",
 			color: "green",
 			face: "pill",
 			shape: "circle",
@@ -90,22 +91,22 @@ const prepared: PreparedTurn = {
 		createdAt: "2026-09-10T04:00:00.000Z",
 	},
 	context: {
-		thread: {
-			id: run.request.threadId,
+		conversation: {
+			id: run.request.conversationId,
 			workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 			title: "Check the release",
-			type: "conversation",
-			hostAgentId: run.request.agentId,
-			parentThreadId: null,
+			kind: "task",
+			botId: run.request.botId,
+			parentConversationId: null,
 		},
-		agent: {
-			id: run.request.agentId,
-			name: "Host Agent",
-			handle: "host-agent",
+		bot: {
+			id: run.request.botId,
+			name: "Host Bot",
+			handle: "host-bot",
 			model: "claude-sonnet-4-20250514",
 			prompt: "",
 			disabledTools: [],
-			usesSandbox: false,
+			usesComputer: false,
 			naturalBrowsing: false,
 			assistantOf: null,
 			visibility: "public",
@@ -115,14 +116,14 @@ const prepared: PreparedTurn = {
 		reason: "default",
 		windowTokens: 128_000,
 		compaction: undefined,
-		routineInstructions: new Map(),
+		automationInstructions: new Map(),
 		channel: null,
 		workspaceName: "Suga",
 		workspaceSlug: "suga",
 		workspaceTimeZone: "UTC",
 		askedBy: null,
 		startedFor: null,
-		crew: [],
+		collaborators: [],
 		participants: [],
 		messages: [],
 	},
@@ -201,7 +202,7 @@ describe("runSegment", () => {
 				collaborations: collaborations(),
 				toolCalls: calls,
 				connectionTools: {
-					forAgent: () =>
+					forBot: () =>
 						Effect.succeed({
 							tools: {
 								wiki__wipe: {
@@ -227,7 +228,7 @@ describe("runSegment", () => {
 					responsesForTurn: () => Effect.fail(new ToolApprovalsIncomplete({ message: "unused" })),
 					beginExecution: ({ atOffset }) =>
 						calls.open({
-							threadId: prepared.context.thread.id,
+							conversationId: prepared.context.conversation.id,
 							messageId: prepared.responseMessage.id,
 							turnId: prepared.turnId,
 							tool: "wiki__wipe",
@@ -269,7 +270,7 @@ describe("runSegment", () => {
 			...prepared,
 			context: {
 				...prepared.context,
-				agent: { ...prepared.context.agent, model: "new-model", prompt: "new prompt" },
+				bot: { ...prepared.context.bot, model: "new-model", prompt: "new prompt" },
 			},
 			checkpoint: {
 				messages: [],
@@ -337,7 +338,7 @@ describe("runSegment", () => {
 				...prepared,
 				context: {
 					...prepared.context,
-					agent: { ...prepared.context.agent, assistantOf: personId },
+					bot: { ...prepared.context.bot, assistantOf: personId },
 					askedBy: personId,
 				},
 			}),
@@ -357,7 +358,7 @@ describe("runSegment", () => {
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 				connectionTools: {
-					forAgent: () =>
+					forBot: () =>
 						Effect.succeed({
 							tools: {
 								notes__write: connectionTool("write", true),
@@ -381,16 +382,21 @@ describe("runSegment", () => {
 				JOIN_CHANNEL_TOOL,
 				ADD_BOT_TO_CHANNEL_TOOL,
 				PIN_BOT_TOOL,
-				START_THREAD_TOOL,
+				START_TASK_TOOL,
+				COLLABORATE_TOOL,
 			]),
 		);
 		expect(offered).not.toContain(SAVE_INSTRUCTIONS_TOOL);
-		for (const routineTool of ROUTINE_TOOLS) expect(offered).not.toContain(routineTool);
+		for (const automationTool of AUTOMATION_TOOLS) expect(offered).not.toContain(automationTool);
 		const approvals = received?.toolApproval as
 			| Record<string, (input: unknown) => unknown>
 			| undefined;
 		expect(approvals?.[CREATE_CHANNEL_TOOL]?.({ name: "Launch" })).toBe("user-approval");
-		expect(approvals?.[START_THREAD_TOOL]?.({ title: "Report", brief: "Write it." })).toBe(
+		expect(approvals?.[START_TASK_TOOL]?.({ title: "Report", brief: "Write it." })).toBe(
+			"user-approval",
+		);
+		// The bot it asks acts with its own connections, so its person allows that too.
+		expect(approvals?.[COLLABORATE_TOOL]?.({ to: "Researcher", brief: "Find it." })).toBe(
 			"user-approval",
 		);
 		expect(approvals?.[WORKSPACE_GUIDE_TOOL]).toBeUndefined();
@@ -435,7 +441,7 @@ describe("runSegment", () => {
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 				connectionTools: {
-					forAgent: () =>
+					forBot: () =>
 						Effect.succeed({
 							tools: {
 								wiki__lookup: offered("lookup", "allow"),
@@ -452,13 +458,13 @@ describe("runSegment", () => {
 			}),
 		);
 
-		expect(Object.keys(received?.tools ?? {}).filter((key) => !ARTIFACT_TOOLS.has(key))).toEqual([
+		expect(Object.keys(received?.tools ?? {}).filter((key) => !FILE_TOOLS.has(key))).toEqual([
 			TOOL_SEARCH,
 			CALL_TOOL,
 			SEARCH_HISTORY_TOOL,
-			READ_THREAD_FILE_TOOL,
-			...ROUTINE_TOOLS,
-			// No person asked this turn, so it is offered no start_thread.
+			READ_CONVERSATION_FILE_TOOL,
+			...AUTOMATION_TOOLS,
+			// No person asked this turn, so it is offered no start_task.
 			MARK_DONE_TOOL,
 			SAVE_INSTRUCTIONS_TOOL,
 			"collaborate",
@@ -478,14 +484,14 @@ describe("runSegment", () => {
 
 	it("refuses a request for a host the workspace blocked at once, asking nobody", async () => {
 		const { turns } = fakes();
-		const usingSandbox: PreparedTurn = {
+		const usingComputer: PreparedTurn = {
 			...prepared,
 			context: {
 				...prepared.context,
-				agent: { ...prepared.context.agent, usesSandbox: true },
+				bot: { ...prepared.context.bot, usesComputer: true },
 			},
 		};
-		const execution: Given["execution"] = { prepare: () => Effect.succeed(usingSandbox) };
+		const execution: Given["execution"] = { prepare: () => Effect.succeed(usingComputer) };
 		const calls = toolCalls();
 		let received: Models.StreamRequest | undefined;
 		const model = Models.fromStream((input) => {
@@ -507,7 +513,7 @@ describe("runSegment", () => {
 				events: eventBus(),
 				collaborations: collaborations(),
 				toolCalls: calls,
-				sandboxTools: {
+				computerTools: {
 					forTurn: () =>
 						Effect.succeed({
 							tools: {},
@@ -537,7 +543,7 @@ describe("runSegment", () => {
 		});
 	});
 
-	it("still offers a built-in tool the agent has switched off, refusing each call to it", async () => {
+	it("still offers a built-in tool the bot has switched off, refusing each call to it", async () => {
 		const { execution, turns } = fakes();
 		const probe = tool({
 			inputSchema: Schema.Struct({}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
@@ -564,7 +570,7 @@ describe("runSegment", () => {
 				...prepared,
 				context: {
 					...prepared.context,
-					agent: { ...prepared.context.agent, disabledTools: ["probe"] },
+					bot: { ...prepared.context.bot, disabledTools: ["probe"] },
 				},
 			}),
 		);
@@ -592,19 +598,19 @@ describe("runSegment", () => {
 
 	it.each([
 		{ disabledTools: [], called: true },
-		{ disabledTools: ["routines"], called: false },
+		{ disabledTools: ["automations"], called: false },
 	])(
-		"sets up a routine for the person the turn answers unless routines are off ($disabledTools)",
+		"sets up an automation for the person the turn answers unless automations are off ($disabledTools)",
 		async ({ disabledTools, called }) => {
 			const { execution, turns } = fakes();
 			const askedBy = "0199a3a0-0000-7000-8000-0000000000f1";
-			const create = vi.fn(() => Effect.fail(new BotRoutines.NobodyAsked()));
+			const create = vi.fn(() => Effect.fail(new BotAutomations.NobodyAsked()));
 			let outcome: unknown;
 			const model = Models.fromStream((input) =>
 				Effect.sync(() =>
 					streamed(
 						(async function* () {
-							outcome = await input.tools?.create_routine?.execute?.(
+							outcome = await input.tools?.create_automation?.execute?.(
 								{
 									name: "Morning standup",
 									instructions: "Ask how everyone is going.",
@@ -624,7 +630,7 @@ describe("runSegment", () => {
 					context: {
 						...prepared.context,
 						askedBy,
-						agent: { ...prepared.context.agent, disabledTools },
+						bot: { ...prepared.context.bot, disabledTools },
 					},
 				}),
 			);
@@ -637,13 +643,13 @@ describe("runSegment", () => {
 					events: eventBus(),
 					collaborations: collaborations(),
 					toolCalls: toolCalls(),
-					routines: { create },
+					automations: { create },
 				}),
 			);
 
 			if (called) {
 				expect(create).toHaveBeenCalledWith(
-					{ agentId: prepared.context.agent.id, askedBy },
+					{ botId: prepared.context.bot.id, askedBy },
 					expect.objectContaining({ name: "Morning standup", schedule: "0 9 * * 1-5" }),
 				);
 				expect(outcome).toMatchObject({ refused: expect.any(String) });
@@ -673,7 +679,7 @@ describe("runSegment", () => {
 		expect(turns.abandon).not.toHaveBeenCalled();
 	});
 
-	it("completes a reply that says nothing but carries a file the agent attached", async () => {
+	it("completes a reply that says nothing but carries a file the bot attached", async () => {
 		const { execution, turns } = fakes();
 		vi.mocked(turns.replyFiles).mockReturnValue(
 			Effect.succeed([
@@ -705,7 +711,11 @@ describe("runSegment", () => {
 	it("finishes a turn that may not run without streaming", async () => {
 		const { execution, turns } = fakes();
 		vi.mocked(execution.prepare).mockReturnValueOnce(
-			Effect.succeed({ _tag: "NotRunnable", reason: "The agent left its pod", ended: undefined }),
+			Effect.succeed({
+				_tag: "NotRunnable",
+				reason: "The bot left its channel",
+				ended: undefined,
+			}),
 		);
 
 		const outcome = await runWithServices(
@@ -848,8 +858,8 @@ interface Given {
 	events: EventBus.Interface;
 	builtInTools?: BuiltInTools.Interface;
 	connectionTools?: ConnectionTools.Interface;
-	sandboxTools?: SandboxTools.Interface;
-	routines?: Partial<BotRoutines.Interface>;
+	computerTools?: ComputerTools.Interface;
+	automations?: Partial<BotAutomations.Interface>;
 }
 
 /**
@@ -863,21 +873,21 @@ function segmentWith(given: Given) {
 				Layer.succeed(Models.Service, given.model),
 				Layer.succeed(EventBus.Service, given.events),
 				Layer.succeed(BuiltInTools.Service, given.builtInTools ?? BuiltInTools.none),
-				Layer.succeed(SandboxTools.Service, given.sandboxTools ?? SandboxTools.none),
+				Layer.succeed(ComputerTools.Service, given.computerTools ?? ComputerTools.none),
 				Layer.succeed(ConnectionTools.Service, given.connectionTools ?? ConnectionTools.none),
 				unimplemented(TurnExecution.Service, given.execution),
 				unimplemented(TurnRepository.Service, given.turns),
 				unimplemented(ToolCallRepository.Service, given.toolCalls),
 				unimplemented(Collaborations.Service, given.collaborations),
-				unimplemented(AgentAdministration.Service, {}),
-				unimplemented(ThreadFiles.Service, { resultFiles: () => Effect.succeed(new Map()) }),
-				unimplemented(Artifacts.Authoring, {}),
-				unimplemented(BotRoutines.Service, given.routines ?? {}),
+				unimplemented(BotAdministration.Service, {}),
+				unimplemented(ConversationFiles.Service, { resultFiles: () => Effect.succeed(new Map()) }),
+				unimplemented(Files.Authoring, {}),
+				unimplemented(BotAutomations.Service, given.automations ?? {}),
 				Layer.succeed(
 					Installation.Service,
 					Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
 				),
-				unimplemented(BotThreads.Service, {}),
+				unimplemented(BotTasks.Service, {}),
 				unimplemented(AssistantGuide.Service, {}),
 				unimplemented(
 					ApprovedToolCalls.Service,
@@ -932,7 +942,7 @@ function segmentAskingApproval(
 		collaborations: collaborations(),
 		toolCalls: toolCalls(),
 		connectionTools: {
-			forAgent: () =>
+			forBot: () =>
 				Effect.succeed({
 					tools: {
 						wiki__wipe: {
@@ -1011,9 +1021,9 @@ function liveEventBus(): EventBus.Interface {
 
 function requestCancellation(events: EventBus.Interface) {
 	return events.publish(
-		threadChannel(run.request.threadId),
+		conversationChannel(run.request.conversationId),
 		streamEvent("turn.cancel_requested", {
-			threadId: run.request.threadId,
+			conversationId: run.request.conversationId,
 			turnId: prepared.turnId,
 		}),
 	);

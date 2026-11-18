@@ -1,12 +1,12 @@
 import { botColorVariables } from "@sugabots/avatars";
-import type { ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
+import type { Participant, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Check, ChevronDown, Globe, X } from "lucide-react";
 import { Fragment, type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
+import { awaitedDeciders } from "@/lib/approvals.ts";
 import type { ConnectionLook } from "@/lib/connections.ts";
+import { useReviewToolCall } from "@/lib/conversations.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useReviewToolCall } from "@/lib/threads.ts";
-import { awaitedDeciders } from "@/lib/tool-approvals.ts";
 import {
 	connectionLabel,
 	NETWORK_REQUEST_TOOL,
@@ -14,7 +14,7 @@ import {
 	stepLabel,
 	wordsFromKey,
 } from "@/lib/tool-names.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
@@ -34,26 +34,26 @@ import { awaitsApproval } from "./tool-activity.ts";
  * request is read as a page rather than in a box inside the chat.
  */
 
-type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
-type Asker = Pick<AgentParticipant, "name" | "color" | "face" | "shape">;
+type BotParticipant = Extract<Participant, { kind: "bot" }>;
+type Asker = Pick<BotParticipant, "name" | "color" | "face" | "shape">;
 type Decision = "allow_once" | "deny";
 
 export function ToolApprovalCard({
 	call,
-	agent,
-	threadId,
+	bot,
+	conversationId,
 	canApprove,
 	look,
 }: {
 	call: ToolCallPart;
 	/** The bot whose reply is waiting on this. */
-	agent: Asker;
-	threadId: string;
+	bot: Asker;
+	conversationId: string;
 	/** Whether the reader may answer it. */
 	canApprove: boolean;
 	look?: ConnectionLook;
 }) {
-	const review = useReviewToolCall(threadId);
+	const review = useReviewToolCall(conversationId);
 	const [reviewing, setReviewing] = useState(false);
 	const { handle, name } = splitToolKey(call.tool);
 	const where = handle ? connectionLabel(handle, look?.name) : "";
@@ -62,14 +62,14 @@ export function ToolApprovalCard({
 	const step: Step = {
 		action,
 		who: networkRequest
-			? `${agent.name} wants its sandbox to reach a new host`
-			: `${agent.name} wants to use ${where || "a tool"}`,
+			? `${bot.name} wants its computer to reach a new host`
+			: `${bot.name} wants to use ${where || "a tool"}`,
 		where,
 		look,
 		networkRequest,
 	};
 	const answerable = awaitsApproval(call) && canApprove;
-	// The answer stays given from when it is sent until the thread's events say
+	// The answer stays given from when it is sent until the conversation's events say
 	// the call is decided, a moment after the decision is accepted.
 	const sent = review.isPending || review.isSuccess;
 	const decide = (decision: Decision) =>
@@ -88,8 +88,7 @@ export function ToolApprovalCard({
 			</Outcome>
 		) : decided?.status === "denied" ? (
 			<Outcome announced={announced} icon={<X aria-hidden size={12} strokeWidth={2.8} />}>
-				Denied{decided.decidedByName && ` by ${decided.decidedByName}`}. {agent.name} won't go
-				ahead.
+				Denied{decided.decidedByName && ` by ${decided.decidedByName}`}. {bot.name} won't go ahead.
 			</Outcome>
 		) : null;
 
@@ -138,7 +137,7 @@ export function ToolApprovalCard({
 				step={step}
 				open={reviewing}
 				onOpenChange={setReviewing}
-				agent={agent}
+				bot={bot}
 			>
 				{answerable ? (
 					<Answer
@@ -186,7 +185,7 @@ interface Step {
 	who: string;
 	where: string;
 	look: ConnectionLook | undefined;
-	/** A request for the sandbox to reach another host, which no connection makes. */
+	/** A request for the computer to reach another host, which no connection makes. */
 	networkRequest: boolean;
 }
 
@@ -307,7 +306,7 @@ function ReviewSheet({
 	step,
 	open,
 	onOpenChange,
-	agent,
+	bot,
 	children,
 }: {
 	input: ToolCallPart["input"];
@@ -315,7 +314,7 @@ function ReviewSheet({
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	/** The bot asking, whose face heads the request. */
-	agent: Asker;
+	bot: Asker;
 	/** The answer, or what became of the request. */
 	children: ReactNode;
 }) {
@@ -329,7 +328,7 @@ function ReviewSheet({
 				showCloseButton={false}
 				initialFocus={top}
 				aria-labelledby={headingId}
-				style={botColorVariables(agent.color)}
+				style={botColorVariables(bot.color)}
 				className="inset-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0 sm:max-w-none md:inset-auto md:top-1/2 md:left-1/2 md:h-auto md:max-h-approval md:max-w-144 md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-dialog"
 			>
 				<div
@@ -341,7 +340,7 @@ function ReviewSheet({
 				</div>
 				<ScrollArea className="min-h-0 flex-1">
 					<div className="flex flex-col gap-4 px-4 py-4">
-						<ReviewHeading step={step} agent={agent} headingId={headingId} />
+						<ReviewHeading step={step} bot={bot} headingId={headingId} />
 						<RequestValue value={input} depth={0} />
 					</div>
 				</ScrollArea>
@@ -358,19 +357,11 @@ function ReviewSheet({
  * mark on its corner, what it would do as the heading, and who wants to use
  * what under it.
  */
-function ReviewHeading({
-	step,
-	agent,
-	headingId,
-}: {
-	step: Step;
-	agent: Asker;
-	headingId: string;
-}) {
+function ReviewHeading({ step, bot, headingId }: { step: Step; bot: Asker; headingId: string }) {
 	return (
 		<div className="flex flex-col items-center gap-1 pb-2 text-center">
 			<span aria-hidden className="relative mb-2.5 inline-flex">
-				<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
+				<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={64} />
 				<span className="absolute -right-2 -bottom-1 rounded-lg ring-3 ring-panel">
 					<StepMark step={step} size="sm" />
 				</span>

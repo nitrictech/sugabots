@@ -7,11 +7,11 @@ import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
-import { agent, workspace } from "../../database/schema.ts";
+import { bot, workspace } from "../../database/schema.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { AgentRepository } from "../agents/agent-repository.ts";
+import { BotRepository } from "../bots/bot-repository.ts";
 
 /**
  * The current actor finishing setting up a workspace. It is transactional and
@@ -20,19 +20,19 @@ import { AgentRepository } from "../agents/agent-repository.ts";
  */
 export interface Interface {
 	/**
-	 * Finishes setting up `workspaceId`, once `agentId` is a bot the actor
-	 * made there, and that bot runs on a model the workspace offers. Finishing settles the first agent and the model the
+	 * Finishes setting up `workspaceId`, once `botId` is a bot the actor
+	 * made there, and that bot runs on a model the workspace offers. Finishing settles the first bot and the model the
 	 * workspace runs it on, so it takes `workspace.providers.manage`.
 	 *
-	 * That model also becomes the workspace's default and every system agent's:
+	 * That model also becomes the workspace's default and every system bot's:
 	 * it is the one model the person setting the workspace up has chosen, and
-	 * the system agents have to run on something.
+	 * the system bots have to run on something.
 	 *
 	 * The first time, it records when the workspace's setup was completed.
 	 */
 	readonly complete: (input: {
 		workspaceId: string;
-		agentId: string;
+		botId: string;
 	}) => Effect.Effect<
 		void,
 		AuthorizationDenied | NotReadyToFinish | NoModelChosen,
@@ -46,10 +46,10 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Onboarding");
 	const authorization = yield* Authorization.Service;
 	const modelProviders = yield* ModelProviderRepository.Service;
-	const agents = yield* AgentRepository.Service;
+	const bots = yield* BotRepository.Service;
 
 	return Service.of({
-		complete: ({ workspaceId, agentId }) =>
+		complete: ({ workspaceId, botId }) =>
 			operation(
 				"complete",
 				transaction(
@@ -60,14 +60,14 @@ export const make = Effect.gen(function* () {
 						);
 						const [eligible] = yield* query((db) =>
 							db
-								.select({ model: agent.model })
-								.from(agent)
+								.select({ model: bot.model })
+								.from(bot)
 								.where(
 									and(
-										eq(agent.id, agentId),
-										eq(agent.workspaceId, resolved),
-										eq(agent.createdById, actor.userId),
-										isNull(agent.systemAgentKey),
+										eq(bot.id, botId),
+										eq(bot.workspaceId, resolved),
+										eq(bot.createdById, actor.userId),
+										isNull(bot.systemBotKey),
 									),
 								)
 								.limit(1)
@@ -85,7 +85,7 @@ export const make = Effect.gen(function* () {
 							model,
 							Effect.all([
 								modelProviders.setDefaultModel(resolved, model),
-								agents.setAllSystemAgentModels(resolved, model),
+								bots.setAllSystemBotModels(resolved, model),
 							]),
 						).pipe(Effect.catchTag("ModelNotEnabled", () => Effect.fail(new NoModelChosen())));
 						yield* recordSetupCompleted(resolved);
@@ -98,7 +98,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, ModelProviderRepository.layer, AgentRepository.layer]),
+	Layer.provide([Authorization.layer, ModelProviderRepository.layer, BotRepository.layer]),
 );
 
 /** The bot named is not one this person may finish onboarding with. */
@@ -108,7 +108,7 @@ export class NotReadyToFinish extends Data.TaggedError("NotReadyToFinish") imple
 	}
 }
 
-/** The first agent runs on no model, or on one the workspace does not offer. */
+/** The first bot runs on no model, or on one the workspace does not offer. */
 export class NoModelChosen extends Data.TaggedError("NoModelChosen") implements UserFacing {
 	get userMessage() {
 		return userText`Choose a model for your first bot first`;

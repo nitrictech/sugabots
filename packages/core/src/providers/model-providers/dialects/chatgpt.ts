@@ -47,7 +47,7 @@ export const chatgpt: ProviderDialect = {
 				(entry): ProviderModelFields => ({
 					modelId: entry.slug,
 					displayName: entry.display_name,
-					// Every model Codex offers is an agent model: it reasons and calls tools.
+					// Every model Codex offers is made to work through tools: it reasons and calls them.
 					capabilities: [
 						"tools",
 						"reasoning",

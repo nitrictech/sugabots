@@ -5,10 +5,10 @@ import { refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /**
- * Trying a model on a system agent before the workspace relies on it.
+ * Trying a model on a system bot before the workspace relies on it.
  *
  * Admin only, like choosing a provider: it spends model calls, and it decides
- * what the workspace's unattended agents will run on.
+ * what the workspace's unattended bots will run on.
  */
 export class ModelTrialsApi extends HttpApiGroup.make("modelTrials")
 	.add(

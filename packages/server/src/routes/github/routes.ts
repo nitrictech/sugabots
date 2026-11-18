@@ -1,6 +1,6 @@
 import { GITHUB_SETUP_RETURN_PATH, MAX_IDEMPOTENCY_KEY_CHARACTERS } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
-import { Routines } from "@sugabots/core/conversations/routines/routines";
+import { Automations } from "@sugabots/core/conversations/automations/automations";
 import { Installation } from "@sugabots/core/installation/installation";
 import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
 import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
@@ -17,7 +17,7 @@ const connectionErrors = {
 	GitHubAppNotInstalled: BadRequest,
 	GitHubRequestFailed: BadRequest,
 	NotGitHubConnection: NotFound,
-	AgentHasGitHubConnection: Conflict,
+	BotHasGitHubConnection: Conflict,
 	RepositoryUnreachable: BadRequest,
 };
 
@@ -38,9 +38,9 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 				}
 				const back = new URL(webAppUrl);
 				back.pathname = `${back.pathname.replace(/\/$/, "")}${GITHUB_SETUP_RETURN_PATH}`;
-				if (outcome.agent) {
-					back.searchParams.set("workspace", outcome.agent.workspaceId);
-					back.searchParams.set("agent", outcome.agent.agentId);
+				if (outcome.bot) {
+					back.searchParams.set("workspace", outcome.bot.workspaceId);
+					back.searchParams.set("bot", outcome.bot.botId);
 				}
 				if (outcome.kind === "done") back.searchParams.set("connection", outcome.connectionId);
 				if (outcome.kind === "failed") back.searchParams.set("github_error", outcome.failure);
@@ -53,7 +53,7 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 			return handlers
 				.handle("start", ({ params, payload }) =>
 					gitHubApps
-						.start({ agentId: params.agentId, organization: payload.organization })
+						.start({ botId: params.botId, organization: payload.organization })
 						.pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
 				.handle("installUrl", ({ params }) =>
@@ -101,7 +101,7 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 export const gitHubWebhookRoutes = HttpApiBuilder.group(ServerApi, "gitHubWebhooks", (handlers) =>
 	Effect.gen(function* () {
 		const connections = yield* GitHubConnections.Service;
-		const connectionEvents = yield* Routines.ConnectionEvents;
+		const connectionEvents = yield* Automations.ConnectionEvents;
 		// Raw, since the signature is over the body exactly as sent.
 		return handlers.handleRaw("delivery", ({ params, request }) =>
 			Effect.gen(function* () {

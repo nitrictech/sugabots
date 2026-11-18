@@ -23,7 +23,7 @@ import { Egress, isPrivateAddress } from "../../network/egress.ts";
 import { ConnectionRepository } from "../connection-repository.ts";
 import { openAppCredential, sealAppCredential } from "./credential.ts";
 import * as GitHub from "./github.ts";
-import { AgentHasGitHubConnection, NotGitHubConnection } from "./github-connections.ts";
+import { BotHasGitHubConnection, NotGitHubConnection } from "./github-connections.ts";
 
 /**
  * Connecting a bot to GitHub: a person makes the bot its own private GitHub
@@ -36,11 +36,11 @@ import { AgentHasGitHubConnection, NotGitHubConnection } from "./github-connecti
 export interface Interface {
 	/** The form that makes the bot's GitHub App, owned by `organization` or by the person. */
 	readonly start: (input: {
-		agentId: string;
+		botId: string;
 		organization: string | undefined;
 	}) => Effect.Effect<
 		GitHubAppForm,
-		AuthorizationDenied | AgentHasGitHubConnection,
+		AuthorizationDenied | BotHasGitHubConnection,
 		CurrentActor.Service
 	>;
 	/**
@@ -59,7 +59,7 @@ export interface Interface {
 	}) => Effect.Effect<SetupOutcome, never, CurrentActor.Service>;
 	/** Where to install the connection's app, or to change which repositories it reaches. */
 	readonly installUrl: (input: {
-		agentId: string;
+		botId: string;
 		connectionId: string;
 	}) => Effect.Effect<string, AuthorizationDenied | NotGitHubConnection, CurrentActor.Service>;
 }
@@ -77,16 +77,16 @@ export const make = Effect.gen(function* () {
 	const apiUrl = `${installation.publicUrl}${API_BASE_PATH}`;
 	const webhooksReachable = reachableFromInternet(installation.publicUrl);
 
-	const managed = (agentId: string) =>
-		Effect.map(authorization.agent(agentId, "connection.manage"), ({ agent }) => agent);
+	const managed = (botId: string) =>
+		Effect.map(authorization.bot(botId, "connection.manage"), ({ bot }) => bot);
 
-	const managedQuietly = (agentId: string) =>
-		managed(agentId).pipe(
+	const managedQuietly = (botId: string) =>
+		managed(botId).pipe(
 			Effect.as(true),
 			Effect.orElseSucceed(() => false),
 		);
 
-	const gitHubConnectionOf = (agent: { workspaceId: string; agentId: string }) =>
+	const gitHubConnectionOf = (bot: { workspaceId: string; botId: string }) =>
 		Effect.map(
 			query((db) =>
 				db
@@ -94,8 +94,8 @@ export const make = Effect.gen(function* () {
 					.from(connection)
 					.where(
 						and(
-							eq(connection.workspaceId, agent.workspaceId),
-							eq(connection.agentId, agent.agentId),
+							eq(connection.workspaceId, bot.workspaceId),
+							eq(connection.botId, bot.botId),
 							eq(connection.kind, "github"),
 						),
 					)
@@ -134,29 +134,29 @@ export const make = Effect.gen(function* () {
 
 	const failed = (setup: SetupStep | undefined, failure: GitHubSetupFailure): SetupOutcome => ({
 		kind: "failed",
-		agent: setup && { workspaceId: setup.workspaceId, agentId: setup.agentId },
+		bot: setup && { workspaceId: setup.workspaceId, botId: setup.botId },
 		failure,
 	});
 
 	return Service.of({
-		start: ({ agentId, organization }) =>
+		start: ({ botId, organization }) =>
 			operation(
 				"start",
 				Effect.gen(function* () {
-					const agent = yield* managed(agentId);
-					if (yield* gitHubConnectionOf({ workspaceId: agent.workspaceId, agentId: agent.id })) {
-						return yield* new AgentHasGitHubConnection();
+					const bot = yield* managed(botId);
+					if (yield* gitHubConnectionOf({ workspaceId: bot.workspaceId, botId: bot.id })) {
+						return yield* new BotHasGitHubConnection();
 					}
 					// The connection's id is in its webhook's address, so it is minted before GitHub makes the app.
 					const connectionId = yield* ids.next;
 					const state = yield* stateFor({
 						step: "make",
-						workspaceId: agent.workspaceId,
-						agentId: agent.id,
+						workspaceId: bot.workspaceId,
+						botId: bot.id,
 						connectionId,
 					});
 					const manifest = GitHub.appManifest({
-						name: appName(agent.name, connectionId),
+						name: appName(bot.name, connectionId),
 						homepageUrl: installation.webAppUrl,
 						redirectUrl: `${apiUrl}${GITHUB_APP_MADE_PATH}`,
 						setupUrl: `${apiUrl}${GITHUB_APP_INSTALLED_PATH}`,
@@ -182,7 +182,7 @@ export const make = Effect.gen(function* () {
 					const setup = yield* stepOf(state, "make");
 					if (!setup) return failed(undefined, "expired");
 					if (!code) return failed(setup, "cancelled");
-					if (!(yield* managedQuietly(setup.agentId))) return failed(undefined, "expired");
+					if (!(yield* managedQuietly(setup.botId))) return failed(undefined, "expired");
 					const made = yield* GitHub.madeApp(http, code).pipe(
 						Effect.tapError((failure) => Effect.logWarning("GitHub didn't make the app", failure)),
 						Effect.option,
@@ -191,7 +191,7 @@ export const make = Effect.gen(function* () {
 					const app = made.value;
 					const { userId } = yield* CurrentActor.Service;
 					const created = yield* connections
-						.createGitHub(setup.workspaceId, setup.agentId, userId, {
+						.createGitHub(setup.workspaceId, setup.botId, userId, {
 							id: setup.connectionId,
 							app: { appId: app.id, slug: app.slug, owner: app.owner },
 							appCredentialEncrypted: sealAppCredential(credentials, {
@@ -218,7 +218,7 @@ export const make = Effect.gen(function* () {
 					const setup = yield* stepOf(state, "install");
 					if (!setup) return failed(undefined, "expired");
 					if (installationId === undefined) return failed(setup, "cancelled");
-					const row = (yield* managedQuietly(setup.agentId))
+					const row = (yield* managedQuietly(setup.botId))
 						? yield* gitHubConnectionOf(setup)
 						: undefined;
 					if (!row?.settings || !row.appCredentialEncrypted || row.id !== setup.connectionId) {
@@ -242,26 +242,26 @@ export const make = Effect.gen(function* () {
 					yield* connections.installed(setup.workspaceId, row.id, { installationId: id, account });
 					return {
 						kind: "done",
-						agent: { workspaceId: setup.workspaceId, agentId: setup.agentId },
+						bot: { workspaceId: setup.workspaceId, botId: setup.botId },
 						connectionId: row.id,
 					};
 				}),
 			),
 
-		installUrl: ({ agentId, connectionId }) =>
+		installUrl: ({ botId, connectionId }) =>
 			operation(
 				"installUrl",
 				Effect.gen(function* () {
-					const agent = yield* managed(agentId);
+					const bot = yield* managed(botId);
 					const row = yield* gitHubConnectionOf({
-						workspaceId: agent.workspaceId,
-						agentId: agent.id,
+						workspaceId: bot.workspaceId,
+						botId: bot.id,
 					});
 					if (!row?.settings || row.id !== connectionId) return yield* new NotGitHubConnection();
 					const state = yield* stateFor({
 						step: "install",
-						workspaceId: agent.workspaceId,
-						agentId: agent.id,
+						workspaceId: bot.workspaceId,
+						botId: bot.id,
 						connectionId,
 					});
 					return GitHub.installAppUrl(row.settings.slug, state);
@@ -283,16 +283,16 @@ export const layer = layerNoDeps.pipe(
  */
 export type SetupOutcome =
 	| { readonly kind: "next"; readonly url: string }
-	| { readonly kind: "done"; readonly agent: SetupAgent; readonly connectionId: string }
+	| { readonly kind: "done"; readonly bot: SetupBot; readonly connectionId: string }
 	| {
 			readonly kind: "failed";
-			readonly agent: SetupAgent | undefined;
+			readonly bot: SetupBot | undefined;
 			readonly failure: GitHubSetupFailure;
 	  };
 
-export interface SetupAgent {
+export interface SetupBot {
 	readonly workspaceId: string;
-	readonly agentId: string;
+	readonly botId: string;
 }
 
 /** How long a person has to finish a step on GitHub's pages. */
@@ -301,7 +301,7 @@ const SETUP_STATE_LIFETIME_MILLISECONDS = 60 * 60 * 1000;
 const SETUP_STATE_PURPOSE = "github-app-setup";
 
 /** A step of setting up a bot's GitHub App, for the connection it is or will be. */
-interface SetupStep extends SetupAgent {
+interface SetupStep extends SetupBot {
 	readonly step: "make" | "install";
 	readonly connectionId: string;
 }
@@ -314,7 +314,7 @@ const SetupStateJson = Schema.fromJsonString(
 	Schema.Struct({
 		step: Schema.Literals(["make", "install"]),
 		workspaceId: Schema.String,
-		agentId: Schema.String,
+		botId: Schema.String,
 		connectionId: Schema.String,
 		userId: Schema.String,
 		expiresAt: Schema.Finite,
@@ -329,9 +329,9 @@ const APP_NAME_SUFFIX_LENGTH = 4;
  * with part of the connection's id, since an app's name is unique across
  * all of GitHub, and cut to the longest name GitHub takes.
  */
-function appName(agentName: string, connectionId: string): string {
+function appName(botName: string, connectionId: string): string {
 	const suffix = ` ${connectionId.slice(-APP_NAME_SUFFIX_LENGTH)}`;
-	const name = `Sugabots ${agentName}`.slice(0, GitHub.MAX_APP_NAME_LENGTH - suffix.length).trim();
+	const name = `Sugabots ${botName}`.slice(0, GitHub.MAX_APP_NAME_LENGTH - suffix.length).trim();
 	return `${name}${suffix}`;
 }
 

@@ -2,40 +2,41 @@ export * as DesktopViewer from "./viewer.ts";
 
 import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
-import { Context, Effect, Layer, type Scope } from "effect";
+import { Context, Deferred, Duration, Effect, Layer, type Scope } from "effect";
 import type { AuthorizationDenied } from "../../../authorization/access.ts";
 import { Authorization } from "../../../authorization/authorization.ts";
 import type { CurrentActor } from "../../../authorization/current-actor.ts";
 import { Visibility } from "../../../authorization/visibility.ts";
+import { BotComputers } from "../../../computers/bot-computers.ts";
+import { ComputerProviderRepository } from "../../../computers/computer-provider-repository.ts";
+import type { Computers } from "../../../computers/computers.ts";
 import { query, serviceOperations } from "../../../database/database.ts";
-import { threadParticipant } from "../../../database/schema.ts";
+import { conversationParticipant } from "../../../database/schema.ts";
 import { Ids } from "../../../ids/ids.ts";
-import { AgentSandboxes } from "../../../sandboxes/agent-sandboxes.ts";
-import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
-import type { Sandboxes } from "../../../sandboxes/sandboxes.ts";
-import { placeOf } from "../sandbox/tools.ts";
+import { placeOf } from "../computer/tools.ts";
 import { DesktopUnavailable, startDesktop } from "./browser.ts";
 
 /**
- * An agent's desktop in a thread, opened by a person to watch and use: where
- * the browser it drives is shown. Anyone who can read the thread and see the
- * agent may open it, while the agent takes part in the thread and uses a
- * computer. Those holding `sandbox.desktop.use` may click and type on it
+ * A bot's desktop in a conversation, opened by a person to watch and use: where
+ * the browser it drives is shown. Anyone who can read the conversation and see the
+ * bot may open it, while the bot takes part in the conversation and uses a
+ * computer. Those holding `computer.desktop.use` may click and type on it
  * too; anyone else only watches. Opening it uses the bot's computer as a turn
  * would, resuming it, or making it if the bot has none, and starts the
- * desktop if it isn't running; the computer stays awake while it is open.
+ * desktop if it isn't running; the computer stays awake while it is open,
+ * and while the person may still see it as it was opened for them.
  */
 export interface Interface {
 	/**
 	 * Where the desktop's VNC server takes a WebSocket, and its password, for
-	 * as long as the scope is open, which holds the sandbox awake.
+	 * as long as the scope is open, which holds the computer awake.
 	 */
 	readonly open: (input: {
-		threadId: string;
-		agentId: string;
+		conversationId: string;
+		botId: string;
 	}) => Effect.Effect<
 		OpenDesktop,
-		AuthorizationDenied | DesktopUnavailable | Sandboxes.Unavailable,
+		AuthorizationDenied | DesktopUnavailable | Computers.Unavailable,
 		CurrentActor.Service | Scope.Scope
 	>;
 }
@@ -45,8 +46,16 @@ export interface Interface {
  * Sugabots to answer with on their behalf: they never see it.
  */
 export interface OpenDesktop {
-	readonly endpoint: Sandboxes.Endpoint;
+	readonly endpoint: Computers.Endpoint;
 	readonly password: string;
+	/**
+	 * Completes once the person may no longer see the desktop as it was opened
+	 * for them: they no longer reach the conversation or the bot, the bot left
+	 * the conversation or stopped using its computer, or they could click and
+	 * type and no longer may. Checked every `ACCESS_CHECK_INTERVAL`; the
+	 * computer is kept awake for them no longer from then.
+	 */
+	readonly accessLost: Effect.Effect<void>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -56,59 +65,93 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const visibility = yield* Visibility.Service;
 	const authorization = yield* Authorization.Service;
-	const agentSandboxes = yield* AgentSandboxes.Service;
-	const providers = yield* SandboxProviderRepository.Service;
+	const botComputers = yield* BotComputers.Service;
+	const providers = yield* ComputerProviderRepository.Service;
 	const ids = yield* Ids.Service;
 	const operation = yield* serviceOperations<Interface>("DesktopViewer");
 
-	/** Whether the agent is the thread's host or was added to it. */
-	const takesPart = (thread: { id: string; hostAgentId: string | null }, agentId: string) =>
-		thread.hostAgentId === agentId
+	/** Whether the bot is the one the conversation is with, or was added to it. */
+	const takesPart = (conversation: { id: string; botId: string | null }, botId: string) =>
+		conversation.botId === botId
 			? Effect.succeed(true)
 			: operation(
 					"open",
 					query((db) =>
 						db
-							.select({ id: threadParticipant.id })
-							.from(threadParticipant)
+							.select({ id: conversationParticipant.id })
+							.from(conversationParticipant)
 							.where(
 								and(
-									eq(threadParticipant.threadId, thread.id),
-									eq(threadParticipant.agentId, agentId),
+									eq(conversationParticipant.conversationId, conversation.id),
+									eq(conversationParticipant.botId, botId),
 								),
 							)
 							.limit(1),
 					),
 				).pipe(Effect.map((rows) => rows.length > 0));
 
+	/**
+	 * Whether the actor may still see the bot's desktop in the conversation as
+	 * `open` let them, clicking and typing on it when `controls`.
+	 */
+	const stillAllowed = (input: { conversationId: string; botId: string; controls: boolean }) =>
+		Effect.gen(function* () {
+			const { conversation } = yield* visibility.conversationStanding(input.conversationId);
+			const { bot, may } = yield* authorization.bot(input.botId, "bot.read");
+			if (!bot.usesComputer || !(yield* takesPart(conversation, input.botId))) return false;
+			return !input.controls || may("computer.desktop.use");
+		}).pipe(
+			Effect.catchTags({
+				ResourceHidden: () => Effect.succeed(false),
+				ActionForbidden: () => Effect.succeed(false),
+			}),
+		);
+
 	return Service.of({
-		open: ({ threadId, agentId }) =>
+		open: ({ conversationId, botId }) =>
 			Effect.gen(function* () {
-				const { thread } = yield* visibility.thread(threadId);
-				const { agent, may } = yield* authorization.agent(agentId, "agent.read");
-				if (!(yield* takesPart(thread, agentId))) {
-					return yield* new DesktopUnavailable({ reason: NOT_IN_THIS_THREAD });
+				const { conversation } = yield* visibility.conversationStanding(conversationId);
+				const { bot, may } = yield* authorization.bot(botId, "bot.read");
+				if (!(yield* takesPart(conversation, botId))) {
+					return yield* new DesktopUnavailable({ reason: NOT_IN_THIS_CONVERSATION });
 				}
 				// The UI hides the desktop then too, but this is what stops a request
-				// from making a sandbox for an agent that a sandbox manager kept off.
-				if (!agent.usesSandbox) return yield* new DesktopUnavailable({ reason: NO_SANDBOX });
-				const owner = { workspaceId: thread.workspaceId, agentId };
+				// from making a computer for a bot that a computer manager kept off.
+				if (!bot.usesComputer) return yield* new DesktopUnavailable({ reason: NO_COMPUTER });
+				const owner = { workspaceId: conversation.workspaceId, botId };
 				const provider = yield* providers.enabled(owner.workspaceId);
-				if (!provider) return yield* new DesktopUnavailable({ reason: SANDBOXES_OFF });
-				const holder: AgentSandboxes.Holder = { kind: "viewer", id: yield* ids.random };
-				yield* Effect.addFinalizer(() => agentSandboxes.release(holder));
-				const { sandbox } = yield* agentSandboxes.open(owner, provider, holder);
-				const turn = { threadId, agentId, color: agent.color };
-				const desktop = yield* startDesktop(sandbox, placeOf(turn), turn);
+				if (!provider) return yield* new DesktopUnavailable({ reason: COMPUTERS_OFF });
+				const holder: BotComputers.Holder = { kind: "viewer", id: yield* ids.random };
+				yield* Effect.addFinalizer(() => botComputers.release(holder));
+				const { computer } = yield* botComputers.open(owner, provider, holder);
+				const turn = { conversationId, botId, color: bot.color };
+				const desktop = yield* startDesktop(computer, placeOf(turn), turn);
 				// The watch server ignores input, so a viewer's mouse and keys never
 				// reach the desktop, whatever their client sends.
-				const server = may("sandbox.desktop.use") ? desktop.control : desktop.watch;
+				const controls = may("computer.desktop.use");
+				const server = controls ? desktop.control : desktop.watch;
+				const lost = yield* Deferred.make<void>();
 				yield* Effect.forkScoped(
-					agentSandboxes
-						.renew(holder)
-						.pipe(Effect.delay(AgentSandboxes.LEASE_RENEWAL), Effect.forever),
+					Effect.sleep(ACCESS_CHECK_INTERVAL).pipe(
+						Effect.andThen(stillAllowed({ conversationId, botId, controls })),
+						Effect.repeat({ while: (allowed) => allowed }),
+						Effect.andThen(Deferred.succeed(lost, undefined)),
+					),
 				);
-				return { endpoint: yield* sandbox.endpoint(server.port), password: server.password };
+				yield* Effect.forkScoped(
+					botComputers
+						.renew(holder)
+						.pipe(
+							Effect.delay(BotComputers.LEASE_RENEWAL),
+							Effect.forever,
+							Effect.raceFirst(Deferred.await(lost)),
+						),
+				);
+				return {
+					endpoint: yield* computer.endpoint(server.port),
+					password: server.password,
+					accessLost: Deferred.await(lost),
+				};
 			}),
 	});
 });
@@ -119,11 +162,14 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Visibility.layer,
 		Authorization.layer,
-		AgentSandboxes.layer,
-		SandboxProviderRepository.layer,
+		BotComputers.layer,
+		ComputerProviderRepository.layer,
 	]),
 );
 
-const NOT_IN_THIS_THREAD = userText`This agent has no desktop in this thread.`;
-const NO_SANDBOX = userText`This bot doesn't use a computer, so it has no desktop.`;
-const SANDBOXES_OFF = userText`Sandboxes are switched off for this workspace, so there's no desktop to open.`;
+/** How often an open desktop checks its person may still see it. */
+export const ACCESS_CHECK_INTERVAL = Duration.seconds(10);
+
+const NOT_IN_THIS_CONVERSATION = userText`This bot has no desktop in this conversation.`;
+const NO_COMPUTER = userText`This bot doesn't use a computer, so it has no desktop.`;
+const COMPUTERS_OFF = userText`Computers are switched off for this workspace, so there's no desktop to open.`;

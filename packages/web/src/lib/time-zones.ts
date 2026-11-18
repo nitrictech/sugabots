@@ -10,7 +10,7 @@ export interface TimeZoneChoice {
 }
 
 /**
- * Every time zone this browser knows, by name. Routines run only in these,
+ * Every time zone this browser knows, by name. Automations run only in these,
  * so a workspace moved to one can keep its schedules.
  */
 export function timeZoneChoices(now: Date): TimeZoneChoice[] {

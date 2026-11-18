@@ -76,7 +76,7 @@ export const providerIn = (workspaceId: string, providerId: string) =>
 	});
 
 /**
- * The models the workspace offers for agents to run on, and its default, which
+ * The models the workspace offers for bots to run on, and its default, which
  * it does not offer while a failed test has that model's provider off.
  */
 export const offeredModels = (workspaceId: string) =>

@@ -7,7 +7,7 @@ import {
 	type WorkspacePermission,
 } from "../../../authorization/permissions.ts";
 import { type Executor, query, type RunEffect } from "../../../database/database.ts";
-import { threadParticipant, user, workspaceMember } from "../../../database/schema.ts";
+import { conversationParticipant, user, workspaceMember } from "../../../database/schema.ts";
 
 export const WORKSPACE_ACCESS_TOOL = "workspace_access";
 
@@ -17,7 +17,7 @@ const MAX_HELPERS = 5;
 export interface PersonAccess {
 	name: string;
 	handle: string;
-	/** `none` for someone in the thread who has since left the workspace. */
+	/** `none` for someone in the conversation who has since left the workspace. */
 	role: WorkspaceRole | "none";
 }
 
@@ -37,15 +37,15 @@ export type WorkspaceAccessResult =
 
 /**
  * The `workspace_access` tool: a person's role, and who can change it. Only
- * for people in this thread, so a bot learns no more about the workspace's
+ * for people in this conversation, so a bot learns no more about the workspace's
  * members than someone needs to be pointed at the right person.
  */
 export function workspaceAccessTool({
-	threadId,
+	conversationId,
 	workspaceId,
 	run,
 }: {
-	threadId: string;
+	conversationId: string;
 	workspaceId: string;
 	run: RunEffect;
 }) {
@@ -54,34 +54,38 @@ export function workspaceAccessTool({
 			"Look up a person's role in this workspace, and who can change what they may do: the owner and admins, or for an admin the owner alone; nobody can change the owner's. Use it when someone can't do something, a setting or tool seems missing for them, or they ask who to ask. What each role may do is in the docs.",
 		inputSchema: Schema.Struct({
 			person: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
-				description: "The handle of a person in this thread, like @sam",
+				description: "The handle of a person in this conversation, like @sam",
 			}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 		execute: async ({ person }): Promise<WorkspaceAccessResult> =>
-			run(query((db) => lookUpAccess(db, { threadId, workspaceId, handle: person }))),
+			run(query((db) => lookUpAccess(db, { conversationId, workspaceId, handle: person }))),
 	});
 }
 
 const lookUpAccess = Effect.fn("WorkspaceAccess.lookUpAccess")(function* (
 	db: Executor,
-	{ threadId, workspaceId, handle }: { threadId: string; workspaceId: string; handle: string },
+	{
+		conversationId,
+		workspaceId,
+		handle,
+	}: { conversationId: string; workspaceId: string; handle: string },
 ) {
 	const people = yield* db
 		.select({ name: user.name, role: workspaceMember.role })
-		.from(threadParticipant)
-		.innerJoin(user, eq(user.id, threadParticipant.userId))
+		.from(conversationParticipant)
+		.innerJoin(user, eq(user.id, conversationParticipant.userId))
 		.leftJoin(
 			workspaceMember,
 			and(eq(workspaceMember.userId, user.id), eq(workspaceMember.workspaceId, workspaceId)),
 		)
-		.where(eq(threadParticipant.threadId, threadId))
-		.orderBy(asc(threadParticipant.createdAt));
+		.where(eq(conversationParticipant.conversationId, conversationId))
+		.orderBy(asc(conversationParticipant.createdAt));
 	const asked = handle.trim().replace(/^@/, "").toLowerCase();
 	const found = people.find((candidate) => handleFromName(candidate.name) === asked);
 	if (!found) {
 		const handles = people.map((candidate) => `@${handleFromName(candidate.name)}`);
 		return {
-			refused: `Nobody in this thread has the handle @${asked}. The people here are: ${handles.join(", ") || "nobody"}.`,
+			refused: `Nobody in this conversation has the handle @${asked}. The people here are: ${handles.join(", ") || "nobody"}.`,
 		};
 	}
 	const changedBy = rolesThatChange(found.role);

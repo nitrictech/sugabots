@@ -40,12 +40,12 @@ services:
       retries: 12
       start_period: 5s
 
-  # Sandboxes for local development, only with `--profile sandboxes`. It holds
+  # Computers for local development, only with `--profile computers`. It holds
   # the Docker socket, so it can start containers on this machine: that is how
-  # it makes sandboxes, and why it is not started unless asked for.
+  # it makes computers, and why it is not started unless asked for.
   opensandbox:
     container_name: sugabots_opensandbox
-    profiles: [sandboxes]
+    profiles: [computers]
     image: opensandbox/server:release-1.1.0
     environment:
       SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
@@ -67,8 +67,8 @@ configs:
       host = "0.0.0.0"
       port = 8090
       api_key = "${OPENSANDBOX_API_KEY:-development-opensandbox-key}"
-      # The host in the sandbox addresses this server returns, which the API
-      # on this machine connects to. Docker publishes sandboxes' ports on every
+      # The host in the computer addresses this server returns, which the API
+      # on this machine connects to. Docker publishes computers' ports on every
       # interface, loopback included, and Docker Desktop forwards them to this
       # machine's loopback.
       eip = "127.0.0.1"
@@ -83,12 +83,12 @@ configs:
 
       [docker]
       network_mode = "bridge"
-      # How this container reaches sandboxes' published ports, to proxy to them
+      # How this container reaches computers' published ports, to proxy to them
       # and check they are up. The opensandbox service's extra_hosts entry
       # resolves this name on Docker Engine and Docker Desktop alike.
       host_ip = "host.docker.internal"
       # Below Linux's ephemeral ports (32768 and up), which outgoing
-      # connections take, so a sandbox's port is never already in use.
+      # connections take, so a computer's port is never already in use.
       port_range_min = 20000
       port_range_max = 30000
       drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]

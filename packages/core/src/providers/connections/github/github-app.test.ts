@@ -14,7 +14,7 @@ import {
 	reachingGitHub,
 	standInGitHub,
 	stateIn,
-	workspaceWithPod,
+	workspaceWithChannel,
 } from "./github.test-support.ts";
 import { GitHubApps } from "./github-app.ts";
 import { GitHubConnections } from "./github-connections.ts";
@@ -27,10 +27,10 @@ const servedAt = (publicUrl: string) =>
 		),
 	);
 
-const listedIn = (owner: { workspaceId: string; agentId: string }) =>
+const listedIn = (owner: { workspaceId: string; botId: string }) =>
 	runOnPostgres(
 		Effect.flatMap(Credentials.Service, (cipher) =>
-			connectionsIn(owner.workspaceId, owner.agentId, cipher),
+			connectionsIn(owner.workspaceId, owner.botId, cipher),
 		),
 	);
 
@@ -51,12 +51,12 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 	const as = (userId: string) => onPostgresAs(userId)(gitHubApps);
 
 	it("makes the bot's app from a manifest, for someone who manages the bot's connections", async () => {
-		const { agentId, adminId, memberId } = await workspaceWithPod("Make");
+		const { botId, adminId, memberId } = await workspaceWithChannel("Make");
 
-		await expect(as(memberId).start({ agentId, organization: "acme" })).rejects.toMatchObject({
+		await expect(as(memberId).start({ botId, organization: "acme" })).rejects.toMatchObject({
 			_tag: "ActionForbidden",
 		});
-		const form = await as(adminId).start({ agentId, organization: "acme" });
+		const form = await as(adminId).start({ botId, organization: "acme" });
 
 		expect(form.url).toMatch(/^https:\/\/github\.com\/organizations\/acme\/settings\/apps\/new\?/);
 		expect(JSON.parse(form.manifest)).toMatchObject({
@@ -76,16 +76,16 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 	});
 
 	it("makes the bot's GitHub connection once GitHub has made the app, signed in once it is installed", async () => {
-		const fixture = await workspaceWithPod("Install");
-		const { workspaceId, agentId, adminId, memberId } = fixture;
-		const form = await as(adminId).start({ agentId, organization: undefined });
+		const fixture = await workspaceWithChannel("Install");
+		const { workspaceId, botId, adminId, memberId } = fixture;
+		const form = await as(adminId).start({ botId, organization: undefined });
 		const state = stateIn(form.url);
 		const webhookUrl = JSON.parse(form.manifest).hook_attributes.url as string;
 
 		const someoneElse = await as(memberId).made({ code: MANIFEST_CODE, state });
 		const made = await as(adminId).made({ code: MANIFEST_CODE, state });
 
-		expect(someoneElse).toEqual({ kind: "failed", agent: undefined, failure: "expired" });
+		expect(someoneElse).toEqual({ kind: "failed", bot: undefined, failure: "expired" });
 		if (made.kind !== "next") throw new Error(`Not made: ${JSON.stringify(made)}`);
 		expect(made.url).toMatch(/^https:\/\/github\.com\/apps\/acme-sugabots\/installations\/new\?/);
 		const [pending] = await listedIn(fixture);
@@ -96,7 +96,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 			appSettingsUrl: "https://github.com/organizations/acme/settings/apps/acme-sugabots",
 		});
 		expect(webhookUrl.endsWith(`/${pending?.id}`)).toBe(true);
-		expect(await runOnPostgres(connections.forAgent(fixture))).toBeUndefined();
+		expect(await runOnPostgres(connections.forBot(fixture))).toBeUndefined();
 
 		const notOurs = await as(adminId).installed({ installationId: 999, state: stateIn(made.url) });
 		const installed = await as(adminId).installed({
@@ -104,29 +104,29 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 			state: stateIn(made.url),
 		});
 
-		expect(notOurs).toEqual({ kind: "failed", agent: { workspaceId, agentId }, failure: "github" });
+		expect(notOurs).toEqual({ kind: "failed", bot: { workspaceId, botId }, failure: "github" });
 		expect(installed).toEqual({
 			kind: "done",
-			agent: { workspaceId, agentId },
+			bot: { workspaceId, botId },
 			connectionId: pending?.id,
 		});
 		expect(await listedIn(fixture)).toMatchObject([
 			{ id: pending?.id, url: "https://github.com/acme", signedIn: true },
 		]);
-		const connected = await runOnPostgres(connections.forAgent(fixture));
+		const connected = await runOnPostgres(connections.forBot(fixture));
 		expect(connected?.account).toBe("acme");
 	});
 
 	it("records the app installed again, on another account", async () => {
-		const fixture = await workspaceWithPod("Again");
-		const { workspaceId, agentId, adminId, memberId } = fixture;
+		const fixture = await workspaceWithChannel("Again");
+		const { workspaceId, botId, adminId, memberId } = fixture;
 		const connectionId = await installedConnection(gitHubApps, fixture);
 
-		await expect(as(memberId).installUrl({ agentId, connectionId })).rejects.toMatchObject({
+		await expect(as(memberId).installUrl({ botId, connectionId })).rejects.toMatchObject({
 			_tag: "ActionForbidden",
 		});
 		// GitHub sends people back here after they change what an installation reaches.
-		const url = await as(adminId).installUrl({ agentId, connectionId });
+		const url = await as(adminId).installUrl({ botId, connectionId });
 		const again = await as(adminId).installed({
 			installationId: OTHER_INSTALLATION_ID,
 			state: stateIn(url),
@@ -135,18 +135,18 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 		expect(url).toMatch(/^https:\/\/github\.com\/apps\/acme-sugabots\/installations\/new\?/);
 		expect(again).toEqual({
 			kind: "done",
-			agent: { workspaceId, agentId },
+			bot: { workspaceId, botId },
 			connectionId,
 		});
 		expect(await listedIn(fixture)).toMatchObject([{ url: "https://github.com/acme-labs" }]);
-		expect((await runOnPostgres(connections.forAgent(fixture)))?.account).toBe("acme-labs");
+		expect((await runOnPostgres(connections.forBot(fixture)))?.account).toBe("acme-labs");
 	});
 
 	it("keeps a bot to one GitHub app", async () => {
-		const fixture = await workspaceWithPod("One");
-		const { workspaceId, agentId, adminId } = fixture;
-		const first = await as(adminId).start({ agentId, organization: undefined });
-		const second = await as(adminId).start({ agentId, organization: undefined });
+		const fixture = await workspaceWithChannel("One");
+		const { workspaceId, botId, adminId } = fixture;
+		const first = await as(adminId).start({ botId, organization: undefined });
+		const second = await as(adminId).start({ botId, organization: undefined });
 		await as(adminId).made({ code: MANIFEST_CODE, state: stateIn(first.url) });
 
 		// The second app was started before the first was made.
@@ -154,31 +154,31 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 
 		expect(meanwhile).toEqual({
 			kind: "failed",
-			agent: { workspaceId, agentId },
+			bot: { workspaceId, botId },
 			failure: "github",
 		});
-		await expect(as(adminId).start({ agentId, organization: undefined })).rejects.toMatchObject({
-			_tag: "AgentHasGitHubConnection",
+		await expect(as(adminId).start({ botId, organization: undefined })).rejects.toMatchObject({
+			_tag: "BotHasGitHubConnection",
 		});
 		expect(await listedIn(fixture)).toHaveLength(1);
 	});
 
 	it("refuses a step's state used for another step", async () => {
-		const { agentId, adminId } = await workspaceWithPod("Steps");
-		const form = await as(adminId).start({ agentId, organization: undefined });
+		const { botId, adminId } = await workspaceWithChannel("Steps");
+		const form = await as(adminId).start({ botId, organization: undefined });
 
 		const outcome = await as(adminId).installed({
 			installationId: INSTALLATION_ID,
 			state: stateIn(form.url),
 		});
 
-		expect(outcome).toEqual({ kind: "failed", agent: undefined, failure: "expired" });
+		expect(outcome).toEqual({ kind: "failed", bot: undefined, failure: "expired" });
 	});
 
 	it("refuses a step's state once it has expired", async () => {
-		const fixture = await workspaceWithPod("Expired");
-		const { adminId, agentId } = fixture;
-		const form = await as(adminId).start({ agentId, organization: undefined });
+		const fixture = await workspaceWithChannel("Expired");
+		const { adminId, botId } = fixture;
+		const form = await as(adminId).start({ botId, organization: undefined });
 
 		const outcome = await runOnPostgres(
 			Effect.gen(function* () {
@@ -190,28 +190,28 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 			),
 		);
 
-		expect(outcome).toEqual({ kind: "failed", agent: undefined, failure: "expired" });
+		expect(outcome).toEqual({ kind: "failed", bot: undefined, failure: "expired" });
 		expect(await listedIn(fixture)).toEqual([]);
 	});
 
 	it("says the person declined, for the bot the step was for", async () => {
-		const { workspaceId, agentId, adminId } = await workspaceWithPod("Declined");
-		const form = await as(adminId).start({ agentId, organization: undefined });
+		const { workspaceId, botId, adminId } = await workspaceWithChannel("Declined");
+		const form = await as(adminId).start({ botId, organization: undefined });
 
 		const outcome = await as(adminId).made({ code: undefined, state: stateIn(form.url) });
 
 		expect(outcome).toEqual({
 			kind: "failed",
-			agent: { workspaceId, agentId },
+			bot: { workspaceId, botId },
 			failure: "cancelled",
 		});
 	});
 
 	it("makes an app without a webhook when GitHub couldn't reach this installation", async () => {
 		const [local] = await servedAt("http://sugabots.localhost:3000");
-		const { agentId, adminId } = await workspaceWithPod("Local");
+		const { botId, adminId } = await workspaceWithChannel("Local");
 
-		const form = await onPostgresAs(adminId)(local).start({ agentId, organization: undefined });
+		const form = await onPostgresAs(adminId)(local).start({ botId, organization: undefined });
 
 		const manifest = JSON.parse(form.manifest);
 		expect(manifest).not.toHaveProperty("hook_attributes");

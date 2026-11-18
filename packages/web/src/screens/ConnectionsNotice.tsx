@@ -1,9 +1,9 @@
-import type { Agent, Connection } from "@sugabots/contracts";
+import type { Bot, Connection } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { useState } from "react";
 import { useConnectionActions, useConnections } from "@/lib/connections.ts";
-import { agentSettingsPageLink } from "@/lib/links.ts";
+import { botSettingsPageLink } from "@/lib/links.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -16,11 +16,11 @@ import { WarningText } from "@/ui/warning-text.tsx";
  * here, or opens the list for several; anyone else is only told. Closing it
  * hides it until the chat is next opened. Nothing while every sign-in holds.
  */
-export function ConnectionsNotice({ agent }: { agent: Agent }) {
+export function ConnectionsNotice({ bot }: { bot: Bot }) {
 	const [dismissed, setDismissed] = useState(false);
-	const expired = useConnections(agent.id).data?.filter((connection) => connection.signInExpired);
+	const expired = useConnections(bot.id).data?.filter((connection) => connection.signInExpired);
 	if (dismissed || !expired || expired.length === 0) return null;
-	const canSignIn = agent.permissions.manageConnections;
+	const canSignIn = bot.permissions.manageConnections;
 	const who = canSignIn ? "you sign" : "someone who manages it signs";
 	const [only] = expired;
 	return (
@@ -29,7 +29,7 @@ export function ConnectionsNotice({ agent }: { agent: Agent }) {
 				{only && expired.length === 1 ? (
 					<>
 						<span className="max-md:hidden">
-							{agent.name} can't use {only.name} until {who} in again.
+							{bot.name} can't use {only.name} until {who} in again.
 						</span>
 						{/* A phone's row has room for one line beside the button, so it only says what happened. */}
 						<span className="md:hidden">{only.name}'s sign-in expired.</span>
@@ -39,7 +39,7 @@ export function ConnectionsNotice({ agent }: { agent: Agent }) {
 					`${expired.length} connections' sign-ins expired.`
 				)}
 			</WarningText>
-			{canSignIn && <SignInAgain agent={agent} expired={expired} />}
+			{canSignIn && <SignInAgain bot={bot} expired={expired} />}
 			<IconButton label="Dismiss" side="top" onClick={() => setDismissed(true)}>
 				<X aria-hidden />
 			</IconButton>
@@ -48,9 +48,9 @@ export function ConnectionsNotice({ agent }: { agent: Agent }) {
 }
 
 /** One connection goes straight to its sign-in; several open the bot's connections, each with its own. */
-function SignInAgain({ agent, expired }: { agent: Agent; expired: readonly Connection[] }) {
+function SignInAgain({ bot, expired }: { bot: Bot; expired: readonly Connection[] }) {
 	const backToChat = useBackToHere("Chat");
-	const actions = useConnectionActions(agent.id);
+	const actions = useConnectionActions(bot.id);
 	const [only] = expired;
 	if (only && expired.length === 1) {
 		return (
@@ -69,7 +69,7 @@ function SignInAgain({ agent, expired }: { agent: Agent; expired: readonly Conne
 	}
 	return (
 		<Link
-			{...agentSettingsPageLink(agent, "connections")}
+			{...botSettingsPageLink(bot, "connections")}
 			state={backToChat}
 			aria-label="Open connections"
 			className={buttonStyles({ variant: "secondary", size: "sm", className: "shrink-0" })}

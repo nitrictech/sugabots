@@ -1,7 +1,7 @@
 import { testPerson } from "@sugabots/contracts/testing";
 import { describe, expect, it } from "vitest";
-import { describeToolCall } from "../threads/message-text.ts";
-import { START_THREAD_TOOL } from "../tools/start-thread/tool.ts";
+import { describeToolCall } from "../repository/message-text.ts";
+import { START_TASK_TOOL } from "../tools/start-task/tool.ts";
 import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
 import { modelPrompt, type TurnEnvironment } from "./context.ts";
 import type { TurnContext } from "./execution.ts";
@@ -12,15 +12,15 @@ const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment 
 	now: new Date("2026-09-25T03:00:00Z"),
 	builtInTools: [],
 	toolCatalog: undefined,
-	sandbox: undefined,
+	computer: undefined,
 	...overrides,
 });
 
 describe("modelPrompt", () => {
-	it("maps people and other agents to attributed user messages", () => {
+	it("maps people and other bots to attributed user messages", () => {
 		const prompt = modelPrompt(context(), environment());
 
-		expect(prompt.system).toContain("You are Host Agent (@host-agent), a bot in workspace Suga.");
+		expect(prompt.system).toContain("You are Host Bot (@host-bot), a bot in workspace Suga.");
 		expect(prompt.system).toContain("Check facts carefully.");
 		// The history, marked where it ends, then one trailing instruction with
 		// everything that varies between turns, so the prefix the provider caches
@@ -30,24 +30,24 @@ describe("modelPrompt", () => {
 			{ role: "assistant", content: "I am checking it." },
 			{
 				role: "user",
-				content: "Reviewer (@reviewer) (agent): Migration is present.",
+				content: "Reviewer (@reviewer) (bot): Migration is present.",
 				cacheBreakpoint: true,
 			},
 		]);
 		const instruction = prompt.messages.at(-1);
 		expect(instruction?.role).toBe("user");
 		expect(instruction?.content).toContain(
-			"In it now: Sam (@sam, person), Host Agent (@host-agent, agent), Reviewer (@reviewer, agent).",
+			"In it now: Sam (@sam, person), Host Bot (@host-bot, bot), Reviewer (@reviewer, bot).",
 		);
 		expect(instruction?.content).toContain(
-			"It is your turn as the agent this thread was addressed to.",
+			"It is your turn as the bot this conversation was addressed to.",
 		);
 		expect(prompt.system).not.toContain("Sam (@sam, person)");
 	});
 
-	it("lists potential collaborators, and tells one why its thread exists", () => {
+	it("lists potential collaborators, and tells one why its conversation exists", () => {
 		const asking = context();
-		asking.crew = [
+		asking.collaborators = [
 			{
 				id: "0199a3a0-0000-7000-8000-000000000005",
 				name: "Reviewer",
@@ -65,25 +65,23 @@ describe("modelPrompt", () => {
 		expect(instruction()).toContain(
 			"Other bots in this workspace, and what each one knows:\n- Reviewer (@reviewer): Checks facts.\n- Scout (@scout)",
 		);
-		expect(instruction()).toContain(
-			"Use the collaborate tool when you need another agent's answer",
-		);
+		expect(instruction()).toContain("Use the collaborate tool when you need another bot's answer");
 		expect(instruction()).not.toContain("callout tool");
 		expect(modelPrompt(context(), environment()).messages.at(-1)?.content).not.toContain(
 			"collaborate tool",
 		);
 
 		const collaboration = context();
-		collaboration.thread.type = "collaboration";
-		collaboration.thread.parentThreadId = "0199a3a0-0000-7000-8000-000000000010";
+		collaboration.conversation.kind = "collaboration";
+		collaboration.conversation.parentConversationId = "0199a3a0-0000-7000-8000-000000000010";
 		expect(modelPrompt(collaboration, environment()).system).toContain(
-			"Another agent opened this thread",
+			"Another bot opened this conversation",
 		);
-		// A thread somebody started from a pod's chat hangs off the chat, but no agent asked for it.
+		// A task somebody started from a channel's conversation hangs off the chat, but no bot asked for it.
 		const fromChat = context();
-		fromChat.thread.parentThreadId = "0199a3a0-0000-7000-8000-000000000010";
+		fromChat.conversation.parentConversationId = "0199a3a0-0000-7000-8000-000000000010";
 		expect(modelPrompt(fromChat, environment()).system).not.toContain(
-			"Another agent opened this thread",
+			"Another bot opened this conversation",
 		);
 	});
 
@@ -92,18 +90,18 @@ describe("modelPrompt", () => {
 			"You are in one of your tasks",
 		);
 		const inChannel = context();
-		inChannel.thread.type = "pod_chat";
-		inChannel.thread.hostAgentId = null;
+		inChannel.conversation.kind = "channel_conversation";
+		inChannel.conversation.botId = null;
 		inChannel.channel = { name: "Release", slug: "release" };
 		const instruction = modelPrompt(inChannel, environment()).messages.at(-1)?.content ?? "";
 		expect(instruction).toContain('You are in "Check the release" in the channel Release');
-		expect(instruction).toContain(`call ${START_THREAD_TOOL}`);
+		expect(instruction).toContain(`call ${START_TASK_TOOL}`);
 		expect(instruction).not.toContain("You are in one of your tasks");
 	});
 
 	it("tells the bot who can reach it: everyone, its creator, or its person", () => {
-		const promptFor = (agent: Partial<TurnContext["agent"]>) =>
-			modelPrompt({ ...context(), agent: { ...context().agent, ...agent } }, environment()).system;
+		const promptFor = (bot: Partial<TurnContext["bot"]>) =>
+			modelPrompt({ ...context(), bot: { ...context().bot, ...bot } }, environment()).system;
 		expect(promptFor({ visibility: "public" })).toContain("You are public");
 		expect(promptFor({ visibility: "private" })).toContain("You are private");
 		expect(promptFor({ visibility: "private", assistantOf: crypto.randomUUID() })).toContain(
@@ -123,7 +121,7 @@ describe("modelPrompt", () => {
 		expect(without?.content).not.toContain("Built-in tools");
 	});
 
-	it("grounds the turn in today's date and in what the agent can check", () => {
+	it("grounds the turn in today's date and in what the bot can check", () => {
 		const prompt = (builtInTools: string[]) =>
 			modelPrompt(context(), environment({ builtInTools }));
 		const instruction = (builtInTools: string[]) =>
@@ -150,13 +148,13 @@ describe("modelPrompt", () => {
 		expect(noTools).toContain("You cannot search the web");
 	});
 
-	it("gives the time where its routines run, named as people say it, so it need not ask", () => {
+	it("gives the time where its automations run, named as people say it, so it need not ask", () => {
 		const instruction = (disabledTools: string[]) =>
 			modelPrompt(
 				{
 					...context(),
 					workspaceTimeZone: "Australia/Sydney",
-					agent: { ...context().agent, disabledTools },
+					bot: { ...context().bot, disabledTools },
 				},
 				environment({ builtInTools: [] }),
 			).messages.at(-1)?.content ?? "";
@@ -168,10 +166,10 @@ describe("modelPrompt", () => {
 			'naming the zone once when you confirm a schedule ("8am Sydney time")',
 		);
 		expect(instruction([])).toContain("Don't ask the person for their timezone");
-		expect(instruction(["routines"])).not.toContain("Routines you set up");
+		expect(instruction(["automations"])).not.toContain("Automations you set up");
 	});
 
-	it("writes the agent's own tool calls into its history as one line each, not the whole output", () => {
+	it("writes the bot's own tool calls into its history as one line each, not the whole output", () => {
 		const input = context();
 		const own = input.messages[1];
 		if (!own) {
@@ -314,10 +312,10 @@ describe("modelPrompt", () => {
 		const history =
 			modelPrompt(input, environment(), new Map([[callId, fileId]])).messages[2]?.content ?? "";
 
-		expect(history).toContain(`kept as file ${fileId}, which read_thread_file reads`);
+		expect(history).toContain(`kept as file ${fileId}, which read_conversation_file reads`);
 	});
 
-	it("tells the agent which message a person's reply quotes", () => {
+	it("tells the bot which message a person's reply quotes", () => {
 		const input = context();
 		const [question, , finding] = input.messages;
 		if (!question || !finding) throw new Error("Context fixture has no messages to reply with");
@@ -373,7 +371,7 @@ describe("modelPrompt", () => {
 			"Sam (@sam): Check the release",
 			"I am checking it.",
 			`${eventLog}\nSam reacted 👀 to your message: "I am checking it."`,
-			"Reviewer (@reviewer) (agent): Migration is present.",
+			"Reviewer (@reviewer) (bot): Migration is present.",
 			`${eventLog}\nSam reacted 🎉 to Reviewer's message: "Migration is present."`,
 		]);
 	});
@@ -391,7 +389,7 @@ describe("modelPrompt", () => {
 			contentType: "application/pdf",
 			size: 2_200_000,
 		} as const;
-		const line = `[Attached report.pdf (application/pdf, 2.1 MB) as file ${report.id}, which read_thread_file reads]`;
+		const line = `[Attached report.pdf (application/pdf, 2.1 MB) as file ${report.id}, which read_conversation_file reads]`;
 
 		input.messages[0] = { ...asked, parts: [...asked.parts, report] };
 		expect(modelPrompt(input, environment()).messages[0]).toEqual({
@@ -407,7 +405,7 @@ ${line}`,
 		});
 	});
 
-	it("tells an agent that works in the sandbox it can copy an attached file there", () => {
+	it("tells a bot that works in the computer it can copy an attached file there", () => {
 		const input = context();
 		const asked = input.messages[0];
 		if (!asked) {
@@ -420,19 +418,19 @@ ${line}`,
 			contentType: "image/png",
 			size: 4_096,
 		} as const;
-		input.agent = { ...input.agent, usesSandbox: true };
+		input.bot = { ...input.bot, usesComputer: true };
 		input.messages[0] = { ...asked, content: "", parts: [chart] };
 
 		expect(modelPrompt(input, environment()).messages[0]).toEqual({
 			role: "user",
-			content: `Sam (@sam): [Attached chart.png (image/png, 4.0 KB) as file ${chart.id}, which read_thread_file reads, or copy_file_to_sandbox copies]`,
+			content: `Sam (@sam): [Attached chart.png (image/png, 4.0 KB) as file ${chart.id}, which read_conversation_file reads, or copy_file_to_computer copies]`,
 		});
 	});
 
-	it("leaves an agent's own attached files to its tool calls, and describes another's", () => {
+	it("leaves a bot's own attached files to its tool calls, and describes another's", () => {
 		const input = context();
 		const [, own, others] = input.messages;
-		if (!own || !others) throw new Error("Context fixture has no agents' messages");
+		if (!own || !others) throw new Error("Context fixture has no bots' messages");
 		const chart = {
 			type: "file",
 			id: "0199a3a0-0000-7000-8000-0000000000f4",
@@ -440,7 +438,7 @@ ${line}`,
 			contentType: "image/png",
 			size: 4_096,
 		} as const;
-		input.agent = { ...input.agent, usesSandbox: true };
+		input.bot = { ...input.bot, usesComputer: true };
 		input.messages[1] = { ...own, parts: [...own.parts, chart] };
 		input.messages[2] = { ...others, parts: [...others.parts, chart] };
 
@@ -449,59 +447,59 @@ ${line}`,
 		expect(history[1]).toEqual({ role: "assistant", content: "I am checking it." });
 		expect(history[2]).toMatchObject({
 			role: "user",
-			content: `Reviewer (@reviewer) (agent): Migration is present.
-[Attached chart.png (image/png, 4.0 KB) as file ${chart.id}, which read_thread_file reads, or copy_file_to_sandbox copies]`,
+			content: `Reviewer (@reviewer) (bot): Migration is present.
+[Attached chart.png (image/png, 4.0 KB) as file ${chart.id}, which read_conversation_file reads, or copy_file_to_computer copies]`,
 		});
 	});
 
-	it("says just before a routine's result which routine posted it, when, and what the run was told", () => {
+	it("says just before an automation's result which automation posted it, when, and what the run was told", () => {
 		const input = context();
 		const own = input.messages[1];
-		if (!own) throw new Error("Context fixture has no agent's message");
+		if (!own) throw new Error("Context fixture has no bot's message");
 		const run = {
-			executionId: "0199a3a0-0000-7000-8000-0000000000f6",
-			threadId: "0199a3a0-0000-7000-8000-0000000000f7",
-			routineId: "0199a3a0-0000-7000-8000-0000000000f8",
-			routineName: "Say Hello",
+			runId: "0199a3a0-0000-7000-8000-0000000000f6",
+			conversationId: "0199a3a0-0000-7000-8000-0000000000f7",
+			automationId: "0199a3a0-0000-7000-8000-0000000000f8",
+			automationName: "Say Hello",
 		};
-		input.messages[1] = { ...own, routineResultOf: run };
-		input.routineInstructions = new Map([[run.executionId, "Say hello"]]);
+		input.messages[1] = { ...own, automationResultOf: run };
+		input.automationInstructions = new Map([[run.runId, "Say hello"]]);
 
 		expect(modelPrompt(input, environment()).messages.slice(1, 3)).toEqual([
 			{
 				role: "user",
 				content: `[Platform event log. Generated by the application, not authored by a conversation participant.]
-The next message is the result of your routine "Say Hello", posted at Thu, 10 Sept 2026, 04:01 UTC when the run finished. The run's instructions were:
+The next message is the result of your automation "Say Hello", posted at Thu, 10 Sept 2026, 04:01 UTC when the run finished. The run's instructions were:
 Say hello`,
 			},
 			{ role: "assistant", content: own.content },
 		]);
 	});
 
-	it("lists the artifacts a routine's result showed after it, so a later turn can find them", () => {
+	it("lists the files an automation's result showed after it, so a later turn can find them", () => {
 		const input = context();
 		const own = input.messages[1];
-		if (!own) throw new Error("Context fixture has no agent's message");
+		if (!own) throw new Error("Context fixture has no bot's message");
 		const traction = {
-			type: "artifact",
-			artifactId: "0199a3a0-0000-7000-8000-0000000000f5",
+			type: "written_file",
+			fileId: "0199a3a0-0000-7000-8000-0000000000f5",
 			kind: "html",
 			title: "Weekly traction",
 			version: 3,
 		} as const;
 		const result = {
 			...own,
-			routineResultOf: {
-				executionId: "0199a3a0-0000-7000-8000-0000000000f6",
-				threadId: "0199a3a0-0000-7000-8000-0000000000f7",
-				routineId: "0199a3a0-0000-7000-8000-0000000000f8",
-				routineName: "Daily traction",
+			automationResultOf: {
+				runId: "0199a3a0-0000-7000-8000-0000000000f6",
+				conversationId: "0199a3a0-0000-7000-8000-0000000000f7",
+				automationId: "0199a3a0-0000-7000-8000-0000000000f8",
+				automationName: "Daily traction",
 			},
 		};
 		// What the line before a result says is the test above's to check.
 		const posted = expect.objectContaining({ role: "user" });
-		const shown = `[Platform event log for Host Agent. Generated by the application, not authored by a conversation participant.]
-[Showed the html artifact "Weekly traction" as written at version 3, artifact ${traction.artifactId}; artifact_read reads its current version]`;
+		const shown = `[Platform event log for Host Bot. Generated by the application, not authored by a conversation participant.]
+[Showed the html file "Weekly traction" as written at version 3, file ${traction.fileId}; file_read reads its current version]`;
 
 		input.messages[1] = { ...result, parts: [...own.parts, traction] };
 		expect(modelPrompt(input, environment()).messages.slice(1, 4)).toEqual([
@@ -547,22 +545,22 @@ Say hello`,
 
 function context(): TurnContext {
 	return {
-		thread: {
+		conversation: {
 			id: "0199a3a0-0000-7000-8000-000000000001",
 			workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 			title: "Check the release",
-			type: "conversation",
-			hostAgentId: "0199a3a0-0000-7000-8000-000000000003",
-			parentThreadId: null,
+			kind: "task",
+			botId: "0199a3a0-0000-7000-8000-000000000003",
+			parentConversationId: null,
 		},
-		agent: {
+		bot: {
 			id: "0199a3a0-0000-7000-8000-000000000003",
-			name: "Host Agent",
-			handle: "host-agent",
+			name: "Host Bot",
+			handle: "host-bot",
 			model: "claude-sonnet-4-20250514",
 			prompt: "Check facts carefully.",
 			disabledTools: [],
-			usesSandbox: false,
+			usesComputer: false,
 			naturalBrowsing: false,
 			assistantOf: null,
 			visibility: "public",
@@ -572,27 +570,27 @@ function context(): TurnContext {
 		reason: "default",
 		windowTokens: 256_000,
 		compaction: undefined,
-		routineInstructions: new Map(),
+		automationInstructions: new Map(),
 		channel: null,
 		workspaceName: "Suga",
 		workspaceSlug: "suga",
 		workspaceTimeZone: "UTC",
 		askedBy: null,
 		startedFor: null,
-		crew: [],
+		collaborators: [],
 		participants: [
 			testPerson({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
 			{
-				kind: "agent",
+				kind: "bot",
 				id: "0199a3a0-0000-7000-8000-000000000003",
-				name: "Host Agent",
-				handle: "host-agent",
+				name: "Host Bot",
+				handle: "host-bot",
 				color: "green",
 				face: "pill",
 				shape: "circle",
 			},
 			{
-				kind: "agent",
+				kind: "bot",
 				id: "0199a3a0-0000-7000-8000-000000000005",
 				name: "Reviewer",
 				handle: "reviewer",
@@ -604,7 +602,7 @@ function context(): TurnContext {
 		messages: [
 			{
 				id: "0199a3a0-0000-7000-8000-000000000006",
-				threadId: "0199a3a0-0000-7000-8000-000000000001",
+				conversationId: "0199a3a0-0000-7000-8000-000000000001",
 				author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
 				kind: "text",
 				status: "complete",
@@ -614,12 +612,12 @@ function context(): TurnContext {
 			},
 			{
 				id: "0199a3a0-0000-7000-8000-000000000007",
-				threadId: "0199a3a0-0000-7000-8000-000000000001",
+				conversationId: "0199a3a0-0000-7000-8000-000000000001",
 				author: {
-					kind: "agent",
+					kind: "bot",
 					id: "0199a3a0-0000-7000-8000-000000000003",
-					name: "Host Agent",
-					handle: "host-agent",
+					name: "Host Bot",
+					handle: "host-bot",
 					color: "green",
 					face: "pill",
 					shape: "circle",
@@ -632,9 +630,9 @@ function context(): TurnContext {
 			},
 			{
 				id: "0199a3a0-0000-7000-8000-000000000008",
-				threadId: "0199a3a0-0000-7000-8000-000000000001",
+				conversationId: "0199a3a0-0000-7000-8000-000000000001",
 				author: {
-					kind: "agent",
+					kind: "bot",
 					id: "0199a3a0-0000-7000-8000-000000000005",
 					name: "Reviewer",
 					handle: "reviewer",

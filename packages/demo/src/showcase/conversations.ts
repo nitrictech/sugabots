@@ -1,33 +1,37 @@
 import { randomUUID } from "node:crypto";
-import type { ArtifactKind, ConnectionTool, JsonValue } from "@sugabots/contracts";
+import type { ConnectionTool, JsonValue, WrittenFileKind } from "@sugabots/contracts";
 import { CONNECTION_TOOL_SEPARATOR, FIRST_CHAT_NAME } from "@sugabots/contracts";
-import { Artifacts } from "@sugabots/core/artifacts/artifacts";
-import { reachesThreadFor } from "@sugabots/core/authorization/access";
-import { threadTitleFrom } from "@sugabots/core/conversations/chats/thread-title";
-import { ARTIFACT_WRITE_TOOL } from "@sugabots/core/conversations/tools/artifacts/tool";
+import { reachesConversationFor } from "@sugabots/core/authorization/access";
+import { taskTitleFrom } from "@sugabots/core/conversations/chats/task-title";
+import { seedConversation } from "@sugabots/core/conversations/seed.test-support";
+import { FILE_WRITE_TOOL } from "@sugabots/core/conversations/tools/files/tool";
 import { query } from "@sugabots/core/database/database";
 import {
-	agent,
-	artifact,
-	artifactVersion,
-	collaboration,
+	automation,
+	automationFeed,
+	automationRun,
+	bot,
+	channelBot,
+	channelConversation,
 	connection,
+	conversation,
+	conversationParticipant,
+	conversationRead,
+	file,
+	fileVersion,
 	message,
 	messageReaction,
-	podAgent,
-	routine,
-	routineExecution,
+	type PlacedConversationRow,
+	placedConversation,
 	type StoredMessagePart,
-	type ThreadRow,
-	thread,
-	threadParticipant,
-	threadRead,
+	task,
 	toolCall,
 	turn,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
+import { Files } from "@sugabots/core/files/files";
 import type { ToolAccess } from "@sugabots/core/providers/sql";
-import { and, eq, isNotNull, isNull, max, sql } from "drizzle-orm";
+import { and, eq, getColumns, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { Effect } from "effect";
 
 /**
@@ -35,7 +39,7 @@ import { Effect } from "effect";
  * them from, so the screenshots need no model, no second login and no waiting.
  * Nothing is announced: the app shows them when it next loads.
  *
- * Each channel's chat and each task is written once: one that already has
+ * Each channel's conversation and each task is written once: one that already has
  * messages is left alone, and so is an automation that already has runs.
  */
 
@@ -84,7 +88,7 @@ type ScriptedPart<Person extends string> =
 				allowed?: { by: Person; at: Clock };
 			};
 	  }
-	| { artifact: { kind: ArtifactKind; title: string; content: string } };
+	| { file: { kind: WrittenFileKind; title: string; content: string } };
 
 interface ScriptedMessage<Person extends string> {
 	/** How a later message quotes this one. */
@@ -117,10 +121,10 @@ export interface ChatScene<Person extends string> {
 	messages: readonly ScriptedMessage<Person>[];
 }
 
-/** One past run of a bot's automation, which posts its result in the automation's thread. */
-export interface RoutineRun {
+/** One past run of a bot's automation, which posts its result in the automation's feed. */
+export interface AutomationRun {
 	bot: string;
-	routine: string;
+	automation: string;
 	scheduledAt: Clock;
 	finishedAt: Clock;
 	result: string;
@@ -138,7 +142,7 @@ export interface SeedConnection {
 
 /**
  * The day the conversations happen: the latest weekday whose morning is over,
- * so none of them is in the future and the weekday routines ran on it.
+ * so none of them is in the future and the weekday automations ran on it.
  */
 function conversationDay(now: Date): Date {
 	const day = new Date(now);
@@ -186,8 +190,8 @@ export const ensureConnections = (input: {
 					.select(
 						db
 							.select({
-								workspaceId: agent.workspaceId,
-								agentId: agent.id,
+								workspaceId: bot.workspaceId,
+								botId: bot.id,
 								name: sql<string>`${seed.name}`.as("name"),
 								handle: sql<string>`${seed.handle}`.as("handle"),
 								url: sql<string>`${seed.url}`.as("url"),
@@ -198,12 +202,12 @@ export const ensureConnections = (input: {
 								),
 								createdById: sql<string>`${input.createdById}::uuid`.as("created_by_id"),
 							})
-							.from(agent)
-							.innerJoin(podAgent, eq(podAgent.agentId, agent.id))
+							.from(bot)
+							.innerJoin(channelBot, eq(channelBot.botId, bot.id))
 							.where(
 								and(
-									eq(agent.workspaceId, input.workspaceId),
-									eq(podAgent.podId, channelIdOf(input.channelIds, seed.channel)),
+									eq(bot.workspaceId, input.workspaceId),
+									eq(channelBot.channelId, channelIdOf(input.channelIds, seed.channel)),
 								),
 							),
 					)
@@ -217,14 +221,14 @@ export const ensureConversations = <Person extends string>(
 	written: {
 		chats: readonly ChatScene<Person>[];
 		tasks: readonly TaskScene<Person>[];
-		runs: readonly RoutineRun[];
+		runs: readonly AutomationRun[];
 	},
 ) =>
 	Effect.gen(function* () {
 		const day = conversationDay(new Date());
 		let count = 0;
 		for (const run of written.runs) {
-			if (yield* writeRoutineRun(cast, day, run)) count += 1;
+			if (yield* writeAutomationRun(cast, day, run)) count += 1;
 		}
 		for (const chat of written.chats) {
 			if (yield* writeChatScene(cast, day, chat)) count += 1;
@@ -242,109 +246,89 @@ export const ensureConversations = <Person extends string>(
  */
 const taskOf = <Person extends string>(cast: Cast<Person>, day: Date, scene: TaskScene<Person>) =>
 	Effect.gen(function* () {
-		const agentId = idOf(cast.botIds, scene.bot);
+		const botId = idOf(cast.botIds, scene.bot);
 		const [first] = scene.messages;
-		const title = threadTitleFrom(textOf(first.parts));
+		const title = taskTitleFrom(textOf(first.parts));
 		const [existing] = yield* query((db) =>
 			db
-				.select()
-				.from(thread)
-				.where(
-					and(
-						eq(thread.type, "conversation"),
-						eq(thread.hostAgentId, agentId),
-						eq(thread.title, title),
-					),
-				),
+				.select({ conversation: getColumns(placedConversation) })
+				.from(task)
+				.innerJoin(placedConversation, eq(placedConversation.id, task.conversationId))
+				.where(and(eq(task.botId, botId), eq(placedConversation.title, title))),
 		);
-		if (existing) return existing;
-		const id = randomUUID();
-		const initiatorUserId = cast.people[first.from.person];
+		if (existing) return existing.conversation;
+		const startedById = cast.people[first.from.person];
 		const at = timeOn(day, first.at);
-		const [created] = yield* query((db) =>
-			db
-				.insert(thread)
-				.values({
-					id,
-					workspaceId: cast.workspaceId,
-					hostAgentId: agentId,
-					conversationId: id,
-					type: "conversation",
-					title,
-					initiatorUserId,
-					createdAt: at,
-				})
-				.returning(),
+		const { id } = yield* query((db) =>
+			seedConversation(db, {
+				workspaceId: cast.workspaceId,
+				kind: "task",
+				botId,
+				startedById,
+				title,
+				createdAt: at,
+			}),
 		);
-		if (!created) return yield* Effect.die(new Error(`Could not start a task with ${scene.bot}`));
 		yield* query((db) =>
-			db.insert(threadParticipant).values([
-				{ threadId: id, userId: initiatorUserId, createdAt: at },
-				{ threadId: id, agentId, createdAt: at },
+			db.insert(conversationParticipant).values([
+				{ conversationId: id, userId: startedById, createdAt: at },
+				{ conversationId: id, botId, createdAt: at },
 			]),
 		);
-		return created;
+		return yield* placedById(id);
 	});
 
 /** The channel's main chat, made if it is not there yet. */
-const mainChatOf = (cast: Cast<string>, podId: string) =>
+const mainChatOf = (cast: Cast<string>, channelId: string) =>
 	Effect.gen(function* () {
-		const id = randomUUID();
-		yield* query((db) =>
-			db
-				.insert(thread)
-				.values({
-					id,
-					workspaceId: cast.workspaceId,
-					podId,
-					hostAgentId: null,
-					conversationId: id,
-					type: "pod_chat",
-					main: true,
-					title: FIRST_CHAT_NAME,
-				})
-				.onConflictDoNothing({ target: thread.podId, where: sql`${thread.main}` }),
+		const mainChatId = () =>
+			query((db) =>
+				db
+					.select({ id: channelConversation.conversationId })
+					.from(channelConversation)
+					.where(
+						and(eq(channelConversation.main, true), eq(channelConversation.channelId, channelId)),
+					),
+			).pipe(Effect.map(([found]) => found?.id));
+		const existing = yield* mainChatId();
+		if (existing) return yield* placedById(existing);
+		const { id } = yield* query((db) =>
+			seedConversation(db, {
+				workspaceId: cast.workspaceId,
+				kind: "channel_conversation",
+				channelId,
+				main: true,
+				title: FIRST_CHAT_NAME,
+			}),
 		);
-		const [podChat] = yield* query((db) =>
-			db
-				.select()
-				.from(thread)
-				.where(and(eq(thread.main, true), eq(thread.podId, podId))),
-		);
-		if (!podChat) return yield* Effect.die(new Error("Could not open the channel's main chat"));
-		return podChat;
+		return yield* placedById(id);
 	});
 
-/** An automation's own thread, where each of its runs posts its result, made if it is not there yet. */
-const routineThreadOf = (
+/** An automation's feed, where each of its runs posts its result, made if it is not there yet. */
+const automationFeedOf = (
 	cast: Cast<string>,
-	routineRow: { id: string; agentId: string; name: string },
+	automationRow: { id: string; botId: string; name: string },
 ) =>
 	Effect.gen(function* () {
 		const [existing] = yield* query((db) =>
-			db.select().from(thread).where(eq(thread.routineId, routineRow.id)),
-		);
-		if (existing) return existing;
-		const id = randomUUID();
-		const [created] = yield* query((db) =>
 			db
-				.insert(thread)
-				.values({
-					id,
-					workspaceId: cast.workspaceId,
-					hostAgentId: routineRow.agentId,
-					conversationId: id,
-					routineId: routineRow.id,
-					type: "routine_feed",
-					title: routineRow.name,
-				})
-				.returning(),
+				.select({ id: automationFeed.conversationId })
+				.from(automationFeed)
+				.where(eq(automationFeed.automationId, automationRow.id)),
 		);
-		if (!created) return yield* Effect.die(new Error(`Could not open ${routineRow.name}'s thread`));
+		if (existing) return yield* placedById(existing.id);
+		const { id } = yield* query((db) =>
+			seedConversation(db, {
+				workspaceId: cast.workspaceId,
+				kind: "automation_feed",
+				automationId: automationRow.id,
+				title: automationRow.name,
+			}),
+		);
 		yield* query((db) =>
-			db.insert(threadParticipant).values({ threadId: id, agentId: routineRow.agentId }),
+			db.insert(conversationParticipant).values({ conversationId: id, botId: automationRow.botId }),
 		);
-		return created;
+		return yield* placedById(id);
 	});
 
 /** Writes the task, unless it already has messages. */
@@ -356,10 +340,14 @@ const writeTask = <Person extends string>(
 	Effect.gen(function* () {
 		const task = yield* taskOf(cast, day, scene);
 		const [said] = yield* query((db) =>
-			db.select({ id: message.id }).from(message).where(eq(message.threadId, task.id)).limit(1),
+			db
+				.select({ id: message.id })
+				.from(message)
+				.where(eq(message.conversationId, task.id))
+				.limit(1),
 		);
 		if (said) return false;
-		yield* writeMessages(cast, day, { inThread: task, messages: scene.messages });
+		yield* writeMessages(cast, day, { inConversation: task, messages: scene.messages });
 		yield* touch(task.id);
 		return true;
 	});
@@ -376,29 +364,29 @@ const writeChatScene = <Person extends string>(
 			db
 				.select({ id: message.id })
 				.from(message)
-				.where(and(eq(message.threadId, mainChat.id), isNotNull(message.authorUserId)))
+				.where(and(eq(message.conversationId, mainChat.id), isNotNull(message.authorUserId)))
 				.limit(1),
 		);
 		if (said) return false;
-		yield* writeMessages(cast, day, { inThread: mainChat, messages: scene.messages });
+		yield* writeMessages(cast, day, { inConversation: mainChat, messages: scene.messages });
 		yield* touch(mainChat.id);
 		return true;
 	});
 
 /**
- * Writes the scripted messages into the thread, each bot reply answering the
+ * Writes the scripted messages into the conversation, each bot reply answering the
  * person's message before it.
  */
 const writeMessages = <Person extends string>(
 	cast: Cast<Person>,
 	day: Date,
 	input: {
-		inThread: ThreadRow;
+		inConversation: PlacedConversationRow;
 		messages: readonly ScriptedMessage<Person>[];
 	},
 ) =>
 	Effect.gen(function* () {
-		const threadId = input.inThread.id;
+		const conversationId = input.inConversation.id;
 		const keyed = new Map<string, string>();
 		let lastPersonMessage: string | undefined;
 		for (const scripted of input.messages) {
@@ -407,15 +395,15 @@ const writeMessages = <Person extends string>(
 			const messageId =
 				"person" in scripted.from
 					? yield* writePersonMessage({
-							threadId,
+							conversationId,
 							userId: cast.people[scripted.from.person],
 							text: textOf(scripted.parts),
 							at,
 							replyToMessageId,
 						})
 					: yield* writeBotReply(cast, day, {
-							threadId,
-							conversationId: input.inThread.conversationId ?? threadId,
+							conversationId,
+							rootConversationId: input.inConversation.rootConversationId ?? conversationId,
 							bot: scripted.from.bot,
 							triggerMessageId: lastPersonMessage,
 							parts: scripted.parts,
@@ -455,7 +443,7 @@ const REACTION_DELAY_MILLISECONDS = 60_000;
 const REPLY_MILLISECONDS = 20_000;
 
 const writePersonMessage = (input: {
-	threadId: string;
+	conversationId: string;
 	userId: string;
 	text: string;
 	at: Date;
@@ -464,15 +452,15 @@ const writePersonMessage = (input: {
 	Effect.gen(function* () {
 		yield* query((db) =>
 			db
-				.insert(threadParticipant)
-				.values({ threadId: input.threadId, userId: input.userId, createdAt: input.at })
+				.insert(conversationParticipant)
+				.values({ conversationId: input.conversationId, userId: input.userId, createdAt: input.at })
 				.onConflictDoNothing(),
 		);
 		const id = randomUUID();
 		yield* query((db) =>
 			db.insert(message).values({
 				id,
-				threadId: input.threadId,
+				conversationId: input.conversationId,
 				authorUserId: input.userId,
 				kind: "text",
 				status: "complete",
@@ -493,8 +481,8 @@ const writeBotReply = <Person extends string>(
 	cast: Cast<Person>,
 	day: Date,
 	input: {
-		threadId: string;
 		conversationId: string;
+		rootConversationId: string;
 		bot: string;
 		triggerMessageId: string | undefined;
 		parts: readonly ScriptedPart<Person>[];
@@ -506,12 +494,12 @@ const writeBotReply = <Person extends string>(
 		if (!input.triggerMessageId) {
 			return yield* Effect.die(new Error(`${input.bot} replies before anyone has written`));
 		}
-		const agentId = idOf(cast.botIds, input.bot);
+		const botId = idOf(cast.botIds, input.bot);
 		const { stored, content, placed } = placeParts(input.parts);
 		// A call still waiting for approval leaves its turn waiting and its reply unfinished.
 		const waiting = placed.some(({ part }) => "toolCall" in part && !part.toolCall.allowed);
 		const turnId = yield* writeTurn(cast, {
-			threadId: input.threadId,
+			conversationId: input.conversationId,
 			bot: input.bot,
 			triggerMessageId: input.triggerMessageId,
 			at: input.at,
@@ -521,8 +509,8 @@ const writeBotReply = <Person extends string>(
 		yield* query((db) =>
 			db.insert(message).values({
 				id: messageId,
-				threadId: input.threadId,
-				authorAgentId: agentId,
+				conversationId: input.conversationId,
+				authorBotId: botId,
 				kind: "text",
 				status: waiting ? "streaming" : "complete",
 				parts: stored,
@@ -536,33 +524,33 @@ const writeBotReply = <Person extends string>(
 			if ("collaboration" in part) {
 				yield* writeCollaboration(cast, day, {
 					id,
-					parentThreadId: input.threadId,
+					parentConversationId: input.conversationId,
 					parentMessageId: messageId,
-					conversationId: input.conversationId,
+					rootConversationId: input.rootConversationId,
 					askingBot: input.bot,
 					turnId,
 					atOffset,
 					asked: input.at,
 					...part.collaboration,
 				});
-			} else if ("artifact" in part) {
-				yield* writeArtifact(cast, {
+			} else if ("file" in part) {
+				yield* writeFile(cast, {
 					id,
-					threadId: input.threadId,
+					conversationId: input.conversationId,
 					messageId,
 					turnId,
 					bot: input.bot,
 					atOffset,
 					writtenAt: input.at,
-					...part.artifact,
+					...part.file,
 				});
 			} else {
 				yield* writeToolCall(cast, day, {
 					id,
-					threadId: input.threadId,
+					conversationId: input.conversationId,
 					messageId,
 					turnId,
-					agentId,
+					botId,
 					atOffset,
 					startedAt: input.at,
 					...part.toolCall,
@@ -580,7 +568,13 @@ const writeBotReply = <Person extends string>(
  */
 const writeTurn = (
 	cast: Cast<string>,
-	input: { threadId: string; bot: string; triggerMessageId: string; at: Date; waiting?: boolean },
+	input: {
+		conversationId: string;
+		bot: string;
+		triggerMessageId: string;
+		at: Date;
+		waiting?: boolean;
+	},
 ) =>
 	Effect.gen(function* () {
 		const id = randomUUID();
@@ -588,8 +582,8 @@ const writeTurn = (
 		yield* query((db) =>
 			db.insert(turn).values({
 				id,
-				threadId: input.threadId,
-				agentId: idOf(cast.botIds, input.bot),
+				conversationId: input.conversationId,
+				botId: idOf(cast.botIds, input.bot),
 				triggerMessageId: input.triggerMessageId,
 				status: input.waiting ? "waiting" : "done",
 				owner: input.waiting ? STAGED_TURN_OWNER : null,
@@ -606,15 +600,15 @@ const writeTurn = (
 /** The owner a staged waiting turn names, in place of a workflow execution's. */
 export const STAGED_TURN_OWNER = "showcase-stage";
 
-/** The bots' own thread under the reply: the brief, the collaborator's answer, and the row tying them to the reply. */
+/** The bots' own conversation under the reply: the brief, the collaborator's answer, and the row tying them to the reply. */
 const writeCollaboration = (
 	cast: Cast<string>,
 	day: Date,
 	input: {
 		id: string;
-		parentThreadId: string;
+		parentConversationId: string;
 		parentMessageId: string;
-		conversationId: string;
+		rootConversationId: string;
 		askingBot: string;
 		turnId: string;
 		atOffset: number;
@@ -630,34 +624,41 @@ const writeCollaboration = (
 		const askingId = idOf(cast.botIds, input.askingBot);
 		const collaboratorId = idOf(cast.botIds, input.with);
 		const answeredAt = timeOn(day, input.answeredAt);
-		const [child] = yield* query((db) =>
-			db
-				.insert(thread)
-				.values({
-					workspaceId: cast.workspaceId,
-					hostAgentId: collaboratorId,
-					conversationId: input.conversationId,
-					type: "collaboration",
-					title: input.title,
-					parentThreadId: input.parentThreadId,
+		const child = yield* query((db) =>
+			seedConversation(db, {
+				workspaceId: cast.workspaceId,
+				kind: "collaboration",
+				title: input.title,
+				createdAt: input.asked,
+				updatedAt: answeredAt,
+				collaboration: {
+					id: input.id,
+					parentConversationId: input.parentConversationId,
+					rootConversationId: input.rootConversationId,
+					parentMessageId: input.parentMessageId,
+					turnId: input.turnId,
+					collaboratorBotId: collaboratorId,
+					brief: input.brief,
+					status: "answered",
+					answer: input.answer,
+					atOffset: input.atOffset,
 					createdAt: input.asked,
 					updatedAt: answeredAt,
-				})
-				.returning(),
+				},
+			}),
 		);
-		if (!child) return yield* Effect.die(new Error("Could not open the collaboration"));
 		yield* query((db) =>
-			db.insert(threadParticipant).values([
-				{ threadId: child.id, agentId: askingId },
-				{ threadId: child.id, agentId: collaboratorId },
+			db.insert(conversationParticipant).values([
+				{ conversationId: child.id, botId: askingId },
+				{ conversationId: child.id, botId: collaboratorId },
 			]),
 		);
 		const briefId = randomUUID();
 		yield* query((db) =>
 			db.insert(message).values({
 				id: briefId,
-				threadId: child.id,
-				authorAgentId: askingId,
+				conversationId: child.id,
+				authorBotId: askingId,
 				kind: "text",
 				status: "complete",
 				parts: [{ type: "text", text: input.brief }],
@@ -666,37 +667,21 @@ const writeCollaboration = (
 			}),
 		);
 		const answerTurn = yield* writeTurn(cast, {
-			threadId: child.id,
+			conversationId: child.id,
 			bot: input.with,
 			triggerMessageId: briefId,
 			at: answeredAt,
 		});
 		yield* query((db) =>
 			db.insert(message).values({
-				threadId: child.id,
-				authorAgentId: collaboratorId,
+				conversationId: child.id,
+				authorBotId: collaboratorId,
 				kind: "text",
 				status: "complete",
 				parts: [{ type: "text", text: input.answer }],
 				content: input.answer,
 				turnId: answerTurn,
 				createdAt: answeredAt,
-			}),
-		);
-		yield* query((db) =>
-			db.insert(collaboration).values({
-				id: input.id,
-				parentThreadId: input.parentThreadId,
-				parentMessageId: input.parentMessageId,
-				turnId: input.turnId,
-				childThreadId: child.id,
-				collaboratorAgentId: collaboratorId,
-				brief: input.brief,
-				status: "answered",
-				answer: input.answer,
-				atOffset: input.atOffset,
-				createdAt: input.asked,
-				updatedAt: answeredAt,
 			}),
 		);
 	});
@@ -707,10 +692,10 @@ const writeToolCall = (
 	day: Date,
 	input: {
 		id: string;
-		threadId: string;
+		conversationId: string;
 		messageId: string;
 		turnId: string;
-		agentId: string;
+		botId: string;
 		atOffset: number;
 		startedAt: Date;
 		connection: string;
@@ -726,7 +711,7 @@ const writeToolCall = (
 			db
 				.select({ id: connection.id, revision: connection.configurationRevision })
 				.from(connection)
-				.where(and(eq(connection.agentId, input.agentId), eq(connection.handle, input.connection))),
+				.where(and(eq(connection.botId, input.botId), eq(connection.handle, input.connection))),
 		);
 		if (!used) return yield* Effect.die(new Error(`No ${input.connection} connection`));
 		const allowedAt = input.allowed ? timeOn(day, input.allowed.at) : undefined;
@@ -749,7 +734,7 @@ const writeToolCall = (
 		yield* query((db) =>
 			db.insert(toolCall).values({
 				id: input.id,
-				threadId: input.threadId,
+				conversationId: input.conversationId,
 				messageId: input.messageId,
 				turnId: input.turnId,
 				tool: `${input.connection}${CONNECTION_TOOL_SEPARATOR}${input.tool}`,
@@ -769,65 +754,65 @@ const writeToolCall = (
 		);
 	});
 
-/** How long a scripted bot takes to write an artifact. */
-const ARTIFACT_WRITE_MILLISECONDS = 8_000;
+/** How long a scripted bot takes to write a file. */
+const FILE_WRITE_MILLISECONDS = 8_000;
 
 /**
- * An artifact the bot wrote, made the way its artifact tool makes one, and the
- * `artifact_write` call that shows it under the reply.
+ * A file the bot wrote, made the way its file tool makes one, and the
+ * `file_write` call that shows it under the reply.
  */
-const writeArtifact = (
+const writeFile = (
 	cast: Cast<string>,
 	input: {
 		id: string;
-		threadId: string;
+		conversationId: string;
 		messageId: string;
 		turnId: string;
 		bot: string;
 		atOffset: number;
 		writtenAt: Date;
-		kind: ArtifactKind;
+		kind: WrittenFileKind;
 		title: string;
 		content: string;
 	},
 ) =>
 	Effect.gen(function* () {
-		const authoring = yield* Artifacts.Authoring;
+		const authoring = yield* Files.Authoring;
 		const { kind, title, content } = input;
 		const written = yield* authoring
 			.create(
 				{
 					workspaceId: cast.workspaceId,
-					agentId: idOf(cast.botIds, input.bot),
-					threadId: input.threadId,
+					botId: idOf(cast.botIds, input.bot),
+					conversationId: input.conversationId,
 				},
 				{ kind, title, content },
 			)
 			.pipe(Effect.orDie);
 		yield* query((db) =>
 			db
-				.update(artifact)
+				.update(file)
 				.set({ createdAt: input.writtenAt, updatedAt: input.writtenAt })
-				.where(eq(artifact.id, written.id)),
+				.where(eq(file.id, written.id)),
 		);
 		yield* query((db) =>
 			db
-				.update(artifactVersion)
+				.update(fileVersion)
 				.set({ createdAt: input.writtenAt })
-				.where(eq(artifactVersion.artifactId, written.id)),
+				.where(eq(fileVersion.fileId, written.id)),
 		);
 		yield* query((db) =>
 			db.insert(toolCall).values({
 				id: input.id,
-				threadId: input.threadId,
+				conversationId: input.conversationId,
 				messageId: input.messageId,
 				turnId: input.turnId,
-				tool: ARTIFACT_WRITE_TOOL,
+				tool: FILE_WRITE_TOOL,
 				sdkToolCallId: randomUUID(),
 				input: { kind, title, content },
 				output: {
 					status: "written",
-					artifactId: written.id,
+					fileId: written.id,
 					kind,
 					title,
 					version: written.version,
@@ -835,7 +820,7 @@ const writeArtifact = (
 				status: "completed",
 				mutating: true,
 				atOffset: input.atOffset,
-				startedAt: new Date(input.writtenAt.getTime() - ARTIFACT_WRITE_MILLISECONDS),
+				startedAt: new Date(input.writtenAt.getTime() - FILE_WRITE_MILLISECONDS),
 				finishedAt: input.writtenAt,
 				createdAt: input.writtenAt,
 				updatedAt: input.writtenAt,
@@ -844,94 +829,87 @@ const writeArtifact = (
 	});
 
 /**
- * A finished run, as the automation runner leaves one: its thread in the
+ * A finished run, as the automation runner leaves one: its conversation in the
  * automation's own, what started it, the bot's reply there, and that reply
- * posted as the run's result in the automation's thread.
+ * posted as the run's result in the automation's feed.
  * Skipped when the automation already has a run.
  */
-const writeRoutineRun = (cast: Cast<string>, day: Date, run: RoutineRun) =>
+const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =>
 	Effect.gen(function* () {
-		const agentId = idOf(cast.botIds, run.bot);
+		const botId = idOf(cast.botIds, run.bot);
 		const [defined] = yield* query((db) =>
 			db
 				.select()
-				.from(routine)
+				.from(automation)
 				.where(
 					and(
-						eq(routine.agentId, agentId),
-						eq(routine.name, run.routine),
-						isNull(routine.deletedAt),
+						eq(automation.botId, botId),
+						eq(automation.name, run.automation),
+						isNull(automation.deletedAt),
 					),
 				),
 		);
-		if (!defined) return yield* Effect.die(new Error(`${run.bot} has no routine ${run.routine}`));
+		if (!defined)
+			return yield* Effect.die(new Error(`${run.bot} has no automation ${run.automation}`));
 		const scheduledAt = timeOn(day, run.scheduledAt);
 		const [ranAlready] = yield* query((db) =>
 			db
-				.select({ id: routineExecution.id })
-				.from(routineExecution)
+				.select({ id: automationRun.id })
+				.from(automationRun)
 				.where(
 					and(
-						eq(routineExecution.routineId, defined.id),
-						eq(routineExecution.triggerIdentity, scheduledAt.toISOString()),
+						eq(automationRun.automationId, defined.id),
+						eq(automationRun.triggerIdentity, scheduledAt.toISOString()),
 					),
 				),
 		);
 		if (ranAlready) return false;
 
-		const routineThread = yield* routineThreadOf(cast, defined);
+		const feed = yield* automationFeedOf(cast, defined);
 		const finishedAt = timeOn(day, run.finishedAt);
-		const [runThread] = yield* query((db) =>
-			db
-				.insert(thread)
-				.values({
-					workspaceId: cast.workspaceId,
-					hostAgentId: agentId,
-					conversationId: routineThread.id,
-					type: "routine",
-					title: `${run.routine} - ${scheduledAt.toISOString()}`,
-					createdAt: scheduledAt,
-					updatedAt: finishedAt,
-				})
-				.returning(),
-		);
-		if (!runThread) return yield* Effect.die(new Error("Could not open the run's thread"));
-		yield* query((db) => db.insert(threadParticipant).values({ threadId: runThread.id, agentId }));
-		const executionId = randomUUID();
-		yield* query((db) =>
-			db.insert(routineExecution).values({
-				id: executionId,
-				routineId: defined.id,
+		const runId = randomUUID();
+		const runConversation = yield* query((db) =>
+			seedConversation(db, {
 				workspaceId: cast.workspaceId,
-				agentId,
-				threadId: runThread.id,
-				triggerKind: "cron",
-				triggerIdentity: scheduledAt.toISOString(),
-				trigger: {
-					kind: "cron",
-					scheduledAt: scheduledAt.toISOString(),
-					acceptedAt: scheduledAt.toISOString(),
-				},
-				routineName: defined.name,
-				instructions: defined.instructions,
-				state: "completed",
-				acceptedAt: scheduledAt,
-				startedAt: scheduledAt,
-				finishedAt,
+				kind: "run",
+				title: `${run.automation} - ${scheduledAt.toISOString()}`,
 				createdAt: scheduledAt,
 				updatedAt: finishedAt,
+				run: {
+					id: runId,
+					automationId: defined.id,
+					botId,
+					triggerKind: "schedule",
+					triggerIdentity: scheduledAt.toISOString(),
+					trigger: {
+						kind: "schedule",
+						scheduledAt: scheduledAt.toISOString(),
+						acceptedAt: scheduledAt.toISOString(),
+					},
+					automationName: defined.name,
+					instructions: defined.instructions,
+					state: "completed",
+					acceptedAt: scheduledAt,
+					startedAt: scheduledAt,
+					finishedAt,
+					createdAt: scheduledAt,
+					updatedAt: finishedAt,
+				},
 			}),
+		);
+		yield* query((db) =>
+			db.insert(conversationParticipant).values({ conversationId: runConversation.id, botId }),
 		);
 		const triggerId = randomUUID();
 		yield* query((db) =>
 			db.insert(message).values({
 				id: triggerId,
-				threadId: runThread.id,
-				routineTrigger: {
-					kind: "routine_trigger",
-					executionId,
-					routineName: defined.name,
-					triggerKind: "cron",
+				conversationId: runConversation.id,
+				automationTrigger: {
+					kind: "automation_trigger",
+					runId,
+					automationName: defined.name,
+					triggerKind: "schedule",
 				},
 				kind: "text",
 				status: "complete",
@@ -941,20 +919,20 @@ const writeRoutineRun = (cast: Cast<string>, day: Date, run: RoutineRun) =>
 			}),
 		);
 		const turnId = yield* writeTurn(cast, {
-			threadId: runThread.id,
+			conversationId: runConversation.id,
 			bot: run.bot,
 			triggerMessageId: triggerId,
 			at: finishedAt,
 		});
 		const posts = [
-			{ threadId: runThread.id, routineExecutionId: null, turnId },
-			{ threadId: routineThread.id, routineExecutionId: executionId, turnId: null },
+			{ conversationId: runConversation.id, runId: null, turnId },
+			{ conversationId: feed.id, runId, turnId: null },
 		];
 		for (const post of posts) {
 			yield* query((db) =>
 				db.insert(message).values({
 					...post,
-					authorAgentId: agentId,
+					authorBotId: botId,
 					kind: "text",
 					status: "complete",
 					parts: [{ type: "text", text: run.result }],
@@ -963,47 +941,49 @@ const writeRoutineRun = (cast: Cast<string>, day: Date, run: RoutineRun) =>
 				}),
 			);
 		}
-		yield* touch(routineThread.id);
+		yield* touch(feed.id);
 		return true;
 	});
 
-/** Stamps the thread with its latest message, so it sorts where that happened. */
-const touch = (threadId: string) =>
+/** Stamps the conversation with its latest message, so it sorts where that happened. */
+const touch = (conversationId: string) =>
 	Effect.gen(function* () {
 		const [latest] = yield* query((db) =>
 			db
 				.select({ at: max(message.createdAt) })
 				.from(message)
-				.where(eq(message.threadId, threadId)),
+				.where(eq(message.conversationId, conversationId)),
 		);
 		if (!latest?.at) return;
 		const at = latest.at;
-		yield* query((db) => db.update(thread).set({ updatedAt: at }).where(eq(thread.id, threadId)));
+		yield* query((db) =>
+			db.update(conversation).set({ updatedAt: at }).where(eq(conversation.id, conversationId)),
+		);
 	});
 
-/** Everyone has read every thread they reach, so nothing seeded shows as unread. */
+/** Everyone has read every conversation they reach, so nothing seeded shows as unread. */
 const markEverythingRead = (cast: Cast<string>) =>
 	Effect.gen(function* () {
 		const now = new Date();
 		const rows = yield* query((db) =>
 			db
-				.select({ threadId: thread.id, userId: workspaceMember.userId })
-				.from(thread)
-				.innerJoin(workspaceMember, eq(workspaceMember.workspaceId, thread.workspaceId))
+				.select({ conversationId: placedConversation.id, userId: workspaceMember.userId })
+				.from(placedConversation)
+				.innerJoin(workspaceMember, eq(workspaceMember.workspaceId, placedConversation.workspaceId))
 				.where(
 					and(
-						eq(thread.workspaceId, cast.workspaceId),
-						reachesThreadFor(thread, workspaceMember.userId),
+						eq(placedConversation.workspaceId, cast.workspaceId),
+						reachesConversationFor(placedConversation, workspaceMember.userId),
 					),
 				),
 		);
 		if (rows.length === 0) return;
 		yield* query((db) =>
 			db
-				.insert(threadRead)
+				.insert(conversationRead)
 				.values(rows.map((row) => ({ ...row, readThrough: now })))
 				.onConflictDoUpdate({
-					target: [threadRead.userId, threadRead.threadId],
+					target: [conversationRead.userId, conversationRead.conversationId],
 					set: { readThrough: now },
 				}),
 		);
@@ -1052,3 +1032,13 @@ function channelIdOf(channelIds: Record<string, string>, channel: string): strin
 	if (!id) throw new Error(`No channel is keyed ${channel}`);
 	return id;
 }
+
+/** The conversation `id`, as the scenes read it back. */
+const placedById = (id: string) =>
+	Effect.flatMap(
+		query((db) =>
+			db.select().from(placedConversation).where(eq(placedConversation.id, id)).limit(1),
+		),
+		([found]) =>
+			found ? Effect.succeed(found) : Effect.die(new Error(`Conversation ${id} is not there`)),
+	);

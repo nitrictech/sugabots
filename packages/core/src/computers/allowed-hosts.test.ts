@@ -1,0 +1,167 @@
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	allowedHost,
+	blockedHost,
+	botAllowedHost,
+	bot as botTable,
+	user,
+	workspace,
+	workspaceMember,
+} from "../database/schema.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { allowedHostsOf, reachOf, TRUSTED_HOSTS } from "./allowed-hosts.ts";
+import type { Computers } from "./computers.ts";
+
+const BLOCKS_HOSTS: Computers.Capabilities = {
+	pauseKeeps: "disk",
+	credentials: "host",
+	blocksHosts: true,
+};
+
+/** What a bot's computer may reach, from the workspace's lists and the bot's own, against Postgres. */
+describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", () => {
+	let workspaceId: string;
+	let builders: { workspaceId: string; botId: string };
+	let research: { workspaceId: string; botId: string };
+
+	afterAll(closeDatabase);
+
+	beforeEach(async () => {
+		const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		const [space] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Hosts ${suffix}`, slug: `hosts-${suffix}` })
+				.returning(),
+		);
+		const [owner] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Sam", email: `hosts-${suffix}@example.com` })
+				.returning(),
+		);
+		if (!space || !owner) throw new Error("fixture");
+		workspaceId = space.id;
+		await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId: owner.id }));
+		const aBot = async (name: string) => {
+			const [bot] = await onDatabase((db) =>
+				db
+					.insert(botTable)
+					.values({
+						workspaceId,
+						name,
+						handle: name.toLowerCase(),
+						color: "sky",
+						face: "pill",
+					})
+					.returning(),
+			);
+			if (!bot) throw new Error("fixture");
+			return { workspaceId, botId: bot.id };
+		};
+		builders = await aBot("Builders");
+		research = await aBot("Research");
+	});
+
+	const allowForWorkspace = (host: string) =>
+		onDatabase((db) => db.insert(allowedHost).values({ workspaceId, host }));
+	const allowForBot = (target: { botId: string }, host: string) =>
+		onDatabase((db) =>
+			db.insert(botAllowedHost).values({ workspaceId, botId: target.botId, host }),
+		);
+	const block = (host: string) =>
+		onDatabase((db) => db.insert(blockedHost).values({ workspaceId, host }));
+
+	it("gives a bot the trusted hosts, the workspace's, and its own, but not another bot's", async () => {
+		await allowForWorkspace("api.example.com");
+		await allowForBot(builders, "builders.example.com");
+		await allowForBot(research, "research.example.com");
+
+		const hosts = await runOnPostgres(allowedHostsOf(builders));
+
+		expect(hosts).toEqual(
+			expect.arrayContaining([...TRUSTED_HOSTS, "api.example.com", "builders.example.com"]),
+		);
+		expect(hosts).not.toContain("research.example.com");
+	});
+
+	it("keeps a blocked host out of every bot's reach, trusted or allowed", async () => {
+		await allowForWorkspace("api.example.com");
+		await allowForBot(builders, "api.example.com");
+		await block("api.example.com");
+		await block("github.com");
+
+		for (const target of [builders, research]) {
+			const hosts = await runOnPostgres(allowedHostsOf(target));
+			expect(hosts).not.toContain("api.example.com");
+			expect(hosts).not.toContain("github.com");
+		}
+	});
+
+	it("keeps out a wildcard that would reach a blocked host, and what a blocked wildcard covers", async () => {
+		await allowForBot(builders, "*.example.com");
+		await allowForBot(builders, "cdn.example.org");
+		await allowForBot(builders, "example.org");
+		await block("api.example.com");
+		await block("*.example.org");
+
+		const hosts = await runOnPostgres(allowedHostsOf(builders));
+
+		expect(hosts).not.toContain("*.example.com");
+		expect(hosts).not.toContain("cdn.example.org");
+		// A wildcard leaves its domain out, blocking as it allows.
+		expect(hosts).toContain("example.org");
+	});
+
+	it("keeps out a blocked domain's subdomains", async () => {
+		await allowForBot(builders, "www.pastebin.com");
+		await allowForBot(builders, "*.pastebin.com");
+		await block("pastebin.com");
+
+		const hosts = await runOnPostgres(allowedHostsOf(builders));
+
+		expect(hosts).not.toContain("www.pastebin.com");
+		expect(hosts).not.toContain("*.pastebin.com");
+	});
+
+	it("gives a bot on the allowlist the hosts allowed it", async () => {
+		await allowForBot(builders, "builders.example.com");
+
+		const reach = await runOnPostgres(
+			reachOf(builders, { networkMode: "allowlist", capabilities: BLOCKS_HOSTS }),
+		);
+
+		expect(reach).toEqual({
+			kind: "allowlist",
+			hosts: expect.arrayContaining([...TRUSTED_HOSTS, "builders.example.com"]),
+		});
+	});
+
+	it("opens every host but the blocked ones, with a blocked domain's subdomains", async () => {
+		await allowForBot(builders, "builders.example.com");
+		await block("pastebin.com");
+		await block("*.example.org");
+
+		const reach = await runOnPostgres(
+			reachOf(builders, { networkMode: "open", capabilities: BLOCKS_HOSTS }),
+		);
+
+		expect(reach).toEqual({
+			kind: "open",
+			blockedHosts: ["pastebin.com", "*.pastebin.com", "*.example.org"],
+		});
+	});
+
+	it("opens every host, blocked or not, at a provider that can't block hosts", async () => {
+		await block("pastebin.com");
+
+		const reach = await runOnPostgres(
+			reachOf(builders, {
+				networkMode: "open",
+				capabilities: { ...BLOCKS_HOSTS, blocksHosts: false },
+			}),
+		);
+
+		expect(reach).toEqual({ kind: "open", blockedHosts: [] });
+	});
+});

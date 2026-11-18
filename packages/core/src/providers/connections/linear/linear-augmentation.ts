@@ -7,7 +7,7 @@ export const linearAugmentation = {
 	tools: {
 		upload_file: {
 			description:
-				"Upload a file from the thread or the sandbox to a URL Linear signed, to attach it to an issue or embed it.",
+				"Upload a file from the conversation or the computer to a URL Linear signed, to attach it to an issue or embed it.",
 			readOnly: false,
 			destructive: false,
 			// Linear's prepare step, which asks, is where a file is decided on; the

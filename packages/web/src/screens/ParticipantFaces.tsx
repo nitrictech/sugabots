@@ -1,5 +1,5 @@
-import type { ThreadParticipant } from "@sugabots/contracts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import type { Participant } from "@sugabots/contracts";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 
 /** How far each face in the stack sits over the one before it, as a share of its size. */
@@ -9,11 +9,11 @@ const OVERLAP = 0.3;
 const RING_WIDTH_PX = 2;
 
 /**
- * The faces of who is in a thread, overlapping in a row: people first, then
+ * The faces of who is in a conversation, overlapping in a row: people first, then
  * bots, each in the order given, the first `shown` of them and then how many
  * more. Every face, and the count, sits over the one before it the same way,
  * ringed in `surface`, the colour of what the stack is on. For decoration
- * only: whatever holds it names who is in the thread.
+ * only: whatever holds it names who is in the conversation.
  */
 export function ParticipantFaces({
 	participants,
@@ -21,7 +21,7 @@ export function ParticipantFaces({
 	size = 20,
 	surface = "var(--background)",
 }: {
-	participants: readonly ThreadParticipant[];
+	participants: readonly Participant[];
 	/** How many faces show before the rest are counted. */
 	shown?: number;
 	size?: number;
@@ -30,7 +30,7 @@ export function ParticipantFaces({
 }) {
 	const ordered = [
 		...participants.filter((participant) => participant.kind === "person"),
-		...participants.filter((participant) => participant.kind === "agent"),
+		...participants.filter((participant) => participant.kind === "bot"),
 	];
 	const faces = ordered.slice(0, shown);
 	const hidden = ordered.length - faces.length;
@@ -44,9 +44,9 @@ export function ParticipantFaces({
 	return (
 		<span aria-hidden className="flex shrink-0 items-center">
 			{faces.map((participant, index) =>
-				participant.kind === "agent" ? (
+				participant.kind === "bot" ? (
 					<span key={participant.id} className="flex" style={place(index)}>
-						<AgentAvatar
+						<BotAvatar
 							color={participant.color}
 							face={participant.face}
 							shape={participant.shape}

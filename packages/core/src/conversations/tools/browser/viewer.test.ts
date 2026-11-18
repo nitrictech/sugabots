@@ -2,29 +2,29 @@ import type { ToolSet } from "ai";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CurrentActor } from "../../../authorization/current-actor.ts";
+import { BotComputers } from "../../../computers/bot-computers.ts";
+import { ComputerCredentials } from "../../../computers/computer-credentials.ts";
+import { ComputerProviderRepository } from "../../../computers/computer-provider-repository.ts";
+import { recordingIds, removeWorkVolumes } from "../../../computers/testing.ts";
 import {
-	agent,
-	thread,
-	threadParticipant,
+	bot as botTable,
+	conversationParticipant,
 	user,
 	workspace,
 	workspaceMember,
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { Egress } from "../../../providers/network/egress.ts";
-import { AgentSandboxes } from "../../../sandboxes/agent-sandboxes.ts";
-import { SandboxCredentials } from "../../../sandboxes/sandbox-credentials.ts";
-import { SandboxProviderRepository } from "../../../sandboxes/sandbox-provider-repository.ts";
-import { recordingIds, removeWorkVolumes } from "../../../sandboxes/testing.ts";
 import { unimplemented } from "../../../testing.ts";
-import { SandboxTools } from "../sandbox.ts";
+import { seedConversation } from "../../seed.test-support.ts";
+import { ComputerTools } from "../computer.ts";
 import { DesktopViewer } from "./viewer.ts";
 import { answerChallenge } from "./vnc-authentication.ts";
 
 /**
- * Watching an agent's desktop, against Postgres and a real OpenSandbox server
+ * Watching a bot's desktop, against Postgres and a real OpenSandbox server
  * running the local build of the default image (`docker compose --profile
- * sandboxes up -d` and `bun run build:sandbox`, with OPENSANDBOX_URL and
+ * computers up -d` and `bun run build:computer`, with OPENSANDBOX_URL and
  * OPENSANDBOX_API_KEY set).
  */
 const env = process.env;
@@ -34,37 +34,37 @@ const SLOW = 180_000;
 describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandbox", () => {
 	let tools: ToolSet;
 	let viewer: DesktopViewer.Interface;
-	let agentSandboxes: AgentSandboxes.Interface;
+	let botComputers: BotComputers.Interface;
 	let workspaceId: string;
 	let ownerId: string;
 	let outsiderId: string;
 	let watcherId: string;
-	let agentId: string;
+	let botId: string;
 	let bystanderId: string;
-	let sandboxlessId: string;
-	let threadId: string;
+	let computerlessId: string;
+	let conversationId: string;
 	const scope = Effect.runSync(Scope.make());
 	const idsHandedOut = new Set<string>();
 
 	beforeAll(async () => {
-		let sandboxTools: SandboxTools.Interface;
-		let providers: SandboxProviderRepository.Interface;
-		[sandboxTools, viewer, agentSandboxes, providers] = await runOnPostgres(
+		let computerTools: ComputerTools.Interface;
+		let providers: ComputerProviderRepository.Interface;
+		[computerTools, viewer, botComputers, providers] = await runOnPostgres(
 			Effect.all([
-				SandboxTools.Service,
+				ComputerTools.Service,
 				DesktopViewer.Service,
-				AgentSandboxes.Service,
-				SandboxProviderRepository.Service,
+				BotComputers.Service,
+				ComputerProviderRepository.Service,
 			]).pipe(
 				Effect.provide(
 					Layer.mergeAll(
-						SandboxTools.layer,
+						ComputerTools.layer,
 						DesktopViewer.layer,
-						AgentSandboxes.layer,
-						SandboxProviderRepository.layer,
+						BotComputers.layer,
+						ComputerProviderRepository.layer,
 					),
 				),
-				Effect.provide(SandboxCredentials.none),
+				Effect.provide(ComputerCredentials.none),
 				Effect.provide(recordingIds(idsHandedOut)),
 				// Registries are asked what an image's tag names, as in production.
 				Effect.provide(unimplemented(Egress.Service, { providers: { for: () => fetch } })),
@@ -100,45 +100,38 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 				{ workspaceId, userId: watcherId, role: "viewer" },
 			]),
 		);
-		const agentIn = (name: string, usesSandbox: boolean): typeof agent.$inferInsert => ({
+		const botIn = (name: string, usesComputer: boolean): typeof botTable.$inferInsert => ({
 			workspaceId,
 			name,
 			handle: `${name.toLowerCase().replaceAll(" ", "-")}-${suffix}`,
 			color: "green",
 			face: "pill",
 			model: "no-such-model",
-			usesSandbox,
+			usesComputer,
 			createdById: ownerId,
 		});
-		const [bot, bystander, sandboxless] = await onDatabase((db) =>
+		const [bot, bystander, computerless] = await onDatabase((db) =>
 			db
-				.insert(agent)
+				.insert(botTable)
 				.values([
-					agentIn("Browser Bot", true),
-					agentIn("Bystander Bot", true),
-					agentIn("Sandboxless Bot", false),
+					botIn("Browser Bot", true),
+					botIn("Bystander Bot", true),
+					botIn("Computerless Bot", false),
 				])
 				.returning(),
 		);
-		if (!bot || !bystander || !sandboxless) throw new Error("fixture");
-		agentId = bot.id;
+		if (!bot || !bystander || !computerless) throw new Error("fixture");
+		botId = bot.id;
 		bystanderId = bystander.id;
-		sandboxlessId = sandboxless.id;
-		const [conversation] = await onDatabase((db) =>
-			db
-				.insert(thread)
-				.values({
-					workspaceId,
-					hostAgentId: agentId,
-					type: "conversation",
-					title: "Look something up",
-				})
-				.returning(),
+		computerlessId = computerless.id;
+		const task = await onDatabase((db) =>
+			seedConversation(db, { workspaceId, kind: "task", botId, title: "Look something up" }),
 		);
-		if (!conversation) throw new Error("fixture");
-		threadId = conversation.id;
+		conversationId = task.id;
 		await onDatabase((db) =>
-			db.insert(threadParticipant).values({ threadId, agentId: sandboxlessId }),
+			db
+				.insert(conversationParticipant)
+				.values({ conversationId: conversationId, botId: computerlessId }),
 		);
 		await runOnPostgres(
 			providers.create(workspaceId, {
@@ -156,13 +149,13 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		);
 		tools = await runOnPostgres(
 			Scope.provide(scope)(
-				sandboxTools.forTurn({
+				computerTools.forTurn({
 					workspaceId,
-					usesSandbox: true,
+					usesComputer: true,
 					naturalBrowsing: false,
 					turnId: "turn-1",
-					threadId,
-					agentId,
+					conversationId,
+					botId,
 					color: "orange",
 					acceptsImages: false,
 				}),
@@ -173,18 +166,18 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	afterAll(async () => {
 		await Effect.runPromise(Scope.close(scope, Exit.void));
 		const providers = await runOnPostgres(
-			Effect.provide(SandboxProviderRepository.Service, SandboxProviderRepository.layer),
+			Effect.provide(ComputerProviderRepository.Service, ComputerProviderRepository.layer),
 		);
 		const provider = await runOnPostgres(providers.enabled(workspaceId));
-		if (provider) await runOnPostgres(agentSandboxes.destroyAllMadeBy(workspaceId, provider));
+		if (provider) await runOnPostgres(botComputers.destroyAllMadeBy(workspaceId, provider));
 		await closeDatabase();
 		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
 
-	const openAs = (userId: string, of = agentId) =>
+	const openAs = (userId: string, of = botId) =>
 		runOnPostgres(
 			Effect.exit(
-				Scope.provide(scope)(viewer.open({ threadId, agentId: of })).pipe(
+				Scope.provide(scope)(viewer.open({ conversationId, botId: of })).pipe(
 					CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId)),
 				),
 			),
@@ -193,7 +186,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	let openedFirst: string | undefined;
 
 	it(
-		"starts the desktop for someone who opens it before the agent has used its browser",
+		"starts the desktop for someone who opens it before the bot has used its browser",
 		async () => {
 			const exit = await openAs(ownerId);
 			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
@@ -205,7 +198,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	);
 
 	it(
-		"gives the agent's browser the desktop a person opened, and shows it to them",
+		"gives the bot's browser the desktop a person opened, and shows it to them",
 		async () => {
 			const navigate = tools.browser_navigate?.execute as (
 				input: object,
@@ -235,7 +228,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	);
 
 	it(
-		"keeps the desktop from anything in the sandbox without its password",
+		"keeps the desktop from anything in the computer without its password",
 		async () => {
 			const exit = await openAs(ownerId);
 			if (!Exit.isSuccess(exit)) throw new Error(exit.toString());
@@ -261,8 +254,8 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		expect(Exit.isFailure(exit) && exit.toString()).toContain("DesktopUnavailable");
 	});
 
-	it("refuses an agent in the thread that doesn't use the sandbox", async () => {
-		const exit = await openAs(ownerId, sandboxlessId);
+	it("refuses a bot in the task that doesn't use the computer", async () => {
+		const exit = await openAs(ownerId, computerlessId);
 
 		expect(Exit.isFailure(exit) && exit.toString()).toContain("DesktopUnavailable");
 	});

@@ -12,7 +12,7 @@ import {
 	openaiCompatible,
 	openrouter,
 	type ProviderDialect,
-} from "../../providers/model-providers/dialects/index.ts";
+} from "../model-providers/dialects/index.ts";
 import { EgressRefused } from "../network/egress.ts";
 
 const sdk = vi.hoisted(() => ({
@@ -515,8 +515,11 @@ describe("a failed model request", () => {
 	it.each([
 		[
 			"the sentence a provider gives as its error",
-			{ code: "invalid-argument", error: "list_routines: tool parameter root must be an object" },
-			"Provider returned 400: list_routines: tool parameter root must be an object",
+			{
+				code: "invalid-argument",
+				error: "list_automations: tool parameter root must be an object",
+			},
+			"Provider returned 400: list_automations: tool parameter root must be an object",
 		],
 		[
 			"the provider's message over the status words beside it",

@@ -1,11 +1,11 @@
 import {
-	type Agent,
-	agentColors,
-	agentFaces,
-	agentShapes,
+	type Bot,
+	botColors,
+	botFaces,
+	botShapes,
 	type ModelProvider,
 	type ProviderModel,
-	type SystemAgent,
+	type SystemBot,
 } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
@@ -179,9 +179,9 @@ const bots = [
 	{ ...oncall, model: "gpt-5" },
 ];
 
-const systemAgents: SystemAgent[] = (["summarise", "compact"] as const).map((key) => ({
+const systemBots: SystemBot[] = (["summarise", "compact"] as const).map((key) => ({
 	key,
-	name: key === "summarise" ? "Scribe" : "Compaction",
+	name: key === "summarise" ? "Summariser" : "Compaction",
 	description: null,
 	color: "ice",
 	face: "pill",
@@ -197,10 +197,10 @@ function Preview({
 	children,
 }: {
 	providers: readonly ModelProvider[];
-	bots: readonly Agent[];
+	bots: readonly Bot[];
 	/** The model new bots start on. */
 	defaultModel: string;
-	/** The model the system agents use. */
+	/** The model the system bots use. */
 	summariesModel: string;
 	children: ReactNode;
 }) {
@@ -212,18 +212,18 @@ function Preview({
 		client.setQueryData(["workspace-standing", WORKSPACE], {
 			role: "admin",
 			permissions: {
-				createPods: true,
+				createChannels: true,
 				manageProviders: true,
 				manageMembers: true,
-				configureBuiltInAgents: true,
+				configureBuiltInBots: true,
 				manageUsage: true,
 			},
 		});
 		client.setQueryData(["model-providers", WORKSPACE], providers);
-		client.setQueryData(["agents", WORKSPACE], bots);
+		client.setQueryData(["bots", WORKSPACE], bots);
 		client.setQueryData(
-			["built-in-agents", WORKSPACE],
-			systemAgents.map((agent) => ({ ...agent, model: summariesModel })),
+			["built-in-bots", WORKSPACE],
+			systemBots.map((bot) => ({ ...bot, model: summariesModel })),
 		);
 		client.setQueryData(["models", WORKSPACE], {
 			models: providers.flatMap((provider) =>
@@ -336,7 +336,7 @@ export const SwitchedOffProvider = meta.story({
 
 /**
  * A provider with a few models: its key, which models are on (listed first),
- * and who uses each. Sonnet is the default and Haiku the system agents'.
+ * and who uses each. Sonnet is the default and Haiku the system bots'.
  */
 export const Provider = meta.story({
 	render: () => <ProviderSettings providerId={anthropic.id} />,
@@ -358,14 +358,14 @@ export const Provider = meta.story({
 });
 
 /** Forty bots on GPT-5, and every OpenRouter model switched on. */
-const crowdOnGpt5: Agent[] = Array.from({ length: 40 }, (_, index) => ({
+const crowdOnGpt5: Bot[] = Array.from({ length: 40 }, (_, index) => ({
 	...oncall,
 	id: `0199a3a0-0000-7000-8000-000000000${String(500 + index)}`,
 	name: `Helper ${index + 1}`,
 	handle: `helper-${index + 1}`,
-	color: agentColors[index % agentColors.length] as Agent["color"],
-	face: agentFaces[index % agentFaces.length] as Agent["face"],
-	shape: agentShapes[index % agentShapes.length] as Agent["shape"],
+	color: botColors[index % botColors.length] as Bot["color"],
+	face: botFaces[index % botFaces.length] as Bot["face"],
+	shape: botShapes[index % botShapes.length] as Bot["shape"],
 	model: "gpt-5",
 }));
 const everyModelOn = providers.map((one) =>
@@ -644,7 +644,7 @@ export const ChatgptSignedIn = meta.story({
 });
 
 /** One model for every system bot, from the models that are switched on. */
-export const SystemAgents = meta.story({
+export const SystemBots = meta.story({
 	render: () => <SystemModelSettings />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Summaries" })).toBeInTheDocument();

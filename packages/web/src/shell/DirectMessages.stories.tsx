@@ -11,7 +11,7 @@ import {
 } from "./story-fixtures.ts";
 
 /*
- * Direct messages, as the sidebar lists them under the pods: with one person
+ * Direct messages, as the sidebar lists them under the channels: with one person
  * or a group, most recent first, and New message as the last row.
  */
 

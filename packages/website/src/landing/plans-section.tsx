@@ -28,7 +28,7 @@ export function PlansSection() {
 				</Plan>
 				<Plan
 					name="Hosted"
-					summary="We run the servers and sandboxes, you bring your keys. Move over from self-hosted when it's ready."
+					summary="We run the servers and computers, you bring your keys. Move over from self-hosted when it's ready."
 					badge="Coming soon"
 				>
 					<div>

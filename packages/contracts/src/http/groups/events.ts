@@ -5,7 +5,7 @@ import { NotFound } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /**
- * Live updates as Server-Sent Events: one stream per open thread, one per
+ * Live updates as Server-Sent Events: one stream per open conversation, one per
  * workspace, and one for the signed-in person. A client resumes with
  * `Last-Event-ID` and misses nothing.
  *
@@ -21,16 +21,16 @@ export class EventsApi extends HttpApiGroup.make("events")
 			success: eventStream,
 			error: NotFound,
 		}),
-		HttpApiEndpoint.get("thread", "/threads/:threadId/events", {
-			params: { threadId: Schema.String },
+		HttpApiEndpoint.get("conversation", "/conversations/:conversationId/events", {
+			params: { conversationId: Schema.String },
 			success: eventStream,
 			error: NotFound,
 		}),
 		/** What is for the signed-in person alone, such as their notifications. */
 		HttpApiEndpoint.get("me", "/me/events", { success: eventStream, error: NotFound }),
-		/** Tells the thread's other watchers the caller is typing in it, as `person.typing`. */
-		HttpApiEndpoint.post("typing", "/threads/:threadId/typing", {
-			params: { threadId: Schema.String },
+		/** Tells the conversation's other watchers the caller is typing in it, as `person.typing`. */
+		HttpApiEndpoint.post("typing", "/conversations/:conversationId/typing", {
+			params: { conversationId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: NotFound,
 		}),

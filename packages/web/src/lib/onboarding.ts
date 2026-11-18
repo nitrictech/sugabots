@@ -2,11 +2,11 @@ import type { CompleteOnboarding, ProviderModel } from "@sugabots/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
-import { agentsQuery, useUpdateAgent } from "@/lib/agents.ts";
+import { botsQuery, useEnsureAssistant } from "@/lib/bots.ts";
 import { useProviderActions } from "@/lib/model-providers.ts";
 import { workspacesQuery } from "@/lib/workspace.ts";
 
-/** Finishing setup makes the first bot's model the workspace's default and every system agent's. */
+/** Finishing setup makes the first bot's model the workspace's default and every system bot's. */
 export function useCompleteOnboarding() {
 	const queries = useQueryClient();
 	return useMutation({
@@ -17,7 +17,7 @@ export function useCompleteOnboarding() {
 				// The workspace is now set up, which the shell asks before it opens it.
 				queries.invalidateQueries({ queryKey: workspacesQuery.queryKey }),
 				queries.invalidateQueries({ queryKey: ["models", workspaceId] }),
-				queries.invalidateQueries({ queryKey: agentsQuery(workspaceId).queryKey }),
+				queries.invalidateQueries({ queryKey: botsQuery(workspaceId).queryKey }),
 			]),
 	});
 }
@@ -39,18 +39,19 @@ export function useListFirstProviderModels(): (providerId: string) => Promise<vo
 
 /**
  * The second half of onboarding's model step: switching `model` on for the
- * workspace and running the first bot, `agentId`, on it. Without a bot, which
- * only a missing Personal pod leaves, the model is still switched on.
+ * workspace and running the person's Personal Assistant on it, made now if
+ * it is missing. Sugabots manages the assistant, so it moves onto `model`
+ * only while it has no model the workspace offers.
  */
-export function useChooseFirstModel(agentId: string | undefined) {
+export function useChooseFirstModel() {
 	const actions = useProviderActions();
-	const updateAgent = useUpdateAgent(agentId ?? "");
+	const ensureAssistant = useEnsureAssistant();
 	return useMutation({
 		mutationFn: async ({ providerId, model }: { providerId: string; model: ProviderModel }) => {
 			if (!model.enabled) {
 				await actions.setModel.mutateAsync({ providerId, modelId: model.id, enabled: true });
 			}
-			if (agentId) await updateAgent.mutateAsync({ model: model.modelId });
+			await ensureAssistant.mutateAsync(model.modelId);
 		},
 	});
 }

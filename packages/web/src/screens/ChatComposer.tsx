@@ -1,6 +1,6 @@
 import { Popover } from "@base-ui/react/popover";
 import {
-	type AgentParticipant,
+	type BotParticipant,
 	canStartMention,
 	MAX_ATTACHMENTS_PER_MESSAGE,
 	MESSAGE_MAX_LENGTH,
@@ -19,7 +19,7 @@ import {
 } from "@/lib/composer-attachments.ts";
 import { useAvailableEmoji } from "@/lib/emoji.ts";
 import { rememberEmoji } from "@/lib/recent-emoji.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { EmojiPicker } from "@/ui/emoji-picker.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -89,15 +89,15 @@ export function ChatComposer({
 	replyingTo?: { message: MessageReplyTo; onCancel: () => void };
 	/** The bots the message goes to, whether the draft names them or the last message did. */
 	addressed?: {
-		bots: readonly AgentParticipant[];
+		bots: readonly BotParticipant[];
 		/** Takes one bot off, however it came to be addressed. */
-		onRemove: (bot: AgentParticipant) => void;
+		onRemove: (bot: BotParticipant) => void;
 		/** Takes off the bots inherited from the last message, leaving those the draft names. */
 		onClearInherited: () => void;
 	};
 	/** The files attached to the message, and what attaches, removes and retries them. */
 	attachments: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
-	/** Send is off until the draft has words, as for a message that starts a thread, which is titled from them. */
+	/** Send is off until the draft has words, as for a message that starts a task, which is titled from them. */
 	needsText?: boolean;
 	/** Whether the message has anybody to go to: Send is off until it does, as in New message until somebody is chosen. */
 	hasRecipients?: boolean;
@@ -375,7 +375,7 @@ function ReplyingToStrip({ message, onCancel }: { message: MessageReplyTo; onCan
 	return (
 		<div className="flex min-h-9 items-center gap-1.5 border-border border-b px-3 py-1.5 text-muted-foreground text-xs">
 			<span className="shrink-0">Replying to</span>
-			{author.kind === "routine_trigger" ? (
+			{author.kind === "automation_trigger" ? (
 				<span className="shrink-0 font-semibold text-soft-foreground">{name}</span>
 			) : (
 				<RemovableChip target={author} label={`Stop replying to ${name}`} onRemove={onCancel} />
@@ -390,8 +390,8 @@ function AddressedStrip({
 	bots,
 	onRemove,
 }: {
-	bots: readonly AgentParticipant[];
-	onRemove: (bot: AgentParticipant) => void;
+	bots: readonly BotParticipant[];
+	onRemove: (bot: BotParticipant) => void;
 }) {
 	return (
 		<div className="flex min-h-9 flex-wrap items-center gap-1.5 border-border border-b px-3 py-1.5 text-muted-foreground text-xs">
@@ -675,8 +675,8 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 	const participant = suggestion;
 	return (
 		<>
-			{participant.kind === "agent" ? (
-				<AgentAvatar
+			{participant.kind === "bot" ? (
+				<BotAvatar
 					color={participant.color}
 					face={participant.face}
 					shape={participant.shape}
@@ -688,7 +688,7 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 			<span className="flex min-w-0 flex-1 flex-col gap-px">
 				<span className="truncate font-medium text-sm">{participant.name}</span>
 				<span className="truncate text-muted-foreground text-xs">
-					{participant.kind === "agent" ? "Bot" : `@${participant.handle}`}
+					{participant.kind === "bot" ? "Bot" : `@${participant.handle}`}
 				</span>
 			</span>
 		</>

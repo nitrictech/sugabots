@@ -122,7 +122,7 @@ export function useSignOut(): () => Promise<void> {
 }
 
 /**
- * Changes your name. Members, pods and chats look a person's name up whenever
+ * Changes your name. Members, channels and chats look a person's name up whenever
  * they are read, so every cached answer is asked for again, as is who you are,
  * without holding up the save. Should `/me` fail just then, the old name stays
  * on screen until the session is next asked.

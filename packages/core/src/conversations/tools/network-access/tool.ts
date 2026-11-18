@@ -1,18 +1,18 @@
-import { sandboxHostSchema } from "@sugabots/contracts";
+import { computerHostSchema } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Schema } from "effect";
+import { blockOn } from "../../../computers/allowed-hosts.ts";
+import { type ComputerNetwork, HostBlocked } from "../../../computers/computer-network.ts";
 import type { RunEffect } from "../../../database/database.ts";
-import { blockOn } from "../../../sandboxes/allowed-hosts.ts";
-import { HostBlocked, type SandboxNetwork } from "../../../sandboxes/sandbox-network.ts";
-import type { Request } from "../sandbox.ts";
+import type { Request } from "../computer.ts";
 
 export const REQUEST_NETWORK_ACCESS_TOOL = "request_network_access";
 
 /**
- * The `request_network_access` tool: an agent asking for its pod's sandbox to
- * reach another host. Every call waits for someone who decides what the pod's
- * sandbox may reach to allow it (see `tools/approval-deciders.ts`), so the
- * tool only runs once they have, and then adds the host to the pod. A host
+ * The `request_network_access` tool: a bot asking for its computer to
+ * reach another host. Every call waits for someone who decides what the bot's
+ * computer may reach to allow it (see `tools/approval-deciders.ts`), so the
+ * tool only runs once they have, and then adds the host to the bot's allowed hosts. A host
  * the workspace blocked, `blocked`, is refused without asking.
  */
 export function requestNetworkAccess({
@@ -22,7 +22,7 @@ export function requestNetworkAccess({
 	run,
 }: {
 	turnId: string;
-	network: Pick<SandboxNetwork.Interface, "grantRequest">;
+	network: Pick<ComputerNetwork.Interface, "grantRequest">;
 	blocked: readonly string[];
 	run: RunEffect<never>;
 }): Request {
@@ -31,7 +31,7 @@ export function requestNetworkAccess({
 			description:
 				"Ask for your computer to be allowed to connect to a host it can't reach. Your creator or an admin decides, and your reply waits until they have; once allowed, your computer reaches the host. Ask only for a host the task needs, by its name, and use a wildcard such as *.example.com only when the task needs many of a domain's subdomains. A host the workspace has blocked is refused at once.",
 			inputSchema: Schema.Struct({
-				host: sandboxHostSchema.annotate({
+				host: computerHostSchema.annotate({
 					description:
 						"The host's name in lowercase, such as api.example.com; *.example.com covers its subdomains but not example.com itself",
 				}),

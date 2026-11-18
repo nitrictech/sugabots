@@ -1,9 +1,9 @@
-import type { ThreadContext } from "@sugabots/contracts";
+import type { ConversationContext } from "@sugabots/contracts";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { ContextMeter } from "./ContextMeter.tsx";
 
-const context = (usedTokens: number, compactedAt: string | null = null): ThreadContext => ({
+const context = (usedTokens: number, compactedAt: string | null = null): ConversationContext => ({
 	usedTokens,
 	measuredAt: "2026-09-28T09:05:00.000Z",
 	windowTokens: 256_000,

@@ -23,7 +23,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { agent, user, workspace } from "../workspaces/sql.ts";
+import { bot, user, workspace } from "../workspaces/sql.ts";
 
 export interface EncryptedProviderHeader {
 	name: string;
@@ -75,7 +75,7 @@ export const providerModel = pgTable(
 		modelId: text("model_id").notNull(),
 		displayName: text("display_name"),
 		capabilities: jsonb("capabilities").$type<ProviderModelCapability[]>().notNull().default([]),
-		/** Of `capabilities`, the ones an admin switched off for agents. */
+		/** Of `capabilities`, the ones an admin switched off for bots. */
 		disabledCapabilities: jsonb("disabled_capabilities")
 			.$type<ProviderModelCapability[]>()
 			.notNull()
@@ -98,7 +98,7 @@ export const providerModel = pgTable(
 );
 
 /**
- * The model a workspace's new agents start on, by the `model_id` agents name
+ * The model a workspace's new bots start on, by the `model_id` bots name
  * it by. A workspace has none until it first offers a model, and from then on
  * always has one: `ModelProviderSetup` refuses any change that would stop
  * offering it, deleting its row included, until another replaces it.
@@ -159,7 +159,7 @@ export const connection = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		agentId: uuid("agent_id").notNull(),
+		botId: uuid("bot_id").notNull(),
 		name: text("name").notNull(),
 		handle: text("handle").notNull(),
 		kind: text("kind").$type<ConnectionKind>().notNull().default("mcp"),
@@ -200,15 +200,13 @@ export const connection = pgTable(
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.agentId, table.workspaceId],
-			foreignColumns: [agent.id, agent.workspaceId],
-			name: "connection_agent_workspace_fkey",
+			columns: [table.botId, table.workspaceId],
+			foreignColumns: [bot.id, bot.workspaceId],
+			name: "connection_bot_workspace_fkey",
 		}).onDelete("cascade"),
-		uniqueIndex("connection_name_idx").on(table.agentId, table.name),
-		uniqueIndex("connection_handle_idx").on(table.agentId, table.handle),
-		uniqueIndex("connection_github_agent_idx")
-			.on(table.agentId)
-			.where(sql`${table.kind} = 'github'`),
+		uniqueIndex("connection_name_idx").on(table.botId, table.name),
+		uniqueIndex("connection_handle_idx").on(table.botId, table.handle),
+		uniqueIndex("connection_github_bot_idx").on(table.botId).where(sql`${table.kind} = 'github'`),
 		uniqueIndex("connection_id_workspace_id_idx").on(table.id, table.workspaceId),
 		uniqueIndex("connection_oauth_state_idx").on(table.oauthState),
 		check("connection_kind_check", sql`${table.kind} in ('mcp', 'github', 'http')`),
@@ -273,7 +271,7 @@ export interface GitHubConnectionRepository {
 
 export type ConnectionRow = typeof connection.$inferSelect;
 
-/** What somebody chose for the pod's bots to do with each of a connection's tools, by the server's name for it. */
+/** What somebody chose for the bot to do with each of a connection's tools, by the server's name for it. */
 export type ToolAccess = Record<string, ConnectionAccess>;
 
 export type ModelProviderRow = typeof modelProvider.$inferSelect;

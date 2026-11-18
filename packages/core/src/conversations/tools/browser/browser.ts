@@ -1,19 +1,19 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { botColors } from "@sugabots/avatars/bot-colors";
-import type { AgentColor } from "@sugabots/contracts";
+import { botPalettes } from "@sugabots/avatars/bot-colors";
+import type { BotColor } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { Data, Effect } from "effect";
-import { Sandboxes } from "../../../sandboxes/sandboxes.ts";
+import { Computers } from "../../../computers/computers.ts";
 import type { UserFacing } from "../../../user-message.ts";
+import type { Place, TurnComputer } from "../computer/tools.ts";
 import { type Image, withImages } from "../images.ts";
-import type { Place, TurnSandbox } from "../sandbox/tools.ts";
 import playwrightTools from "./playwright-tools.json" with { type: "json" };
 
 /**
- * The browser tools: Playwright MCP's, run in the pod's sandbox by a browser
- * of the agent's own in each thread, on the agent's own desktop there, so
+ * The browser tools: Playwright MCP's, run in the bot's computer by a browser
+ * of the bot's own in each conversation, on the bot's own desktop there, so
  * people watching see what it does. The tools are offered from the list the
  * image's server was built with; the browser starts on the first call.
  */
@@ -29,9 +29,9 @@ interface Failed {
 	error: UserText;
 }
 
-/** A desktop and browser for one agent in one thread, started on first use. */
+/** A desktop and browser for one bot in one conversation, started on first use. */
 export interface BrowserSession {
-	/** The session's name in the sandbox, which the viewer finds its desktop by. */
+	/** The session's name in the computer, which the viewer finds its desktop by. */
 	readonly name: string;
 	/** Calls `tool` in the browser, giving up on it when `abortSignal` aborts. */
 	readonly call: (
@@ -45,17 +45,17 @@ export interface BrowserSession {
 
 const SCREENSHOT_TOOL = "browser_take_screenshot";
 const IMAGE_BEFORE_PASSWORDS = userText`This computer's image is from before desktops had passwords. Upgrade the bot's computer to open its desktop.`;
-const NO_BROWSER = userText`This sandbox's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
+const NO_BROWSER = userText`This computer's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
 
-/** An agent in a thread, whose desktop there is drawn in the agent's colour. */
-export interface AgentInThread {
-	readonly threadId: string;
-	readonly agentId: string;
-	readonly color: AgentColor;
+/** A bot in a conversation, whose desktop there is drawn in the bot's colour. */
+export interface BotInConversation {
+	readonly conversationId: string;
+	readonly botId: string;
+	readonly color: BotColor;
 }
 
-/** An agent browsing in a thread, in the way it was set to. */
-export interface AgentBrowsing extends AgentInThread {
+/** A bot browsing in a conversation, in the way it was set to. */
+export interface BotBrowsing extends BotInConversation {
 	/**
 	 * Whether it browses so people watching can follow: a cursor that moves to
 	 * what it clicks, smooth scrolling, and typing at a typing pace. Slower.
@@ -63,12 +63,12 @@ export interface AgentBrowsing extends AgentInThread {
 	readonly naturalBrowsing: boolean;
 }
 
-/** The session's name for an agent in a thread: one desktop and browser each. */
-export function sessionName(turn: { threadId: string; agentId: string }) {
-	return `${turn.threadId}-${turn.agentId}`;
+/** The session's name for a bot in a conversation: one desktop and browser each. */
+export function sessionName(turn: { conversationId: string; botId: string }) {
+	return `${turn.conversationId}-${turn.botId}`;
 }
 
-/** An agent's desktop in a thread, running: where viewers reach it, and whether it had to start. */
+/** A bot's desktop in a conversation, running: where viewers reach it, and whether it had to start. */
 export interface Desktop {
 	/** The server a viewer may click and type through. */
 	readonly control: VncServer;
@@ -84,7 +84,7 @@ export interface VncServer {
 	readonly password: string;
 }
 
-/** An agent's browser in a thread, running on its desktop. */
+/** A bot's browser in a conversation, running on its desktop. */
 export interface Browser {
 	readonly viewerPort: number;
 	/** Where its Playwright MCP server is. */
@@ -94,11 +94,11 @@ export interface Browser {
 }
 
 /**
- * Starts the agent's desktop in the thread, without its browser, or finds it
+ * Starts the bot's desktop in the conversation, without its browser, or finds it
  * running: what a person opening the desktop needs.
  */
-export const startDesktop = (sandbox: Sandboxes.Sandbox, place: Place, turn: AgentInThread) =>
-	Effect.flatMap(desktopCommand(sandbox, place, turn, "desktop"), (reported) =>
+export const startDesktop = (computer: Computers.Computer, place: Place, turn: BotInConversation) =>
+	Effect.flatMap(desktopCommand(computer, place, turn, "desktop"), (reported) =>
 		reported.watch === undefined ||
 		reported.password === undefined ||
 		reported.watchPassword === undefined
@@ -111,13 +111,13 @@ export const startDesktop = (sandbox: Sandboxes.Sandbox, place: Place, turn: Age
 	);
 
 /**
- * Starts the agent's browser in the thread, on its desktop, or finds them
- * running: what the agent's browser calls need. A person who opened the
+ * Starts the bot's browser in the conversation, on its desktop, or finds them
+ * running: what the bot's browser calls need. A person who opened the
  * desktop first meets the same desktop, and the same browser if the dock
  * started it.
  */
-export const startBrowser = (sandbox: Sandboxes.Sandbox, place: Place, turn: AgentInThread) =>
-	Effect.flatMap(desktopCommand(sandbox, place, turn, "session"), (ports) =>
+export const startBrowser = (computer: Computers.Computer, place: Place, turn: BotInConversation) =>
+	Effect.flatMap(desktopCommand(computer, place, turn, "session"), (ports) =>
 		ports.browser === undefined
 			? Effect.fail(new DesktopUnavailable({ reason: NO_BROWSER }))
 			: Effect.succeed<Browser>({
@@ -128,20 +128,20 @@ export const startBrowser = (sandbox: Sandboxes.Sandbox, place: Place, turn: Age
 	);
 
 /**
- * Runs `sugabots-desktop desktop` or `session` for the agent in the thread,
+ * Runs `sugabots-desktop desktop` or `session` for the bot in the conversation,
  * and reads the ports and passwords it reports.
  */
 const desktopCommand = (
-	sandbox: Sandboxes.Sandbox,
+	computer: Computers.Computer,
 	place: Place,
-	turn: AgentInThread,
+	turn: BotInConversation,
 	command: "desktop" | "session",
 ) =>
 	Effect.gen(function* () {
-		const directory = `${place.folder}/.browser/${turn.agentId}`;
+		const directory = `${place.folder}/.browser/${turn.botId}`;
 		// Images from before desktops had colours ignore `--accent` and `--folder`.
-		const ran = yield* sandbox.exec(
-			`mkdir -p ${Sandboxes.shellQuoted(place.home)} && sugabots-desktop ${command} ${Sandboxes.shellQuoted(sessionName(turn))} ${Sandboxes.shellQuoted(`${directory}/profile`)} ${Sandboxes.shellQuoted(directory)} --accent ${Sandboxes.shellQuoted(botColors[turn.color].face)} --folder ${Sandboxes.shellQuoted(place.folder)}`,
+		const ran = yield* computer.exec(
+			`mkdir -p ${Computers.shellQuoted(place.home)} && sugabots-desktop ${command} ${Computers.shellQuoted(sessionName(turn))} ${Computers.shellQuoted(`${directory}/profile`)} ${Computers.shellQuoted(directory)} --accent ${Computers.shellQuoted(botPalettes[turn.color].face)} --folder ${Computers.shellQuoted(place.folder)}`,
 			{ env: { HOME: place.home }, timeout: "60 seconds", maxOutputCharacters: 2_000 },
 		);
 		const reported: Record<string, string | undefined> = Object.fromEntries(
@@ -175,36 +175,36 @@ export class DesktopUnavailable
 }
 
 export function browserSession(
-	turnSandbox: TurnSandbox,
+	turnComputer: TurnComputer,
 	place: Place,
-	turn: AgentBrowsing,
+	turn: BotBrowsing,
 ): BrowserSession {
 	const name = sessionName(turn);
 	let connecting: Promise<{ client: Client; note?: UserText } | Failed> | undefined;
 	let told = false;
 
 	const connect = async (): Promise<{ client: Client; note?: UserText } | Failed> => {
-		const { sandbox } = await turnSandbox.open();
-		const browser = await turnSandbox.run(
-			startBrowser(sandbox, place, turn).pipe(
+		const { computer } = await turnComputer.open();
+		const browser = await turnComputer.run(
+			startBrowser(computer, place, turn).pipe(
 				Effect.catchTag("DesktopUnavailable", (unavailable) =>
 					Effect.succeed({ status: "failed" as const, error: unavailable.reason }),
 				),
 			),
 		);
 		if ("status" in browser) return browser;
-		const endpoint = await turnSandbox.run(sandbox.endpoint(browser.browserPort));
+		const endpoint = await turnComputer.run(computer.endpoint(browser.browserPort));
 		const client = new Client({ name: "sugabots", version: "1" });
 		await client.connect(
 			new StreamableHTTPClientTransport(new URL(`${endpoint.url}/mcp`), {
 				requestInit: { headers: endpoint.headers },
 			}),
 		);
-		if (turn.naturalBrowsing) await browseNaturally(client, botColors[turn.color].face);
+		if (turn.naturalBrowsing) await browseNaturally(client, botPalettes[turn.color].face);
 		return browser.started
 			? {
 					client,
-					note: userText`Your browser has just started, on your own desktop in the sandbox. Tabs from before, if any, are gone.`,
+					note: userText`Your browser has just started, on your own desktop in the computer. Tabs from before, if any, are gone.`,
 				}
 			: { client };
 	};
@@ -214,7 +214,7 @@ export function browserSession(
 		call: async (toolName, input, abortSignal) => {
 			connecting ??= connect().catch((cause: unknown) => {
 				connecting = undefined;
-				if (cause instanceof Sandboxes.Unavailable)
+				if (cause instanceof Computers.Unavailable)
 					return { status: "failed", error: cause.userMessage };
 				throw cause;
 			});
@@ -244,7 +244,7 @@ const RUN_CODE_TOOL = "browser_run_code_unsafe";
 /**
  * Has the browser's MCP server act naturally for the rest of this session,
  * the turn's, in `accent`. Images from before Playwright drew a cursor
- * refuse it, and the agent browses as it otherwise would.
+ * refuse it, and the bot browses as it otherwise would.
  */
 async function browseNaturally(client: Client, accent: string) {
 	await client
@@ -254,7 +254,7 @@ async function browseNaturally(client: Client, accent: string) {
 
 /**
  * Playwright code for the browser's MCP server: a cursor on each tab, drawn
- * by Playwright, that moves to what the agent uses and rings it; a smooth
+ * by Playwright, that moves to what the bot uses and rings it; a smooth
  * scroll to it first; and typing at a typing pace rather than setting a
  * field's value.
  *

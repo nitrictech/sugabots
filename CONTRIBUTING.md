@@ -142,6 +142,17 @@ bun run dev
 Back up your PostgreSQL volume and `.env` before updating an installation that
 contains data you care about.
 
+Updating from a version where bots shared computers, destroy those computers
+before migrating, while the database still records where they are. Run this
+after `docker compose up -d` and before `bun run db:migrate`:
+
+```sh
+bun run --cwd packages/core destroy-pod-computers
+```
+
+Until every shared computer is destroyed, `bun run db:migrate` stops before
+changing the database and says so.
+
 ### Reset everything
 
 The following removes the database volume and all Sugabots data:
@@ -174,13 +185,13 @@ bun run check           # lint, typecheck, and test
 bun run build           # build all packages
 bun run format          # apply Biome formatting fixes
 bun run db:studio       # inspect the database with Drizzle Studio
-bun run build:sandbox   # build the sandbox image, as sugabots-sandbox:dev
+bun run build:computer  # build the computer image, as sugabots-sandbox:dev
 ```
 
-Sandboxes are made from the published image their tag names on its registry,
+Computers are made from the published image their tag names on its registry,
 so a local build under the published name is never used. To try one, set the
 OpenSandbox provider's image to `sugabots-sandbox:dev` in the workspace's
-settings. The pods' sandboxes move to it once idle.
+settings. Bots' computers move to it once idle.
 
 The API exports traces and logs to any OTLP/HTTP collector set by the tracing
 lines in `.env` (see `.env.example`). For local development,

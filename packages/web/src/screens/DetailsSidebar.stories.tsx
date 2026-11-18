@@ -1,12 +1,12 @@
 import type {
+	Automation,
 	Connection,
-	Routine,
+	ConversationActivity,
+	Participant,
 	SessionUser,
-	SystemAgent,
-	ThreadActivity,
-	ThreadParticipant,
+	SystemBot,
 } from "@sugabots/contracts";
-import { routineTriggers, testPerson } from "@sugabots/contracts/testing";
+import { automationTriggers, testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn, within } from "storybook/test";
@@ -24,7 +24,7 @@ const user: SessionUser = {
 	image: null,
 } as SessionUser;
 
-const people: ThreadParticipant[] = [
+const people: Participant[] = [
 	["Jay Young", "0199a3a0-0000-7000-8000-000000000502"],
 	["Rowan Ellis", user.id],
 	["Mara Kent", "0199a3a0-0000-7000-8000-000000000503"],
@@ -32,9 +32,9 @@ const people: ThreadParticipant[] = [
 	["Alex Lee", "0199a3a0-0000-7000-8000-000000000505"],
 ].map(([name, id]) => testPerson({ id: id as string, name: name as string }));
 
-const threadId = "0199a3a0-0000-7000-8000-000000000510";
+const conversationId = "0199a3a0-0000-7000-8000-000000000510";
 
-const activity: ThreadActivity = {
+const activity: ConversationActivity = {
 	summary: {
 		content:
 			"Overnight outbound queued 38 leads and six have replied, including both Northwind accounts asking about pricing. Jay wants short replies drafted. Checkout timeouts are back; Linear Handler found 41 events and is waiting on approval to open an issue. Nothing else is outstanding from this week.",
@@ -51,47 +51,47 @@ const activity: ThreadActivity = {
 	recentParticipants: people,
 };
 
-const scribe: SystemAgent = {
+const summariser: SystemBot = {
 	key: "summarise",
-	name: "Scribe",
+	name: "Summariser",
 	description: null,
 	color: "orange",
 	face: "arc",
 	model: "claude-sonnet-4-5",
-} as SystemAgent;
+} as SystemBot;
 
-function routine(id: string, name: string, expression: string): Routine {
+function automation(id: string, name: string, expression: string): Automation {
 	return {
 		id,
 		workspaceId: WORKSPACE,
-		agentId: growthDesk.id,
+		botId: growthDesk.id,
 		name,
 		instructions: "Do the thing.",
-		triggers: routineTriggers(id, {
-			kind: "cron",
+		triggers: automationTriggers(id, {
+			kind: "schedule",
 			schedule: { repeat: "cron", expression },
 			timezone: "Australia/Sydney",
 			nextScheduledAt: null,
 		}),
 		state: "enabled",
 		createdById: null,
-		createdByAgentId: null,
+		createdByBotId: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		updatedAt: "2026-09-01T00:00:00.000Z",
 	};
 }
 
-const routines = [
-	routine("0199a3a0-0000-7000-8000-000000000521", "Overnight outbound", "0 6 * * *"),
-	routine("0199a3a0-0000-7000-8000-000000000522", "Reply digest", "0 9 * * 1-5"),
-	routine("0199a3a0-0000-7000-8000-000000000523", "Pipeline review", "0 16 * * 5"),
+const automations = [
+	automation("0199a3a0-0000-7000-8000-000000000521", "Overnight outbound", "0 6 * * *"),
+	automation("0199a3a0-0000-7000-8000-000000000522", "Reply digest", "0 9 * * 1-5"),
+	automation("0199a3a0-0000-7000-8000-000000000523", "Pipeline review", "0 16 * * 5"),
 ];
 
 function connection(id: string, name: string, url: string): Connection {
 	return {
 		id,
 		workspaceId: WORKSPACE,
-		agentId: growthDesk.id,
+		botId: growthDesk.id,
 		name,
 		handle: name.toLowerCase(),
 		url,
@@ -123,8 +123,8 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	args: {
-		agent: growthDesk,
-		threadId,
+		bot: growthDesk,
+		conversationId,
 		user,
 		contents: {
 			participants: people,
@@ -139,15 +139,15 @@ const meta = preview.meta({
 			],
 			fileUrlOf: (fileId: string) => `https://files.example/${fileId}`,
 		},
-		onOpenRoutines: fn(),
+		onOpenAutomations: fn(),
 		onClose: fn(),
 	},
 	decorators: [
 		function WithQueries(Story, context) {
-			const scribeHasModel = context.parameters.scribeHasModel !== false;
+			const summariserHasModel = context.parameters.summariserHasModel !== false;
 			const [queryClient] = useState(() => {
 				const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-				client.setQueryData(["routines", "agent", growthDesk.id], routines);
+				client.setQueryData(["automations", "bot", growthDesk.id], automations);
 				client.setQueryData(
 					["connections", growthDesk.id],
 					context.parameters.connections ?? connections,
@@ -166,12 +166,12 @@ const meta = preview.meta({
 					],
 				);
 				client.setQueryData(
-					["built-in-agents", WORKSPACE],
-					[scribeHasModel ? scribe : { ...scribe, model: null }],
+					["built-in-bots", WORKSPACE],
+					[summariserHasModel ? summariser : { ...summariser, model: null }],
 				);
 				client.setQueryData(
-					["thread-activity", threadId],
-					scribeHasModel ? activity : { ...activity, summary: null },
+					["conversation-activity", conversationId],
+					summariserHasModel ? activity : { ...activity, summary: null },
 				);
 				return client;
 			});
@@ -189,7 +189,7 @@ const meta = preview.meta({
 
 /**
  * Default is a bot beside its chat: its name and model, then each section,
- * with who is in the thread folded to their faces and a count.
+ * with who is in the task folded to their faces and a count.
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
@@ -203,7 +203,7 @@ export const Default = meta.story({
 	},
 });
 
-/** Expanded opens who is in the thread, each folded list, and the summary. */
+/** Expanded opens who is in the task, each folded list, and the summary. */
 export const Expanded = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: /in this conversation$/ }));
@@ -234,17 +234,17 @@ export const CloseOnAPhone = meta.story({
 	},
 });
 
-/** Before the system agents have a model there is no summary, and it says so rather than staying blank. */
-export const SystemAgentsNotSetUp = meta.story({
-	parameters: { scribeHasModel: false },
+/** Before the system bots have a model there is no summary, and it says so rather than staying blank. */
+export const SystemBotsNotSetUp = meta.story({
+	parameters: { summariserHasModel: false },
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/The system agents write these/)).toBeVisible();
+		await expect(canvas.getByText(/The system bots write these/)).toBeVisible();
 	},
 });
 
 /**
  * A connection whose sign-in expired says so under its name, in place of its
- * tool count, with a sign-in beside it for someone who manages the pod's.
+ * tool count, with a sign-in beside it for someone who manages the bot's connections.
  */
 export const SignInExpired = meta.story({
 	parameters: {

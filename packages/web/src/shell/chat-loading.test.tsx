@@ -3,22 +3,22 @@ import { afterEach, expect, it, vi } from "vitest";
 import { apiAnswers, linear, mount, onWideScreen } from "@/test-api.tsx";
 
 const chatModule = vi.hoisted(() => Promise.withResolvers<void>());
-const newThreadModule = vi.hoisted(() => Promise.withResolvers<void>());
+const newTaskModule = vi.hoisted(() => Promise.withResolvers<void>());
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 vi.mock("@/screens/ConversationPage.tsx", async (importOriginal) => {
 	await chatModule.promise;
 	return importOriginal<typeof import("@/screens/ConversationPage.tsx")>();
 });
-vi.mock("@/screens/NewThread.tsx", async (importOriginal) => {
-	await newThreadModule.promise;
-	return importOriginal<typeof import("@/screens/NewThread.tsx")>();
+vi.mock("@/screens/NewTask.tsx", async (importOriginal) => {
+	await newTaskModule.promise;
+	return importOriginal<typeof import("@/screens/NewTask.tsx")>();
 });
 
 afterEach(() => {
 	cleanup();
 	chatModule.resolve();
-	newThreadModule.resolve();
+	newTaskModule.resolve();
 	vi.useRealTimers();
 	vi.clearAllMocks();
 });
@@ -52,8 +52,8 @@ it("keeps the sidebar, with the bot in it, while the new task screen loads", asy
 	expect(await within(sidebar).findByRole("link", { name: linear.name })).toBeDefined();
 
 	await act(async () => {
-		newThreadModule.resolve();
-		await import("@/screens/NewThread.tsx");
+		newTaskModule.resolve();
+		await import("@/screens/NewTask.tsx");
 	});
 	expect(screen.getByRole("navigation", { name: "Sidebar" })).toBe(sidebar);
 });

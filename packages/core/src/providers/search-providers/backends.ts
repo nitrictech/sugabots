@@ -16,8 +16,8 @@ import type { SearchConnection } from "./search-connection.ts";
  *
  * Every backend takes the same request and answers the same shape, so the
  * tool and the settings test are written once. A failure is an answer with a
- * reason, never a throw: the agent, or the admin testing the connection,
- * reads it as a sentence, and the agent also gets what the service said.
+ * reason, never a throw: the bot, or the admin testing the connection,
+ * reads it as a sentence, and the bot also gets what the service said.
  */
 
 interface SearchResult {

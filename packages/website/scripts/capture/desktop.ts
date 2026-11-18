@@ -1,12 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { botColors } from "@sugabots/avatars/bot-colors";
+import { botPalettes } from "@sugabots/avatars/bot-colors";
 import type { BrowserContext } from "playwright";
 import { freePort } from "./environment.ts";
 
 /**
- * A real sandbox desktop for the Sandboxes slide, without a sandbox provider:
- * the sandbox image in plain Docker, its desktop started as Sugabots starts
- * it when a bot uses its browser, in Code Reviewer's colour, with the browser
+ * A real computer desktop for the Computers slide, without a computer provider:
+ * the computer image in plain Docker, its desktop started as Sugabots starts
+ * it when a bot uses its browser, in Researcher's colour, with the browser
  * on Sugabots' own site. The app's desktop viewer is pointed at it in place of
  * the API's relay.
  */
@@ -14,8 +14,8 @@ import { freePort } from "./environment.ts";
 const IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
 /** The desktop's own WebSocket for VNC viewers: display 1's, at 5900 + 1. */
 const VIEWER_PORT = 5901;
-/** Code Reviewer's, the bot the slide shows, which the desktop is drawn in as the app would draw it. */
-const ACCENT = botColors.rose.face;
+/** Researcher's, the bot the slide shows, which the desktop is drawn in as the app would draw it. */
+const ACCENT = botPalettes.ice.face;
 /**
  * The desktop asks viewers for a password, which the API's relay gives and
  * the viewer, pointed past it, can't. In front of the real Xvnc on the
@@ -34,17 +34,17 @@ const LOAD_SECONDS = 30;
 const SETTLE_MILLISECONDS = 2500;
 
 export interface Desktop {
-	/** Points the app's desktop viewer at this desktop, and says sandboxes are on. */
+	/** Points the app's desktop viewer at this desktop, and says computers are on. */
 	showIn(context: BrowserContext): Promise<void>;
 	stop(): void;
 }
 
-/** The desktop, or nothing when the sandbox image hasn't been built here. */
+/** The desktop, or nothing when the computer image hasn't been built here. */
 export async function startDesktop(): Promise<Desktop | undefined> {
 	try {
 		execFileSync("docker", ["image", "inspect", IMAGE], { stdio: "ignore" });
 	} catch {
-		console.warn(`  No ${IMAGE}: run \`bun run build:sandbox\` for the Sandboxes slide.`);
+		console.warn(`  No ${IMAGE}: run \`bun run build:computer\` for the Computers slide.`);
 		return undefined;
 	}
 	const port = await freePort();
@@ -97,7 +97,7 @@ export async function startDesktop(): Promise<Desktop | undefined> {
 	}
 	return {
 		async showIn(context) {
-			await context.route("**/api/workspaces/*/sandbox-providers/access", (route) =>
+			await context.route("**/api/workspaces/*/computer-providers/access", (route) =>
 				route.fulfill({ json: { enabled: true } }),
 			);
 			// The viewer connects to the desktop's VNC server itself, which takes a
@@ -106,7 +106,7 @@ export async function startDesktop(): Promise<Desktop | undefined> {
 				// Native sockets, not a subclass's: noVNC checks a socket's methods on its own prototype.
 				window.WebSocket = new Proxy(window.WebSocket, {
 					construct: (Native, [url, protocols]: [string | URL, string | string[] | undefined]) =>
-						new Native(/\/agents\/[^/]+\/desktop$/.test(String(url)) ? desktopUrl : url, protocols),
+						new Native(/\/bots\/[^/]+\/desktop$/.test(String(url)) ? desktopUrl : url, protocols),
 				});
 			}, `ws://127.0.0.1:${port}`);
 		},

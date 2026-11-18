@@ -31,12 +31,12 @@ export function useProviderActions() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();
 	// The first model a workspace switches on becomes its default and every
-	// built-in agent's, so any of these changes can move those too.
+	// built-in bot's, so any of these changes can move those too.
 	const refresh = () =>
 		Promise.all([
 			queryClient.invalidateQueries({ queryKey: ["model-providers", workspaceId] }),
 			queryClient.invalidateQueries({ queryKey: ["models", workspaceId] }),
-			queryClient.invalidateQueries({ queryKey: ["built-in-agents", workspaceId] }),
+			queryClient.invalidateQueries({ queryKey: ["built-in-bots", workspaceId] }),
 		]);
 	function requiredWorkspace() {
 		if (!workspaceId) throw new NotReadyError();
@@ -179,7 +179,7 @@ export function useProviderActions() {
 			onSuccess: () =>
 				Promise.all([
 					refresh(),
-					queryClient.invalidateQueries({ queryKey: ["agents", workspaceId] }),
+					queryClient.invalidateQueries({ queryKey: ["bots", workspaceId] }),
 				]),
 		}),
 		switchOff: useMutation({
@@ -195,7 +195,7 @@ export function useProviderActions() {
 			onSuccess: () =>
 				Promise.all([
 					refresh(),
-					queryClient.invalidateQueries({ queryKey: ["agents", workspaceId] }),
+					queryClient.invalidateQueries({ queryKey: ["bots", workspaceId] }),
 				]),
 		}),
 		updateModel: useMutation({

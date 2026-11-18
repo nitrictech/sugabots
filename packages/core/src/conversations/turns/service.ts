@@ -19,7 +19,7 @@ export const makeService = Effect.gen(function* () {
 
 	const recordSystemTurn: Turns.Interface["recordSystemTurn"] = (systemTurn, work) =>
 		Effect.gen(function* () {
-			const opened = yield* turns.openSystemAgentTurn(systemTurn);
+			const opened = yield* turns.openSystemBotTurn(systemTurn);
 			if (opened._tag === "NotRunnable") {
 				return { _tag: "Skipped", reason: opened.reason } as const;
 			}
@@ -27,7 +27,7 @@ export const makeService = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const worked = yield* Effect.exit(restore(work(opened.turnId)));
 					if (Exit.isSuccess(worked)) {
-						yield* turns.completeSystemAgentTurn(opened.turnId, worked.value.contextTokens);
+						yield* turns.completeSystemBotTurn(opened.turnId, worked.value.contextTokens);
 						return { _tag: "Completed", value: worked.value.value } as const;
 					}
 					const expected = Cause.findErrorOption(worked.cause);
@@ -41,7 +41,7 @@ export const makeService = Effect.gen(function* () {
 						: Cause.hasInterruptsOnly(worked.cause)
 							? SYSTEM_TURN_INTERRUPTED
 							: TURN_STOPPED_UNEXPECTEDLY;
-					yield* turns.failSystemAgentTurn(opened.turnId, userMessage);
+					yield* turns.failSystemBotTurn(opened.turnId, userMessage);
 					return { _tag: "Failed" } as const;
 				}),
 			);
@@ -55,24 +55,26 @@ export const makeService = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const admission = yield* admitTurn(lanes, request);
 						if (admission === "waiting") {
-							yield* emit([ConversationEvent.TurnQueued({ threadId: request.threadId })]);
+							yield* emit([
+								ConversationEvent.TurnQueued({ conversationId: request.conversationId }),
+							]);
 						}
 					}),
 				),
 			),
-		stopUnder: (threadIds) =>
+		stopUnder: (conversationIds) =>
 			operation(
 				"stopUnder",
 				transaction(
 					Effect.gen(function* () {
-						if (threadIds.length === 0) return;
+						if (conversationIds.length === 0) return;
 						// A cancelled waiting turn's workflow still waits for its approvals,
 						// holding its lane, until it is told to stop.
-						const stillWaiting = yield* turns.cancelUnder(threadIds);
+						const stillWaiting = yield* turns.cancelUnder(conversationIds);
 						yield* afterCommit(
 							Effect.forEach(stillWaiting, (owner) => signals.cancel(owner), { discard: true }),
 						);
-						yield* lanes.dropWaiting(threadIds, [Turn._tag]);
+						yield* lanes.dropWaiting(conversationIds, [Turn._tag]);
 					}),
 				),
 			),

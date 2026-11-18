@@ -1,4 +1,4 @@
-import { BotFace, type BotLook } from "@sugabots/avatars";
+import { type BotLook, StillBotFace } from "@sugabots/avatars";
 import { cn } from "cn";
 import type { ReactNode } from "react";
 
@@ -22,7 +22,7 @@ export const people = {
 	lorraine: { name: "Lorraine Delgado", initials: "LD", photo: "/people/lorraine-delgado.jpg" },
 } as const satisfies Record<string, Person>;
 
-export const crew = {
+export const bots = {
 	growthDesk: { name: "Growth Desk", look: { color: "green", face: "pill", shape: "leaf" } },
 	pricingAnalyst: {
 		name: "Pricing Analyst",
@@ -55,7 +55,7 @@ export function PersonAvatar({ person, className }: { person: Person; className?
 export function AuthorAvatar({ author, className }: { author: Author; className?: string }) {
 	if (author.kind === "person")
 		return <PersonAvatar person={author.person} className={className} />;
-	return <BotFace {...author.bot.look} className={cn("size-7", className)} />;
+	return <StillBotFace {...author.bot.look} className={cn("size-7", className)} />;
 }
 
 export function authorName(author: Author) {

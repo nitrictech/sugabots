@@ -15,11 +15,11 @@ import { Reveal, RevealItem } from "@/components/reveal";
 const toolIcons: Record<BuiltInToolKey, LucideIcon> = {
 	web_fetch: GlobeIcon,
 	web_search: SearchIcon,
-	routines: CalendarClockIcon,
-	artifact_list: LibraryIcon,
-	artifact_read: FileTextIcon,
-	artifact_write: FilePenIcon,
-	artifact_edit: PencilLineIcon,
+	automations: CalendarClockIcon,
+	file_list: LibraryIcon,
+	file_read: FileTextIcon,
+	file_write: FilePenIcon,
+	file_edit: PencilLineIcon,
 };
 
 /** The tools every bot comes with, from the product's own catalog. */

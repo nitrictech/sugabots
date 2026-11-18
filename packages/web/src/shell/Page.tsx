@@ -1,4 +1,4 @@
-import type { Agent, Pod } from "@sugabots/contracts";
+import type { Bot, Channel } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { ReactNode } from "react";
 import { formatAge } from "@/lib/list-time.ts";
@@ -9,7 +9,10 @@ import { HeaderBack } from "@/screens/ChatHeader.tsx";
  * or a page of a channel's or a bot's, such as its Files, which leads back
  * to the channel or the bot.
  */
-export type PagePlace = { kind: "tab" } | { kind: "pod"; pod: Pod } | { kind: "bot"; agent: Agent };
+export type PagePlace =
+	| { kind: "tab" }
+	| { kind: "channel"; channel: Channel }
+	| { kind: "bot"; bot: Bot };
 
 /**
  * A page beside the sidebar, such as Inbox: its `PageHeader`, and what it
@@ -60,8 +63,8 @@ export function PageHeader({
 				tab ? "max-md:gap-0.5 max-md:pr-2 max-md:pl-4" : "max-md:gap-2 max-md:px-4",
 			)}
 		>
-			{place.kind === "pod" && <HeaderBack back={{ to: "pod", pod: place.pod }} />}
-			{place.kind === "bot" && <HeaderBack back={{ to: "bot", agent: place.agent }} />}
+			{place.kind === "channel" && <HeaderBack back={{ to: "channel", channel: place.channel }} />}
+			{place.kind === "bot" && <HeaderBack back={{ to: "bot", bot: place.bot }} />}
 			<h1
 				className={cn(
 					"m-0 min-w-0 flex-1 truncate font-medium text-sm text-foreground",

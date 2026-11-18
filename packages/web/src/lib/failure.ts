@@ -14,7 +14,7 @@ export class NotReadyError extends Error {
  * Every screen needs this and each was writing its own `describe(failure)`,
  * three of them with the same name and different behaviour. The wording that
  * genuinely differs per screen is the `instead` map: a `Conflict` means
- * something specific where a pod is being named, and nothing in
+ * something specific where a channel is being named, and nothing in
  * particular anywhere else.
  *
  * Anything that is not one of the API's failures never reached it, so it gets the one

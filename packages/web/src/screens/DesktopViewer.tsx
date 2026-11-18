@@ -1,46 +1,46 @@
 import type RFB from "@novnc/novnc";
-import type { Agent } from "@sugabots/contracts";
+import type { Bot } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Keyboard, Monitor, X } from "lucide-react";
 import { type FormEvent, type Ref, type RefObject, useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
+import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
-import { agentSettingsLink } from "@/lib/links.ts";
+import { botSettingsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
-import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { Stage, StageMark } from "@/shell/Stage.tsx";
 import { BACK_BUTTON } from "@/ui/back-button.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 
 /**
- * An agent's computer opened beside its chat, live: where the browser it
- * drives is shown. Opening it starts the desktop, and the sandbox if it was
+ * A bot's computer opened beside its chat, live: where the browser it
+ * drives is shown. Opening it starts the desktop, and the computer if it was
  * paused, so the first connection can take a few seconds; it comes over a
- * WebSocket the API relays from the sandbox. The person watches until they
- * take over, if the pod lets them use desktops, and can hand control back.
+ * WebSocket the API relays from the computer. The person watches until they
+ * take over, if the bot lets them use its desktop, and can hand control back.
  * Without a computer, because the workspace has none set up or the bot does
  * not use one, it says so and where to change that.
  */
 export function DesktopStage({
-	threadId,
-	agent,
+	conversationId,
+	bot,
 	mayUse,
 	onClose,
 }: {
-	threadId: string;
-	agent: Agent;
-	/** Whether the person holds the pod's `useDesktops`, and so may take over. */
+	conversationId: string;
+	bot: Bot;
+	/** Whether the person may use the bot's desktop, and so may take over. */
 	mayUse: boolean;
 	onClose: () => void;
 }) {
-	const access = useSandboxAccess();
-	const sandboxes = access.data;
+	const access = useComputerAccess();
+	const computers = access.data;
 	const may = useWorkspacePermissions();
 	const backToChat = useBackToHere("Chat");
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
@@ -48,11 +48,11 @@ export function DesktopStage({
 	const phoneKeys = usePanelKeys<HTMLElement>(onClose);
 	// What stands between the bot and a computer, if anything: the workspace has none, or the bot doesn't use one.
 	const missing =
-		sandboxes === undefined
+		computers === undefined
 			? undefined
-			: !sandboxes.enabled
+			: !computers.enabled
 				? "workspace"
-				: !agent.usesSandbox
+				: !bot.usesComputer
 					? "bot"
 					: null;
 	// What the computer shows: its screen, or why there is none.
@@ -68,7 +68,7 @@ export function DesktopStage({
 								<Link
 									from="/$workspace"
 									to="./settings/$section"
-									params={{ section: "sandboxes" }}
+									params={{ section: "computers" }}
 									state={backToChat}
 									className={buttonStyles({ size: "sm" })}
 								>
@@ -81,16 +81,16 @@ export function DesktopStage({
 					)}
 				</EmptyState>
 			) : missing === "bot" ? (
-				<EmptyState icon={<Monitor strokeWidth={1.75} />} title={`${agent.name} has no computer`}>
+				<EmptyState icon={<Monitor strokeWidth={1.75} />} title={`${bot.name} has no computer`}>
 					Give it one in its settings, so it can run commands, open websites and edit files.{" "}
-					{agent.permissions.update && (
-						<Link {...agentSettingsLink(agent)} state={backToChat} className="text-link underline">
-							Open {agent.name}'s settings.
+					{bot.permissions.update && (
+						<Link {...botSettingsLink(bot)} state={backToChat} className="text-link underline">
+							Open {bot.name}'s settings.
 						</Link>
 					)}
 				</EmptyState>
 			) : missing === null ? (
-				<ComputerScreen threadId={threadId} agent={agent} mayUse={mayUse} />
+				<ComputerScreen conversationId={conversationId} bot={bot} mayUse={mayUse} />
 			) : access.isError ? (
 				<EmptyState title="Could not check for a computer">
 					The API did not answer. Reload this page to try again.
@@ -102,7 +102,7 @@ export function DesktopStage({
 	if (phone) {
 		return (
 			<section
-				aria-label={`${agent.name}'s computer`}
+				aria-label={`${bot.name}'s computer`}
 				{...phoneKeys}
 				className="fixed inset-0 outline-none z-50 flex flex-col bg-black pt-safe-or-3 pb-safe-or-4"
 			>
@@ -117,13 +117,13 @@ export function DesktopStage({
 	}
 	return (
 		<Stage
-			label={`${agent.name}'s computer`}
+			label={`${bot.name}'s computer`}
 			icon={
 				<StageMark>
 					<Monitor strokeWidth={2} />
 				</StageMark>
 			}
-			title={`${agent.name}'s computer`}
+			title={`${bot.name}'s computer`}
 			byline={
 				missing === undefined ? undefined : (
 					<span className="flex items-center gap-1.5">
@@ -147,16 +147,16 @@ export function DesktopStage({
 
 /** The bot's computer, live, as large as the room allows, with who has control and the way to take it. */
 function ComputerScreen({
-	threadId,
-	agent,
+	conversationId,
+	bot,
 	mayUse,
 }: {
-	threadId: string;
-	agent: Agent;
+	conversationId: string;
+	bot: Bot;
 	mayUse: boolean;
 }) {
 	const [inControl, setInControl] = useState(false);
-	const agentUsing = useDesktopInUse(threadId, agent.id);
+	const botUsing = useDesktopInUse(conversationId, bot.id);
 	const keyboard = useRef<HTMLTextAreaElement>(null);
 	return (
 		<div className="flex min-h-0 flex-1 flex-col items-center gap-4">
@@ -164,8 +164,8 @@ function ComputerScreen({
 			<div className="@container-size flex min-h-0 w-full flex-1 items-center justify-center">
 				<div className="w-desktop-screen">
 					<DesktopScreen
-						threadId={threadId}
-						agentId={agent.id}
+						conversationId={conversationId}
+						botId={bot.id}
 						viewOnly={!inControl}
 						offersReconnect
 						keyboardInput={keyboard}
@@ -173,23 +173,23 @@ function ComputerScreen({
 				</div>
 			</div>
 			<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-xs">
-				<AgentAvatar
-					color={agent.color}
-					face={agent.face}
-					shape={agent.shape}
+				<BotAvatar
+					color={bot.color}
+					face={bot.face}
+					shape={bot.shape}
 					size={22}
 					className="shrink-0"
 				/>
 				<span className="min-w-0 text-soft-foreground">
 					{!mayUse ? (
-						<>You can watch what {agent.name} does here.</>
+						<>You can watch what {bot.name} does here.</>
 					) : inControl ? (
 						<>
 							<b className="font-semibold text-foreground">You</b> have control
 						</>
-					) : agentUsing ? (
+					) : botUsing ? (
 						<>
-							<b className="font-semibold text-foreground">{agent.name}</b> has control
+							<b className="font-semibold text-foreground">{bot.name}</b> has control
 						</>
 					) : (
 						<>Watching</>
@@ -227,33 +227,38 @@ function ComputerScreen({
 }
 
 /**
- * The agent's screen in the reply that is using it, watch-only, so people see
+ * The bot's screen in the reply that is using it, watch-only, so people see
  * the browser at work without leaving the chat. Clicking it opens the desktop
  * beside the chat.
  */
 export function LiveDesktopCard({
-	threadId,
-	agentId,
-	agentName,
+	conversationId,
+	botId,
+	botName,
 	onOpen,
 }: {
-	threadId: string;
-	agentId: string;
-	agentName: string;
+	conversationId: string;
+	botId: string;
+	botName: string;
 	onOpen: () => void;
 }) {
 	return (
 		<article
-			aria-label={`${agentName}'s screen`}
+			aria-label={`${botName}'s screen`}
 			className="overflow-hidden rounded-xl border border-border bg-panel"
 		>
 			<div className="relative">
 				{/* Covered by the button that opens the desktop, which reconnects there. */}
-				<DesktopScreen threadId={threadId} agentId={agentId} viewOnly offersReconnect={false} />
+				<DesktopScreen
+					conversationId={conversationId}
+					botId={botId}
+					viewOnly
+					offersReconnect={false}
+				/>
 				<button
 					type="button"
 					onClick={onOpen}
-					aria-label={`Open ${agentName}'s desktop`}
+					aria-label={`Open ${botName}'s desktop`}
 					className="focus-ring absolute inset-0 cursor-zoom-in"
 				/>
 			</div>
@@ -262,7 +267,7 @@ export function LiveDesktopCard({
 					<span className="absolute inline-flex size-full animate-ping rounded-full bg-bot-mono opacity-60 motion-reduce:animate-none" />
 					<span className="relative inline-flex size-2 rounded-full bg-bot-mono" />
 				</span>
-				{agentName} is using its browser
+				{botName} is using its browser
 			</p>
 		</article>
 	);
@@ -271,8 +276,8 @@ export function LiveDesktopCard({
 type Standing = "connecting" | "connected" | "ended" | "idle";
 
 /**
- * How long the desktop stays connected while neither the person nor the agent
- * uses it. A connection holds the sandbox awake, so a forgotten tab would keep
+ * How long the desktop stays connected while neither the person nor the bot
+ * uses it. A connection holds the computer awake, so a forgotten tab would keep
  * it running for as long as the tab stays open.
  */
 const IDLE_TIMEOUT_MINUTES = 5;
@@ -284,17 +289,17 @@ const INPUT_EVENTS = ["pointerdown", "pointermove", "wheel", "keydown"] as const
 /**
  * The desktop, scaled to fit and, unless `viewOnly`, taking the person's
  * mouse and keys, for as long as it's mounted and in use: it lets go after {@link IDLE_TIMEOUT_MINUTES}
- * without input from the person or a browser call from the agent.
+ * without input from the person or a browser call from the bot.
  */
 export function DesktopScreen({
-	threadId,
-	agentId,
+	conversationId,
+	botId,
 	viewOnly,
 	offersReconnect,
 	keyboardInput,
 }: {
-	threadId: string;
-	agentId: string;
+	conversationId: string;
+	botId: string;
 	/** Shows the desktop without sending input. The API enforces it either way. */
 	viewOnly: boolean;
 	/** Shows a Reconnect button once disconnected, for a screen nothing else covers. */
@@ -312,11 +317,11 @@ export function DesktopScreen({
 	const [standing, setStanding] = useState<Standing>("connecting");
 	const [attempt, setAttempt] = useState(0);
 	const lastUsedAt = useRef(Date.now());
-	const agentUsing = useDesktopInUse(threadId, agentId);
-	const agentUsingNow = useRef(agentUsing);
+	const botUsing = useDesktopInUse(conversationId, botId);
+	const botUsingNow = useRef(botUsing);
 	useEffect(() => {
-		agentUsingNow.current = agentUsing;
-	}, [agentUsing]);
+		botUsingNow.current = botUsing;
+	}, [botUsing]);
 	// Taking over or handing back switches input on the open connection, without reconnecting.
 	useEffect(() => {
 		viewOnlyNow.current = viewOnly;
@@ -392,8 +397,8 @@ export function DesktopScreen({
 		let hiddenWhileConnected = document.hidden;
 		let droppedWhileHidden = false;
 		const unusedTooLong = () =>
-			!agentUsingNow.current && Date.now() - lastUsedAt.current >= IDLE_TIMEOUT_MINUTES * 60_000;
-		// Waking the sandbox after a long absence is left to the Reconnect button.
+			!botUsingNow.current && Date.now() - lastUsedAt.current >= IDLE_TIMEOUT_MINUTES * 60_000;
+		// Waking the computer after a long absence is left to the Reconnect button.
 		const reconnect = () =>
 			unusedTooLong() ? setStanding("idle") : setAttempt((count) => count + 1);
 		const reconnectWhenShown = () => {
@@ -405,7 +410,7 @@ export function DesktopScreen({
 		};
 		document.addEventListener("visibilitychange", reconnectWhenShown);
 		const idleCheck = setInterval(() => {
-			if (agentUsingNow.current) used();
+			if (botUsingNow.current) used();
 			if (!viewer || !unusedTooLong()) return;
 			const idleViewer = viewer;
 			viewer = undefined;
@@ -415,7 +420,7 @@ export function DesktopScreen({
 		// Loaded only when somebody watches: noVNC is large, and most people never do.
 		void import("@novnc/novnc").then(({ default: RFBClient }) => {
 			if (unmounted) return;
-			const opened = new RFBClient(element, desktopUrl(threadId, agentId));
+			const opened = new RFBClient(element, desktopUrl(conversationId, botId));
 			viewer = opened;
 			connected.current = opened;
 			opened.scaleViewport = true;
@@ -452,7 +457,7 @@ export function DesktopScreen({
 			closing?.disconnect();
 			connected.current = undefined;
 		};
-	}, [threadId, agentId, attempt]);
+	}, [conversationId, botId, attempt]);
 
 	return (
 		<div className="relative aspect-4/3 w-full overflow-hidden rounded-panel bg-list">
@@ -606,11 +611,11 @@ function pressControlWith(viewer: RFB, keysym: number, code: string) {
 const STANDING_TEXT: Record<Exclude<Standing, "connected">, string> = {
 	connecting: "Starting the desktop…",
 	ended: "The desktop couldn't be reached.",
-	idle: `Disconnected after ${IDLE_TIMEOUT_MINUTES} minutes unused, so the sandbox can pause.`,
+	idle: `Disconnected after ${IDLE_TIMEOUT_MINUTES} minutes unused, so the computer can pause.`,
 };
 
-function desktopUrl(threadId: string, agentId: string) {
-	const url = new URL(`${apiBaseUrl}/threads/${threadId}/agents/${agentId}/desktop`);
+function desktopUrl(conversationId: string, botId: string) {
+	const url = new URL(`${apiBaseUrl}/conversations/${conversationId}/bots/${botId}/desktop`);
 	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
 	return url.href;
 }

@@ -86,7 +86,7 @@ describe("pruning", () => {
 
 	it("survives a store that throws, so a failed sweep cannot take the API down", async () => {
 		const store = EventStore.inMemory();
-		await store.append("thread:c1", rawEvent("message.created"));
+		await store.append("conversation:c1", rawEvent("message.created"));
 		const prune = vi.spyOn(store, "prune").mockRejectedValue(new Error("connection lost"));
 
 		const { runtime, passes } = pruning(store);
@@ -96,6 +96,6 @@ describe("pruning", () => {
 		await vi.waitFor(() => expect(prune).toHaveBeenCalledTimes(2));
 		await runtime.dispose();
 
-		expect(await store.has("thread:c1", 1)).toBe(true);
+		expect(await store.has("conversation:c1", 1)).toBe(true);
 	});
 });

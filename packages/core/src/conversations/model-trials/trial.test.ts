@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { noDatabase } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, streamed } from "../../providers/models/testing.ts";
-import { CASES, type TrialSystemAgent } from "./cases.ts";
+import { CASES, type TrialSystemBot } from "./cases.ts";
 import { ACCURACY_NEEDED, BUDGET_MS, explain, rateAccuracy, rateSpeed, runTrial } from "./trial.ts";
 
 /** A model that answers whatever it is told to, so the grading is what is under test. */
@@ -17,10 +17,10 @@ function scripted(
 	});
 }
 
-const trial = (model: Models.Interface, systemAgentKey: TrialSystemAgent, attempts = 1) =>
+const trial = (model: Models.Interface, systemBotKey: TrialSystemBot, attempts = 1) =>
 	Effect.runPromise(
 		Effect.provide(
-			runTrial({ systemAgentKey, model: "under-trial", workspaceId: "w1", attempts }, model),
+			runTrial({ systemBotKey, model: "under-trial", workspaceId: "w1", attempts }, model),
 			noDatabase,
 		),
 	);
@@ -38,7 +38,7 @@ describe("rating a model", () => {
 		expect(rateAccuracy(0, 0)).toBe("terrible");
 	});
 
-	it("judges speed against what the system agent can afford to wait", () => {
+	it("judges speed against what the system bot can afford to wait", () => {
 		expect(rateSpeed(15_000, BUDGET_MS.summarise)).toBe("excellent");
 		expect(rateSpeed(25_000, BUDGET_MS.summarise)).toBe("good");
 		expect(rateSpeed(45_000, BUDGET_MS.summarise)).toBe("poor");

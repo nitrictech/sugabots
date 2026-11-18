@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { agentColorSchema, agentFaceSchema, agentShapeSchema } from "./agents.ts";
+import { botColorSchema, botFaceSchema, botShapeSchema } from "./bots.ts";
 import { providerPresetIdSchema } from "./provider-catalog.ts";
 
 /**
@@ -38,16 +38,16 @@ export const usageDaySchema = Schema.Struct({
 
 /** A bot's spend: the requests its own turns made. */
 export const botUsageSchema = Schema.Struct({
-	agentId: Schema.String,
+	botId: Schema.String,
 	/** Null for a bot that has since been deleted. */
 	name: Schema.NullOr(Schema.String),
-	color: Schema.NullOr(agentColorSchema),
-	face: Schema.NullOr(agentFaceSchema),
-	shape: Schema.NullOr(agentShapeSchema),
+	color: Schema.NullOr(botColorSchema),
+	face: Schema.NullOr(botFaceSchema),
+	shape: Schema.NullOr(botShapeSchema),
 	...spendFields,
 });
 
-/** A model's spend through one provider, the bots' and the system agents' together. */
+/** A model's spend through one provider, the bots' and the system bots' together. */
 export const modelUsageSchema = Schema.Struct({
 	/** The model id sent to the provider. */
 	model: Schema.String,
@@ -69,10 +69,10 @@ export const workspaceUsageSchema = Schema.Struct({
 	bots: Schema.Array(botUsageSchema),
 	models: Schema.Array(modelUsageSchema),
 	/**
-	 * What the system agents spent: routing, summaries and titles,
+	 * What the system bots spent: routing, summaries and titles,
 	 * compaction, and trying models out from settings.
 	 */
-	systemAgents: Schema.Struct(spendFields),
+	systemBots: Schema.Struct(spendFields),
 	/**
 	 * What every person's Personal Assistant spent, together: each is its
 	 * person's alone, so none is named.

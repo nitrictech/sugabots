@@ -3,7 +3,7 @@ import { BadRequest, Conflict, NotFound, PayloadTooLarge } from "@sugabots/contr
 import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
-import { ThreadFiles } from "@sugabots/core/conversations/thread-files/thread-files";
+import { ConversationFiles } from "@sugabots/core/files/conversation-files";
 import { userText } from "@sugabots/errors";
 import { Effect, Stream } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
@@ -20,32 +20,32 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 		return handlers
 			.handle("list", ({ params, query }) =>
 				view
-					.list({ workspace: params.workspace, pod: query.pod })
+					.list({ workspace: params.workspace, channel: query.channel })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("podMarkers", ({ params }) =>
-				view.podMarkers(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
+			.handle("channelMarkers", ({ params }) =>
+				view.channelMarkers(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("activity", ({ params }) =>
-				view.activity(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
+			.handle("inbox", ({ params }) =>
+				view.inbox(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("approvals", ({ params }) =>
 				view.approvals(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("botTasks", ({ params }) =>
-				view.botTasks(params.agentId).pipe(asSessionUser, asHttpError(chatErrors)),
+				view.botTasks(params.botId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("startTask", ({ params, payload }) =>
 				chats
 					.startTask({
-						agentId: params.agentId,
+						botId: params.botId,
 						messageId: payload.id,
 						content: payload.message,
 					})
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("startInterview", ({ params }) =>
-				chats.startInterview(params.agentId).pipe(asSessionUser, asHttpError(chatErrors)),
+				chats.startInterview(params.botId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("directMessages", ({ params }) =>
 				view.directMessages(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
@@ -63,19 +63,19 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("directMessage", ({ params }) =>
 				view.directMessage(params.conversationId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("openRoutineFeed", ({ params }) =>
+			.handle("openAutomationFeed", ({ params }) =>
 				chats
-					.openRoutineFeed({ workspace: params.workspace, routineId: params.routineId })
+					.openAutomationFeed({ workspace: params.workspace, automationId: params.automationId })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("openPodChat", ({ params }) =>
+			.handle("openMainChat", ({ params }) =>
 				chats
-					.openPodChat({ workspace: params.workspace, podId: params.podId })
+					.openMainChat({ workspace: params.workspace, channelId: params.channelId })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("startChat", ({ params, payload }) =>
 				chats
-					.startChat({ podId: params.podId, name: payload.name })
+					.startChat({ channelId: params.channelId, name: payload.name })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("renameChat", ({ params, payload }) =>
@@ -108,7 +108,7 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 				chats.markRead(params.conversationId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("markItemRead", ({ params }) =>
-				chats.markItemRead(params.threadId).pipe(asSessionUser, asHttpError(chatErrors)),
+				chats.markItemRead(params.conversationId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("send", ({ params, payload }) =>
 				chats
@@ -127,7 +127,7 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 				Effect.gen(function* () {
 					// Refused before any of it is read, when it says how large it is.
 					if (Number(request.headers["content-length"]) > MAX_ATTACHMENT_BYTES) {
-						return yield* new ThreadFiles.FileTooLarge({ maxSize: MAX_ATTACHMENT_BYTES });
+						return yield* new ConversationFiles.FileTooLarge({ maxSize: MAX_ATTACHMENT_BYTES });
 					}
 					return yield* files.upload({
 						conversationId: params.conversationId,
@@ -170,7 +170,7 @@ const storeOutagesAsDefects = {
 
 const chatErrors = {
 	...refusals,
-	HostNotCrew: BadRequest,
+	HostUnavailable: BadRequest,
 	DirectToSelf: BadRequest,
 	TooManyInDirect: BadRequest,
 	MessageIdConflict: Conflict,
@@ -184,7 +184,7 @@ const chatErrors = {
 
 const fileErrors = {
 	...refusals,
-	ThreadFileTooLarge: PayloadTooLarge,
+	FileTooLarge: PayloadTooLarge,
 	TooManyUnsentUploads: Conflict,
-	ThreadFileNotFound: NotFound,
+	ConversationFileNotFound: NotFound,
 };

@@ -1,12 +1,12 @@
-import { handleFromName } from "./agents.ts";
+import type { AutomationTrigger } from "./automations.ts";
+import { handleFromName } from "./bots.ts";
 import {
 	type Connection,
 	type ConnectionToolWithAccess,
 	type ConnectionWithTools,
 	toolAccessCountsOf,
 } from "./connections.ts";
-import type { RoutineTrigger } from "./routines.ts";
-import type { PersonParticipant } from "./threads.ts";
+import type { PersonParticipant } from "./conversations.ts";
 
 /**
  * A person as the API shows them, for tests and stories. The handle is derived
@@ -31,7 +31,7 @@ export function testPerson({
 /** A connection for tests and stories, with every tool in full, as the server holds it. */
 export type TestConnection = Omit<Connection, "toolCounts"> & { tools: ConnectionToolWithAccess[] };
 
-/** `connection` as the pod's list gives it: how many tools are at each setting, not the tools. */
+/** `connection` as its bot's list gives it: how many tools are at each setting, not the tools. */
 export function listedConnection({ tools, ...connection }: TestConnection): Connection {
 	return { ...connection, toolCounts: toolAccessCountsOf(tools) };
 }
@@ -44,26 +44,29 @@ export function connectionWithTools(connection: TestConnection): ConnectionWithT
 	};
 }
 
-/** A routine's trigger as a fixture writes it, before it is given an id. */
-export type TestRoutineTrigger = RoutineTrigger extends infer T
-	? T extends RoutineTrigger
+/** An automation's trigger as a fixture writes it, before it is given an id. */
+export type TestAutomationTrigger = AutomationTrigger extends infer T
+	? T extends AutomationTrigger
 		? Omit<T, "id">
 		: never
 	: never;
 
 /**
- * A routine's triggers, numbered by `routineId`: the first has the routine's
- * own id, as a trigger moved from when routines had one does.
+ * An automation's triggers, numbered by `automationId`: the first has the automation's
+ * own id, as a trigger moved from when automations had one does.
  */
-export function routineTriggers(
-	routineId: string,
-	...triggers: TestRoutineTrigger[]
-): RoutineTrigger[] {
+export function automationTriggers(
+	automationId: string,
+	...triggers: TestAutomationTrigger[]
+): AutomationTrigger[] {
 	return triggers.map(
 		(trigger, index) =>
 			({
 				...trigger,
-				id: index === 0 ? routineId : `${routineId.slice(0, -2)}${String(index).padStart(2, "0")}`,
-			}) as RoutineTrigger,
+				id:
+					index === 0
+						? automationId
+						: `${automationId.slice(0, -2)}${String(index).padStart(2, "0")}`,
+			}) as AutomationTrigger,
 	);
 }

@@ -1,9 +1,9 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
 import { Effect, Layer } from "effect";
 import {
-	agent,
-	pod,
-	podMember,
+	bot as botTable,
+	channel,
+	channelMember,
 	user,
 	workspace,
 	workspaceMember,
@@ -39,7 +39,7 @@ export interface Asked {
 export type Route = (asked: Asked) => Response | undefined;
 
 /**
- * GitHub as a pod's app sees it: it makes the app from a manifest, and
+ * GitHub as a bot's app sees it: it makes the app from a manifest, and
  * finds the app's installations, on `acme` and `acme-labs`, only with a
  * token signed by the app's key. `routes` answer anything else, before a 404.
  */
@@ -146,8 +146,8 @@ export const reachingGitHub = (github: typeof fetch, publicUrl: string) =>
 		Layer.succeed(Installation.Service, Installation.fromUrls({ isProduction: false, publicUrl })),
 	);
 
-/** A workspace with an admin, a member, and a shared pod the member is in. */
-export async function workspaceWithPod(label: string) {
+/** A workspace with an admin, a member, and a channel the member is in. */
+export async function workspaceWithChannel(label: string) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const [space] = await onDatabase((db) =>
 		db
@@ -174,7 +174,7 @@ export async function workspaceWithPod(label: string) {
 	);
 	const [shared] = await onDatabase((db) =>
 		db
-			.insert(pod)
+			.insert(channel)
 			.values({
 				workspaceId,
 				name: "Builders",
@@ -185,11 +185,11 @@ export async function workspaceWithPod(label: string) {
 	);
 	if (!shared) throw new Error("fixture");
 	await onDatabase((db) =>
-		db.insert(podMember).values({ workspaceId, podId: shared.id, userId: member.id }),
+		db.insert(channelMember).values({ workspaceId, channelId: shared.id, userId: member.id }),
 	);
 	const [bot] = await onDatabase((db) =>
 		db
-			.insert(agent)
+			.insert(botTable)
 			.values({
 				workspaceId,
 				name: "Builder",
@@ -202,8 +202,8 @@ export async function workspaceWithPod(label: string) {
 	if (!bot) throw new Error("fixture");
 	return {
 		workspaceId,
-		podId: shared.id,
-		agentId: bot.id,
+		channelId: shared.id,
+		botId: bot.id,
 		adminId: admin.id,
 		memberId: member.id,
 	};
@@ -215,10 +215,10 @@ export async function workspaceWithPod(label: string) {
  */
 export async function madeConnection(
 	gitHubApps: GitHubApps.Interface,
-	{ agentId, adminId }: { agentId: string; adminId: string },
+	{ botId, adminId }: { botId: string; adminId: string },
 ) {
 	const asAdmin = onPostgresAs(adminId)(gitHubApps);
-	const form = await asAdmin.start({ agentId, organization: undefined });
+	const form = await asAdmin.start({ botId, organization: undefined });
 	const made = await asAdmin.made({ code: MANIFEST_CODE, state: stateIn(form.url) });
 	if (made.kind !== "next") throw new Error(`Not made: ${JSON.stringify(made)}`);
 	// The connection's id ends its webhook's address.
@@ -230,7 +230,7 @@ export async function madeConnection(
 /** The bot's GitHub app, made by the fixture's admin and installed on `acme`. */
 export async function installedConnection(
 	gitHubApps: GitHubApps.Interface,
-	fixture: { agentId: string; adminId: string },
+	fixture: { botId: string; adminId: string },
 ) {
 	const { connectionId, installState } = await madeConnection(gitHubApps, fixture);
 	const installed = await onPostgresAs(fixture.adminId)(gitHubApps).installed({

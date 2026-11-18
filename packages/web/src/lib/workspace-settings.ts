@@ -13,7 +13,7 @@ export const workspaceSettingSections = [
 	{ id: "general", label: "General", path: "/settings" },
 	{ id: "members", label: "People", path: "/settings/members" },
 	{ id: "providers", label: "Models", path: "/settings/providers", needs: "manageProviders" },
-	{ id: "sandboxes", label: "Computers", path: "/settings/sandboxes", needs: "manageProviders" },
+	{ id: "computers", label: "Computers", path: "/settings/computers", needs: "manageProviders" },
 	{ id: "search", label: "Web search", path: "/settings/search", needs: "manageProviders" },
 	{ id: "usage", label: "Usage", path: "/settings/usage", needs: "manageUsage" },
 ] as const satisfies ReadonlyArray<SectionShape>;
@@ -70,32 +70,32 @@ export function workspaceSettingSection(section: string): SettingSection | undef
 }
 
 /** The pages of a channel's settings, as the navigation lists them under it. */
-export const podSettingsPages = [
+export const channelSettingsPages = [
 	{ id: "general", label: "General" },
 	{ id: "people", label: "People" },
 	{ id: "bots", label: "Bots" },
 ] as const;
 
-export type PodSettingsPage = (typeof podSettingsPages)[number]["id"];
+export type ChannelSettingsPage = (typeof channelSettingsPages)[number]["id"];
 
 /** The page of a channel's settings an address names after the channel, if it names one. */
-export function podSettingsPage(segment: string): PodSettingsPage | undefined {
-	return podSettingsPages.find((page) => page.id === segment)?.id;
+export function channelSettingsPage(segment: string): ChannelSettingsPage | undefined {
+	return channelSettingsPages.find((page) => page.id === segment)?.id;
 }
 
 /**
  * The pages of a bot's settings besides its own: the services it is connected
  * to, and its computer, which is there only while the workspace has computers.
  */
-export const agentSettingsPages = [
+export const botSettingsPages = [
 	{ id: "general", label: "General" },
 	{ id: "connections", label: "Connections" },
 	{ id: "computer", label: "Computer" },
 ] as const;
 
-export type AgentSettingsPage = (typeof agentSettingsPages)[number]["id"];
+export type BotSettingsPage = (typeof botSettingsPages)[number]["id"];
 
 /** The page of a bot's settings an address names after the bot, if it names one. */
-export function agentSettingsPage(segment: string): AgentSettingsPage | undefined {
-	return agentSettingsPages.find((page) => page.id === segment)?.id;
+export function botSettingsPage(segment: string): BotSettingsPage | undefined {
+	return botSettingsPages.find((page) => page.id === segment)?.id;
 }

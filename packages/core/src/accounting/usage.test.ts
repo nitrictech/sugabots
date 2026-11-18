@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden } from "../authorization/access.ts";
 import {
-	agent,
+	bot,
 	modelProvider,
 	modelRequest,
 	user,
@@ -62,7 +62,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 		);
 		const [growthDesk, accountManager] = await onDatabase((db) =>
 			db
-				.insert(agent)
+				.insert(bot)
 				.values([
 					{
 						workspaceId,
@@ -103,14 +103,14 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 	type Recorded = Partial<typeof modelRequest.$inferInsert> &
 		Pick<typeof modelRequest.$inferInsert, "startedAt">;
 
-	/** Requests in the ledger: completed agent turns of Growth Desk's by default. */
+	/** Requests in the ledger: completed bot turns of Growth Desk's by default. */
 	const recorded = (...requests: Recorded[]) =>
 		onDatabase((db) =>
 			db.insert(modelRequest).values(
 				requests.map((request) => ({
 					workspaceId,
-					purpose: "agent-turn" as const,
-					agentId: growthDeskId,
+					purpose: "bot-turn" as const,
+					botId: growthDeskId,
 					step: 0,
 					providerId,
 					preset: "anthropic" as const,
@@ -124,15 +124,15 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 
 	const priced = (usd: number) => ({ costUsd: usd, costSource: "models.dev@test" });
 
-	it("adds up a month by bot and model, with the system agents apart", async () => {
+	it("adds up a month by bot and model, with the system bots apart", async () => {
 		await recorded(
 			{ startedAt: new Date("2026-09-03T01:00:00Z"), ...priced(1.5) },
 			{ startedAt: new Date("2026-09-03T02:00:00Z"), ...priced(0.75) },
-			{ startedAt: new Date("2026-09-10T02:00:00Z"), agentId: accountManagerId, ...priced(2) },
+			{ startedAt: new Date("2026-09-10T02:00:00Z"), botId: accountManagerId, ...priced(2) },
 			{
 				startedAt: new Date("2026-09-10T03:00:00Z"),
 				purpose: "summary",
-				agentId: null,
+				botId: null,
 				...priced(0.25),
 			},
 			// Answered, but its cost can't be known.
@@ -147,7 +147,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 		expect(usage).toMatchObject({ usd: 4.5, unpricedRequests: 1 });
 		expect(usage.bots).toEqual([
 			{
-				agentId: growthDeskId,
+				botId: growthDeskId,
 				name: "Growth Desk",
 				color: "green",
 				face: "pill",
@@ -156,7 +156,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				unpricedRequests: 1,
 			},
 			{
-				agentId: accountManagerId,
+				botId: accountManagerId,
 				name: "Account Manager",
 				color: "sky",
 				face: "dot",
@@ -165,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				unpricedRequests: 0,
 			},
 		]);
-		// The bots' requests and the Scribe's to the same model are one line.
+		// The bots' requests and the Summariser's to the same model are one line.
 		expect(usage.models).toEqual([
 			expect.objectContaining({
 				model: "claude-sonnet",
@@ -174,7 +174,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				unpricedRequests: 1,
 			}),
 		]);
-		expect(usage.systemAgents).toEqual({ usd: 0.25, unpricedRequests: 0 });
+		expect(usage.systemBots).toEqual({ usd: 0.25, unpricedRequests: 0 });
 		expect(usage.days).toHaveLength(30);
 		expect(usage.days.filter((day) => day.usd > 0)).toEqual([
 			{ date: "2026-09-03", usd: 2.25 },
@@ -185,7 +185,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 	it("counts people's Personal Assistants together, naming none", async () => {
 		const [assistant] = await onDatabase((db) =>
 			db
-				.insert(agent)
+				.insert(bot)
 				.values({
 					workspaceId,
 					name: "Personal Assistant",
@@ -200,13 +200,13 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 		if (!assistant) throw new Error("fixture");
 		await recorded(
 			{ startedAt: new Date("2026-09-03T01:00:00Z"), ...priced(1.5) },
-			{ startedAt: new Date("2026-09-04T01:00:00Z"), agentId: assistant.id, ...priced(0.5) },
+			{ startedAt: new Date("2026-09-04T01:00:00Z"), botId: assistant.id, ...priced(0.5) },
 		);
 
 		const usage = await usageAs(adminId).month({ workspace: workspaceId, month: "2026-09" });
 
 		expect(usage).toMatchObject({ usd: 2, unpricedRequests: 0 });
-		expect(usage.bots.map((bot) => bot.agentId)).toEqual([growthDeskId]);
+		expect(usage.bots.map((bot) => bot.botId)).toEqual([growthDeskId]);
 		expect(usage.personalAssistants).toEqual({ usd: 0.5, unpricedRequests: 0 });
 	});
 

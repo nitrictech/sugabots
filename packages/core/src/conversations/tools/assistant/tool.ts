@@ -2,8 +2,8 @@ import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
 import type { AssistantGuide } from "../../assistant/assistant-guide.ts";
+import type { Request } from "../computer.ts";
 import { noInputSchema } from "../no-input.ts";
-import type { Request } from "../sandbox.ts";
 
 export const WORKSPACE_GUIDE_TOOL = "workspace_guide";
 export const CREATE_CHANNEL_TOOL = "create_channel";

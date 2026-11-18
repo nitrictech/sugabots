@@ -3,7 +3,7 @@ import { useState } from "react";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
-import { storyPodChatFor } from "@/story-app.tsx";
+import { storyChannelConversationFor } from "@/story-app.tsx";
 import { ChannelConversationsView } from "./ConversationList.tsx";
 import { DirectMessagesSection } from "./DirectMessages.tsx";
 import { SidebarView } from "./Sidebar.tsx";
@@ -28,7 +28,7 @@ const suga = {
 	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 
-const nothing = { unreadMessages: 0, needsApproval: false, failedRoutines: 0 };
+const nothing = { unreadMessages: 0, needsApproval: false, failedAutomations: 0 };
 
 const meta = preview.meta({
 	title: "Product/Sidebar",
@@ -41,18 +41,18 @@ const meta = preview.meta({
 		return () => localStorage.removeItem("sugabots-folded");
 	},
 	args: {
-		assistant: { agent: chief, ...nothing },
+		assistant: { bot: chief, ...nothing },
 		channels: [
-			{ pod: revenue, ...nothing },
-			{ pod: engineering, ...nothing, unreadMessages: 4 },
-			{ pod: design, ...nothing, needsApproval: true },
+			{ channel: revenue, ...nothing },
+			{ channel: engineering, ...nothing, unreadMessages: 4 },
+			{ channel: design, ...nothing, needsApproval: true },
 		],
 		bots: [
-			{ agent: growthDesk, ...nothing },
-			{ agent: accountManager, ...nothing, unreadMessages: 2 },
-			{ agent: linearHandler, ...nothing, failedRoutines: 1 },
+			{ bot: growthDesk, ...nothing },
+			{ bot: accountManager, ...nothing, unreadMessages: 2 },
+			{ bot: linearHandler, ...nothing, failedAutomations: 1 },
 		],
-		currentPodSlug: revenue.slug,
+		currentChannelSlug: revenue.slug,
 		view: undefined,
 		unreadForYou: 1,
 		unreadInInbox: 3,
@@ -65,10 +65,10 @@ const meta = preview.meta({
 		directMessages: (
 			<DirectMessagesSection items={[withPriya, withPriyaAndTheo, withMarco]} status="ready" />
 		),
-		conversationsOf: (pod) => (
+		conversationsOf: (channel) => (
 			<ChannelConversationsView
-				pod={pod}
-				chats={[{ conversation: storyPodChatFor(pod), unreadMessages: 0 }]}
+				channel={channel}
+				chats={[{ conversation: storyChannelConversationFor(channel), unreadMessages: 0 }]}
 				status="ready"
 			/>
 		),
@@ -105,5 +105,5 @@ export const Default = meta.story({
 
 /** Inbox open, shaded in the sidebar. */
 export const InboxOpen = meta.story({
-	args: { view: "inbox", currentPodSlug: undefined },
+	args: { view: "inbox", currentChannelSlug: undefined },
 });

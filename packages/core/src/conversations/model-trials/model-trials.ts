@@ -9,12 +9,12 @@ import { serviceOperations } from "../../database/database.ts";
 import { Models } from "../../providers/models/models.ts";
 import { runTrial, type TrialReport } from "./trial.ts";
 
-/** Trying a model out on a system agent before a workspace relies on it. */
+/** Trying a model out on a system bot before a workspace relies on it. */
 export interface Interface {
 	/**
-	 * Asks `model` the system agent's trial cases in a workspace named by its
+	 * Asks `model` the system bot's trial cases in a workspace named by its
 	 * id or its slug. A trial spends model calls and decides what the
-	 * workspace's unattended agents run on, so it takes the current actor's
+	 * workspace's unattended bots run on, so it takes the current actor's
 	 * `workspace.providers.manage`.
 	 */
 	readonly run: (
@@ -29,12 +29,12 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const models = yield* Models.Service;
 	return Service.of({
-		run: ({ workspace, systemAgentKey, model }) =>
+		run: ({ workspace, systemBotKey, model }) =>
 			operation(
 				"run",
 				Effect.flatMap(
 					authorization.workspace(workspace, "workspace.providers.manage"),
-					({ workspaceId }) => runTrial({ systemAgentKey, model, workspaceId }, models),
+					({ workspaceId }) => runTrial({ systemBotKey, model, workspaceId }, models),
 				),
 			),
 	});

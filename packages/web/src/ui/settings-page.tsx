@@ -622,7 +622,7 @@ export function SettingsAddMark() {
 	);
 }
 
-/** The foot of a page for something that cannot be undone: Delete pod, Sign out. */
+/** The foot of a page for something that cannot be undone: Delete channel, Sign out. */
 export function SettingsDanger({
 	label,
 	description,
@@ -630,9 +630,9 @@ export function SettingsDanger({
 	onClick,
 	disabledReason,
 }: {
-	/** What the action does, in full: Delete pod. */
+	/** What the action does, in full: Delete channel. */
 	label: string;
-	/** What follows from it: Removes its bots, threads and artifacts. */
+	/** What follows from it: Removes its bots, conversations and files. */
 	description: ReactNode;
 	/** The button's own word, short beside the label: Delete. */
 	action: string;

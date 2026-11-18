@@ -68,11 +68,14 @@ describe("asHttpError", () => {
 	});
 
 	it("passes a failure already in the API's terms through as it is", () => {
-		const refusal = new NotFound({ message: userText`No such thread`, details: { id: "t1" } });
+		const refusal = new NotFound({
+			message: userText`No such conversation`,
+			details: { id: "t1" },
+		});
 
 		expect(failWith(refusal)).toEqual({
 			_tag: "NotFound",
-			message: "No such thread",
+			message: "No such conversation",
 			details: { id: "t1" },
 		});
 	});

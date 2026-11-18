@@ -1,4 +1,9 @@
-import { type Channel, EVENT_VERSION, type EventType, type StreamEvent } from "@sugabots/contracts";
+import {
+	EVENT_VERSION,
+	type EventType,
+	type StreamChannel,
+	type StreamEvent,
+} from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { event } from "../schema.ts";
@@ -56,12 +61,12 @@ for (const { name, skip, make, backdate } of stores) {
 		let store: EventStore.Interface;
 		// Channels are per-test so a shared Postgres instance, and whatever a
 		// previous run left in it, cannot affect the result.
-		let channel: Channel;
+		let channel: StreamChannel;
 
 		beforeEach(async () => {
 			clock = new Date(Date.now() - DAY_MS);
 			store = await make();
-			channel = `thread:${crypto.randomUUID()}`;
+			channel = `conversation:${crypto.randomUUID()}`;
 		});
 
 		it("hands back a sequence number that rises", async () => {
@@ -83,7 +88,7 @@ for (const { name, skip, make, backdate } of stores) {
 
 		it("returns the envelope exactly as it was stored", async () => {
 			const published = rawEvent("tool_call.completed", {
-				threadId: "c1",
+				conversationId: "c1",
 				output: { rows: [1, 2], nested: { ok: true } },
 			});
 
@@ -102,7 +107,7 @@ for (const { name, skip, make, backdate } of stores) {
 		});
 
 		it("never replays another channel's events", async () => {
-			await store.append(`workspace:${crypto.randomUUID()}`, rawEvent("thread.created"));
+			await store.append(`workspace:${crypto.randomUUID()}`, rawEvent("conversation.created"));
 
 			expect(await store.replay(channel, 0, 10)).toEqual([]);
 		});
@@ -113,7 +118,7 @@ for (const { name, skip, make, backdate } of stores) {
 			expect(await store.has(channel, seq)).toBe(true);
 			expect(await store.has(channel, seq + 1_000_000)).toBe(false);
 			// The row exists, but not on the channel the client is resuming.
-			expect(await store.has(`thread:${crypto.randomUUID()}`, seq)).toBe(false);
+			expect(await store.has(`conversation:${crypto.randomUUID()}`, seq)).toBe(false);
 		});
 
 		it("prunes what is older than the cutoff and keeps the rest", async () => {

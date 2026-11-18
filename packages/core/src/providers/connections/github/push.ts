@@ -6,7 +6,7 @@ import { type DomainError, userText } from "@sugabots/errors";
 import { Effect, ErrorReporter, Schema } from "effect";
 import * as GitHub from "./github.ts";
 
-/** The ref a sandbox's bundle carries the commit to push under. */
+/** The ref a computer's bundle carries the commit to push under. */
 export const BUNDLE_REF = "refs/sugabots/push";
 
 /**

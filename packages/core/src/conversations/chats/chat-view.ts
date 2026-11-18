@@ -1,12 +1,11 @@
 export * as ChatView from "./chat-view.ts";
 
 import type {
-	ActivityFeed,
-	ActivityItem,
 	AnsweredApproval,
 	ApprovalInbox,
 	ApprovalRequest,
 	BotTaskList,
+	ChannelConversationMarkers,
 	ChatHistoryEntry,
 	ChatHistoryPage,
 	ChatList,
@@ -16,8 +15,9 @@ import type {
 	ChatPageQuery,
 	DirectMessageList,
 	DirectMessageListItem,
+	InboxFeed,
+	InboxItem,
 	PersonParticipant,
-	PodChatMarkers,
 	ToolApprovalDeciders,
 } from "@sugabots/contracts";
 import {
@@ -26,7 +26,7 @@ import {
 	handleFromName,
 	mentionPattern,
 	messagePreview,
-	NOTIFYING_THREAD_TYPES,
+	NOTIFYING_CONVERSATION_KINDS,
 	textWithoutNarration,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
@@ -36,6 +36,7 @@ import {
 	type DBQueryConfig,
 	desc,
 	eq,
+	getColumns,
 	gt,
 	inArray,
 	isNotNull,
@@ -50,10 +51,10 @@ import { alias } from "drizzle-orm/pg-core";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import {
 	type AuthorizationDenied,
-	agentStandingsFor,
+	botStandingsFor,
 	mayDecideApprovals,
 	ResourceHidden,
-	reachedPodStandingsFor,
+	reachedChannelStandingsFor,
 } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
@@ -62,19 +63,21 @@ import { type Executor, query, serviceOperations } from "../../database/database
 import type { relations } from "../../database/relations.ts";
 import type * as schema from "../../database/schema.ts";
 import {
-	agent,
-	agentSummary,
-	CONVERSATION_TYPES,
+	automation,
+	automationFeed,
+	automationRun,
+	bot,
+	botSummary,
+	channel,
 	collaboration,
-	directMember,
+	conversationRead,
+	directMessageMember,
 	message,
-	pinnedAgent,
-	pod,
-	routine,
-	routineExecution,
-	type ThreadRow,
-	thread,
-	threadRead,
+	OPENABLE_CONVERSATION_KINDS,
+	type PlacedConversationRow,
+	pinnedBot,
+	placedConversation,
+	task,
 	toolCall,
 	turn,
 	user,
@@ -82,24 +85,29 @@ import {
 } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { crewAgentRow, toAgent } from "../../workspaces/agents/agent.ts";
+import { personFacingBotRow, toBot } from "../../workspaces/bots/bot.ts";
+import { latestRunFailedUnseen, resultPosted, runIdOf } from "../automations/automations.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
-import { latestRunFailedUnseen, resultPosted, routineExecutionIdOf } from "../routines/routines.ts";
 import {
-	agentColumns,
 	authorRow,
+	botColumns,
 	messageFromRelations,
 	messageRelations,
 	personColumns,
 	recentParticipantsOf,
 	toParticipant,
 	toPerson,
-} from "../threads/participants.ts";
-import { membersOfDirectKey } from "../threads/repository.ts";
-import { toToolCallPart } from "../threads/tool-calls.ts";
-import { decidersOf, SANDBOX_REQUEST_TOOLS } from "../tools/approval-deciders.ts";
+} from "../repository/participants.ts";
+import { membersOfDirectKey } from "../repository/repository.ts";
+import { toToolCallPart } from "../repository/tool-calls.ts";
+import { COMPUTER_REQUEST_TOOLS, decidersOf } from "../tools/approval-deciders.ts";
 import { Turns } from "../turns/turns.ts";
-import { toConversationThread, toDirect, toPodChat, toRoutineFeed } from "./conversation.ts";
+import {
+	toAutomationFeed,
+	toChannelConversation,
+	toDirectMessage,
+	toTask,
+} from "./conversation.ts";
 
 /**
  * What the chat screens show, of the conversations the current actor can see:
@@ -107,23 +115,23 @@ import { toConversationThread, toDirect, toPodChat, toRoutineFeed } from "./conv
  * timelines.
  */
 export interface Interface {
-	/** The main chat and threads of one channel, `pod` by its id or slug, of a workspace by its id or its slug. */
+	/** The main chat and threads of one channel, `channel` by its id or slug, of a workspace by its id or its slug. */
 	readonly list: (input: {
 		workspace: string;
-		pod: string;
+		channel: string;
 	}) => Effect.Effect<ChatList, AuthorizationDenied, CurrentActor.Service>;
-	/** The tasks and automations of the bot `agentId`. Hidden unless the actor reaches it. */
+	/** The tasks and automations of the bot `botId`. Hidden unless the actor reaches it. */
 	readonly botTasks: (
-		agentId: string,
+		botId: string,
 	) => Effect.Effect<BotTaskList, AuthorizationDenied, CurrentActor.Service>;
 	/**
 	 * How each channel and bot of the workspace the actor reaches stands for
 	 * them: its conversations' unread messages, whether any waits on their
 	 * decision, and how many of a bot's automations failed.
 	 */
-	readonly podMarkers: (
+	readonly channelMarkers: (
 		workspace: string,
-	) => Effect.Effect<PodChatMarkers, AuthorizationDenied, CurrentActor.Service>;
+	) => Effect.Effect<ChannelConversationMarkers, AuthorizationDenied, CurrentActor.Service>;
 	/**
 	 * The actor's direct messages in the workspace, with one other person or a
 	 * group, the most recent message first.
@@ -148,15 +156,20 @@ export interface Interface {
 	 * every automation run, read or not, but those that completed with nothing to
 	 * report; and every collaboration, read or not.
 	 */
-	readonly activity: (
+	readonly inbox: (
 		workspace: string,
-	) => Effect.Effect<ActivityFeed, AuthorizationDenied, CurrentActor.Service>;
+	) => Effect.Effect<InboxFeed, AuthorizationDenied, CurrentActor.Service>;
+	/** The newest `limit` messages in the inbox that mention the actor and they have not read. */
+	readonly unreadMentions: (
+		workspace: string,
+		limit: number,
+	) => Effect.Effect<InboxItem[], AuthorizationDenied, CurrentActor.Service>;
 	/** A page of the conversation, newest last. */
 	readonly messages: (
 		conversationId: string,
 		page?: ChatPageQuery,
 	) => Effect.Effect<ChatMessagesPage, ResourceHidden | InvalidPageCursor, CurrentActor.Service>;
-	/** A page of the threads opened beside the conversation, newest activity first. */
+	/** A page of the conversations opened beside the conversation, newest activity first. */
 	readonly history: (
 		conversationId: string,
 		page?: ChatPageQuery,
@@ -186,20 +199,41 @@ export const make = Effect.gen(function* () {
 		});
 	});
 
+	/** What the inbox looks through for the actor in `workspace`; none when they have no account. */
+	const inboxScopeOf = (workspace: string) =>
+		Effect.gen(function* () {
+			const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
+			const { userId } = yield* CurrentActor.Service;
+			const [person] = yield* query((db) =>
+				db.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1),
+			);
+			if (!person) return undefined;
+			const since = DateTime.toDate(
+				DateTime.subtract(yield* DateTime.now, { days: INBOX_WINDOW_DAYS }),
+			);
+			return {
+				workspaceId,
+				reachesConversation: yield* visibility.reachesConversation,
+				userId,
+				handle: handleFromName(person.name),
+				since,
+			} satisfies InboxScope;
+		});
+
 	return Service.of({
 		list: (input) =>
 			operation(
 				"list",
 				Effect.gen(function* () {
-					yield* Effect.annotateCurrentSpan("conversation.list.pod", input.pod);
+					yield* Effect.annotateCurrentSpan("conversation.list.channel", input.channel);
 					const { workspaceId } = yield* authorization.workspace(input.workspace, "workspace.read");
-					const reachesPod = yield* visibility.reachesPod;
+					const reachesChannel = yield* visibility.reachesChannel;
 					const { userId } = yield* CurrentActor.Service;
-					const podId = yield* query((db) =>
-						reachablePod(db, input.pod, { workspaceId, reachesPod }),
+					const channelId = yield* query((db) =>
+						reachableChannel(db, input.channel, { workspaceId, reachesChannel }),
 					);
-					if (!podId) return yield* new ResourceHidden({ resource: "pod" });
-					const chats = yield* query((db) => podChats(db, podId));
+					if (!channelId) return yield* new ResourceHidden({ resource: "channel" });
+					const chats = yield* query((db) => channelConversations(db, channelId));
 					const chatsUnread = yield* query((db) =>
 						unreadMessageCounts(
 							db,
@@ -209,34 +243,34 @@ export const make = Effect.gen(function* () {
 					);
 					return {
 						chats: chats.map((chat) => ({
-							conversation: toPodChat(chat),
+							conversation: toChannelConversation(chat),
 							unreadMessages: chatsUnread.get(chat.id) ?? 0,
 						})),
 					};
 				}),
 			),
 
-		botTasks: (agentId) =>
+		botTasks: (botId) =>
 			operation(
 				"botTasks",
 				Effect.gen(function* () {
-					const { agent: host, actor } = yield* authorization.agent(agentId, "agent.read");
+					const { bot: host, actor } = yield* authorization.bot(botId, "bot.read");
 					const { userId } = actor;
-					const crewHost = crewAgentRow(host);
-					if (!crewHost) return yield* new ResourceHidden({ resource: "agent" });
+					const personFacingHost = personFacingBotRow(host);
+					if (!personFacingHost) return yield* new ResourceHidden({ resource: "bot" });
 					const listed = yield* query((db) => tasksOf(db, host.id));
-					const threadIds = listed.map((row) => row.conversation.id);
-					const latest = yield* query((db) => latestMessages(db, threadIds));
-					const waitingOn = yield* query((db) => toolsAwaitingApproval(db, threadIds));
-					const marksOf = yield* conversationMarks(host.workspaceId, threadIds);
-					const mentioning = yield* query((db) => unreadMentionsIn(db, userId, threadIds));
+					const conversationIds = listed.map((row) => row.conversation.id);
+					const latest = yield* query((db) => latestMessages(db, conversationIds));
+					const waitingOn = yield* query((db) => toolsAwaitingApproval(db, conversationIds));
+					const marksOf = yield* conversationMarks(host.workspaceId, conversationIds);
+					const mentioning = yield* query((db) => unreadMentionsIn(db, userId, conversationIds));
 					const pinned = yield* query((db) => isPinnedBy(db, host.id, userId));
-					const shownHost = toAgent(crewHost, { actor, pinned });
+					const shownHost = toBot(personFacingHost, { actor, pinned });
 					const tasks = listed.map((row): ChatListItem => {
 						const last = latest.get(row.conversation.id);
 						return {
-							agent: shownHost,
-							conversation: toConversationThread(row.conversation),
+							bot: shownHost,
+							conversation: toTask(row.conversation),
 							lastMessage: last
 								? {
 										preview: replyPreview(last),
@@ -250,7 +284,7 @@ export const make = Effect.gen(function* () {
 							mentionsYou: mentioning.has(row.conversation.id),
 						};
 					});
-					const owned = yield* query((db) => listedRoutines(db, host.id, userId));
+					const owned = yield* query((db) => listedAutomations(db, host.id, userId));
 					const feedMentions = yield* query((db) =>
 						unreadMentionsIn(
 							db,
@@ -258,28 +292,28 @@ export const make = Effect.gen(function* () {
 							owned.flatMap((row) => (row.feed ? [row.feed.id] : [])),
 						),
 					);
-					const routines = owned.map((row) => ({
-						routine: {
-							id: row.routine.id,
-							name: row.routine.name,
-							state: row.routine.state,
+					const automations = owned.map((row) => ({
+						automation: {
+							id: row.automation.id,
+							name: row.automation.name,
+							state: row.automation.state,
 							failed: row.failed,
-							pausedAfterFailures: row.routine.pausedAfterFailuresAt !== null,
+							pausedAfterFailures: row.automation.pausedAfterFailuresAt !== null,
 						},
-						agent: shownHost,
-						conversation: row.feed && toRoutineFeed(row.feed),
+						bot: shownHost,
+						conversation: row.feed && toAutomationFeed(row.feed),
 						mentionsYou: row.feed !== null && feedMentions.has(row.feed.id),
 					}));
 					const [summary] = yield* query((db) =>
 						db
-							.select({ content: agentSummary.content, updatedAt: agentSummary.updatedAt })
-							.from(agentSummary)
-							.where(eq(agentSummary.agentId, host.id))
+							.select({ content: botSummary.content, updatedAt: botSummary.updatedAt })
+							.from(botSummary)
+							.where(eq(botSummary.botId, host.id))
 							.limit(1),
 					);
 					return {
 						tasks: tasks.sort(byLatestMessage),
-						routines,
+						automations,
 						summary: summary
 							? { content: summary.content, updatedAt: summary.updatedAt.toISOString() }
 							: null,
@@ -287,26 +321,28 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		podMarkers: (workspace) =>
+		channelMarkers: (workspace) =>
 			operation(
-				"podMarkers",
+				"channelMarkers",
 				Effect.gen(function* () {
 					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
 					const { userId } = yield* CurrentActor.Service;
-					const reachesPod = yield* visibility.reachesPod;
-					const reachesAgent = yield* visibility.reachesAgent;
-					const chats = yield* query((db) => podChatsReached(db, workspaceId, reachesPod));
-					const botThreads = yield* query((db) =>
-						botConversationsReached(db, workspaceId, reachesAgent),
+					const reachesChannel = yield* visibility.reachesChannel;
+					const reachesBot = yield* visibility.reachesBot;
+					const chats = yield* query((db) =>
+						channelConversationsReached(db, workspaceId, reachesChannel),
+					);
+					const botTasks = yield* query((db) =>
+						botConversationsReached(db, workspaceId, reachesBot),
 					);
 					const marksOf = yield* conversationMarks(workspaceId, [
 						...chats.map(({ id }) => id),
-						...botThreads.map(({ id }) => id),
+						...botTasks.map(({ id }) => id),
 					]);
 					const failed = yield* query((db) =>
-						failedRoutinesByAgent(db, workspaceId, reachesAgent, userId),
+						failedAutomationsByBot(db, workspaceId, reachesBot, userId),
 					);
-					const nothing = { unreadMessages: 0, needsApproval: false, failedRoutines: 0 };
+					const nothing = { unreadMessages: 0, needsApproval: false, failedAutomations: 0 };
 					const tally = (into: Record<string, Marker>, key: string, conversationId: string) => {
 						const { unreadMessages, needsApproval } = marksOf(conversationId);
 						if (unreadMessages === 0 && !needsApproval) return;
@@ -317,15 +353,14 @@ export const make = Effect.gen(function* () {
 							needsApproval: marked.needsApproval || needsApproval,
 						};
 					};
-					const pods: Record<string, Marker> = {};
-					for (const chat of chats) tally(pods, chat.podId, chat.id);
-					const agents: Record<string, Marker> = {};
-					for (const conversation of botThreads)
-						tally(agents, conversation.agentId, conversation.id);
-					for (const [agentId, failedRoutines] of failed) {
-						agents[agentId] = { ...(agents[agentId] ?? nothing), failedRoutines };
+					const channels: Record<string, Marker> = {};
+					for (const chat of chats) tally(channels, chat.channelId, chat.id);
+					const bots: Record<string, Marker> = {};
+					for (const conversation of botTasks) tally(bots, conversation.botId, conversation.id);
+					for (const [botId, failedAutomations] of failed) {
+						bots[botId] = { ...(bots[botId] ?? nothing), failedAutomations };
 					}
-					return { pods, agents };
+					return { channels, bots };
 				}),
 			),
 
@@ -337,7 +372,7 @@ export const make = Effect.gen(function* () {
 						workspace,
 						"workspace.read",
 					);
-					const rows = yield* query((db) => directThreadsOf(db, workspaceId, actor.userId));
+					const rows = yield* query((db) => directMessagesOf(db, workspaceId, actor.userId));
 					const items = yield* directMessageItems(workspaceId, actor.userId, rows);
 					return { items: items.sort(byLatestMessage) };
 				}),
@@ -347,13 +382,13 @@ export const make = Effect.gen(function* () {
 			operation(
 				"directMessage",
 				Effect.gen(function* () {
-					const reached = yield* visibility.thread(conversationId);
-					if (reached.kind !== "direct") {
+					const reached = yield* visibility.conversationStanding(conversationId);
+					if (reached.kind !== "direct_message") {
 						return yield* new ResourceHidden({ resource: "conversation" });
 					}
 					const { userId } = yield* CurrentActor.Service;
-					const [item] = yield* directMessageItems(reached.thread.workspaceId, userId, [
-						reached.thread,
+					const [item] = yield* directMessageItems(reached.conversation.workspaceId, userId, [
+						reached.conversation,
 					]);
 					if (!item) return yield* new ResourceHidden({ resource: "conversation" });
 					return item;
@@ -367,11 +402,13 @@ export const make = Effect.gen(function* () {
 					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
 					const { userId } = yield* CurrentActor.Service;
 					const deciders = yield* query((db) => approvalDecidersIn(db, workspaceId, userId));
-					const reachesThread = yield* visibility.reachesThread;
+					const reachesConversation = yield* visibility.reachesConversation;
 					const waiting = yield* query((db) =>
-						waitingApprovalRows(db, deciders.decidable, reachesThread),
+						waitingApprovalRows(db, deciders.decidable, reachesConversation),
 					);
-					const answered = yield* query((db) => answeredApprovalRows(db, reachesThread));
+					const answered = yield* query((db) =>
+						answeredApprovalRows(db, workspaceId, reachesConversation),
+					);
 					return {
 						waiting: waiting.map(toApprovalRequest),
 						answered: answered.flatMap((row): AnsweredApproval[] => {
@@ -382,66 +419,43 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		activity: (workspace) =>
+		inbox: (workspace) =>
 			operation(
-				"activity",
+				"inbox",
 				Effect.gen(function* () {
-					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
-					const { userId } = yield* CurrentActor.Service;
-					const [person] = yield* query((db) =>
-						db.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1),
+					const scope = yield* inboxScopeOf(workspace);
+					if (!scope) return { items: [] };
+					const messages = yield* query((db) =>
+						inboxMessageRows(db, scope, { onlyUnreadMentions: false, limit: INBOX_ITEMS }),
 					);
-					if (!person) return { items: [] };
-					const since = DateTime.toDate(
-						DateTime.subtract(yield* DateTime.now, { days: ACTIVITY_WINDOW_DAYS }),
-					);
-					const scope: ActivityScope = {
-						workspaceId,
-						reachesThread: yield* visibility.reachesThread,
-						userId,
-						handle: handleFromName(person.name),
-						since,
-					};
-					const messages = yield* query((db) => activityRows(db, scope));
-					const runs = yield* query((db) => routineRunRows(db, scope));
+					const runs = yield* query((db) => automationRunRows(db, scope));
 					const collaborations = yield* query((db) => collaborationRows(db, scope));
-					const items: ActivityItem[] = [
-						...messages.map(
-							(row): ActivityItem => ({
-								kind: row.mentionsYou ? "mention" : "message",
-								messageId: row.id,
-								author: toParticipant(authorRow(row.authorUser, row.authorAgent)),
-								preview: replyPreview(row),
-								podId: row.podId,
-								conversationId: row.conversationId,
-								at: row.createdAt.toISOString(),
-								unread: row.unread,
-							}),
-						),
+					const items: InboxItem[] = [
+						...messages.map(inboxMessageItem),
 						...runs.map(
-							(row): ActivityItem => ({
-								kind: "routine",
-								threadId: row.threadId,
-								routineName: row.routineName,
+							(row): InboxItem => ({
+								kind: "run",
+								conversationId: row.conversationId,
+								automationName: row.automationName,
 								state: row.state,
 								triggerKind: row.triggerKind,
-								agent: { kind: "agent", ...row.agent },
+								bot: { kind: "bot", ...row.bot },
 								preview: row.lastReply && runReportPreview(row.lastReply),
 								mentionsYou: row.mentionsYou,
-								conversationId: row.conversationId,
+								rootConversationId: row.rootConversationId,
 								at: row.at.toISOString(),
 								unread: row.unread,
 							}),
 						),
 						...collaborations.map(
-							(row): ActivityItem => ({
+							(row): InboxItem => ({
 								kind: "collaboration",
-								threadId: row.threadId,
-								initiator: { kind: "agent", ...row.initiator },
-								recipient: { kind: "agent", ...row.recipient },
+								conversationId: row.conversationId,
+								initiator: { kind: "bot", ...row.initiator },
+								recipient: { kind: "bot", ...row.recipient },
 								status: row.status,
 								brief: row.brief,
-								conversationId: row.conversationId,
+								rootConversationId: row.rootConversationId,
 								at: row.at.toISOString(),
 								unread: row.unread,
 							}),
@@ -450,8 +464,21 @@ export const make = Effect.gen(function* () {
 					return {
 						items: items
 							.sort((left, right) => right.at.localeCompare(left.at))
-							.slice(0, ACTIVITY_ITEMS),
+							.slice(0, INBOX_ITEMS),
 					};
+				}),
+			),
+
+		unreadMentions: (workspace, limit) =>
+			operation(
+				"unreadMentions",
+				Effect.gen(function* () {
+					const scope = yield* inboxScopeOf(workspace);
+					if (!scope) return [];
+					const messages = yield* query((db) =>
+						inboxMessageRows(db, scope, { onlyUnreadMentions: true, limit }),
+					);
+					return messages.map(inboxMessageItem);
 				}),
 			),
 
@@ -466,9 +493,9 @@ export const make = Effect.gen(function* () {
 					// Before the query, and whether or not the conversation is there, so a
 					// bad cursor says nothing about the conversation.
 					const before = page.cursor ? yield* pageCursor(page.cursor) : undefined;
-					const reachesThread = yield* visibility.reachesThread;
+					const reachesConversation = yield* visibility.reachesConversation;
 					const row = yield* query((db) =>
-						loadMainPage(db, conversationId, reachesThread, page.limit, before),
+						loadMainPage(db, conversationId, reachesConversation, page.limit, before),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
 					return toMainPage(row, page.limit);
@@ -484,9 +511,9 @@ export const make = Effect.gen(function* () {
 						return yield* new ResourceHidden({ resource: "conversation" });
 					}
 					const before = page.cursor ? yield* pageCursor(page.cursor) : undefined;
-					const reachesThread = yield* visibility.reachesThread;
+					const reachesConversation = yield* visibility.reachesConversation;
 					const row = yield* query((db) =>
-						loadHistory(db, conversationId, reachesThread, page.limit, before),
+						loadHistory(db, conversationId, reachesConversation, page.limit, before),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
 					return toHistoryPage(row, page.limit);
@@ -500,7 +527,7 @@ export const layerNoDeps = Layer.effect(Service, make);
 export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
 
 /** How one channel or bot stands for the person, as the markers show it. */
-type Marker = PodChatMarkers["pods"][string];
+type Marker = ChannelConversationMarkers["channels"][string];
 
 export class InvalidPageCursor extends Data.TaggedError("InvalidPageCursor") implements UserFacing {
 	get userMessage() {
@@ -508,123 +535,143 @@ export class InvalidPageCursor extends Data.TaggedError("InvalidPageCursor") imp
 	}
 }
 
-/** The id of the channel `podRef` names, by its id or its slug, when the actor reaches it. */
-const reachablePod = Effect.fn("ChatView.reachablePod")(function* (
+/** The id of the channel `channelRef` names, by its id or its slug, when the actor reaches it. */
+const reachableChannel = Effect.fn("ChatView.reachableChannel")(function* (
 	db: Executor,
-	podRef: string,
-	input: { workspaceId: string; reachesPod: Visibility.ReachesPod },
+	channelRef: string,
+	input: { workspaceId: string; reachesChannel: Visibility.ReachesChannel },
 ) {
 	const [row] = yield* db
-		.select({ id: pod.id })
-		.from(pod)
+		.select({ id: channel.id })
+		.from(channel)
 		.where(
 			and(
-				isUuid(podRef) ? eq(pod.id, podRef) : eq(pod.slug, podRef),
-				eq(pod.workspaceId, input.workspaceId),
-				input.reachesPod(pod.id),
+				isUuid(channelRef) ? eq(channel.id, channelRef) : eq(channel.slug, channelRef),
+				eq(channel.workspaceId, input.workspaceId),
+				input.reachesChannel(channel.id),
 			),
 		)
 		.limit(1);
 	return row?.id;
 });
 
-/** The tasks of the bot `agentId`, most recently changed first, each with who has written in it lately. */
-const tasksOf = Effect.fn("ChatView.tasksOf")(function* (db: Executor, agentId: string) {
-	const conversation = alias(thread, "conversation");
+/** The tasks of the bot `botId`, most recently changed first, each with who has written in it lately. */
+const tasksOf = Effect.fn("ChatView.tasksOf")(function* (db: Executor, botId: string) {
 	return yield* db
-		.select({ conversation, participants: recentParticipantsOf(conversation.id) })
-		.from(conversation)
-		.where(and(eq(conversation.type, "conversation"), eq(conversation.hostAgentId, agentId)))
-		.orderBy(desc(conversation.updatedAt), desc(conversation.id));
+		.select({
+			conversation: getColumns(placedConversation),
+			participants: recentParticipantsOf(placedConversation.id),
+		})
+		.from(task)
+		.innerJoin(placedConversation, eq(placedConversation.id, task.conversationId))
+		.where(eq(task.botId, botId))
+		.orderBy(desc(placedConversation.updatedAt), desc(placedConversation.id));
 });
 
-/** Whether `userId` pinned the bot `agentId`. */
+/** Whether `userId` pinned the bot `botId`. */
 const isPinnedBy = Effect.fn("ChatView.isPinnedBy")(function* (
 	db: Executor,
-	agentId: string,
+	botId: string,
 	userId: string,
 ) {
 	const [row] = yield* db
-		.select({ id: pinnedAgent.agentId })
-		.from(pinnedAgent)
-		.where(and(eq(pinnedAgent.agentId, agentId), eq(pinnedAgent.userId, userId)))
+		.select({ id: pinnedBot.botId })
+		.from(pinnedBot)
+		.where(and(eq(pinnedBot.botId, botId), eq(pinnedBot.userId, userId)))
 		.limit(1);
 	return row !== undefined;
 });
 
 /**
- * The automations of the bot `agentId` that are still there, by name, each
- * with its thread when it has one, and whether it failed since `userId` last
+ * The automations of the bot `botId` that are still there, by name, each
+ * with its conversation when it has one, and whether it failed since `userId` last
  * looked.
  */
-const listedRoutines = Effect.fn("ChatView.listedRoutines")(function* (
+const listedAutomations = Effect.fn("ChatView.listedAutomations")(function* (
 	db: Executor,
-	agentId: string,
+	botId: string,
 	userId: string,
 ) {
-	const feed = alias(thread, "feed");
+	const feed = alias(placedConversation, "feed");
 	return yield* db
-		.select({ routine, feed, failed: latestRunFailedUnseen(routine.id, userId) })
-		.from(routine)
-		.leftJoin(feed, eq(feed.routineId, routine.id))
-		.where(and(eq(routine.agentId, agentId), isNull(routine.deletedAt)))
-		.orderBy(asc(routine.name), asc(routine.id));
+		.select({
+			automation,
+			feed: getColumns(feed),
+			failed: latestRunFailedUnseen(automation.id, userId),
+		})
+		.from(automation)
+		.leftJoin(feed, eq(feed.automationId, automation.id))
+		.where(and(eq(automation.botId, botId), isNull(automation.deletedAt)))
+		.orderBy(asc(automation.name), asc(automation.id));
 });
 
 /** The channel's conversations not archived: its main chat, then its threads in the order they were started. */
-const podChats = Effect.fn("ChatView.podChats")(function* (db: Executor, podId: string) {
+const channelConversations = Effect.fn("ChatView.channelConversations")(function* (
+	db: Executor,
+	channelId: string,
+) {
 	return yield* db
 		.select()
-		.from(thread)
-		.where(and(eq(thread.type, "pod_chat"), eq(thread.podId, podId), isNull(thread.archivedAt)))
-		.orderBy(desc(thread.main), asc(thread.createdAt), asc(thread.id));
-});
-
-/** The conversations not archived of every channel in the workspace that `reachesPod` reaches. */
-const podChatsReached = Effect.fn("ChatView.podChatsReached")(function* (
-	db: Executor,
-	workspaceId: string,
-	reachesPod: Visibility.ReachesPod,
-) {
-	const rows = yield* db
-		.select({ id: thread.id, podId: thread.podId })
-		.from(thread)
+		.from(placedConversation)
 		.where(
 			and(
-				eq(thread.type, "pod_chat"),
-				isNull(thread.archivedAt),
-				eq(thread.workspaceId, workspaceId),
-				reachesPod(thread.podId),
+				eq(placedConversation.kind, "channel_conversation"),
+				eq(placedConversation.channelId, channelId),
+				isNull(placedConversation.archivedAt),
 			),
+		)
+		.orderBy(
+			desc(placedConversation.main),
+			asc(placedConversation.createdAt),
+			asc(placedConversation.id),
 		);
-	return rows.flatMap(({ id, podId }) => (podId ? [{ id, podId }] : []));
 });
 
-/** The tasks and automation threads of every bot in the workspace that `reachesAgent` reaches. */
+/** The conversations not archived of every channel in the workspace that `reachesChannel` reaches. */
+const channelConversationsReached = Effect.fn("ChatView.channelConversationsReached")(function* (
+	db: Executor,
+	workspaceId: string,
+	reachesChannel: Visibility.ReachesChannel,
+) {
+	const rows = yield* db
+		.select({ id: placedConversation.id, channelId: placedConversation.channelId })
+		.from(placedConversation)
+		.where(
+			and(
+				eq(placedConversation.kind, "channel_conversation"),
+				isNull(placedConversation.archivedAt),
+				eq(placedConversation.workspaceId, workspaceId),
+				reachesChannel(placedConversation.channelId),
+			),
+		);
+	return rows.flatMap(({ id, channelId }) => (channelId ? [{ id, channelId }] : []));
+});
+
+/** The tasks and automation feeds of every bot in the workspace that `reachesBot` reaches. */
 const botConversationsReached = Effect.fn("ChatView.botConversationsReached")(function* (
 	db: Executor,
 	workspaceId: string,
-	reachesAgent: Visibility.ReachesAgent,
+	reachesBot: Visibility.ReachesBot,
 ) {
 	const rows = yield* db
-		.select({ id: thread.id, agentId: thread.hostAgentId })
-		.from(thread)
+		.select({ id: placedConversation.id, botId: placedConversation.botId })
+		.from(placedConversation)
 		.where(
 			and(
-				inArray(thread.type, ["conversation", "routine_feed"]),
-				eq(thread.workspaceId, workspaceId),
-				reachesAgent(thread.hostAgentId),
+				inArray(placedConversation.kind, ["task", "automation_feed"]),
+				eq(placedConversation.workspaceId, workspaceId),
+				reachesBot(placedConversation.botId),
 			),
 		);
-	return rows.flatMap(({ id, agentId }) => (agentId ? [{ id, agentId }] : []));
+	return rows.flatMap(({ id, botId }) => (botId ? [{ id, botId }] : []));
 });
 
-/** The newest message with words in it on each thread, in one query. */
+/** The newest message with words in it in each conversation, in one query. */
 const latestMessages = Effect.fn("ChatView.latestMessages")(function* (
 	db: Executor,
-	threadIds: readonly string[],
+	conversationIds: readonly string[],
 ) {
-	if (threadIds.length === 0) {
+	if (conversationIds.length === 0) {
 		return new Map<
 			string,
 			{
@@ -636,69 +683,82 @@ const latestMessages = Effect.fn("ChatView.latestMessages")(function* (
 		>();
 	}
 	const rows = yield* db
-		.selectDistinctOn([message.threadId], {
-			threadId: message.threadId,
+		.selectDistinctOn([message.conversationId], {
+			conversationId: message.conversationId,
 			content: message.content,
 			parts: message.parts,
 			authorUserId: message.authorUserId,
 			createdAt: message.createdAt,
 		})
 		.from(message)
-		.where(and(inArray(message.threadId, [...threadIds]), ne(message.content, "")))
-		.orderBy(message.threadId, desc(message.createdAt));
-	return new Map(rows.map((row) => [row.threadId, row]));
+		.where(and(inArray(message.conversationId, [...conversationIds]), ne(message.content, "")))
+		.orderBy(message.conversationId, desc(message.createdAt));
+	return new Map(rows.map((row) => [row.conversationId, row]));
 });
 
 /**
- * For each of the threads with calls waiting for approval, the tool the first
+ * For each of the conversations with calls waiting for approval, the tool the first
  * would run in the newest reply that asked, whether or not it wrote anything.
  */
 const toolsAwaitingApproval = Effect.fn("ChatView.toolsAwaitingApproval")(function* (
 	db: Executor,
-	threadIds: readonly string[],
+	conversationIds: readonly string[],
 ) {
-	if (threadIds.length === 0) return new Map<string, string>();
+	if (conversationIds.length === 0) return new Map<string, string>();
 	const rows = yield* db
-		.selectDistinctOn([toolCall.threadId], { threadId: toolCall.threadId, tool: toolCall.tool })
+		.selectDistinctOn([toolCall.conversationId], {
+			conversationId: toolCall.conversationId,
+			tool: toolCall.tool,
+		})
 		.from(toolCall)
 		.innerJoin(message, eq(message.id, toolCall.messageId))
-		.where(and(inArray(toolCall.threadId, [...threadIds]), eq(toolCall.approvalStatus, "pending")))
-		.orderBy(toolCall.threadId, desc(message.createdAt), asc(toolCall.atOffset), asc(toolCall.id));
-	return new Map(rows.map((row) => [row.threadId, row.tool]));
+		.where(
+			and(
+				inArray(toolCall.conversationId, [...conversationIds]),
+				eq(toolCall.approvalStatus, "pending"),
+			),
+		)
+		.orderBy(
+			toolCall.conversationId,
+			desc(message.createdAt),
+			asc(toolCall.atOffset),
+			asc(toolCall.id),
+		);
+	return new Map(rows.map((row) => [row.conversationId, row.tool]));
 });
 
 /**
  * How many messages with words in them somebody other than `userId` finished on
- * each of the threads since `userId` caught up with it, by `caughtUpAt`.
- * Threads with none are left out.
+ * each of the conversations since `userId` caught up with it, by `caughtUpAt`.
+ * Conversations with none are left out.
  */
 const unreadMessageCounts = Effect.fn("ChatView.unreadMessageCounts")(function* (
 	db: Executor,
 	userId: string,
-	threadIds: readonly string[],
+	conversationIds: readonly string[],
 ) {
-	if (threadIds.length === 0) return new Map<string, number>();
+	if (conversationIds.length === 0) return new Map<string, number>();
 	const rows = yield* db
-		.select({ threadId: message.threadId, count: sql<number>`count(*)::int` })
+		.select({ conversationId: message.conversationId, count: sql<number>`count(*)::int` })
 		.from(message)
 		.where(
 			and(
-				inArray(message.threadId, [...threadIds]),
+				inArray(message.conversationId, [...conversationIds]),
 				finishedWordsFromOthers(userId),
-				unreadBy(db, userId, { threadId: message.threadId, at: message.createdAt }),
+				unreadBy(db, userId, { conversationId: message.conversationId, at: message.createdAt }),
 			),
 		)
-		.groupBy(message.threadId);
-	return new Map(rows.map((row) => [row.threadId, row.count]));
+		.groupBy(message.conversationId);
+	return new Map(rows.map((row) => [row.conversationId, row.count]));
 });
 
-/** Those of the threads with a message `userId` has not read that mentions them. */
+/** Those of the conversations with a message `userId` has not read that mentions them. */
 const unreadMentionsIn = Effect.fn("ChatView.unreadMentionsIn")(function* (
 	db: Executor,
 	userId: string,
-	threadIds: readonly string[],
+	conversationIds: readonly string[],
 ) {
-	if (threadIds.length === 0) return new Set<string>();
+	if (conversationIds.length === 0) return new Set<string>();
 	const [person] = yield* db
 		.select({ name: user.name })
 		.from(user)
@@ -706,17 +766,17 @@ const unreadMentionsIn = Effect.fn("ChatView.unreadMentionsIn")(function* (
 		.limit(1);
 	if (!person) return new Set<string>();
 	const rows = yield* db
-		.selectDistinct({ threadId: message.threadId })
+		.selectDistinct({ conversationId: message.conversationId })
 		.from(message)
 		.where(
 			and(
-				inArray(message.threadId, [...threadIds]),
+				inArray(message.conversationId, [...conversationIds]),
 				finishedWordsFromOthers(userId),
 				mentions(handleFromName(person.name)),
-				unreadBy(db, userId, { threadId: message.threadId, at: message.createdAt }),
+				unreadBy(db, userId, { conversationId: message.conversationId, at: message.createdAt }),
 			),
 		);
-	return new Set(rows.map((row) => row.threadId));
+	return new Set(rows.map((row) => row.conversationId));
 });
 
 /** A `message` with words in it, finished, written by somebody other than `userId`. */
@@ -730,36 +790,36 @@ function finishedWordsFromOthers(userId: string): SQL | undefined {
 
 /**
  * Whether `userId` has yet to catch up with something that happened in
- * `threadId` at `at`, by `caughtUpAt`.
+ * `conversationId` at `at`, by `caughtUpAt`.
  */
 function unreadBy(
 	db: Executor,
 	userId: string,
-	{ threadId, at }: { threadId: SQLWrapper; at: SQLWrapper },
+	{ conversationId, at }: { conversationId: SQLWrapper; at: SQLWrapper },
 ): SQL<boolean> {
-	return sql<boolean>`coalesce(${at} > ${caughtUpAt(db, userId, threadId)}, true)`;
+	return sql<boolean>`coalesce(${at} > ${caughtUpAt(db, userId, conversationId)}, true)`;
 }
 
 /**
- * Whether `userId` has yet to catch up with a routine run or collaboration
+ * Whether `userId` has yet to catch up with an automation run or collaboration
  * that began at `at`: neither the conversation it is in, `conversationId`,
- * nor its own thread, `itemThreadId`, read past when it began. Opening the
- * item from Inbox reads its own thread, so it reads that item alone.
+ * nor its own conversation, `itemConversationId`, read past when it began. Opening the
+ * item from Inbox reads its own conversation, so it reads that item alone.
  */
 function itemUnreadBy(
 	db: Executor,
 	userId: string,
 	{
 		conversationId,
-		itemThreadId,
+		itemConversationId,
 		at,
-	}: { conversationId: SQLWrapper; itemThreadId: SQLWrapper; at: SQLWrapper },
+	}: { conversationId: SQLWrapper; itemConversationId: SQLWrapper; at: SQLWrapper },
 ): SQL<boolean> {
-	return sql<boolean>`(${unreadBy(db, userId, { threadId: conversationId, at })} and ${unreadBy(db, userId, { threadId: itemThreadId, at })})`;
+	return sql<boolean>`(${unreadBy(db, userId, { conversationId: conversationId, at })} and ${unreadBy(db, userId, { conversationId: itemConversationId, at })})`;
 }
 
 /**
- * When `userId` last caught up with `threadId`: the later of how far they
+ * When `userId` last caught up with `conversationId`: the later of how far they
  * have read it and the last message they wrote there, or null when neither.
  *
  * A reply is stamped when it began. Reading never moves past a reply still
@@ -768,60 +828,66 @@ function itemUnreadBy(
  * as caught up with, even if it finished after, because a message does not
  * keep when it finished.
  */
-function caughtUpAt(db: Executor, userId: string, threadId: SQLWrapper): SQL<Date | null> {
+function caughtUpAt(db: Executor, userId: string, conversationId: SQLWrapper): SQL<Date | null> {
 	const own = alias(message, "own_message");
 	// Through `sql`, because a timestamp column selected bare is cast to text for reading.
 	const readThrough = db
-		.select({ at: sql`${threadRead.readThrough}` })
-		.from(threadRead)
-		.where(and(sql`${threadRead.threadId} = ${threadId}`, eq(threadRead.userId, userId)));
+		.select({ at: sql`${conversationRead.readThrough}` })
+		.from(conversationRead)
+		.where(
+			and(
+				sql`${conversationRead.conversationId} = ${conversationId}`,
+				eq(conversationRead.userId, userId),
+			),
+		);
 	const lastWritten = db
 		.select({ at: sql`max(${own.createdAt})` })
 		.from(own)
-		.where(and(sql`${own.threadId} = ${threadId}`, eq(own.authorUserId, userId)));
+		.where(and(sql`${own.conversationId} = ${conversationId}`, eq(own.authorUserId, userId)));
 	return sql<Date | null>`greatest((${readThrough}), (${lastWritten}))`;
 }
 
 /**
  * Whether a `message` mentions `handle`, or is a person's `@here` or
- * `@channel` where `groupsMention` holds. A bot's or a routine's notifies
+ * `@channel` where `groupsMention` holds. A bot's or an automation's notifies
  * nobody, so it mentions nobody.
  */
 function mentions(handle: string, groupsMention: SQL = sql`true`): SQL {
 	return sql`(${message.content} ~* ${mentionPattern(handle)} or (${message.authorUserId} is not null and ${groupsMention} and ${message.content} ~* ${mentionPattern(...GROUP_MENTION_HANDLES)}))`;
 }
 
-/** How far back the activity feed looks: past this, a conversation is old news, read or not. */
-const ACTIVITY_WINDOW_DAYS = 30;
-/** The most messages the activity feed lists. */
-const ACTIVITY_ITEMS = 50;
+/** How far back the inbox looks: past this, a conversation is old news, read or not. */
+const INBOX_WINDOW_DAYS = 30;
+/** The most messages the inbox lists. */
+const INBOX_ITEMS = 50;
 
 /**
- * The messages in the conversations `userId` reaches, since `since`, written
- * by somebody else and either mentioning them or not yet read, newest first,
- * with their authors.
+ * The newest `limit` messages in the conversations `userId` reaches, since
+ * `since`, written by somebody else and either mentioning them or not yet
+ * read (both, with `onlyUnreadMentions`), with their authors.
  */
-const activityRows = Effect.fn("ChatView.activityRows")(function* (
+const inboxMessageRows = Effect.fn("ChatView.inboxMessageRows")(function* (
 	db: Executor,
-	input: ActivityScope,
+	input: InboxScope,
+	{ onlyUnreadMentions, limit }: { onlyUnreadMentions: boolean; limit: number },
 ) {
 	// `@here` and `@channel` are text in a direct message, where everybody is told of every message.
-	const mentionsYou = mentions(input.handle, sql`${thread.type} <> 'direct'`);
+	const mentionsYou = mentions(input.handle, sql`${placedConversation.kind} <> 'direct_message'`);
 	const unread = unreadBy(db, input.userId, {
-		threadId: message.threadId,
+		conversationId: message.conversationId,
 		at: message.createdAt,
 	});
-	const author = alias(agent, "author_agent");
+	const author = alias(bot, "author_bot");
 	return yield* db
 		.select({
 			id: message.id,
 			parts: message.parts,
 			content: message.content,
 			createdAt: message.createdAt,
-			podId: thread.podId,
-			conversationId: thread.id,
+			channelId: placedConversation.channelId,
+			conversationId: placedConversation.id,
 			authorUser: { id: user.id, name: user.name, email: user.email, image: user.image },
-			authorAgent: {
+			authorBot: {
 				id: author.id,
 				name: author.name,
 				handle: author.handle,
@@ -834,47 +900,63 @@ const activityRows = Effect.fn("ChatView.activityRows")(function* (
 		})
 		.from(message)
 		.innerJoin(
-			thread,
+			placedConversation,
 			and(
-				eq(thread.id, message.threadId),
-				// The threads whose messages notify people are the ones Inbox shows.
-				inArray(thread.type, [...NOTIFYING_THREAD_TYPES]),
+				eq(placedConversation.id, message.conversationId),
+				// The conversations whose messages notify people are the ones Inbox shows.
+				inArray(placedConversation.kind, [...NOTIFYING_CONVERSATION_KINDS]),
 			),
 		)
 		.leftJoin(user, eq(user.id, message.authorUserId))
-		.leftJoin(author, eq(author.id, message.authorAgentId))
+		.leftJoin(author, eq(author.id, message.authorBotId))
 		.where(
 			and(
-				eq(thread.workspaceId, input.workspaceId),
-				input.reachesThread(thread),
+				eq(placedConversation.workspaceId, input.workspaceId),
+				input.reachesConversation(placedConversation),
 				gt(message.createdAt, input.since),
 				finishedWordsFromOthers(input.userId),
-				or(mentionsYou, unread),
+				onlyUnreadMentions ? and(mentionsYou, unread) : or(mentionsYou, unread),
 			),
 		)
 		.orderBy(desc(message.createdAt))
-		.limit(ACTIVITY_ITEMS);
+		.limit(limit);
 });
 
-interface ActivityScope {
+/** A message row as the inbox lists it. */
+function inboxMessageItem(
+	row: Effect.Success<ReturnType<typeof inboxMessageRows>>[number],
+): InboxItem {
+	return {
+		kind: row.mentionsYou ? "mention" : "message",
+		messageId: row.id,
+		author: toParticipant(authorRow(row.authorUser, row.authorBot)),
+		preview: replyPreview(row),
+		channelId: row.channelId,
+		rootConversationId: row.conversationId,
+		at: row.createdAt.toISOString(),
+		unread: row.unread,
+	};
+}
+
+interface InboxScope {
 	workspaceId: string;
-	reachesThread: Visibility.ReachesThread;
+	reachesConversation: Visibility.ReachesConversation;
 	userId: string;
 	/** The person's handle, which mentions of them use. */
 	handle: string;
 	since: Date;
 }
 
-/** The newest finished reply with words in it a bot wrote in `threadId`, or null when it has written none. */
-function lastReplyIn(db: Executor, threadId: SQLWrapper): SQL<Reply | null> {
+/** The newest finished reply with words in it a bot wrote in `conversationId`, or null when it has written none. */
+function lastReplyIn(db: Executor, conversationId: SQLWrapper): SQL<Reply | null> {
 	const reply = alias(message, "last_reply");
 	const latest = db
 		.select({ reply: sql`json_build_object('content', ${reply.content}, 'parts', ${reply.parts})` })
 		.from(reply)
 		.where(
 			and(
-				sql`${reply.threadId} = ${threadId}`,
-				sql`${reply.authorAgentId} is not null`,
+				sql`${reply.conversationId} = ${conversationId}`,
+				sql`${reply.authorBotId} is not null`,
 				ne(reply.content, ""),
 				ne(reply.status, "streaming"),
 			),
@@ -896,115 +978,115 @@ function replyPreview(reply: Reply): string {
 }
 
 /**
- * The start of a routine run's report. A report often opens with a heading,
+ * The start of an automation run's report. A report often opens with a heading,
  * so its lines run together, and the preview reads past the heading.
  */
 function runReportPreview(reply: Reply): string {
 	return messagePreview(spokenText(reply).replace(/\s+/g, " "));
 }
 
-/** What `reply` says as a thread shows it, without the narration before its tool calls. */
+/** What `reply` says as a conversation shows it, without the narration before its tool calls. */
 function spokenText(reply: Reply): string {
 	return textWithoutNarration(reply.parts) || reply.content;
 }
 
 /**
- * The bots `reachesAgent` reaches with automations whose latest run failed
+ * The bots `reachesBot` reaches with automations whose latest run failed
  * since `userId` last looked, and how many each has.
  */
-const failedRoutinesByAgent = Effect.fn("ChatView.failedRoutinesByAgent")(function* (
+const failedAutomationsByBot = Effect.fn("ChatView.failedAutomationsByBot")(function* (
 	db: Executor,
 	workspaceId: string,
-	reachesAgent: Visibility.ReachesAgent,
+	reachesBot: Visibility.ReachesBot,
 	userId: string,
 ) {
 	const rows = yield* db
-		.select({ agentId: routine.agentId, count: sql<number>`count(*)::int` })
-		.from(routine)
+		.select({ botId: automation.botId, count: sql<number>`count(*)::int` })
+		.from(automation)
 		.where(
 			and(
-				eq(routine.workspaceId, workspaceId),
-				isNull(routine.deletedAt),
-				reachesAgent(routine.agentId),
-				latestRunFailedUnseen(routine.id, userId),
+				eq(automation.workspaceId, workspaceId),
+				isNull(automation.deletedAt),
+				reachesBot(automation.botId),
+				latestRunFailedUnseen(automation.id, userId),
 			),
 		)
-		.groupBy(routine.agentId);
-	return new Map(rows.map((row) => [row.agentId, row.count] as const));
+		.groupBy(automation.botId);
+	return new Map(rows.map((row) => [row.botId, row.count] as const));
 });
 
 /**
- * The routine runs in the conversations `userId` reaches since `since`, newest
+ * The automation runs in the conversations `userId` reaches since `since`, newest
  * first, with their last replies, but not those that completed with nothing to
  * report. A run is unread news only once it posted a result or failed, from
  * when it ended. It mentions the person when its result, posted only in the
- * automation's thread, does.
+ * automation's feed, does.
  */
-const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
+const automationRunRows = Effect.fn("ChatView.automationRunRows")(function* (
 	db: Executor,
-	input: ActivityScope,
+	input: InboxScope,
 ) {
-	const conversation = alias(thread, "conversation");
-	const posted = resultPosted(routineExecution.id);
+	const conversation = alias(placedConversation, "conversation");
+	const posted = resultPosted(automationRun.id);
 	const elsewhere = alias(message, "result_elsewhere");
 	const resultMentioningYou = db
 		.select({ id: message.id })
 		.from(message)
 		.where(
 			and(
-				eq(message.routineExecutionId, routineExecution.id),
-				eq(message.threadId, conversation.id),
+				eq(message.runId, automationRun.id),
+				eq(message.conversationId, conversation.id),
 				mentions(input.handle),
 				sql`not exists (${db
 					.select({ id: elsewhere.id })
 					.from(elsewhere)
 					.where(
 						and(
-							eq(elsewhere.routineExecutionId, routineExecution.id),
-							ne(elsewhere.threadId, conversation.id),
+							eq(elsewhere.runId, automationRun.id),
+							ne(elsewhere.conversationId, conversation.id),
 						),
 					)})`,
 			),
 		);
-	const isNews = or(eq(routineExecution.state, "failed"), posted);
+	const isNews = or(eq(automationRun.state, "failed"), posted);
 	return yield* db
 		.select({
-			threadId: routineExecution.threadId,
-			routineName: routineExecution.routineName,
-			state: routineExecution.state,
-			triggerKind: routineExecution.triggerKind,
-			at: routineExecution.acceptedAt,
-			agent: {
-				id: agent.id,
-				name: agent.name,
-				handle: agent.handle,
-				color: agent.color,
-				face: agent.face,
-				shape: agent.shape,
+			conversationId: automationRun.conversationId,
+			automationName: automationRun.automationName,
+			state: automationRun.state,
+			triggerKind: automationRun.triggerKind,
+			at: automationRun.acceptedAt,
+			bot: {
+				id: bot.id,
+				name: bot.name,
+				handle: bot.handle,
+				color: bot.color,
+				face: bot.face,
+				shape: bot.shape,
 			},
-			conversationId: conversation.id,
+			rootConversationId: conversation.id,
 			unread: sql<boolean>`(${isNews} and ${itemUnreadBy(db, input.userId, {
 				conversationId: conversation.id,
-				itemThreadId: routineExecution.threadId,
-				at: sql`coalesce(${routineExecution.finishedAt}, ${routineExecution.acceptedAt})`,
+				itemConversationId: automationRun.conversationId,
+				at: sql`coalesce(${automationRun.finishedAt}, ${automationRun.acceptedAt})`,
 			})})`,
 			mentionsYou: sql<boolean>`exists (${resultMentioningYou})`,
-			lastReply: lastReplyIn(db, routineExecution.threadId),
+			lastReply: lastReplyIn(db, automationRun.conversationId),
 		})
-		.from(routineExecution)
-		.innerJoin(thread, eq(thread.id, routineExecution.threadId))
-		.innerJoin(conversation, eq(conversation.id, thread.conversationId))
-		.innerJoin(agent, eq(agent.id, routineExecution.agentId))
+		.from(automationRun)
+		.innerJoin(placedConversation, eq(placedConversation.id, automationRun.conversationId))
+		.innerJoin(conversation, eq(conversation.id, placedConversation.rootConversationId))
+		.innerJoin(bot, eq(bot.id, automationRun.botId))
 		.where(
 			and(
 				eq(conversation.workspaceId, input.workspaceId),
-				input.reachesThread(conversation),
-				gt(routineExecution.acceptedAt, input.since),
-				or(ne(routineExecution.state, "completed"), posted),
+				input.reachesConversation(conversation),
+				gt(automationRun.acceptedAt, input.since),
+				or(ne(automationRun.state, "completed"), posted),
 			),
 		)
-		.orderBy(desc(routineExecution.acceptedAt))
-		.limit(ACTIVITY_ITEMS);
+		.orderBy(desc(automationRun.acceptedAt))
+		.limit(INBOX_ITEMS);
 });
 
 /**
@@ -1013,16 +1095,16 @@ const routineRunRows = Effect.fn("ChatView.routineRunRows")(function* (
  */
 const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 	db: Executor,
-	input: ActivityScope,
+	input: InboxScope,
 ) {
-	const asked = alias(thread, "asked_thread");
+	const asked = alias(placedConversation, "asked_conversation");
 	const askingMessage = alias(message, "asking_message");
-	const initiator = alias(agent, "initiator");
-	const recipient = alias(agent, "recipient");
-	const conversation = alias(thread, "conversation");
+	const initiator = alias(bot, "initiator");
+	const recipient = alias(bot, "recipient");
+	const conversation = alias(placedConversation, "conversation");
 	return yield* db
 		.select({
-			threadId: collaboration.childThreadId,
+			conversationId: collaboration.conversationId,
 			status: collaboration.status,
 			brief: collaboration.brief,
 			at: collaboration.createdAt,
@@ -1042,28 +1124,28 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 				face: recipient.face,
 				shape: recipient.shape,
 			},
-			conversationId: conversation.id,
+			rootConversationId: conversation.id,
 			unread: itemUnreadBy(db, input.userId, {
 				conversationId: conversation.id,
-				itemThreadId: collaboration.childThreadId,
+				itemConversationId: collaboration.conversationId,
 				at: collaboration.createdAt,
 			}),
 		})
 		.from(collaboration)
-		.innerJoin(asked, eq(asked.id, collaboration.childThreadId))
-		.innerJoin(conversation, eq(conversation.id, asked.conversationId))
+		.innerJoin(asked, eq(asked.id, collaboration.conversationId))
+		.innerJoin(conversation, eq(conversation.id, asked.rootConversationId))
 		.innerJoin(askingMessage, eq(askingMessage.id, collaboration.parentMessageId))
-		.innerJoin(initiator, eq(initiator.id, askingMessage.authorAgentId))
-		.innerJoin(recipient, eq(recipient.id, collaboration.collaboratorAgentId))
+		.innerJoin(initiator, eq(initiator.id, askingMessage.authorBotId))
+		.innerJoin(recipient, eq(recipient.id, collaboration.collaboratorBotId))
 		.where(
 			and(
 				eq(conversation.workspaceId, input.workspaceId),
-				input.reachesThread(conversation),
+				input.reachesConversation(conversation),
 				gt(collaboration.createdAt, input.since),
 			),
 		)
 		.orderBy(desc(collaboration.createdAt))
-		.limit(ACTIVITY_ITEMS);
+		.limit(INBOX_ITEMS);
 });
 
 /** How many answered approvals the inbox lists, newest first. */
@@ -1072,9 +1154,9 @@ const ANSWERED_APPROVALS = 50;
 const WAITING_APPROVALS = 100;
 
 /**
- * Which approvals `userId` may decide in the threads they reach, by
+ * Which approvals `userId` may decide in the conversations they reach, by
  * `mayDecideToolCall`, the rule deciding an approval checks: by their
- * standing in the channel or towards the bot of the conversation a thread
+ * standing in the channel or towards the bot of the conversation a conversation
  * belongs to, and, for a request to change a bot's computer, towards that bot.
  */
 const approvalDecidersIn = Effect.fn("ChatView.approvalDecidersIn")(function* (
@@ -1082,46 +1164,47 @@ const approvalDecidersIn = Effect.fn("ChatView.approvalDecidersIn")(function* (
 	workspaceId: string,
 	userId: string,
 ) {
-	const agents = new Map(
-		(yield* agentStandingsFor(db, workspaceId, userId)).map((standing) => [
-			standing.agent.id,
+	const bots = new Map(
+		(yield* botStandingsFor(db, workspaceId, userId)).map((standing) => [
+			standing.bot.id,
 			standing,
 		]),
 	);
-	const pods = new Map(
-		(yield* reachedPodStandingsFor(db, workspaceId, userId)).map((standing) => [
-			standing.pod.id,
+	const channels = new Map(
+		(yield* reachedChannelStandingsFor(db, workspaceId, userId)).map((standing) => [
+			standing.channel.id,
 			standing,
 		]),
 	);
-	/** `conversation` is the one the call's thread belongs to; `askingAgentId` the bot that raised it. */
+	/** `conversation` is the one the call's conversation belongs to; `askingBotId` the bot that raised it. */
 	const mayDecide = (
-		conversation: { podId: string | null; hostAgentId: string | null },
-		askingAgentId: string,
-		inRoutine: boolean,
+		conversation: { channelId: string | null; hostBotId: string | null },
+		askingBotId: string,
+		inAutomation: boolean,
 		deciders: ToolApprovalDeciders,
 	) => {
-		if (deciders === "sandbox-managers") {
-			return agents.get(askingAgentId)?.may("sandbox.request.decide") ?? false;
+		if (deciders === "computer-managers") {
+			return bots.get(askingBotId)?.may("computer.request.decide") ?? false;
 		}
-		if (conversation.podId !== null) {
-			return pods.get(conversation.podId)?.may("approval.decide") ?? false;
+		if (conversation.channelId !== null) {
+			return channels.get(conversation.channelId)?.may("approval.decide") ?? false;
 		}
-		const host =
-			conversation.hostAgentId === null ? undefined : agents.get(conversation.hostAgentId);
-		return host !== undefined && mayDecideApprovals(host, inRoutine, deciders);
+		const host = conversation.hostBotId === null ? undefined : bots.get(conversation.hostBotId);
+		return host !== undefined && mayDecideApprovals(host, inAutomation, deciders);
 	};
-	const agentIds = [...agents.keys()];
+	const botIds = [...bots.keys()];
 	const decidable: Decidable = {
-		podsDeciding: [...pods.keys()].filter((podId) => pods.get(podId)?.may("approval.decide")),
-		outsideRoutines: agentIds.filter((agentId) =>
-			mayDecide({ podId: null, hostAgentId: agentId }, agentId, false, "pod"),
+		channelsDeciding: [...channels.keys()].filter((channelId) =>
+			channels.get(channelId)?.may("approval.decide"),
 		),
-		inRoutines: agentIds.filter((agentId) =>
-			mayDecide({ podId: null, hostAgentId: agentId }, agentId, true, "pod"),
+		outsideAutomations: botIds.filter((botId) =>
+			mayDecide({ channelId: null, hostBotId: botId }, botId, false, "conversation"),
 		),
-		sandboxRequests: agentIds.filter((agentId) =>
-			mayDecide({ podId: null, hostAgentId: null }, agentId, false, "sandbox-managers"),
+		inAutomations: botIds.filter((botId) =>
+			mayDecide({ channelId: null, hostBotId: botId }, botId, true, "conversation"),
+		),
+		computerRequests: botIds.filter((botId) =>
+			mayDecide({ channelId: null, hostBotId: null }, botId, false, "computer-managers"),
 		),
 	};
 	return { mayDecide, decidable };
@@ -1134,70 +1217,74 @@ const approvalDecidersIn = Effect.fn("ChatView.approvalDecidersIn")(function* (
  * change their computer they decide (see `decidersOf`).
  */
 interface Decidable {
-	podsDeciding: readonly string[];
-	outsideRoutines: readonly string[];
-	inRoutines: readonly string[];
-	sandboxRequests: readonly string[];
+	channelsDeciding: readonly string[];
+	outsideAutomations: readonly string[];
+	inAutomations: readonly string[];
+	computerRequests: readonly string[];
 }
 
 /**
- * The tool calls waiting on a decision `decidable` allows, in threads
- * `reachesThread` reaches, oldest first, each with the bot that asked and its
+ * The tool calls waiting on a decision `decidable` allows, in conversations
+ * `reachesConversation` reaches, oldest first, each with the bot that asked and its
  * conversation.
  */
 const waitingApprovalRows = Effect.fn("ChatView.waitingApprovalRows")(function* (
 	db: Executor,
 	decidable: Decidable,
-	reachesThread: Visibility.ReachesThread,
+	reachesConversation: Visibility.ReachesConversation,
 ) {
-	const asking = alias(thread, "asking_thread");
-	const conversation = alias(thread, "approval_conversation");
-	const sandboxRequest = inArray(toolCall.tool, [...SANDBOX_REQUEST_TOOLS]);
-	const inRoutine = isNotNull(routineExecutionIdOf(asking.id));
+	const asking = alias(placedConversation, "asking_conversation");
+	const conversation = alias(placedConversation, "approval_conversation");
+	const computerRequest = inArray(toolCall.tool, [...COMPUTER_REQUEST_TOOLS]);
+	const inAutomation = isNotNull(runIdOf(asking.id));
 	const conditions: SQL[] = [];
-	if (decidable.podsDeciding.length > 0) {
+	if (decidable.channelsDeciding.length > 0) {
 		conditions.push(
-			sql`not ${sandboxRequest} and ${inArray(conversation.podId, [...decidable.podsDeciding])}`,
+			sql`not ${computerRequest} and ${inArray(conversation.channelId, [...decidable.channelsDeciding])}`,
 		);
 	}
-	if (decidable.outsideRoutines.length > 0) {
+	if (decidable.outsideAutomations.length > 0) {
 		conditions.push(
-			sql`not ${sandboxRequest} and ${inArray(conversation.hostAgentId, [...decidable.outsideRoutines])} and not ${inRoutine}`,
+			sql`not ${computerRequest} and ${inArray(conversation.botId, [...decidable.outsideAutomations])} and not ${inAutomation}`,
 		);
 	}
-	if (decidable.inRoutines.length > 0) {
+	if (decidable.inAutomations.length > 0) {
 		conditions.push(
-			sql`not ${sandboxRequest} and ${inArray(conversation.hostAgentId, [...decidable.inRoutines])} and ${inRoutine}`,
+			sql`not ${computerRequest} and ${inArray(conversation.botId, [...decidable.inAutomations])} and ${inAutomation}`,
 		);
 	}
-	if (decidable.sandboxRequests.length > 0) {
+	if (decidable.computerRequests.length > 0) {
 		conditions.push(
-			sql`${sandboxRequest} and ${inArray(turn.agentId, [...decidable.sandboxRequests])}`,
+			sql`${computerRequest} and ${inArray(turn.botId, [...decidable.computerRequests])}`,
 		);
 	}
 	if (conditions.length === 0) return [];
 	return yield* selectApprovals(db, asking, conversation)
-		.where(and(eq(toolCall.approvalStatus, "pending"), or(...conditions), reachesThread(asking)))
+		.where(
+			and(eq(toolCall.approvalStatus, "pending"), or(...conditions), reachesConversation(asking)),
+		)
 		.orderBy(asc(toolCall.startedAt))
 		.limit(WAITING_APPROVALS);
 });
 
 /**
- * The tool calls answered in threads `reachesThread` reaches, newest answer
+ * The tool calls answered in conversations `reachesConversation` reaches, newest answer
  * first, each with the bot that asked and its conversation.
  */
 const answeredApprovalRows = Effect.fn("ChatView.answeredApprovalRows")(function* (
 	db: Executor,
-	reachesThread: Visibility.ReachesThread,
+	workspaceId: string,
+	reachesConversation: Visibility.ReachesConversation,
 ) {
-	const asking = alias(thread, "asking_thread");
-	const conversation = alias(thread, "approval_conversation");
+	const asking = alias(placedConversation, "asking_conversation");
+	const conversation = alias(placedConversation, "approval_conversation");
 	return yield* selectApprovals(db, asking, conversation)
 		.where(
 			and(
+				eq(asking.workspaceId, workspaceId),
 				inArray(toolCall.approvalStatus, ["allowed", "denied"]),
 				isNotNull(toolCall.decidedAt),
-				reachesThread(asking),
+				reachesConversation(asking),
 			),
 		)
 		.orderBy(desc(toolCall.decidedAt))
@@ -1206,50 +1293,58 @@ const answeredApprovalRows = Effect.fn("ChatView.answeredApprovalRows")(function
 
 /**
  * Tool calls with the bot that asked, the conversation they are in, and who answered.
- * `asking` is the thread a call was made in, aliased because
- * `routineExecutionIdOf` reads `thread` itself.
+ * `asking` is the conversation a call was made in, aliased because
+ * `runIdOf` reads `conversation` itself.
  */
-function selectApprovals(db: Executor, asking: AskingThread, conversation: ApprovalConversation) {
+function selectApprovals(
+	db: Executor,
+	asking: AskingConversation,
+	conversation: ApprovalConversation,
+) {
 	const decider = alias(user, "decider");
 	return db
 		.select({
 			call: toolCall,
 			// A collaboration's is the channel of the conversation it was opened from.
-			podId: conversation.podId,
-			conversationId: asking.conversationId,
-			agent: {
-				id: agent.id,
-				name: agent.name,
-				handle: agent.handle,
-				color: agent.color,
-				face: agent.face,
-				shape: agent.shape,
+			channelId: conversation.channelId,
+			rootConversationId: asking.rootConversationId,
+			bot: {
+				id: bot.id,
+				name: bot.name,
+				handle: bot.handle,
+				color: bot.color,
+				face: bot.face,
+				shape: bot.shape,
 			},
 			decidedByName: decider.name,
 		})
 		.from(toolCall)
-		.innerJoin(asking, eq(asking.id, toolCall.threadId))
-		.innerJoin(conversation, eq(conversation.id, asking.conversationId))
+		.innerJoin(asking, eq(asking.id, toolCall.conversationId))
+		.innerJoin(conversation, eq(conversation.id, asking.rootConversationId))
 		.innerJoin(turn, eq(turn.id, toolCall.turnId))
-		.innerJoin(agent, eq(agent.id, turn.agentId))
+		.innerJoin(bot, eq(bot.id, turn.botId))
 		.leftJoin(decider, eq(decider.id, toolCall.decidedById))
 		.$dynamic();
 }
 
-type AskingThread = ReturnType<typeof alias<typeof thread, "asking_thread">>;
+type AskingConversation = ReturnType<
+	typeof alias<typeof placedConversation, "asking_conversation">
+>;
 
-/** The conversation the asking thread belongs to. */
-type ApprovalConversation = ReturnType<typeof alias<typeof thread, "approval_conversation">>;
+/** The conversation the asking conversation belongs to. */
+type ApprovalConversation = ReturnType<
+	typeof alias<typeof placedConversation, "approval_conversation">
+>;
 
 type ApprovalRow = Effect.Success<ReturnType<typeof answeredApprovalRows>>[number];
 
 function toApprovalRequest(row: ApprovalRow): ApprovalRequest {
 	return {
 		call: toToolCallPart(row.call, row.decidedByName),
-		agent: { kind: "agent", ...row.agent },
-		podId: row.podId,
-		threadId: row.call.threadId,
-		conversationId: row.conversationId,
+		bot: { kind: "bot", ...row.bot },
+		channelId: row.channelId,
+		conversationId: row.call.conversationId,
+		rootConversationId: row.rootConversationId,
 	};
 }
 
@@ -1279,26 +1374,26 @@ const conversationsAwaitingDecisionBy = Effect.fn("ChatView.conversationsAwaitin
 		}: { workspaceId: string; userId: string; conversationIds: readonly string[] },
 	) {
 		if (conversationIds.length === 0) return new Set<string>();
-		// Aliased, because `routineExecutionIdOf` reads `thread` itself, and an
+		// Aliased, because `runIdOf` reads `conversation` itself, and an
 		// unaliased column would name its row rather than this one.
-		const asking = alias(thread, "asking_thread");
-		const conversation = alias(thread, "approval_conversation");
+		const asking = alias(placedConversation, "asking_conversation");
+		const conversation = alias(placedConversation, "approval_conversation");
 		const pending = yield* db
 			.selectDistinct({
-				conversationId: asking.conversationId,
-				podId: conversation.podId,
-				hostAgentId: conversation.hostAgentId,
-				agentId: turn.agentId,
-				routineExecutionId: routineExecutionIdOf(asking.id),
+				rootConversationId: asking.rootConversationId,
+				channelId: conversation.channelId,
+				hostBotId: conversation.botId,
+				botId: turn.botId,
+				runId: runIdOf(asking.id),
 				tool: toolCall.tool,
 			})
 			.from(toolCall)
-			.innerJoin(asking, eq(asking.id, toolCall.threadId))
-			.innerJoin(conversation, eq(conversation.id, asking.conversationId))
+			.innerJoin(asking, eq(asking.id, toolCall.conversationId))
+			.innerJoin(conversation, eq(conversation.id, asking.rootConversationId))
 			.innerJoin(turn, eq(turn.id, toolCall.turnId))
 			.where(
 				and(
-					inArray(asking.conversationId, [...conversationIds]),
+					inArray(asking.rootConversationId, [...conversationIds]),
 					eq(toolCall.approvalStatus, "pending"),
 				),
 			);
@@ -1306,33 +1401,28 @@ const conversationsAwaitingDecisionBy = Effect.fn("ChatView.conversationsAwaitin
 		const { mayDecide } = yield* approvalDecidersIn(db, workspaceId, userId);
 		return new Set(
 			// The conversations are ones the person reaches, so their standing decides.
-			pending.flatMap(
-				({ conversationId, podId, hostAgentId, agentId, routineExecutionId, tool }) =>
-					conversationId &&
-					mayDecide({ podId, hostAgentId }, agentId, routineExecutionId !== null, decidersOf(tool))
-						? [conversationId]
-						: [],
+			pending.flatMap(({ rootConversationId, channelId, hostBotId, botId, runId, tool }) =>
+				rootConversationId &&
+				mayDecide({ channelId, hostBotId }, botId, runId !== null, decidersOf(tool))
+					? [rootConversationId]
+					: [],
 			),
 		);
 	},
 );
 
 /** The direct messages `userId` is in, in the workspace. */
-const directThreadsOf = Effect.fn("ChatView.directThreadsOf")(function* (
+const directMessagesOf = Effect.fn("ChatView.directMessagesOf")(function* (
 	db: Executor,
 	workspaceId: string,
 	userId: string,
 ) {
 	const rows = yield* db
-		.select({ conversation: thread })
-		.from(directMember)
-		.innerJoin(thread, eq(thread.id, directMember.threadId))
+		.select({ conversation: getColumns(placedConversation) })
+		.from(directMessageMember)
+		.innerJoin(placedConversation, eq(placedConversation.id, directMessageMember.conversationId))
 		.where(
-			and(
-				eq(directMember.userId, userId),
-				eq(thread.workspaceId, workspaceId),
-				eq(thread.type, "direct"),
-			),
+			and(eq(directMessageMember.userId, userId), eq(placedConversation.workspaceId, workspaceId)),
 		);
 	return rows.map((row) => row.conversation);
 });
@@ -1345,7 +1435,7 @@ const directThreadsOf = Effect.fn("ChatView.directThreadsOf")(function* (
 const directMessageItems = (
 	workspaceId: string,
 	userId: string,
-	conversations: readonly ThreadRow[],
+	conversations: readonly PlacedConversationRow[],
 ) =>
 	Effect.gen(function* () {
 		const othersIn = new Map(
@@ -1356,11 +1446,11 @@ const directMessageItems = (
 					: membersOfDirectKey(conversation.directKey).filter((id) => id !== userId),
 			]),
 		);
-		const threadIds = conversations.map((conversation) => conversation.id);
+		const conversationIds = conversations.map((conversation) => conversation.id);
 		const { latest, unread, present } = yield* Effect.all(
 			{
-				latest: query((db) => latestMessages(db, threadIds)),
-				unread: query((db) => unreadMessageCounts(db, userId, threadIds)),
+				latest: query((db) => latestMessages(db, conversationIds)),
+				unread: query((db) => unreadMessageCounts(db, userId, conversationIds)),
 				present: query((db) =>
 					workspaceMembersById(db, workspaceId, [...othersIn.values()].flat()),
 				),
@@ -1375,7 +1465,7 @@ const directMessageItems = (
 			});
 			const last = latest.get(conversation.id);
 			return {
-				conversation: toDirect(conversation),
+				conversation: toDirectMessage(conversation),
 				people: people.sort((left, right) => left.name.localeCompare(right.name)),
 				formerMembers: others.length - people.length,
 				lastMessage: last
@@ -1426,20 +1516,20 @@ function byLatestMessage(left: ListedByLatest, right: ListedByLatest): number {
 /**
  * A page of the conversation: its messages with their authors and parts, and
  * its automation runs, each newest first and one more than the page. Nothing
- * when `reachesThread` does not reach the conversation.
+ * when `reachesConversation` does not reach the conversation.
  */
 const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 	db: Executor,
 	conversationId: string,
-	reachesThread: Visibility.ReachesThread,
+	reachesConversation: Visibility.ReachesConversation,
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
-	const conversation = yield* db.query.thread.findFirst({
+	const conversation = yield* db.query.placedConversation.findFirst({
 		where: {
 			id: conversationId,
-			type: { in: [...CONVERSATION_TYPES] },
-			RAW: (row) => reachesThread(row),
+			kind: { in: [...OPENABLE_CONVERSATION_KINDS] },
+			RAW: (row) => reachesConversation(row),
 		},
 		columns: { id: true },
 		with: {
@@ -1452,49 +1542,50 @@ const loadMainPage = Effect.fn("ChatView.loadMainPage")(function* (
 		},
 	});
 	if (!conversation) return undefined;
-	const routineExecutions = yield* db.query.routineExecution.findMany({
+	const automationRuns = yield* db.query.automationRun.findMany({
 		limit: limit + 1,
 		orderBy: { acceptedAt: "desc", id: "desc" },
 		where: {
 			RAW: (row) =>
 				and(
-					sql`${row.threadId} in (select ${thread.id} from ${thread} where ${thread.conversationId} = ${conversationId})`,
+					// Each run of an automation is listed in its feed.
+					sql`${row.automationId} in (select ${automationFeed.automationId} from ${automationFeed} where ${automationFeed.conversationId} = ${conversationId})`,
 					before && earlierThan(row.acceptedAt, row.id, before),
 				) ?? sql`true`,
 		},
 		columns: {
 			id: true,
-			threadId: true,
-			routineName: true,
+			conversationId: true,
+			automationName: true,
 			triggerKind: true,
 			acceptedAt: true,
 			state: true,
 			error: true,
 		},
 		extras: {
-			report: (row) => lastReplyIn(db, row.threadId),
+			report: (row) => lastReplyIn(db, row.conversationId),
 			posted: (row) => resultPosted(sql`${row.id}`),
 		},
 	});
 	const [paused] = yield* db
-		.select({ routineId: routine.id, at: routine.pausedAfterFailuresAt })
-		.from(routine)
-		.innerJoin(thread, eq(thread.routineId, routine.id))
-		.where(eq(thread.id, conversationId))
+		.select({ automationId: automation.id, at: automation.pausedAfterFailuresAt })
+		.from(automation)
+		.innerJoin(placedConversation, eq(placedConversation.automationId, automation.id))
+		.where(eq(placedConversation.id, conversationId))
 		.limit(1);
 	// On the page whose span it falls in: the first, or one before where it happened.
 	const pausedAfterFailures =
 		paused?.at && (!before || paused.at < before.at)
-			? { routineId: paused.routineId, at: paused.at }
+			? { automationId: paused.automationId, at: paused.at }
 			: null;
-	return { ...conversation, routineExecutions, pausedAfterFailures };
+	return { ...conversation, automationRuns, pausedAfterFailures };
 });
 
-/** The status of the newest turn in `threadId`, or null when it has none. */
-function latestTurnStatusIn(threadId: SQLWrapper): SQL<schema.TurnRow["status"] | null> {
+/** The status of the newest turn in `conversationId`, or null when it has none. */
+function latestTurnStatusIn(conversationId: SQLWrapper): SQL<schema.TurnRow["status"] | null> {
 	return sql<schema.TurnRow["status"] | null>`(
 		select ${turn.status} from ${turn}
-		where ${turn.threadId} = ${threadId}
+		where ${turn.conversationId} = ${conversationId}
 		order by ${turn.startedAt} desc, ${turn.id} desc
 		limit 1
 	)`;
@@ -1502,14 +1593,14 @@ function latestTurnStatusIn(threadId: SQLWrapper): SQL<schema.TurnRow["status"] 
 
 type MainPage = NonNullable<Effect.Success<ReturnType<typeof loadMainPage>>>;
 
-/** The routine `routineId` pausing itself at `at`, as a page lists it, by the routine's id. */
-function pausedCandidate(routineId: string, at: Date) {
+/** The automation `automationId` pausing itself at `at`, as a page lists it, by the automation's id. */
+function pausedCandidate(automationId: string, at: Date) {
 	return {
-		id: routineId,
+		id: automationId,
 		createdAt: at,
 		item: (): ChatMessageItem => ({
-			kind: "routine_paused",
-			id: routineId,
+			kind: "automation_paused",
+			id: automationId,
 			createdAt: at.toISOString(),
 		}),
 	};
@@ -1524,19 +1615,19 @@ function toMainPage(row: MainPage, limit: number) {
 			item: (): ChatMessageItem => ({ kind: "message", message: messageFromRelations(stored) }),
 		})),
 		...(row.pausedAfterFailures
-			? [pausedCandidate(row.pausedAfterFailures.routineId, row.pausedAfterFailures.at)]
+			? [pausedCandidate(row.pausedAfterFailures.automationId, row.pausedAfterFailures.at)]
 			: []),
 		// A run that posted its result is shown by the post, which opens the run.
-		...row.routineExecutions
+		...row.automationRuns
 			.filter((execution) => !execution.posted)
 			.map((execution) => ({
 				id: execution.id,
 				createdAt: execution.acceptedAt,
 				item: (): ChatMessageItem => ({
-					kind: "routine",
+					kind: "run",
 					id: execution.id,
-					threadId: execution.threadId,
-					routineName: execution.routineName,
+					conversationId: execution.conversationId,
+					automationName: execution.automationName,
 					triggerKind: execution.triggerKind,
 					state: execution.state,
 					error: execution.error,
@@ -1562,23 +1653,23 @@ function toMainPage(row: MainPage, limit: number) {
 }
 
 /**
- * A page of the threads opened beside the conversation, one statement: its
- * routine runs and collaborations, each newest activity first and one more
- * than the page. Nothing when `reachesThread` does not reach the
+ * A page of the conversations opened beside the conversation, one statement: its
+ * automation runs and collaborations, each newest activity first and one more
+ * than the page. Nothing when `reachesConversation` does not reach the
  * conversation.
  */
 const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 	db: Executor,
 	conversationId: string,
-	reachesThread: Visibility.ReachesThread,
+	reachesConversation: Visibility.ReachesConversation,
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
-	const sideThreads = {
+	const items = {
 		limit: limit + 1,
 		orderBy: { updatedAt: "desc", id: "desc" },
 		where: {
-			type: { in: ["collaboration", "routine"] },
+			kind: { in: ["collaboration", "run"] },
 			...(before && { RAW: (row) => earlierThan(row.updatedAt, row.id, before) }),
 		},
 		extras: {
@@ -1589,41 +1680,41 @@ const loadHistory = Effect.fn("ChatView.loadHistory")(function* (
 			participants: {
 				columns: {},
 				orderBy: { createdAt: "asc", id: "asc" },
-				with: { user: personColumns, agent: agentColumns },
+				with: { user: personColumns, bot: botColumns },
 			},
-			routineExecution: {
-				columns: { id: true, routineId: true, routineName: true, trigger: true, state: true },
+			automationRun: {
+				columns: { id: true, automationId: true, automationName: true, trigger: true, state: true },
 			},
 		},
-	} satisfies DBQueryConfig<"many", typeof relations, (typeof relations)["thread"]>;
-	return yield* db.query.thread.findFirst({
+	} satisfies DBQueryConfig<"many", typeof relations, (typeof relations)["placedConversation"]>;
+	return yield* db.query.placedConversation.findFirst({
 		where: {
 			id: conversationId,
-			type: { in: [...CONVERSATION_TYPES] },
-			RAW: (row) => reachesThread(row),
+			kind: { in: [...OPENABLE_CONVERSATION_KINDS] },
+			RAW: (row) => reachesConversation(row),
 		},
 		columns: { id: true },
-		with: { conversationThreads: sideThreads },
+		with: { rootedConversations: items },
 	});
 });
 
 type HistoryRow = NonNullable<Effect.Success<ReturnType<typeof loadHistory>>>;
 
-/** The threads, loaded newest activity first, cut to the page. */
+/** The collaborations and runs, loaded newest activity first, cut to the page. */
 function toHistoryPage(row: HistoryRow, limit: number) {
-	const threads = row.conversationThreads;
-	const page = threads.slice(0, limit);
+	const rooted = row.rootedConversations;
+	const page = rooted.slice(0, limit);
 	const items = page.flatMap((side): ChatHistoryEntry[] => {
-		if (side.type !== "collaboration" && side.type !== "routine") return [];
-		// A routine's execution row; a collaboration has none.
-		const execution = side.type === "routine" ? side.routineExecution : null;
+		if (side.kind !== "collaboration" && side.kind !== "run") return [];
+		// A run's own row; a collaboration has none.
+		const execution = side.kind === "run" ? side.automationRun : null;
 		return [
 			{
-				threadId: side.id,
-				parentThreadId: side.parentThreadId,
-				type: side.type,
+				conversationId: side.id,
+				parentConversationId: side.parentConversationId,
+				kind: side.kind,
 				title: side.title,
-				participants: side.participants.map(({ user: person, agent: participant }) =>
+				participants: side.participants.map(({ user: person, bot: participant }) =>
 					toParticipant(authorRow(person, participant)),
 				),
 				status: execution
@@ -1633,14 +1724,14 @@ function toHistoryPage(row: HistoryRow, limit: number) {
 						: side.latestTurnStatus === "failed"
 							? "failed"
 							: "completed",
-				routineExecution: execution
+				automationRun: execution
 					? {
-							executionId: execution.id,
-							routineId: execution.routineId,
-							routineName: execution.routineName,
+							runId: execution.id,
+							automationId: execution.automationId,
+							automationName: execution.automationName,
 							triggerKind: execution.trigger.kind,
 							triggeredAt:
-								execution.trigger.kind === "cron"
+								execution.trigger.kind === "schedule"
 									? execution.trigger.scheduledAt
 									: execution.trigger.kind === "manual"
 										? execution.trigger.requestedAt
@@ -1655,7 +1746,7 @@ function toHistoryPage(row: HistoryRow, limit: number) {
 	return {
 		items,
 		nextCursor:
-			threads.length > limit && oldest
+			rooted.length > limit && oldest
 				? encodeCursor({ at: oldest.updatedAt, id: oldest.id })
 				: null,
 	};

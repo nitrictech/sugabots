@@ -77,7 +77,7 @@ export interface PromptMessage {
 	content: string;
 	/**
 	 * Whether later requests repeat the prompt up to and including this
-	 * message, as a turn's history is repeated by the thread's next turn. A
+	 * message, as a turn's history is repeated by the conversation's next turn. A
 	 * provider that caches only the prefixes a request marks is told to cache
 	 * it; one that caches by itself needs no telling.
 	 */
@@ -657,7 +657,7 @@ export class AnswerTimedOut
  * Short, because each attempt is a model call somebody is waiting on, and
  * because a prompt the model cannot follow will not start working on the tenth
  * try — that is a prompt to fix, not a failure to absorb. The small gap is
- * jittered so a wave of threads hitting the same bad patch does not re-ask in
+ * jittered so a wave of requests hitting the same bad patch does not re-ask in
  * lockstep.
  */
 const RETRY_UNUSABLE = Schedule.recurs(2).pipe(

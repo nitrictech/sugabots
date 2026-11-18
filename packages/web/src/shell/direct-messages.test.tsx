@@ -1,9 +1,9 @@
 import {
-	type Direct,
+	type ConversationDetails,
+	type DirectMessage,
 	type DirectMessageListItem,
 	type Message,
 	streamEvent,
-	type ThreadDetails,
 } from "@sugabots/contracts";
 import { NotFound } from "@sugabots/contracts/http";
 import { testPerson } from "@sugabots/contracts/testing";
@@ -25,8 +25,8 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const withJuno: Direct = {
-	kind: "direct",
+const withJuno: DirectMessage = {
+	kind: "direct_message",
 	id: "0199a3a0-0000-7000-8000-0000000006a1",
 	workspaceId: workspace.id,
 	title: "Direct message",
@@ -38,7 +38,7 @@ const junoParticipant = testPerson({ id: juno.id, name: juno.name, email: juno.e
 
 const fromJuno: Message = {
 	id: "0199a3a0-0000-7000-8000-0000000007a1",
-	threadId: withJuno.id,
+	conversationId: withJuno.id,
 	author: junoParticipant,
 	kind: "text",
 	status: "complete",
@@ -65,7 +65,7 @@ const theo = testPerson({
 });
 
 /** A group: Juno and Theo. */
-const withJunoAndTheo: Direct = {
+const withJunoAndTheo: DirectMessage = {
 	...withJuno,
 	id: "0199a3a0-0000-7000-8000-0000000006a3",
 };
@@ -88,34 +88,34 @@ function membersWithTheo() {
 	}));
 }
 
-/** What a direct message holds, as the thread API returns it. */
+/** What a direct message holds, as the conversations API returns it. */
 function details(
-	conversation: Direct,
+	conversation: DirectMessage,
 	messages: Message[],
 	others: ReturnType<typeof testPerson>[] = [junoParticipant],
-): ThreadDetails {
+): ConversationDetails {
 	const me = testPerson({ id: sam.id, name: sam.name, email: sam.email });
 	const people = [me, ...others];
 	return {
-		thread: {
+		conversation: {
 			id: conversation.id,
 			workspaceId: conversation.workspaceId,
-			podId: null,
-			hostAgentId: null,
-			conversationId: conversation.id,
-			type: conversation.kind,
+			channelId: null,
+			botId: null,
+			rootConversationId: conversation.id,
+			kind: conversation.kind,
 			title: conversation.title,
 			status: "done",
-			parentThreadId: null,
-			initiatorUserId: sam.id,
+			parentConversationId: null,
+			startedById: sam.id,
 			doneAt: null,
 			createdAt: conversation.createdAt,
 			updatedAt: conversation.updatedAt,
 		},
 		capabilities: { approveToolCalls: true },
-		routineExecution: null,
+		automationRun: null,
 		participants: people,
-		crew: [],
+		channelBots: [],
 		members: people,
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -137,7 +137,7 @@ function directMessageAnswers({ unread = 0 }: { unread?: number } = {}) {
 			);
 			return item
 				? Effect.succeed(item)
-				: Effect.fail(new NotFound({ message: userText`No such thread` }));
+				: Effect.fail(new NotFound({ message: userText`No such conversation` }));
 		},
 	);
 	client.api.chats.markRead.mockImplementation(
@@ -155,15 +155,20 @@ function directMessageAnswers({ unread = 0 }: { unread?: number } = {}) {
 			}),
 	);
 	// The bots' channels as `apiAnswers` has them, and the direct messages.
-	const channelOf = client.api.threads.get.getMockImplementation();
-	client.api.threads.get.mockImplementation((request: { params: { threadId: string } }) => {
-		const { threadId } = request.params;
-		if (threadId === withJuno.id) return Effect.succeed(details(withJuno, [fromJuno]));
-		if (threadId === withJunoAndTheo.id) {
-			return Effect.succeed(details(withJunoAndTheo, [], [junoParticipant, theo]));
-		}
-		return channelOf?.(request) ?? Effect.fail(new NotFound({ message: userText`No such thread` }));
-	});
+	const channelOf = client.api.conversations.get.getMockImplementation();
+	client.api.conversations.get.mockImplementation(
+		(request: { params: { conversationId: string } }) => {
+			const { conversationId } = request.params;
+			if (conversationId === withJuno.id) return Effect.succeed(details(withJuno, [fromJuno]));
+			if (conversationId === withJunoAndTheo.id) {
+				return Effect.succeed(details(withJunoAndTheo, [], [junoParticipant, theo]));
+			}
+			return (
+				channelOf?.(request) ??
+				Effect.fail(new NotFound({ message: userText`No such conversation` }))
+			);
+		},
+	);
 	client.api.chats.sendDirectMessage.mockReturnValue(
 		Effect.succeed({ conversation: withJuno, message: fromJuno }),
 	);
@@ -243,7 +248,7 @@ describe("direct messages", () => {
 		await within(section).findByRole("link", { name: "New message" });
 
 		client.api.chats.directMessages.mockReturnValue(Effect.succeed({ items: [junoItem(1)] }));
-		updates.emit(streamEvent("thread.changed", { threadId: withJuno.id }));
+		updates.emit(streamEvent("conversation.changed", { conversationId: withJuno.id }));
 
 		expect(await within(section).findByRole("link", { name: /^Juno(?!,)/ })).toBeDefined();
 	});
@@ -256,11 +261,12 @@ describe("direct messages", () => {
 		client.api.chats.send.mockReturnValue(
 			Effect.succeed({ message: fromJuno, routing: { status: "routed" } }),
 		);
-		const threadOf = client.api.threads.get.getMockImplementation();
-		client.api.threads.get.mockImplementation((request: { params: { threadId: string } }) =>
-			request.params.threadId === withJunoAndTheo.id
-				? Effect.succeed(details(withJunoAndTheo, [], [junoParticipant, theo]))
-				: threadOf?.(request),
+		const conversationOf = client.api.conversations.get.getMockImplementation();
+		client.api.conversations.get.mockImplementation(
+			(request: { params: { conversationId: string } }) =>
+				request.params.conversationId === withJunoAndTheo.id
+					? Effect.succeed(details(withJunoAndTheo, [], [junoParticipant, theo]))
+					: conversationOf?.(request),
 		);
 		const router = mount(`/suga/bots/${linear.handle}`);
 		const section = await directMessagesInSidebar();
@@ -320,7 +326,7 @@ describe("direct messages", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 		// The conversation it starts is listed before the answer to sending arrives.
 		client.api.chats.directMessages.mockReturnValue(Effect.succeed({ items: [junoItem(0)] }));
-		updates.emit(streamEvent("thread.changed", { threadId: withJuno.id }));
+		updates.emit(streamEvent("conversation.changed", { conversationId: withJuno.id }));
 		await within(await directMessagesInSidebar()).findByRole("link", { name: /^Juno/ });
 		answer();
 
@@ -450,7 +456,7 @@ describe("direct messages", () => {
 				items: [junoItem(0), { ...groupItem, people: [junoParticipant, renamed] }],
 			}),
 		);
-		updates.emit(streamEvent("thread.changed", { threadId: withJunoAndTheo.id }));
+		updates.emit(streamEvent("conversation.changed", { conversationId: withJunoAndTheo.id }));
 
 		expect(
 			await screen.findByRole("heading", { level: 1, name: "Juno and Theodore" }),
@@ -481,7 +487,7 @@ describe("direct messages", () => {
 	});
 
 	it("opens a person's message from Inbox in their direct message", async () => {
-		client.api.chats.activity.mockReturnValue(
+		client.api.chats.inbox.mockReturnValue(
 			Effect.succeed({
 				items: [
 					{
@@ -489,15 +495,15 @@ describe("direct messages", () => {
 						messageId: fromJuno.id,
 						author: junoParticipant,
 						preview: fromJuno.content,
-						podId: null,
-						conversationId: withJuno.id,
+						channelId: null,
+						rootConversationId: withJuno.id,
 						at: fromJuno.createdAt,
 						unread: true,
 					},
 				],
 			}),
 		);
-		mount("/suga/activity");
+		mount("/suga/inbox");
 
 		const row = await screen.findByRole("link", {
 			name: new RegExp(`${juno.name} wrote.*in a direct message`),
@@ -506,7 +512,7 @@ describe("direct messages", () => {
 	});
 
 	it("waits for the direct messages before opening a message from Inbox that is in none of the channels", async () => {
-		client.api.chats.activity.mockReturnValue(
+		client.api.chats.inbox.mockReturnValue(
 			Effect.succeed({
 				items: [
 					{
@@ -514,8 +520,8 @@ describe("direct messages", () => {
 						messageId: fromJuno.id,
 						author: junoParticipant,
 						preview: fromJuno.content,
-						podId: null,
-						conversationId: withJuno.id,
+						channelId: null,
+						rootConversationId: withJuno.id,
 						at: fromJuno.createdAt,
 						unread: true,
 					},
@@ -524,7 +530,7 @@ describe("direct messages", () => {
 		);
 		const directMessages = pendingAnswer();
 		client.api.chats.directMessages.mockReturnValue(directMessages.effect);
-		mount("/suga/activity");
+		mount("/suga/inbox");
 
 		await screen.findByText(fromJuno.content);
 		// Not yet a way into a task with a bot, which it may not be.
@@ -537,8 +543,8 @@ describe("direct messages", () => {
 
 	it("counts every unread message in its direct messages as written to the person, as a mention is", async () => {
 		directMessageAnswers({ unread: 2 });
-		// The activity feed holds the latest items only, so it is not where they are counted.
-		client.api.chats.activity.mockReturnValue(Effect.succeed({ items: [] }));
+		// The inbox holds the latest items only, so it is not where they are counted.
+		client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
 		mount(`/suga/dm/${withJunoAndTheo.id}`);
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
@@ -547,8 +553,8 @@ describe("direct messages", () => {
 
 	it("marks every direct message with anything unread read from Inbox, past what Inbox lists", async () => {
 		directMessageAnswers({ unread: 1 });
-		client.api.chats.activity.mockReturnValue(Effect.succeed({ items: [] }));
-		mount("/suga/activity");
+		client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
+		mount("/suga/inbox");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Mark all as read" }));
 

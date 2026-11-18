@@ -65,7 +65,7 @@ export interface Client {
 	readonly api: Api;
 	/** Signing up, in and out. Workspaces and invitations are routes in `api`. */
 	readonly auth: AuthApi;
-	/** Live updates: one stream per open thread, one per workspace. */
+	/** Live updates: one stream per open conversation, one per workspace. */
 	readonly events: EventsApi;
 	/** The bearer store, absent when `authMode` is `cookie`. */
 	readonly tokens: TokenStore | undefined;

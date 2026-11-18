@@ -1,5 +1,5 @@
 import {
-	type Agent,
+	type Bot,
 	type Connection,
 	type ConnectionAccess,
 	type ConnectionToolSetting,
@@ -19,7 +19,7 @@ import {
 } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useInstallGitHubApp } from "@/lib/github-connections.ts";
-import { agentSettingsPageLink } from "@/lib/links.ts";
+import { botSettingsPageLink } from "@/lib/links.ts";
 import { TOOL_ACCESS_LABELS } from "@/lib/tool-access-labels.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
@@ -55,18 +55,18 @@ const TROUBLESHOOTING_URL = `${projectLinks.documentation}/connections#troublesh
 
 export function ConnectionPage({
 	connection,
-	agent,
+	bot,
 	back,
 }: {
 	connection: Connection;
-	agent: Agent;
+	bot: Bot;
 	/** The link back to the bot's connections, or to wherever the page was opened from: a `PageBackLink`. */
 	back: ReactNode;
 }) {
 	const [page, setPage] = useState<"connection" | "tools">("connection");
-	const canManage = agent.permissions.manageConnections;
-	const actions = useConnectionActions(agent.id);
-	const detail = useConnectionWithTools(agent.id, connection.id);
+	const canManage = bot.permissions.manageConnections;
+	const actions = useConnectionActions(bot.id);
+	const detail = useConnectionWithTools(bot.id, connection.id);
 	const setToolAccess = (toolAccess: Record<string, ConnectionAccess>) =>
 		actions.update.mutate({ connectionId: connection.id, json: { toolAccess } });
 
@@ -90,7 +90,7 @@ export function ConnectionPage({
 	return (
 		<ConnectionCard
 			connection={connection}
-			agent={agent}
+			bot={bot}
 			back={back}
 			tools={detail}
 			setToolAccess={setToolAccess}
@@ -103,22 +103,22 @@ type ToolsQuery = ReturnType<typeof useConnectionWithTools>;
 
 function ConnectionCard({
 	connection,
-	agent,
+	bot,
 	back,
 	tools,
 	setToolAccess,
 	onOpenTools,
 }: {
 	connection: Connection;
-	agent: Agent;
+	bot: Bot;
 	back: ReactNode;
 	tools: ToolsQuery;
 	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
 	onOpenTools: () => void;
 }) {
-	const canManage = agent.permissions.manageConnections;
-	const actions = useConnectionActions(agent.id);
-	const installApp = useInstallGitHubApp(agent.id);
+	const canManage = bot.permissions.manageConnections;
+	const actions = useConnectionActions(bot.id);
+	const installApp = useInstallGitHubApp(bot.id);
 	const navigate = useNavigate();
 	const [removing, setRemoving] = useState(false);
 	const [replacingSecret, setReplacingSecret] = useState(false);
@@ -137,7 +137,7 @@ function ConnectionCard({
 			return;
 		}
 		setRemoving(false);
-		await navigate({ ...agentSettingsPageLink(agent, "connections"), replace: true });
+		await navigate({ ...botSettingsPageLink(bot, "connections"), replace: true });
 	}
 
 	return (
@@ -148,14 +148,14 @@ function ConnectionCard({
 			hero={<ConnectionPageMark connection={connection} />}
 			title={connection.name}
 			description={
-				connection.connectedBy ? `Connected by ${connection.connectedBy}` : `For ${agent.name}`
+				connection.connectedBy ? `Connected by ${connection.connectedBy}` : `For ${bot.name}`
 			}
 		>
 			{error && <Alert>{failureMessage(error)}</Alert>}
 			<SettingsGroup
 				label={connection.auth === "oauth" || !isServer ? "Account" : "Connection"}
 				// A test is a button under the group, with how it went beside it, so it never moves the page.
-				note={isServer && <TestConnection connection={connection} agentId={agent.id} />}
+				note={isServer && <TestConnection connection={connection} botId={bot.id} />}
 			>
 				{(connection.auth === "oauth" || !isServer) && (
 					<SettingsRow
@@ -230,14 +230,14 @@ function ConnectionCard({
 				{replacingSecret && (
 					<SecretForm
 						connection={connection}
-						agentId={agent.id}
+						botId={bot.id}
 						done={() => setReplacingSecret(false)}
 					/>
 				)}
 			</SettingsGroup>
 			{connection.kind === "github" && (
 				<GitHubRepositoriesGroup
-					agentId={agent.id}
+					botId={bot.id}
 					connectionId={connection.id}
 					appSettingsUrl={connection.appSettingsUrl ?? connection.url}
 					canManage={canManage}
@@ -252,7 +252,7 @@ function ConnectionCard({
 			{canManage && (
 				<SettingsDanger
 					label={`Disconnect ${connection.name}`}
-					description={`${agent.name} loses access straight away.`}
+					description={`${bot.name} loses access straight away.`}
 					action="Disconnect"
 					onClick={() => setRemoving(true)}
 				/>
@@ -264,7 +264,7 @@ function ConnectionCard({
 				description={
 					connection.kind === "github" ? (
 						<>
-							{agent.name} can no longer use its tools or its repositories. Its app stays on GitHub
+							{bot.name} can no longer use its tools or its repositories. Its app stays on GitHub
 							until you delete it there:{" "}
 							<a
 								href={`${connection.appSettingsUrl ?? connection.url}/advanced`}
@@ -277,7 +277,7 @@ function ConnectionCard({
 							in its advanced settings.
 						</>
 					) : (
-						`${agent.name} can no longer use its tools. Connecting it again means signing in or entering its details again.`
+						`${bot.name} can no longer use its tools. Connecting it again means signing in or entering its details again.`
 					)
 				}
 				confirmLabel="Disconnect"
@@ -294,8 +294,8 @@ function ConnectionCard({
  * it, so a check never moves the page. A failure says why in a line, with the
  * way to fix it next to that.
  */
-function TestConnection({ connection, agentId }: { connection: Connection; agentId: string }) {
-	const actions = useConnectionActions(agentId);
+function TestConnection({ connection, botId }: { connection: Connection; botId: string }) {
+	const actions = useConnectionActions(botId);
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
 	const reachable = checked ? checked.reachable : connection.status === "error" ? false : undefined;
@@ -379,14 +379,14 @@ function secretActionLabel(connection: Connection): string {
 /** A new secret for a header connection, or its first access token, in a row of its own group. */
 function SecretForm({
 	connection,
-	agentId,
+	botId,
 	done,
 }: {
 	connection: Connection;
-	agentId: string;
+	botId: string;
 	done: () => void;
 }) {
-	const actions = useConnectionActions(agentId);
+	const actions = useConnectionActions(botId);
 	const [secret, setSecret] = useState("");
 	const needsToken = connection.secretHeader === null;
 

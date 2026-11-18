@@ -1,5 +1,5 @@
 import { PgClient } from "@effect/sql-pg";
-import { type Channel, streamEvent } from "@sugabots/contracts";
+import { type StreamChannel, streamEvent } from "@sugabots/contracts";
 import { Effect, Layer, Queue } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -16,7 +16,7 @@ import { EventStore } from "./store.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses", () => {
 	let store: EventStore.Interface;
-	const channel = `thread:relay-${Date.now()}` as const satisfies Channel;
+	const channel = `conversation:relay-${Date.now()}` as const satisfies StreamChannel;
 	const buses: EventBus.Interface[] = [];
 
 	beforeAll(async () => {
@@ -70,13 +70,16 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		await listening();
 		const heardByReader = collect(reader, 1);
 		const heardByWriter = collect(writer, 1);
-		const seq = await store.append(channel, streamEvent("thread.changed", { threadId: "t" }));
+		const seq = await store.append(
+			channel,
+			streamEvent("conversation.changed", { conversationId: "t" }),
+		);
 
 		await writer.publishCommitted([
-			{ channel, seq, event: streamEvent("thread.changed", { threadId: "t" }) },
+			{ channel, seq, event: streamEvent("conversation.changed", { conversationId: "t" }) },
 		]);
 
-		expect(await heardByReader).toMatchObject([{ seq, event: { type: "thread.changed" } }]);
+		expect(await heardByReader).toMatchObject([{ seq, event: { type: "conversation.changed" } }]);
 		expect(await heardByWriter).toHaveLength(1);
 		// Nothing else arrives: the writer does not hear its own notice back.
 		await new Promise((resolve) => setTimeout(resolve, 200));
@@ -90,10 +93,10 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 
 		await writer.publish(
 			channel,
-			streamEvent("message.delta", { threadId: "t", messageId: "m", offset: 0, text: "hi" }),
+			streamEvent("message.delta", { conversationId: "t", messageId: "m", offset: 0, text: "hi" }),
 		);
 		const large = streamEvent("message.completed", {
-			threadId: "t",
+			conversationId: "t",
 			messageId: "m",
 			status: "complete",
 			content: "x".repeat(9_000),

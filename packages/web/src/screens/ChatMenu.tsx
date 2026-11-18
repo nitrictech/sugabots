@@ -1,9 +1,9 @@
-import type { Pod } from "@sugabots/contracts";
+import type { Channel } from "@sugabots/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { Archive, Ellipsis, Pencil } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useArchiveChat, useRenameChat } from "@/lib/chats.ts";
-import { podLink } from "@/lib/links.ts";
+import { channelLink } from "@/lib/links.ts";
 import { ChatNameDialog } from "@/shell/ChatNameDialog.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -16,19 +16,19 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
-/** One of a pod's channels, as changing it needs it. */
+/** One of a channel's conversations, as changing it needs it. */
 export interface ChannelToChange {
-	pod: Pod;
+	channel: Channel;
 	conversationId: string;
 	name: string;
-	/** Whether it may be archived, which the pod's first may not. */
+	/** Whether it may be archived, which the channel's first may not. */
 	archivable: boolean;
 }
 
 /**
- * Beside a channel's name, for whoever may change the pod: renaming the
- * channel, and, unless it is the pod's first, archiving it, which takes it off
- * the pod's list and goes back to the pod. Its threads stay where they are.
+ * Beside a channel's name, for whoever may change the channel: renaming the
+ * channel, and, unless it is the channel's first, archiving it, which takes it off
+ * the channel's list and goes back to the channel. Its threads stay where they are.
  * A phone has these in the channel's details instead.
  */
 export function ChatMenu(channel: ChannelToChange) {
@@ -71,7 +71,7 @@ export function ChatMenu(channel: ChannelToChange) {
  * not be archived.
  */
 export function ChannelActions({
-	pod,
+	channel,
 	conversationId,
 	name,
 	archivable,
@@ -94,7 +94,7 @@ export function ChannelActions({
 		}
 		setArchiving(false);
 		// Back to Home, or Home in the archived channel's place, so Back never returns to it.
-		leaveForPage(router.buildLocation(podLink(pod)).href);
+		leaveForPage(router.buildLocation(channelLink(channel)).href);
 	}
 
 	return (

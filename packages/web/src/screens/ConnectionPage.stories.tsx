@@ -4,10 +4,10 @@ import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, connectionHandlers, StoryApp, storyPods } from "../story-app.tsx";
+import { appHandlers, connectionHandlers, StoryApp, storyChannels } from "../story-app.tsx";
 
 /*
- * One connection on its own page under its pod: who connected it and what keeps
+ * One connection on its own page under its bot: who connected it and what keeps
  * it working, a setting for each kind of tool, any tool set apart, and Disconnect.
  */
 
@@ -32,7 +32,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		agentId: "0199a3a0-0000-7000-8000-00000000b071",
+		botId: "0199a3a0-0000-7000-8000-00000000b071",
 		kind: "mcp",
 		auth: "header",
 		signedIn: true,
@@ -87,7 +87,7 @@ const linear = connection(1, {
 		},
 	],
 });
-/** Linear as a pod might set it: reads run, changes ask, and deleting is off. */
+/** Linear as a bot might set it: reads run, changes ask, and deleting is off. */
 const linearCustom: TestConnection = {
 	...linear,
 	tools: linear.tools.map((tool) => ({
@@ -152,7 +152,7 @@ const posthog = connection(5, {
 	})),
 });
 
-/** The pod's own GitHub App's connection: installed on acme, then waiting on its install. */
+/** The bot's own GitHub App's connection: installed on acme, then waiting on its install. */
 const gitHubApp = connection(6, {
 	name: "GitHub",
 	handle: "github-app",
@@ -190,7 +190,7 @@ const alerts = connection(8, {
 });
 
 const appRepositories = (account: string | null) =>
-	http.get(`${API}/agents/:agentId/connections/:connectionId/repositories`, () =>
+	http.get(`${API}/bots/:botId/connections/:connectionId/repositories`, () =>
 		HttpResponse.json({
 			account,
 			repositories:
@@ -226,7 +226,7 @@ const meta = preview.meta({
 			alerts,
 		];
 		msw.use(
-			http.patch(`${API}/agents/:agentId/connections/:connectionId`, async ({ request }) => {
+			http.patch(`${API}/bots/:botId/connections/:connectionId`, async ({ request }) => {
 				const change = (await request.json()) as ConnectionUpdate;
 				current = {
 					...current,
@@ -252,7 +252,7 @@ async function openIndividualTools() {
 }
 
 /**
- * A connection as a pod might set it: who connected it, what keeps it
+ * A connection as a bot might set it: who connected it, what keeps it
  * working, reads allowed and changes asking first, with the one tool set
  * apart counted, and Disconnect at the foot.
  */
@@ -340,7 +340,7 @@ export const NotSignedIn = meta.story({
 	},
 });
 
-/** The pod's GitHub App's connection: the repositories its bots work on, from the account the app is installed on. */
+/** The bot's GitHub App's connection: the repositories it works on, from the account the app is installed on. */
 export const GitHubApp = meta.story({
 	beforeEach({ msw }) {
 		msw.use(appRepositories("acme"));
@@ -349,7 +349,7 @@ export const GitHubApp = meta.story({
 	play: async ({ canvas }) => {
 		const repositories = await canvas.findByRole("region", { name: "Repositories" });
 		await expect(within(repositories).getByText("acme/web")).toBeInTheDocument();
-		await expect(within(repositories).getByRole("link", { name: "the pod's app" })).toHaveAttribute(
+		await expect(within(repositories).getByRole("link", { name: "the bot's app" })).toHaveAttribute(
 			"href",
 			"https://github.com/organizations/acme/settings/apps/sugabots-revenue-09a7",
 		);
@@ -363,7 +363,7 @@ export const AddingARepository = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			appRepositories("acme"),
-			http.get(`${API}/agents/:agentId/connections/:connectionId/github/reachable`, async () => {
+			http.get(`${API}/bots/:botId/connections/:connectionId/github/reachable`, async () => {
 				await delay(300);
 				return HttpResponse.json(
 					["acme/web", "acme/infra", "acme/docs"].map((repository) => ({
@@ -467,7 +467,7 @@ export const HundredsOfTools = meta.story({
 export const LoadingTools = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/agents/:agentId/connections/:connectionId`, () => delay("infinite")),
+			http.get(`${API}/bots/:botId/connections/:connectionId`, () => delay("infinite")),
 			...connectionHandlers([linearCustom]),
 			...appHandlers(),
 		);
@@ -480,16 +480,16 @@ export const LoadingTools = meta.story({
 	},
 });
 
-/** A member who may not manage the pod's connections: everything shown, nothing to change. */
+/** A member who may not manage the bot's connections: everything shown, nothing to change. */
 export const Member = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			...connectionHandlers([linear]),
 			...appHandlers({
 				role: "member",
-				pods: storyPods.map((pod) => ({
-					...pod,
-					permissions: { ...pod.permissions, manageConnections: false },
+				channels: storyChannels.map((channel) => ({
+					...channel,
+					permissions: { ...channel.permissions, manageConnections: false },
 				})),
 			}),
 		);
@@ -505,7 +505,7 @@ export const Member = meta.story({
 	},
 });
 
-/** On a phone: Back to the pod's Connections at the top. */
+/** On a phone: Back to the bot's Connections at the top. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {

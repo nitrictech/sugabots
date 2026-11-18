@@ -1,20 +1,20 @@
 export * as AssistantGuide from "./assistant-guide.ts";
 
-import { sharedPodSlugSchema, slugify } from "@sugabots/contracts";
+import { channelSlugSchema, slugify } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer, Schema } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { AuthenticatedUserId, CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations } from "../../database/database.ts";
-import { agentSummary, routine } from "../../database/schema.ts";
+import { automation, botSummary } from "../../database/schema.ts";
 import { Installation } from "../../installation/installation.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { AgentAdministration } from "../../workspaces/agents/agent-administration.ts";
-import { PodAdministration } from "../../workspaces/pods/pod-administration.ts";
-import type { PodRepository } from "../../workspaces/pods/pod-repository.ts";
+import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
+import { ChannelAdministration } from "../../workspaces/channels/channel-administration.ts";
+import type { ChannelRepository } from "../../workspaces/channels/channel-repository.ts";
+import { latestRunFailed } from "../automations/execution.ts";
 import { ChatView } from "../chats/chat-view.ts";
-import { latestRunFailed } from "../routines/execution.ts";
 
 /**
  * What a Personal Assistant knows of its person's workspace, and what it does
@@ -50,8 +50,8 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("AssistantGuide");
-	const pods = yield* PodAdministration.Service;
-	const agents = yield* AgentAdministration.Service;
+	const channelAdministration = yield* ChannelAdministration.Service;
+	const bots = yield* BotAdministration.Service;
 	const view = yield* ChatView.Service;
 	const { webAppUrl } = yield* Installation.Service;
 
@@ -61,18 +61,20 @@ export const make = Effect.gen(function* () {
 	const asPerson = <A, E, R>(person: Person, work: Effect.Effect<A, E, R>) =>
 		work.pipe(CurrentActor.provide(AuthenticatedUserId.vouchedFor(person.userId)));
 
-	const channelNamed = (person: Person, address: string) =>
-		Effect.flatMap(pods.list({ workspace: person.workspaceId }), (listed) => {
-			const wanted = address.trim().replace(/^#/, "").toLowerCase();
-			const found = listed.find((pod) => pod.slug === wanted || pod.name.toLowerCase() === wanted);
+	// Exactly the address and handle the person approved: a looser match, such as
+	// by name, could act on a channel or bot they didn't mean.
+	const channelAt = (person: Person, address: string) =>
+		Effect.flatMap(channelAdministration.list({ workspace: person.workspaceId }), (listed) => {
+			const wanted = address.trim().replace(/^#/, "");
+			const found = listed.find((channel) => channel.slug === wanted);
 			return found ? Effect.succeed(found) : Effect.fail(new NothingNamed({ what: "channel" }));
 		});
 
-	const botNamed = (person: Person, handle: string) =>
-		Effect.flatMap(agents.list({ workspace: person.workspaceId }), (listed) => {
-			const wanted = handle.trim().replace(/^@/, "").toLowerCase();
+	const botWithHandle = (person: Person, handle: string) =>
+		Effect.flatMap(bots.list({ workspace: person.workspaceId }), (listed) => {
+			const wanted = handle.trim().replace(/^@/, "");
 			const found = listed.find(
-				(agent) => agent.handle === wanted && agent.systemAgentKey === null && !agent.assistant,
+				(bot) => bot.handle === wanted && bot.systemBotKey === null && !bot.assistant,
 			);
 			return found ? Effect.succeed(found) : Effect.fail(new NothingNamed({ what: "bot" }));
 		});
@@ -85,97 +87,94 @@ export const make = Effect.gen(function* () {
 					person,
 					Effect.gen(function* () {
 						const workspace = person.workspaceId;
-						const channels = yield* pods.list({ workspace });
-						const bots = (yield* agents.list({ workspace })).filter(
-							(agent) => agent.systemAgentKey === null && !agent.assistant,
+						const channels = yield* channelAdministration.list({ workspace });
+						const workspaceBots = (yield* bots.list({ workspace })).filter(
+							(bot) => bot.systemBotKey === null && !bot.assistant,
 						);
-						const talkable = bots.filter((agent) => agent.permissions.talk);
+						const talkable = workspaceBots.filter((bot) => bot.permissions.talk);
 						const lately =
 							talkable.length === 0
 								? []
 								: yield* query((db) =>
 										db
-											.select({ agentId: agentSummary.agentId, content: agentSummary.content })
-											.from(agentSummary)
+											.select({ botId: botSummary.botId, content: botSummary.content })
+											.from(botSummary)
 											.where(
 												inArray(
-													agentSummary.agentId,
-													talkable.map((agent) => agent.id),
+													botSummary.botId,
+													talkable.map((bot) => bot.id),
 												),
 											),
 									);
-						const latelyOf = new Map(lately.map((row) => [row.agentId, row.content]));
+						const latelyOf = new Map(lately.map((row) => [row.botId, row.content]));
 						// As things stand, not since the person last looked: reading a
-						// failed run's thread doesn't mend the automation.
+						// failed run's conversation doesn't mend the automation.
 						const failing =
 							talkable.length === 0
 								? []
 								: yield* query((db) =>
 										db
-											.select({ agentId: routine.agentId, count: sql<number>`count(*)::int` })
-											.from(routine)
+											.select({ botId: automation.botId, count: sql<number>`count(*)::int` })
+											.from(automation)
 											.where(
 												and(
 													inArray(
-														routine.agentId,
-														talkable.map((agent) => agent.id),
+														automation.botId,
+														talkable.map((bot) => bot.id),
 													),
-													isNull(routine.deletedAt),
+													isNull(automation.deletedAt),
 													or(
-														isNotNull(routine.pausedAfterFailuresAt),
-														and(eq(routine.state, "enabled"), latestRunFailed(routine.id)),
+														isNotNull(automation.pausedAfterFailuresAt),
+														and(eq(automation.state, "enabled"), latestRunFailed(automation.id)),
 													),
 												),
 											)
-											.groupBy(routine.agentId),
+											.groupBy(automation.botId),
 									);
-						const failingOf = new Map(failing.map((row) => [row.agentId, row.count]));
-						const activity = yield* view.activity(workspace);
+						const failingOf = new Map(failing.map((row) => [row.botId, row.count]));
+						const unreadMentions = yield* view.unreadMentions(workspace, LISTED_ITEMS);
 						const approvals = yield* view.approvals(workspace);
 						const at = base(person);
 						return {
-							channels: channels.map((pod) => ({
-								name: pod.name,
-								address: pod.slug,
-								link: `${at}/channels/${pod.slug}`,
-								description: pod.description,
-								private: pod.visibility === "private",
-								youAreIn: pod.isMember,
+							channels: channels.map((channel) => ({
+								name: channel.name,
+								address: channel.slug,
+								link: `${at}/channels/${channel.slug}`,
+								description: channel.description,
+								private: channel.visibility === "private",
+								youAreIn: channel.isMember,
 							})),
-							bots: bots.map((agent) => ({
-								name: agent.name,
-								handle: `@${agent.handle}`,
-								link: `${at}/bots/${agent.handle}`,
-								description: agent.description,
-								private: agent.visibility === "private",
-								pinned: agent.pinned,
-								youCanTalkToIt: agent.permissions.talk,
-								lately: latelyOf.get(agent.id) ?? null,
+							bots: workspaceBots.map((bot) => ({
+								name: bot.name,
+								handle: `@${bot.handle}`,
+								link: `${at}/bots/${bot.handle}`,
+								description: bot.description,
+								private: bot.visibility === "private",
+								pinned: bot.pinned,
+								youCanTalkToIt: bot.permissions.talk,
+								lately: latelyOf.get(bot.id) ?? null,
 							})),
 							waitingOnYou: {
 								approvals: approvals.waiting.slice(0, LISTED_ITEMS).map((request) => ({
-									bot: request.agent.name,
+									bot: request.bot.name,
 									tool: request.call.tool,
 									link: `${at}/approvals/${request.call.id}`,
 								})),
-								unreadMentions: activity.items
-									.filter((item) => item.kind === "mention" && item.unread)
-									.slice(0, LISTED_ITEMS)
-									.flatMap((item) =>
-										item.kind === "mention"
-											? [
-													{
-														from: item.author.name,
-														preview: item.preview,
-														link: `${at}/activity/${item.conversationId}?message=${item.messageId}`,
-													},
-												]
-											: [],
-									),
-								failingAutomations: bots.flatMap((agent) => {
-									const failing = failingOf.get(agent.id) ?? 0;
+								unreadMentions: unreadMentions.flatMap((item) =>
+									item.kind === "mention"
+										? [
+												{
+													from: item.author.name,
+													preview: item.preview,
+													link: `${at}/inbox/${item.rootConversationId}?message=${item.messageId}`,
+												},
+											]
+										: [],
+								),
+								failingAutomations: workspaceBots.flatMap((bot) => {
+									const failing = failingOf.get(bot.id) ?? 0;
 									return failing > 0
-										? [{ bot: agent.name, failing, link: `${at}/bots/${agent.handle}/automations` }]
+										? [{ bot: bot.name, failing, link: `${at}/bots/${bot.handle}/automations` }]
 										: [];
 								}),
 							},
@@ -198,10 +197,10 @@ export const make = Effect.gen(function* () {
 				asPerson(
 					person,
 					Effect.gen(function* () {
-						const slug = yield* Schema.decodeUnknownEffect(sharedPodSlugSchema)(
+						const slug = yield* Schema.decodeUnknownEffect(channelSlugSchema)(
 							slugify(channel.name),
 						).pipe(Effect.mapError(() => new UnusableChannelName()));
-						const made = yield* pods.create({
+						const made = yield* channelAdministration.create({
 							workspace: person.workspaceId,
 							name: channel.name,
 							slug,
@@ -219,8 +218,8 @@ export const make = Effect.gen(function* () {
 				asPerson(
 					person,
 					Effect.gen(function* () {
-						const found = yield* channelNamed(person, address);
-						const joined = yield* pods.join({ podId: found.id });
+						const found = yield* channelAt(person, address);
+						const joined = yield* channelAdministration.join({ channelId: found.id });
 						return { name: joined.name, link: `${base(person)}/channels/${joined.slug}` };
 					}),
 				),
@@ -232,9 +231,9 @@ export const make = Effect.gen(function* () {
 				asPerson(
 					person,
 					Effect.gen(function* () {
-						const channel = yield* channelNamed(person, target.channel);
-						const bot = yield* botNamed(person, target.bot);
-						yield* pods.addBot({ podId: channel.id, agentId: bot.id });
+						const channel = yield* channelAt(person, target.channel);
+						const bot = yield* botWithHandle(person, target.bot);
+						yield* channelAdministration.addBot({ channelId: channel.id, botId: bot.id });
 						return { name: channel.name, link: `${base(person)}/channels/${channel.slug}` };
 					}),
 				),
@@ -246,8 +245,8 @@ export const make = Effect.gen(function* () {
 				asPerson(
 					person,
 					Effect.gen(function* () {
-						const bot = yield* botNamed(person, target.bot);
-						yield* agents.setPinned({ agentId: bot.id, pinned: target.pinned });
+						const bot = yield* botWithHandle(person, target.bot);
+						yield* bots.setPinned({ botId: bot.id, pinned: target.pinned });
 						return { name: bot.name, link: `${base(person)}/bots/${bot.handle}` };
 					}),
 				),
@@ -264,7 +263,7 @@ export const layerNoDeps = Layer.effect(Service, make);
  */
 export const layer = Layer.suspend(() =>
 	layerNoDeps.pipe(
-		Layer.provide([PodAdministration.layer, AgentAdministration.layer, ChatView.layer]),
+		Layer.provide([ChannelAdministration.layer, BotAdministration.layer, ChatView.layer]),
 	),
 );
 
@@ -317,17 +316,19 @@ export type Refused =
 	| AuthorizationDenied
 	| NothingNamed
 	| UnusableChannelName
-	| PodRepository.PodSlugTaken
-	| PodRepository.BotNotPublic
-	| PodAdministration.NotInWorkspace;
+	| ChannelRepository.ChannelSlugTaken
+	| ChannelRepository.BotNotPublic
+	| ChannelAdministration.NotInWorkspace;
 
-/** No channel or bot the person can see goes by the name the assistant gave. */
+/** No channel or bot the person can see has the address or handle the assistant gave. */
 export class NothingNamed
 	extends Data.TaggedError("NothingNamed")<{ readonly what: "channel" | "bot" }>
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`There is no ${this.what} by that name that you can see.`;
+		return this.what === "channel"
+			? userText`There is no channel at that address that you can see.`
+			: userText`There is no bot with that handle that you can see.`;
 	}
 }
 

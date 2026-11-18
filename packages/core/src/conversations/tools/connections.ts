@@ -11,6 +11,7 @@ import {
 import type { JSONSchema7, Tool } from "ai";
 import { Clock, Context, Duration, Effect, Layer } from "effect";
 import { type Database, effectRunner } from "../../database/database.ts";
+import type { ConversationFiles } from "../../files/conversation-files.ts";
 import {
 	ConnectionRepository,
 	everyToolOff,
@@ -30,7 +31,6 @@ import {
 	type EgressHttpClient,
 	type EgressHttpClients,
 } from "../../providers/network/egress.ts";
-import type { ThreadFiles } from "../thread-files/thread-files.ts";
 import { offerAugmentationTools } from "./augmentations.ts";
 import type { Workspace } from "./github/push-tool.ts";
 import { gitHubNote, gitHubTools } from "./github/tools.ts";
@@ -50,7 +50,7 @@ import type { UploadSide } from "./signed-upload/tool.ts";
  * A connection whose every tool is off is not opened at all.
  *
  * A server that cannot be reached is left out of the turn, with a line in the
- * log, rather than the turn failing: the agent can still answer with what it
+ * log, rather than the turn failing: the bot can still answer with what it
  * has, and the connection's own test is where the owner learns why. One whose
  * sign-in was refused is left out too, but named apart, since it stays out of
  * every turn until a person signs in again.
@@ -91,9 +91,9 @@ export interface ConnectionToolSet {
 }
 
 export interface Interface {
-	forAgent(
+	forBot(
 		workspaceId: string,
-		agentId: string,
+		botId: string,
 		turn: TurnSide,
 	): Effect.Effect<ConnectionToolSet, never, Database>;
 }
@@ -101,14 +101,14 @@ export interface Interface {
 /** What a turn's tools work for and through, for the kinds whose tools are Sugabots' own. */
 export interface TurnSide {
 	readonly turnId: string;
-	readonly agentId: string;
-	readonly threadId: string;
-	/** The thread's files, which a connection's upload tool sends from. */
-	readonly files: Pick<ThreadFiles.Interface, "read">;
+	readonly botId: string;
+	readonly conversationId: string;
+	/** The conversation's files, which a connection's upload tool sends from. */
+	readonly files: Pick<ConversationFiles.Interface, "read">;
 	/** The bot's computer, while the turn may use it. */
 	readonly workspace: Workspace | undefined;
-	/** Whether the sandbox's provider signs its requests in, outside it. */
-	readonly sandboxSignsIn: boolean;
+	/** Whether the computer's provider signs its requests in, outside it. */
+	readonly computerSignsIn: boolean;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -150,7 +150,7 @@ interface KeptListing {
 }
 
 export interface Parts {
-	connections: Pick<ConnectionRepository.Interface, "targetsForAgent">;
+	connections: Pick<ConnectionRepository.Interface, "targetsForBot">;
 	/** Bound egress clients, so a session goes only to the connection's own address. */
 	httpClients: EgressHttpClients;
 	/** Opens a session with a server; the real one speaks MCP. */
@@ -161,7 +161,7 @@ export interface Parts {
 	 */
 	oauth?: { clients: Effect.Effect<OAuthProviders>; fetch: EgressHttpClient };
 	/** The bot's GitHub app; a case without one offers no GitHub tools. */
-	github?: Pick<GitHubConnections.Interface, "forAgent">;
+	github?: Pick<GitHubConnections.Interface, "forBot">;
 }
 
 /** The tools built from `parts`, for `make` and for a case that supplies its own. */
@@ -176,9 +176,9 @@ export function from({
 	const failedAt = new Map<string, number>();
 
 	/** The bot's GitHub app's tools, and what the model is told of them. */
-	const gitHubOffered = (workspaceId: string, agentId: string, turn: TurnSide) =>
+	const gitHubOffered = (workspaceId: string, botId: string, turn: TurnSide) =>
 		Effect.gen(function* () {
-			const connected = github ? yield* github.forAgent({ workspaceId, agentId }) : undefined;
+			const connected = github ? yield* github.forBot({ workspaceId, botId }) : undefined;
 			if (!connected || everyToolOff(connected.connection)) {
 				return { tools: {}, instructions: {} };
 			}
@@ -188,17 +188,17 @@ export function from({
 			return {
 				tools: gitHubTools({ connected, ...turn, run }),
 				instructions: {
-					[connected.connection.handle]: gitHubNote(connected, turn.sandboxSignsIn),
+					[connected.connection.handle]: gitHubNote(connected, turn.computerSignsIn),
 				},
 			};
 		});
 
 	return {
-		forAgent: (workspaceId, agentId, turn) =>
+		forBot: (workspaceId, botId, turn) =>
 			Effect.gen(function* () {
-				const { targets: reached, signInExpired: expired } = yield* connections.targetsForAgent(
+				const { targets: reached, signInExpired: expired } = yield* connections.targetsForBot(
 					workspaceId,
-					agentId,
+					botId,
 				);
 				// One waiting on a sign-in is still the bot's, so it isn't offered to be added again.
 				const addable = presetsAddableTo([...reached, ...expired]);
@@ -206,7 +206,7 @@ export function from({
 				const endpointTools = reached
 					.filter((target) => target.kind === "http")
 					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
-				const gitHub = yield* gitHubOffered(workspaceId, agentId, turn);
+				const gitHub = yield* gitHubOffered(workspaceId, botId, turn);
 				const ownTools = {
 					tools: Object.assign({}, ...endpointTools, gitHub.tools),
 					instructions: gitHub.instructions,
@@ -216,9 +216,9 @@ export function from({
 					return { ...nothingOffered, ...ownTools, signInExpired, addable };
 				}
 				const uploadSide: UploadSide = {
-					threadId: turn.threadId,
+					conversationId: turn.conversationId,
 					files: turn.files,
-					sandbox: turn.workspace,
+					computer: turn.workspace,
 					upload: httpClients,
 					run: effectRunner({
 						runPromiseExit: Effect.runPromiseExitWith(yield* Effect.context<Database>()),
@@ -392,5 +392,5 @@ const nothingOffered: ConnectionToolSet = {
 
 /** No connections at all, for a case that offers a turn none. */
 export const none: Interface = {
-	forAgent: () => Effect.succeed(nothingOffered),
+	forBot: () => Effect.succeed(nothingOffered),
 };

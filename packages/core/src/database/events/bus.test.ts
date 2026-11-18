@@ -9,7 +9,7 @@ import { EventStore } from "./store.ts";
  * provoke through a socket.
  */
 
-const CHANNEL = "thread:c1";
+const CHANNEL = "conversation:c1";
 
 function rawEvent(type: EventType, data: Record<string, unknown> = {}): StreamEvent {
 	return { ...data, v: EVENT_VERSION, type };
@@ -66,7 +66,7 @@ describe("publish and subscribe", () => {
 		const store = EventStore.inMemory();
 		const events = EventBus.inProcess({ store });
 		const live = take(events.subscribe(CHANNEL), 1);
-		const event = streamEvent("agent.updated", { id: "m1" });
+		const event = streamEvent("bot.updated", { id: "m1" });
 		const seq = await store.append(CHANNEL, event);
 
 		await events.publishCommitted([{ channel: CHANNEL, seq, event }]);
@@ -88,12 +88,12 @@ describe("publish and subscribe", () => {
 
 	it("keeps channels apart", async () => {
 		const events = bus();
-		const thread = take(events.subscribe(CHANNEL), 1);
+		const conversation = take(events.subscribe(CHANNEL), 1);
 
-		await events.publish("workspace:w1", rawEvent("thread.created"));
+		await events.publish("workspace:w1", rawEvent("conversation.created"));
 		await events.publish(CHANNEL, rawEvent("message.created"));
 
-		expect(types(await thread)).toEqual(["message.created"]);
+		expect(types(await conversation)).toEqual(["message.created"]);
 	});
 
 	it("numbers durable events and leaves deltas unnumbered", async () => {
@@ -137,7 +137,7 @@ describe("publish and subscribe", () => {
 		const stream = take(events.subscribe(CHANNEL), 2);
 		const first = events.publish(CHANNEL, rawEvent("message.created", { n: 1 }));
 		const second = events.publishCommitted([
-			{ channel: CHANNEL, seq: 2, event: streamEvent("agent.updated", { n: 2 }) },
+			{ channel: CHANNEL, seq: 2, event: streamEvent("bot.updated", { n: 2 }) },
 		]);
 
 		releaseAppend();
@@ -228,7 +228,7 @@ describe("resume", () => {
 
 	it("resets an id that was never on this channel", async () => {
 		const events = bus();
-		await events.publish("workspace:w1", rawEvent("thread.created"));
+		await events.publish("workspace:w1", rawEvent("conversation.created"));
 
 		const stream = take(events.subscribe(CHANNEL, { since: 1 }), 1);
 		expect(types(await stream)).toEqual(["reset"]);

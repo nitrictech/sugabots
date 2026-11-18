@@ -1,14 +1,14 @@
 import { Schema } from "effect";
 import { sessionUserSchema } from "./api.ts";
+import { slugSchema } from "./channels.ts";
 import { emailSchema } from "./email.ts";
-import { podSlugSchema } from "./pods.ts";
 import { timeZoneSchema } from "./time-zones.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 import { assignableWorkspaceRoleSchema, workspaceRoleSchema } from "./workspaces.ts";
 
 /** Unique across the installation. */
-export const workspaceSlugSchema = podSlugSchema;
+export const workspaceSlugSchema = slugSchema;
 
 export const workspaceSchema = Schema.Struct({
 	id: uuidSchema,
@@ -42,12 +42,12 @@ export const newWorkspaceSchema = Schema.Struct({
 export type NewWorkspace = typeof newWorkspaceSchema.Type;
 
 /**
- * The workspace's time zone, and how many of its routines have a schedule in
+ * The workspace's time zone, and how many of its automations have a schedule in
  * that zone. Those schedules move with the workspace when its zone changes.
  */
 export const workspaceTimeZoneSchema = Schema.Struct({
 	timeZone: Schema.String,
-	scheduledRoutines: Schema.Number,
+	scheduledAutomations: Schema.Number,
 });
 export type WorkspaceTimeZone = typeof workspaceTimeZoneSchema.Type;
 

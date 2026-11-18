@@ -29,13 +29,13 @@ import { activityOf, type RepositoryActivity } from "./github-events.ts";
  * changed through the connection's tools, which are Sugabots' own, and what
  * happens there, which its app delivers. A bot has at most one, since its
  * computer can be signed in to only one account at GitHub. Seeing a
- * connection's repositories takes `agent.read`; choosing them takes
+ * connection's repositories takes `bot.read`; choosing them takes
  * `connection.manage`.
  */
 export interface Interface {
 	/** What the connection's app reaches, for the bot to choose from. */
 	readonly reachableRepositories: (input: {
-		agentId: string;
+		botId: string;
 		connectionId: string;
 	}) => Effect.Effect<
 		readonly AccountRepository[],
@@ -43,7 +43,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	readonly repositories: (input: {
-		agentId: string;
+		botId: string;
 		connectionId: string;
 	}) => Effect.Effect<
 		ConnectionRepositories,
@@ -52,7 +52,7 @@ export interface Interface {
 	>;
 	/** Adds a repository the connection's app reaches. */
 	readonly addRepository: (input: {
-		agentId: string;
+		botId: string;
 		connectionId: string;
 		repository: string;
 	}) => Effect.Effect<
@@ -66,7 +66,7 @@ export interface Interface {
 	>;
 	/** Removing one the connection doesn't have changes nothing. */
 	readonly removeRepository: (input: {
-		agentId: string;
+		botId: string;
 		connectionId: string;
 		repository: string;
 	}) => Effect.Effect<
@@ -75,11 +75,11 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/** The bot's GitHub app, for its turns and computer; undefined until its app is installed. */
-	readonly forAgent: (agent: Agent) => Effect.Effect<Connected | undefined>;
+	readonly forBot: (bot: Bot) => Effect.Effect<Connected | undefined>;
 	/**
 	 * What a delivery to the connection's webhook says happened at one of its
 	 * account's repositories, once its app proves it sent it; `activity` is
-	 * `undefined` for an event no routine is run by.
+	 * `undefined` for an event no automation is run by.
 	 */
 	readonly receiveDelivery: (
 		delivery: Delivery & { connectionId: string },
@@ -98,11 +98,11 @@ export const make = Effect.gen(function* () {
 	const egress = yield* Egress.Service;
 	const http = egress.providers.for({ baseUrl: GitHub.API_URL });
 
-	const managed = (agentId: string) =>
-		Effect.map(authorization.agent(agentId, "connection.manage"), agentOf);
+	const managed = (botId: string) =>
+		Effect.map(authorization.bot(botId, "connection.manage"), botOf);
 
 	/** The bot's GitHub connection `connectionId`, with its app's settings. */
-	const connectionOf = (agent: Agent, connectionId: string) =>
+	const connectionOf = (bot: Bot, connectionId: string) =>
 		Effect.gen(function* () {
 			const [row] = yield* query((db) =>
 				db
@@ -111,8 +111,8 @@ export const make = Effect.gen(function* () {
 					.where(
 						and(
 							eq(connection.id, connectionId),
-							eq(connection.workspaceId, agent.workspaceId),
-							eq(connection.agentId, agent.agentId),
+							eq(connection.workspaceId, bot.workspaceId),
+							eq(connection.botId, bot.botId),
 							eq(connection.kind, "github"),
 						),
 					)
@@ -123,9 +123,9 @@ export const make = Effect.gen(function* () {
 		});
 
 	/** The connection's app at the account it is installed on. */
-	const installedAppOf = (agent: Agent, connectionId: string) =>
+	const installedAppOf = (bot: Bot, connectionId: string) =>
 		Effect.gen(function* () {
-			const { row } = yield* connectionOf(agent, connectionId);
+			const { row } = yield* connectionOf(bot, connectionId);
 			const app = installedApp(credentials, row);
 			if (!app) return yield* new AppNotInstalled();
 			return app;
@@ -159,7 +159,7 @@ export const make = Effect.gen(function* () {
 
 	/** Changes the connection's repositories, answering them as people are shown them after. */
 	const changed = (
-		agent: Agent,
+		bot: Bot,
 		connectionId: string,
 		settings: GitHubConnectionSettings,
 		change: (
@@ -168,7 +168,7 @@ export const make = Effect.gen(function* () {
 	) =>
 		Effect.gen(function* () {
 			const repositories = yield* connections.changeGitHubRepositories(
-				agent.workspaceId,
+				bot.workspaceId,
 				connectionId,
 				change,
 			);
@@ -177,34 +177,34 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		reachableRepositories: ({ agentId, connectionId }) =>
+		reachableRepositories: ({ botId, connectionId }) =>
 			operation(
 				"reachableRepositories",
 				Effect.gen(function* () {
-					const agent = yield* managed(agentId);
-					const app = yield* installedAppOf(agent, connectionId);
+					const bot = yield* managed(botId);
+					const app = yield* installedAppOf(bot, connectionId);
 					const reached = yield* GitHub.repositories(http, app);
 					return reached.map((one) => ({ repository: one.fullName, private: one.private }));
 				}),
 			),
 
-		repositories: ({ agentId, connectionId }) =>
+		repositories: ({ botId, connectionId }) =>
 			operation(
 				"repositories",
 				Effect.gen(function* () {
-					const agent = agentOf(yield* authorization.agent(agentId, "connection.read"));
-					const { settings } = yield* connectionOf(agent, connectionId);
+					const bot = botOf(yield* authorization.bot(botId, "connection.read"));
+					const { settings } = yield* connectionOf(bot, connectionId);
 					return yield* shown(settings);
 				}),
 			),
 
-		addRepository: ({ agentId, connectionId, repository }) =>
+		addRepository: ({ botId, connectionId, repository }) =>
 			operation(
 				"addRepository",
 				Effect.gen(function* () {
-					const agent = yield* managed(agentId);
-					const { settings } = yield* connectionOf(agent, connectionId);
-					const app = yield* installedAppOf(agent, connectionId);
+					const bot = yield* managed(botId);
+					const { settings } = yield* connectionOf(bot, connectionId);
+					const app = yield* installedAppOf(bot, connectionId);
 					const reached = yield* GitHub.repositories(http, app);
 					// GitHub's paths ignore case.
 					const found = reached.find(
@@ -214,7 +214,7 @@ export const make = Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					const addedAt = DateTime.formatIso(yield* DateTime.now);
 					const pathOf = new Map(reached.map((one) => [one.id, one.fullName]));
-					return yield* changed(agent, connectionId, settings, (repositories) => [
+					return yield* changed(bot, connectionId, settings, (repositories) => [
 						// GitHub has just said what each is called now, so those renamed since are kept up.
 						...repositories.map((one) => ({ ...one, path: pathOf.get(one.id) ?? one.path })),
 						...(repositories.some((one) => one.id === found.id)
@@ -224,21 +224,21 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		removeRepository: ({ agentId, connectionId, repository }) =>
+		removeRepository: ({ botId, connectionId, repository }) =>
 			operation(
 				"removeRepository",
 				Effect.gen(function* () {
-					const agent = yield* managed(agentId);
-					const { settings } = yield* connectionOf(agent, connectionId);
-					return yield* changed(agent, connectionId, settings, (repositories) =>
+					const bot = yield* managed(botId);
+					const { settings } = yield* connectionOf(bot, connectionId);
+					return yield* changed(bot, connectionId, settings, (repositories) =>
 						repositories.filter((one) => one.path.toLowerCase() !== repository.toLowerCase()),
 					);
 				}),
 			),
 
-		forAgent: (agent) =>
+		forBot: (bot) =>
 			operation(
-				"forAgent",
+				"forBot",
 				Effect.gen(function* () {
 					const [row] = yield* query((db) =>
 						db
@@ -246,8 +246,8 @@ export const make = Effect.gen(function* () {
 							.from(connection)
 							.where(
 								and(
-									eq(connection.workspaceId, agent.workspaceId),
-									eq(connection.agentId, agent.agentId),
+									eq(connection.workspaceId, bot.workspaceId),
+									eq(connection.botId, bot.botId),
 									eq(connection.kind, "github"),
 								),
 							)
@@ -301,14 +301,14 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([Authorization.layer, ConnectionRepository.layer]),
 );
 
-export interface Agent {
+export interface Bot {
 	readonly workspaceId: string;
-	readonly agentId: string;
+	readonly botId: string;
 }
 
-const agentOf = (standing: { agent: { id: string; workspaceId: string } }): Agent => ({
-	workspaceId: standing.agent.workspaceId,
-	agentId: standing.agent.id,
+const botOf = (standing: { bot: { id: string; workspaceId: string } }): Bot => ({
+	workspaceId: standing.bot.workspaceId,
+	botId: standing.bot.id,
 });
 
 /** The connection's app at the account it is installed on; undefined until it is installed. */
@@ -357,8 +357,8 @@ export class NotGitHubConnection
 }
 
 /** A second GitHub app for a bot, whose computer can be signed in to only one account there. */
-export class AgentHasGitHubConnection
-	extends Schema.TaggedError<AgentHasGitHubConnection>()("AgentHasGitHubConnection", {})
+export class BotHasGitHubConnection
+	extends Schema.TaggedError<BotHasGitHubConnection>()("BotHasGitHubConnection", {})
 	implements DomainError
 {
 	readonly isRetryable = false;

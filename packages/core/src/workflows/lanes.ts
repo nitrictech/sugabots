@@ -21,7 +21,7 @@ export interface Interface {
 	/** Starts the workflow now if the lane is idle; otherwise leaves it to wait, by `whenBusy`. */
 	readonly admit: <W extends Workflow.Any>(request: {
 		readonly key: string;
-		/** What the lane's work is about (a thread, say), for `laneBusy`. */
+		/** What the lane's work is about (a conversation, say), for `laneBusy`. */
 		readonly subject?: string;
 		readonly workflow: W;
 		readonly payload: W["payloadSchema"]["Type"];
@@ -76,7 +76,7 @@ const general = (workflow: Workflow.Any) =>
 
 /**
  * Whether any lane about `subject` is running one of `workflows`, as a
- * condition for a query: "is an agent answering in this thread". A lane holds
+ * condition for a query: "is a bot answering in this conversation". A lane holds
  * waiting requests only while it runs, so a running lane covers those too.
  */
 export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) =>

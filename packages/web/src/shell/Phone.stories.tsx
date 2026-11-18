@@ -1,4 +1,4 @@
-import type { ActivityItem, ApprovalRequest, ArtifactSummary } from "@sugabots/contracts";
+import type { ApprovalRequest, InboxItem, WrittenFileSummary } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, within } from "storybook/test";
@@ -38,22 +38,24 @@ const meta = preview.meta({
 });
 
 /**
- * Home: every pod down the rail, and the one open beside it, with its
- * artifacts and routines, then its channels and bots.
+ * Home: every channel down the rail, and the one open beside it, with its
+ * files and automations, then its channels and bots.
  */
 export const Home = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		const pods = await canvas.findByRole("navigation", { name: "Direct messages and pods" });
-		await expect(within(pods).getByRole("link", { name: revenue.name })).toHaveAttribute(
+		const channels = await canvas.findByRole("navigation", {
+			name: "Direct messages and channels",
+		});
+		await expect(within(channels).getByRole("link", { name: revenue.name })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
-		await expect(within(pods).getByRole("link", { name: engineering.name })).toBeVisible();
-		await expect(within(pods).getByRole("link", { name: "Personal, Only you" })).toBeVisible();
+		await expect(within(channels).getByRole("link", { name: engineering.name })).toBeVisible();
+		await expect(within(channels).getByRole("link", { name: "Personal, Only you" })).toBeVisible();
 		await expect(canvas.getByRole("heading", { level: 1, name: revenue.name })).toBeVisible();
-		await expect(canvas.queryByText("Only you can see into this pod.")).toBeNull();
-		await expect(canvas.getByRole("link", { name: "Artifacts" })).toBeVisible();
+		await expect(canvas.queryByText("Only you can see into this channel.")).toBeNull();
+		await expect(canvas.getByRole("link", { name: "Files" })).toBeVisible();
 		await expect(await canvas.findByRole("link", { name: "Growth Desk" })).toBeVisible();
 		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
 		await expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute(
@@ -63,7 +65,7 @@ export const Home = meta.story({
 	},
 });
 
-/** Direct messages, under Home: going to Inbox and back to Home returns to them, not to a pod. */
+/** Direct messages, under Home: going to Inbox and back to Home returns to them, not to a channel. */
 export const DirectMessagesHome = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/dm`} />,
 	play: async ({ canvas, userEvent }) => {
@@ -83,7 +85,7 @@ export const DirectMessagesHome = meta.story({
 
 /** Inbox as a tab: titled large, with no Back, over the tabs. */
 export const Inbox = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/activity`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/inbox`} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { level: 1, name: "Inbox" })).toBeVisible();
 		await expect(canvas.queryByRole("link", { name: "Back" })).toBeNull();
@@ -103,7 +105,7 @@ export const Inbox = meta.story({
 export const TabCounts = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/activity`, () =>
+			http.get(`${API}/workspaces/:workspace/chats/inbox`, () =>
 				HttpResponse.json({ items: Array.from({ length: 7 }, (_, index) => unreadMention(index)) }),
 			),
 			http.get(`${API}/workspaces/:workspace/chats/approvals`, () =>
@@ -114,7 +116,7 @@ export const TabCounts = meta.story({
 			),
 		);
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/activity`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/inbox`} />,
 	play: async ({ canvas }) => {
 		const tabs = await canvas.findByRole("navigation", { name: "Tabs" }, { timeout: 10_000 });
 		await expect(await within(tabs).findByText("7 unread messages for you")).toBeInTheDocument();
@@ -122,7 +124,7 @@ export const TabCounts = meta.story({
 	},
 });
 
-function unreadMention(index: number): ActivityItem {
+function unreadMention(index: number): InboxItem {
 	return {
 		kind: "mention",
 		unread: true,
@@ -130,8 +132,8 @@ function unreadMention(index: number): ActivityItem {
 		author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
 		preview: "@rowan-ellis can you sign off the Acme quote before 5?",
 		at: new Date(Date.now() - (index + 1) * 60_000).toISOString(),
-		podId: null,
-		conversationId: storyTaskFor(growthDesk).id,
+		channelId: null,
+		rootConversationId: storyTaskFor(growthDesk).id,
 	};
 }
 
@@ -151,8 +153,8 @@ function waitingApproval(index: number): ApprovalRequest {
 			finishedAt: null,
 			approval: { status: "pending", decidedByName: null, decidedAt: null },
 		},
-		agent: {
-			kind: "agent",
+		bot: {
+			kind: "bot",
 			id: growthDesk.id,
 			name: growthDesk.name,
 			handle: growthDesk.handle,
@@ -160,9 +162,9 @@ function waitingApproval(index: number): ApprovalRequest {
 			face: growthDesk.face,
 			shape: "circle",
 		},
-		podId: null,
-		threadId: storyTaskFor(growthDesk).id,
+		channelId: null,
 		conversationId: storyTaskFor(growthDesk).id,
+		rootConversationId: storyTaskFor(growthDesk).id,
 	};
 }
 
@@ -176,7 +178,7 @@ export const Approvals = meta.story({
 
 /**
  * The You tab's Settings: you on a card that opens your own settings, the
- * workspace's sections, then each pod, which opens a page of its own.
+ * workspace's sections, then each channel, which opens a page of its own.
  */
 export const You = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/you`} />,
@@ -187,11 +189,11 @@ export const You = meta.story({
 		).toHaveAttribute("href", `/${storyWorkspace.slug}/settings/profile`);
 		await expect(await canvas.findByRole("link", { name: "Computers" })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/settings/sandboxes`,
+			`/${storyWorkspace.slug}/settings/computers`,
 		);
 		await expect(canvas.getByRole("link", { name: new RegExp(revenue.name) })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/you/pods/${revenue.slug}`,
+			`/${storyWorkspace.slug}/you/channels/${revenue.slug}`,
 		);
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeVisible();
 	},
@@ -209,9 +211,9 @@ export const Profile = meta.story({
 	},
 });
 
-/** A pod opened from Settings: its General, Connections, People and Bots, and Back to Settings. */
-export const YouPod = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/you/pods/${revenue.slug}`} />,
+/** A channel opened from Settings: its General, Connections, People and Bots, and Back to Settings. */
+export const YouChannel = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/you/channels/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("link", { name: "Back to Settings" })).toHaveAttribute(
 			"href",
@@ -229,8 +231,8 @@ export const YouPod = meta.story({
 	},
 });
 
-/** A pod's Bots, opened from You: that part alone, under the pod's name. */
-export const PodPart = meta.story({
+/** A channel's Bots, opened from You: that part alone, under the channel's name. */
+export const ChannelPart = meta.story({
 	render: () => (
 		<StoryApp path={`/${storyWorkspace.slug}/settings/channels/${revenue.slug}/bots`} />
 	),
@@ -241,30 +243,30 @@ export const PodPart = meta.story({
 	},
 });
 
-const plan: ArtifactSummary = {
+const plan: WrittenFileSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
-	threadId: storyTaskFor(growthDesk).id,
+	conversationId: storyTaskFor(growthDesk).id,
 	kind: "document",
 	title: "Q4 outreach plan",
 	version: 1,
-	createdBy: { agentId: growthDesk.id, name: growthDesk.name },
+	createdBy: { botId: growthDesk.id, name: growthDesk.name },
 	createdAt: "2026-09-29T07:00:00.000Z",
 	updatedAt: "2026-09-29T07:00:00.000Z",
 };
 
-/** An artifact opened from the pod's Artifacts takes the whole screen. */
-export const Artifact = meta.story({
+/** A file opened from the channel's Files takes the whole screen. */
+export const OpenFile = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/pods/:podId/artifacts`, () => HttpResponse.json([plan])),
-			http.get(`${API}/artifacts/:artifactId`, () =>
+			http.get(`${API}/channels/:channelId/files`, () => HttpResponse.json([plan])),
+			http.get(`${API}/files/:fileId`, () =>
 				HttpResponse.json({
 					...plan,
 					content: "# Q4 outreach plan\n\nBook 40 discovery calls with mid-market accounts.",
 					shownVersion: { number: 1, author: plan.createdBy, createdAt: plan.createdAt },
 				}),
 			),
-			http.get(`${API}/artifacts/:artifactId/versions`, () =>
+			http.get(`${API}/files/:fileId/versions`, () =>
 				HttpResponse.json([{ number: 1, author: plan.createdBy, createdAt: plan.createdAt }]),
 			),
 		);
@@ -273,11 +275,11 @@ export const Artifact = meta.story({
 		<StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/files/${plan.id}`} />
 	),
 	play: async ({ canvas }) => {
-		const artifact = await canvas.findByRole("region", { name: "Artifact" });
+		const file = await canvas.findByRole("region", { name: "File" });
 		await expect(
-			await within(artifact).findByText("Book 40 discovery calls with mid-market accounts."),
+			await within(file).findByText("Book 40 discovery calls with mid-market accounts."),
 		).toBeVisible();
-		await expect(artifact.getBoundingClientRect().width).toBeGreaterThan(300);
+		await expect(file.getBoundingClientRect().width).toBeGreaterThan(300);
 	},
 });
 
@@ -300,10 +302,10 @@ export const Opened = meta.story({
 	},
 });
 
-/** A pod's Artifacts, whose Back returns to that pod's Home, not the workspace's first. */
-export const Artifacts = meta.story({
+/** A channel's Files, whose Back returns to that channel's Home, not the workspace's first. */
+export const Files = meta.story({
 	beforeEach({ msw }) {
-		msw.use(http.get(`${API}/pods/:podId/artifacts`, () => HttpResponse.json([])));
+		msw.use(http.get(`${API}/channels/:channelId/files`, () => HttpResponse.json([])));
 	},
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${engineering.slug}/files`} />,
 	play: async ({ canvas }) => {
@@ -313,47 +315,47 @@ export const Artifacts = meta.story({
 	},
 });
 
-const longThread = storyConversationFor(growthDesk);
+const longTask = storyConversationFor(growthDesk);
 const LONG_TITLE = "Bot setup and purpose definition for the quarter";
 
 /**
- * A thread with a bot: its name heads its messages, and over them a pill with
- * its name, shortened to fit, and the bot it is in, as every thread's pill is,
+ * A task with a bot: its name heads its messages, and over them a pill with
+ * its name, shortened to fit, and the bot it is in, as every task's pill is,
  * between Back and the ⋯, which holds the computer and Mark done.
  */
-export const Thread = meta.story({
+export const Task = meta.story({
 	beforeEach({ msw }) {
 		const details = storyChatDetails(growthDesk);
 		msw.use(
-			http.get(`${API}/threads/${longThread.id}`, () =>
+			http.get(`${API}/conversations/${longTask.id}`, () =>
 				HttpResponse.json({
 					...details,
-					thread: {
-						...details.thread,
-						id: longThread.id,
-						conversationId: longThread.id,
-						type: "conversation",
+					conversation: {
+						...details.conversation,
+						id: longTask.id,
+						rootConversationId: longTask.id,
+						kind: "task",
 						title: LONG_TITLE,
 					},
 				}),
 			),
-			http.get(`${API}/threads/${longThread.id}/activity`, () =>
+			http.get(`${API}/conversations/${longTask.id}/activity`, () =>
 				HttpResponse.json(storyChatActivity(growthDesk)),
 			),
 		);
 	},
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/${longThread.id}`} />
+		<StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/${longTask.id}`} />
 	),
 	play: async ({ canvas, userEvent }) => {
 		const more = await canvas.findByRole("button", { name: "More for this task" });
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
-		// Back returns to the bot's chat the thread is with, not the pod's Home.
+		// Back returns to the bot's chat the task is with, not the channel's Home.
 		await expect(canvas.getByRole("link", { name: `Back to ${growthDesk.name}` })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/bots/${growthDesk.handle}`,
 		);
-		// The thread's name heads its messages, and the pill over them, shortened to fit.
+		// The task's name heads its messages, and the pill over them, shortened to fit.
 		await expect(await canvas.findByRole("heading", { level: 2, name: LONG_TITLE })).toBeVisible();
 		const pill = canvas
 			.getByText(LONG_TITLE, { selector: "button[aria-hidden] span" })
@@ -367,7 +369,7 @@ export const Thread = meta.story({
 	},
 });
 
-/** The pod's channel, with a # in place of a bot's face. */
+/** The channel's main chat, with a # in place of a bot's face. */
 export const Channel = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
 	play: async ({ canvas }) => {

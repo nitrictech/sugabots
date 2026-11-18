@@ -9,7 +9,7 @@ import type { ConnectionTool } from "@sugabots/contracts";
 export const GITHUB_CONNECTION_TOOLS: readonly ConnectionTool[] = [
 	{
 		name: "push_branch",
-		description: "Push a commit from a checkout in the sandbox to a branch under sugabots/.",
+		description: "Push a commit from a checkout in the computer to a branch under sugabots/.",
 		readOnly: false,
 		destructive: false,
 	},

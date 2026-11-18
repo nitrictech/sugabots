@@ -33,7 +33,7 @@ export const botMoods = ["still", "idle", "thinking", "happy", "excited", "sleep
 export type BotMood = (typeof botMoods)[number];
 
 /**
- * - still: as `BotFace` draws it, unmoving until it's asked to hop.
+ * - still: as `StillBotFace` draws it, unmoving until it's asked to hop.
  * - idle: glances about and blinks, and watches the pointer and typing if asked.
  * - thinking: its eyes shrink away into three dots that rise in turn, as a
  *   bot's typing indicator does.

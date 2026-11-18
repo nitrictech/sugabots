@@ -3,14 +3,14 @@ import { Link, linkOptions } from "@tanstack/react-router";
 import { ChevronRight, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useApprovalApp } from "@/lib/approval-app.ts";
+import { useChannels } from "@/lib/channels.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
+import { useReviewToolCall } from "@/lib/conversations.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { usePods } from "@/lib/pods.ts";
-import { useReviewToolCall } from "@/lib/threads.ts";
 import { Answer, FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
 import { awaitsApproval } from "@/screens/tool-activity.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { ConversationLink } from "@/shell/ConversationLink.tsx";
 import { ListTime, Page } from "@/shell/Page.tsx";
 
@@ -131,35 +131,35 @@ function approvalLink(request: ApprovalRequest) {
  * way to the conversation it was asked in.
  */
 function WaitingCard({ request }: { request: ApprovalRequest }) {
-	const { agent, call } = request;
+	const { bot, call } = request;
 	const { action } = useApprovalApp(request);
-	const { data: pods } = usePods();
-	const pod = pods?.find((candidate) => candidate.id === request.podId);
-	const review = useReviewToolCall(request.threadId);
+	const { data: channels } = useChannels();
+	const channel = channels?.find((candidate) => candidate.id === request.channelId);
+	const review = useReviewToolCall(request.conversationId);
 	// A phone answers with two wide buttons, and opens the request whole from its name.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const asked = [
-		pod && `in ${pod.name}`,
+		channel && `in ${channel.name}`,
 		`at ${formatListTime(new Date(call.startedAt), new Date())}`,
 	]
 		.filter(Boolean)
 		.join(" ");
 	return (
 		<article
-			aria-label={`${agent.name}: ${action}`}
+			aria-label={`${bot.name}: ${action}`}
 			className="flex flex-col gap-3 rounded-xl border border-border p-4 max-md:rounded-2xl max-md:bg-card max-md:p-3.5"
 		>
 			<Link
 				{...approvalLink(request)}
 				className="focus-ring -m-1 flex items-start gap-3 rounded-lg p-1 max-md:items-center"
 			>
-				<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={24} />
+				<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={24} />
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 					<h3 className="m-0 font-semibold text-sm text-foreground max-md:font-medium max-md:text-base">
 						{action}
 					</h3>
 					<span className="text-subtle-foreground text-xs max-md:text-xs">
-						{agent.name} asked {asked}
+						{bot.name} asked {asked}
 					</span>
 				</div>
 				<ChevronRight
@@ -183,16 +183,20 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 					/>
 				) : (
 					<p className="m-0 text-xs text-muted-foreground">
-						No longer waiting: {agent.name} stopped before it was answered.
+						No longer waiting: {bot.name} stopped before it was answered.
 					</p>
 				)}
 				<span className="flex-1 max-md:hidden" />
-				{request.conversationId && (
+				{/* A channel's conversation links once the channel is known. */}
+				{request.rootConversationId && (request.channelId === null || channel) && (
 					<ConversationLink
-						pod={pod}
-						agent={request.agent}
-						conversationId={request.conversationId}
-						search={request.threadId === request.conversationId ? {} : { thread: request.threadId }}
+						channel={channel ?? null}
+						conversationId={request.rootConversationId}
+						search={
+							request.conversationId === request.rootConversationId
+								? {}
+								: { item: request.conversationId }
+						}
 						// A phone reaches the conversation from the request's own page.
 						className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-foreground max-md:hidden"
 					>
@@ -207,17 +211,17 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 /** A request already answered: which bot, what it would have done, which way it went, and when. */
 function ResolvedRow({ request }: { request: AnsweredApproval }) {
 	const { action } = useApprovalApp(request);
-	const { agent, answer } = request;
+	const { bot, answer } = request;
 	return (
 		<Link
 			{...approvalLink(request)}
 			className="focus-ring flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition-colors hover:bg-message-hover max-md:min-h-14 max-md:px-1 max-md:text-sm max-md:active:bg-row-selected"
 		>
-			<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={20} />
+			<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={20} />
 			{/* On a phone, what it would have done over which bot, as two lines. */}
 			<span className="min-w-0 flex-1 truncate text-muted-foreground max-md:flex max-md:flex-col max-md:gap-0.5">
 				<span className="text-foreground max-md:order-2 max-md:truncate max-md:text-xs max-md:text-subtle-foreground">
-					{agent.name}
+					{bot.name}
 				</span>{" "}
 				<span className="max-md:truncate max-md:text-foreground">{action}</span>
 			</span>

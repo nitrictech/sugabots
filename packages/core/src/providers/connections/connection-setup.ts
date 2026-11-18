@@ -14,7 +14,7 @@ import { Clock, Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
-import type { AgentPermission } from "../../authorization/permissions.ts";
+import type { BotPermission } from "../../authorization/permissions.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
 import type { UserFacing } from "../../user-message.ts";
@@ -35,7 +35,7 @@ import { type SignInStartFailure, signInStartFailure } from "./oauth.ts";
  */
 export interface Interface {
 	readonly list: (
-		agent: InAgent,
+		bot: InBot,
 	) => Effect.Effect<Connection[], AuthorizationDenied, CurrentActor.Service>;
 	readonly get: (
 		input: InConnection,
@@ -46,7 +46,7 @@ export interface Interface {
 	>;
 	/** Learns a server's tools straight away, unless it waits on a sign-in. */
 	readonly create: (
-		input: InAgent & { connection: NewConnection },
+		input: InBot & { connection: NewConnection },
 	) => Effect.Effect<
 		Connection,
 		| AuthorizationDenied
@@ -57,7 +57,7 @@ export interface Interface {
 	>;
 	/** testUnsaved asks the server at `server.url`, with its secret, for its tools, saving nothing. */
 	readonly testUnsaved: (
-		input: InAgent & { server: UnsavedConnection },
+		input: InBot & { server: UnsavedConnection },
 	) => Effect.Effect<
 		ConnectionTestResult,
 		AuthorizationDenied | UrlNotAllowed,
@@ -92,7 +92,7 @@ export interface Interface {
 	>;
 	/** Adds a catalogued server, which signs in with OAuth, and starts its sign-in. */
 	readonly connectFromCatalog: (
-		input: InAgent & { server: { name: string; url: string } },
+		input: InBot & { server: { name: string; url: string } },
 	) => Effect.Effect<
 		{ connectionId: string; authorizationUrl: string },
 		| AuthorizationDenied
@@ -123,33 +123,33 @@ export interface Interface {
 	}) => Effect.Effect<SignInOutcome, ConnectionNotFound, CurrentActor.Service>;
 }
 
-export interface InAgent {
-	agentId: string;
+export interface InBot {
+	botId: string;
 }
 
 /** One of a bot's connections. */
-export interface InConnection extends InAgent {
+export interface InConnection extends InBot {
 	connectionId: string;
 }
 
 /** A bot, by its workspace and its own id. */
-export interface AgentLocation {
+export interface BotLocation {
 	workspaceId: string;
-	agentId: string;
+	botId: string;
 }
 
 /** One of a bot's connections, by its workspace, its bot and its own id. */
-interface ConnectionLocation extends AgentLocation {
+interface ConnectionLocation extends BotLocation {
 	connectionId: string;
 }
 
 /**
- * How a sign-in ended. `agent` is there once the sign-in is known to be for a
+ * How a sign-in ended. `bot` is there once the sign-in is known to be for a
  * bot the caller manages, so the browser can be sent back to it.
  */
 export type SignInOutcome =
-	| { agent: AgentLocation }
-	| { failure: ConnectionSignInFailure; agent?: AgentLocation };
+	| { bot: BotLocation }
+	| { failure: ConnectionSignInFailure; bot?: BotLocation };
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ConnectionSetup",
@@ -164,26 +164,26 @@ export const make = Effect.gen(function* () {
 	const cipher = yield* Credentials.Service;
 
 	/** Where the connection is, once the actor may take `permission` on its bot. */
-	const locate = ({ agentId, connectionId }: InConnection, permission: AgentPermission) =>
+	const locate = ({ botId, connectionId }: InConnection, permission: BotPermission) =>
 		Effect.map(
-			authorization.agent(agentId, permission),
-			({ agent }): ConnectionLocation => ({
-				workspaceId: agent.workspaceId,
-				agentId: agent.id,
+			authorization.bot(botId, permission),
+			({ bot }): ConnectionLocation => ({
+				workspaceId: bot.workspaceId,
+				botId: bot.id,
 				connectionId,
 			}),
 		);
 
-	const requireConnection = ({ workspaceId, agentId, connectionId }: ConnectionLocation) =>
+	const requireConnection = ({ workspaceId, botId, connectionId }: ConnectionLocation) =>
 		Effect.filterOrFail(
-			connectionIn(workspaceId, agentId, connectionId, cipher),
+			connectionIn(workspaceId, botId, connectionId, cipher),
 			(found) => found !== undefined,
 			() => new ConnectionNotFound(),
 		);
 
 	const test = (at: ConnectionLocation) =>
 		Effect.gen(function* () {
-			const target = yield* connections.target(at.workspaceId, at.agentId, at.connectionId);
+			const target = yield* connections.target(at.workspaceId, at.botId, at.connectionId);
 			if (!target) {
 				return yield* new ConnectionNotFound();
 			}
@@ -268,30 +268,25 @@ export const make = Effect.gen(function* () {
 		);
 
 	return Service.of({
-		list: ({ agentId }) =>
+		list: ({ botId }) =>
 			operation(
 				"list",
-				Effect.flatMap(authorization.agent(agentId, "connection.read"), ({ agent }) =>
-					connectionsIn(agent.workspaceId, agent.id, cipher),
+				Effect.flatMap(authorization.bot(botId, "connection.read"), ({ bot }) =>
+					connectionsIn(bot.workspaceId, bot.id, cipher),
 				),
 			),
 
 		get: (input) =>
 			operation("get", Effect.flatMap(locate(input, "connection.read"), requireConnection)),
 
-		create: ({ agentId, connection }) =>
+		create: ({ botId, connection }) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
-					const { agent, actor } = yield* authorization.agent(agentId, "connection.manage");
+					const { bot, actor } = yield* authorization.bot(botId, "connection.manage");
 					yield* requireAllowedUrl(egress, connection.url);
-					const made = yield* connections.create(
-						agent.workspaceId,
-						agent.id,
-						actor.userId,
-						connection,
-					);
-					const at = { workspaceId: agent.workspaceId, agentId: agent.id, connectionId: made.id };
+					const made = yield* connections.create(bot.workspaceId, bot.id, actor.userId, connection);
+					const at = { workspaceId: bot.workspaceId, botId: bot.id, connectionId: made.id };
 					if (connection.kind === "http" || connection.auth !== "oauth") {
 						yield* discoverQuietly(at);
 					}
@@ -299,11 +294,11 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		testUnsaved: ({ agentId, server }) =>
+		testUnsaved: ({ botId, server }) =>
 			operation(
 				"testUnsaved",
 				Effect.gen(function* () {
-					yield* authorization.agent(agentId, "connection.manage");
+					yield* authorization.bot(botId, "connection.manage");
 					yield* requireAllowedUrl(egress, server.url);
 					const headers: Record<string, string> =
 						server.secretHeader && server.secret ? { [server.secretHeader]: server.secret } : {};
@@ -325,7 +320,7 @@ export const make = Effect.gen(function* () {
 					}
 					const updated = yield* connections.update(
 						at.workspaceId,
-						at.agentId,
+						at.botId,
 						at.connectionId,
 						changes,
 					);
@@ -348,7 +343,7 @@ export const make = Effect.gen(function* () {
 				"remove",
 				Effect.gen(function* () {
 					const at = yield* locate(input, "connection.manage");
-					if (!(yield* connections.remove(at.workspaceId, at.agentId, at.connectionId))) {
+					if (!(yield* connections.remove(at.workspaceId, at.botId, at.connectionId))) {
 						return yield* new ConnectionNotFound();
 					}
 				}),
@@ -356,14 +351,14 @@ export const make = Effect.gen(function* () {
 
 		test: (input) => operation("test", Effect.flatMap(locate(input, "connection.manage"), test)),
 
-		connectFromCatalog: ({ agentId, server }) =>
+		connectFromCatalog: ({ botId, server }) =>
 			operation(
 				"connectFromCatalog",
 				Effect.gen(function* () {
-					const { agent, actor } = yield* authorization.agent(agentId, "connection.manage");
-					const workspaceId = agent.workspaceId;
+					const { bot, actor } = yield* authorization.bot(botId, "connection.manage");
+					const workspaceId = bot.workspaceId;
 					yield* requireAllowedUrl(egress, server.url);
-					const made = yield* connections.create(workspaceId, agent.id, actor.userId, {
+					const made = yield* connections.create(workspaceId, bot.id, actor.userId, {
 						...server,
 						auth: "oauth",
 					});
@@ -372,10 +367,10 @@ export const make = Effect.gen(function* () {
 						connectionId: made.id,
 						serverUrl: made.url,
 						startedByUserId: actor.userId,
-					}).pipe(Effect.tapError(() => connections.remove(workspaceId, agent.id, made.id)));
+					}).pipe(Effect.tapError(() => connections.remove(workspaceId, bot.id, made.id)));
 					if ("authorized" in started) {
 						// Nothing to sign in to, so nothing the person asked for was made.
-						yield* connections.remove(workspaceId, agent.id, made.id);
+						yield* connections.remove(workspaceId, bot.id, made.id);
 						return yield* new ConnectionNeededNoSignIn();
 					}
 					return { connectionId: made.id, authorizationUrl: started.authorizationUrl };
@@ -421,20 +416,18 @@ export const make = Effect.gen(function* () {
 					// the sign-in: authority can be withdrawn while the person is away at
 					// the authorization server, and completing would store a credential
 					// they may no longer manage.
-					const allowed = yield* Effect.result(
-						authorization.agent(owner.agentId, "connection.manage"),
-					);
+					const allowed = yield* Effect.result(authorization.bot(owner.botId, "connection.manage"));
 					if (allowed._tag === "Failure") return { failure: "not_allowed" as const };
 
-					const agent = { workspaceId: owner.workspaceId, agentId: owner.agentId };
+					const bot = { workspaceId: owner.workspaceId, botId: owner.botId };
 					if (callback.error || !callback.code) {
 						yield* Effect.logWarning("An authorization server refused a connection's sign-in", {
 							error: callback.error,
 							description: callback.errorDescription,
 						});
-						return { failure: "refused" as const, agent };
+						return { failure: "refused" as const, bot };
 					}
-					const at = { ...agent, connectionId: owner.connectionId };
+					const at = { ...bot, connectionId: owner.connectionId };
 					const found = yield* requireConnection(at);
 					const finished = yield* Effect.result(
 						signIn.finish(owner.workspaceId, owner.connectionId, found.url, {
@@ -444,11 +437,11 @@ export const make = Effect.gen(function* () {
 					);
 					if (finished._tag === "Failure") {
 						yield* Effect.logWarning("A connection's sign-in did not finish", finished.failure);
-						return { failure: "not_completed" as const, agent };
+						return { failure: "not_completed" as const, bot };
 					}
 
 					yield* discoverQuietly(at);
-					return { agent };
+					return { bot };
 				}),
 			),
 	});

@@ -1,28 +1,28 @@
 import { useRender } from "@base-ui/react/use-render";
 import type {
-	Agent,
+	Bot,
 	Connection,
+	ConversationSummary,
 	FilePart,
+	Participant,
 	SessionUser,
-	ThreadParticipant,
-	ThreadSummary,
 } from "@sugabots/contracts";
 import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Archive, ChevronDown, FileText, Hash, Pencil, RefreshCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { useModelName } from "@/lib/agents.ts";
-import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
+import { scheduleLabel } from "@/lib/automation-schedule.ts";
+import { useAutomationActions, useAutomations } from "@/lib/automations.ts";
+import { useModelName } from "@/lib/bots.ts";
+import { useBuiltInBots } from "@/lib/built-in-bots.ts";
 import { usableToolCount, useConnectionActions, useConnections } from "@/lib/connections.ts";
-import { agentSettingsLink } from "@/lib/links.ts";
+import { useConversationActivity } from "@/lib/conversations.ts";
+import { botSettingsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
-import { scheduleLabel } from "@/lib/routine-schedule.ts";
-import { useRoutineActions, useRoutines } from "@/lib/routines.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { useThreadActivity } from "@/lib/threads.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
@@ -30,7 +30,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
-import { SystemAgentsNotSetUp } from "./BuiltInAgentSetup.tsx";
+import { SystemBotsNotSetUp } from "./BuiltInBotSetup.tsx";
 import { ChannelActions, type ChannelToChange } from "./ChatMenu.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
@@ -39,52 +39,52 @@ import { ParticipantFaces } from "./ParticipantFaces.tsx";
 
 /** How many rows a list shows before Show more. */
 const FILES_SHOWN = 3;
-const ROUTINES_SHOWN = 2;
+const AUTOMATIONS_SHOWN = 2;
 /** A summary longer than this is folded to four lines until asked for the rest. */
 const SUMMARY_FOLDED_OVER = 240;
 
 /**
  * A bot beside its chat: its face, name and model, and the way to its
  * settings, then what the chat is about, how much of the bot's short-term
- * memory it fills, the routines it runs, the apps it can reach, who is in the
+ * memory it fills, the automations it runs, the apps it can reach, who is in the
  * chat and the files shared there.
  */
 export function DetailsSidebar({
-	agent,
-	threadId,
+	bot,
+	conversationId,
 	user,
 	contents,
-	onOpenRoutines,
+	onOpenAutomations,
 	onClose,
 }: {
-	agent: Agent;
-	threadId: string;
+	bot: Bot;
+	conversationId: string;
 	user: SessionUser;
-	/** Who is in the thread, and the files shared in it. */
-	contents: ThreadContents;
-	/** Opens the bot's routines beside the chat, in place of these Details: all of them, or the one `routineId` names. */
-	onOpenRoutines: (routineId?: string) => void;
+	/** Who is in the conversation, and the files shared in it. */
+	contents: ConversationContents;
+	/** Opens the bot's automations beside the chat, in place of these Details: all of them, or the one `automationId` names. */
+	onOpenAutomations: (automationId?: string) => void;
 	onClose: () => void;
 }) {
 	const backToChat = useBackToHere("Chat");
-	const activity = useThreadActivity(threadId).data;
-	const scribe = useBuiltInAgents().data?.find(({ key }) => key === "summarise");
-	const modelName = useModelName(agent.model);
+	const activity = useConversationActivity(conversationId).data;
+	const summariser = useBuiltInBots().data?.find(({ key }) => key === "summarise");
+	const modelName = useModelName(bot.model);
 	return (
 		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-75">
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
 				{/* On a phone, the bot large in the middle, its name under it, then what can be done with it. */}
 				<div className="flex items-center gap-3 px-5 pt-5 pb-4 max-md:flex-col max-md:gap-2.5 max-md:px-4 max-md:pt-1 max-md:text-center">
-					<AgentAvatar
-						color={agent.color}
-						face={agent.face}
-						shape={agent.shape}
+					<BotAvatar
+						color={bot.color}
+						face={bot.face}
+						shape={bot.shape}
 						size={36}
 						className="shrink-0 max-md:size-22"
 					/>
 					<div className="flex min-w-0 flex-1 flex-col leading-snug max-md:gap-0.5">
 						<h3 className="m-0 truncate font-semibold text-sm text-foreground max-md:text-xl">
-							{agent.name}
+							{bot.name}
 						</h3>
 						<p className="m-0 truncate text-subtle-foreground text-xs max-md:text-sm">
 							{modelName ?? "No model chosen"}
@@ -93,25 +93,28 @@ export function DetailsSidebar({
 					<IconButton
 						label="Bot settings"
 						variant="bar"
-						render={<Link {...agentSettingsLink(agent)} state={backToChat} />}
+						render={<Link {...botSettingsLink(bot)} state={backToChat} />}
 						className="border border-border-strong max-md:hidden"
 					>
 						<SettingsIcon size={15} />
 					</IconButton>
 					<div className="flex justify-center gap-7 pt-2 md:hidden">
 						<RoundAction
-							render={<Link {...agentSettingsLink(agent)} state={backToChat} />}
+							render={<Link {...botSettingsLink(bot)} state={backToChat} />}
 							icon={<SettingsIcon size={20} />}
 							label="Settings"
 						/>
 						<RoundAction
-							render={<button type="button" onClick={() => onOpenRoutines()} />}
+							render={<button type="button" onClick={() => onOpenAutomations()} />}
 							icon={<RefreshCcw size={20} strokeWidth={1.75} />}
 							label="Automations"
 						/>
 					</div>
 				</div>
-				<Summary summary={activity?.summary} scribeHasModel={scribe && scribe.model !== null} />
+				<Summary
+					summary={activity?.summary}
+					summariserHasModel={summariser && summariser.model !== null}
+				/>
 				{activity?.context && (
 					<SidebarSection
 						title="Memory"
@@ -124,9 +127,9 @@ export function DetailsSidebar({
 						<ContextMeter context={activity.context} />
 					</SidebarSection>
 				)}
-				<Routines agent={agent} onOpen={onOpenRoutines} />
-				<Tools agent={agent} />
-				<InThisThread participants={contents.participants} user={user} />
+				<Automations bot={bot} onOpen={onOpenAutomations} />
+				<Tools bot={bot} />
+				<InThisConversation participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
 		</ChatSidebar>
@@ -160,28 +163,28 @@ function RoundAction({
 	});
 }
 
-/** Who is in a thread, and the files shared in it, each opening where it is served. */
-export interface ThreadContents {
-	participants: readonly ThreadParticipant[];
+/** Who is in a conversation, and the files shared in it, each opening where it is served. */
+export interface ConversationContents {
+	participants: readonly Participant[];
 	/** The files in the messages loaded so far, oldest first: older pages add theirs as they load. */
 	files: readonly FilePart[];
 	fileUrlOf: (fileId: string) => string;
 }
 
-/** A thread between people, beside it: who is in it, and the files shared there. */
+/** A conversation between people, beside it: who is in it, and the files shared there. */
 export function PeopleDetails({
 	user,
 	contents,
 	onClose,
 }: {
 	user: SessionUser;
-	contents: ThreadContents;
+	contents: ConversationContents;
 	onClose: () => void;
 }) {
 	return (
 		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-75">
 			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 xl:[&>section:first-child]:border-t-0">
-				<InThisThread participants={contents.participants} user={user} />
+				<InThisConversation participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
 		</ChatSidebar>
@@ -189,7 +192,7 @@ export function PeopleDetails({
 }
 
 /**
- * One of a pod's channels, beside it: its name, and on a phone, renaming it
+ * One of a channel's conversations, beside it: its name, and on a phone, renaming it
  * and archiving it for whoever may; then who is in it and the files shared
  * there.
  */
@@ -209,7 +212,7 @@ export function ChannelDetails({
 	/** The channel, for whoever may rename or archive it. */
 	channel?: ChannelToChange;
 	user: SessionUser;
-	contents: ThreadContents;
+	contents: ConversationContents;
 	onClose: () => void;
 }) {
 	return (
@@ -251,26 +254,26 @@ export function ChannelDetails({
 						</ChannelActions>
 					)}
 				</div>
-				<InThisThread participants={contents.participants} user={user} />
+				<InThisConversation participants={contents.participants} user={user} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
 		</ChatSidebar>
 	);
 }
 
-/** How many faces the folded In this thread shows before counting the rest. */
+/** How many faces the folded In this conversation shows before counting the rest. */
 const FACES_SHOWN = 4;
 
 /**
- * Everyone in the thread: their faces and how many, which opens the list of
+ * Everyone in the conversation: their faces and how many, which opens the list of
  * them, each bot, and each person, the viewer as You. A phone, with the
  * room, always lists them.
  */
-function InThisThread({
+function InThisConversation({
 	participants,
 	user,
 }: {
-	participants: readonly ThreadParticipant[];
+	participants: readonly Participant[];
 	user: SessionUser;
 }) {
 	const [opened, setOpened] = useState(false);
@@ -318,9 +321,9 @@ function InThisThread({
 	);
 }
 
-function Face({ participant, size }: { participant: ThreadParticipant; size: number }) {
-	return participant.kind === "agent" ? (
-		<AgentAvatar
+function Face({ participant, size }: { participant: Participant; size: number }) {
+	return participant.kind === "bot" ? (
+		<BotAvatar
 			color={participant.color}
 			face={participant.face}
 			shape={participant.shape}
@@ -331,7 +334,7 @@ function Face({ participant, size }: { participant: ThreadParticipant; size: num
 	);
 }
 
-/** The files shared in the thread, newest first, each opening as it is served. */
+/** The files shared in the conversation, newest first, each opening as it is served. */
 function SharedFiles({
 	files,
 	fileUrlOf,
@@ -367,17 +370,17 @@ function SharedFiles({
 
 function Summary({
 	summary,
-	scribeHasModel,
+	summariserHasModel,
 }: {
-	summary: ThreadSummary | null | undefined;
-	/** `undefined` while the built-in agents load, so the unconfigured state is not flashed. */
-	scribeHasModel: boolean | undefined;
+	summary: ConversationSummary | null | undefined;
+	/** `undefined` while the built-in bots load, so the unconfigured state is not flashed. */
+	summariserHasModel: boolean | undefined;
 }) {
 	const [open, setOpen] = useState(false);
-	if (scribeHasModel === false) {
+	if (summariserHasModel === false) {
 		return (
 			<SidebarSection title="Summary">
-				<SystemAgentsNotSetUp />
+				<SystemBotsNotSetUp />
 			</SidebarSection>
 		);
 	}
@@ -404,13 +407,7 @@ function Summary({
 	);
 }
 
-function ParticipantRow({
-	participant,
-	user,
-}: {
-	participant: ThreadParticipant;
-	user: SessionUser;
-}) {
+function ParticipantRow({ participant, user }: { participant: Participant; user: SessionUser }) {
 	return (
 		<li className="flex h-8.5 items-center gap-2.5 max-md:h-11 max-md:gap-3">
 			<span aria-hidden className="contents">
@@ -420,28 +417,28 @@ function ParticipantRow({
 				{participant.name}
 			</span>
 			<span className="text-subtle-foreground text-xs">
-				{participant.kind === "agent" ? "Bot" : participant.id === user.id ? "You" : "Member"}
+				{participant.kind === "bot" ? "Bot" : participant.id === user.id ? "You" : "Member"}
 			</span>
 		</li>
 	);
 }
 
 /**
- * The bot's routines, each opening beside the chat with its runs, with a switch to
+ * The bot's automations, each opening beside the chat with its runs, with a switch to
  * pause or resume it for whoever may manage them, and See all, which opens
  * them all beside the chat.
  */
-function Routines({
-	agent,
+function Automations({
+	bot,
 	onOpen,
 }: {
-	agent: Agent;
-	/** Opens the bot's routines beside the chat: all of them, or the one `routineId` names. */
-	onOpen: (routineId?: string) => void;
+	bot: Bot;
+	/** Opens the bot's automations beside the chat: all of them, or the one `automationId` names. */
+	onOpen: (automationId?: string) => void;
 }) {
-	const routines = useRoutines(agent.id);
-	const actions = useRoutineActions();
-	const list = routines.data ?? [];
+	const automations = useAutomations(bot.id);
+	const actions = useAutomationActions();
+	const list = automations.data ?? [];
 	if (list.length === 0) return null;
 	return (
 		<SidebarSection
@@ -456,34 +453,35 @@ function Routines({
 				</button>
 			}
 		>
-			<Expandable items={list} shown={ROUTINES_SHOWN}>
-				{(routine) => (
-					<li key={routine.id} className="flex items-center gap-3 py-1 max-md:min-h-11">
+			<Expandable items={list} shown={AUTOMATIONS_SHOWN}>
+				{(automation) => (
+					<li key={automation.id} className="flex items-center gap-3 py-1 max-md:min-h-11">
 						<button
 							type="button"
-							onClick={() => onOpen(routine.id)}
+							onClick={() => onOpen(automation.id)}
 							className="focus-ring flex min-w-0 flex-1 flex-col rounded-sm text-left leading-snug hover:[&>span:first-child]:underline"
 						>
 							<span className="truncate text-xs text-foreground max-md:text-sm">
-								{routine.name}
+								{automation.name}
 							</span>
-							{scheduleLabel(routine) && (
+							{scheduleLabel(automation) && (
 								<span className="truncate text-subtle-foreground text-xs">
-									{scheduleLabel(routine)}
+									{scheduleLabel(automation)}
 								</span>
 							)}
 						</button>
 						<Toggle
-							label={`${routine.name} on`}
-							checked={routine.state === "enabled"}
+							label={`${automation.name} on`}
+							checked={automation.state === "enabled"}
 							disabled={
-								!agent.permissions.manageRoutines ||
-								(actions.update.isPending && actions.update.variables?.routineId === routine.id)
+								!bot.permissions.manageAutomations ||
+								(actions.update.isPending &&
+									actions.update.variables?.automationId === automation.id)
 							}
 							onChange={(on) =>
 								actions.update.mutate({
-									agentId: agent.id,
-									routineId: routine.id,
+									botId: bot.id,
+									automationId: automation.id,
 									json: { state: on ? "enabled" : "paused" },
 								})
 							}
@@ -500,9 +498,9 @@ function Routines({
  * their tools it may use, each opening the bot's settings. One whose
  * sign-in expired says so instead, with a sign-in for someone who may.
  */
-export function Tools({ agent }: { agent: Agent }) {
+export function Tools({ bot }: { bot: Bot }) {
 	const backToChat = useBackToHere("Chat");
-	const connections = useConnections(agent.id);
+	const connections = useConnections(bot.id);
 	const list =
 		connections.data?.filter(
 			(connection) => connection.signInExpired || usableToolCount(connection) > 0,
@@ -514,10 +512,10 @@ export function Tools({ agent }: { agent: Agent }) {
 				{list.map((connection) => (
 					<li key={connection.id}>
 						{connection.signInExpired ? (
-							<ExpiredTool agent={agent} connection={connection} />
+							<ExpiredTool bot={bot} connection={connection} />
 						) : (
 							<Link
-								{...agentSettingsLink(agent)}
+								{...botSettingsLink(bot)}
 								state={backToChat}
 								className="focus-ring -mx-1.5 flex h-8 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
 							>
@@ -542,8 +540,8 @@ export function Tools({ agent }: { agent: Agent }) {
 }
 
 /** A connection whose sign-in expired: its name, why the bot can't use it, and a sign-in for someone who may. */
-function ExpiredTool({ agent, connection }: { agent: Agent; connection: Connection }) {
-	const actions = useConnectionActions(agent.id);
+function ExpiredTool({ bot, connection }: { bot: Bot; connection: Connection }) {
+	const actions = useConnectionActions(bot.id);
 	return (
 		<div className="-mx-1.5 flex items-center gap-2.5 px-1.5 py-1 max-md:gap-3">
 			<ConnectionMark presetId={connectionMarkFor(connection)} name={connection.name} size="md" />
@@ -551,7 +549,7 @@ function ExpiredTool({ agent, connection }: { agent: Agent; connection: Connecti
 				<span className="truncate text-foreground text-xs max-md:text-sm">{connection.name}</span>
 				<WarningText className="text-warning text-xs">Sign-in expired</WarningText>
 			</div>
-			{agent.permissions.manageConnections && (
+			{bot.permissions.manageConnections && (
 				<Button
 					variant="secondary"
 					size="sm"

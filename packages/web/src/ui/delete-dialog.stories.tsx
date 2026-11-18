@@ -13,12 +13,12 @@ const meta = preview.meta({
 		pending: false,
 		title: "Delete Engineering?",
 		description:
-			"Its 2 bots, their chats, routines and connections will be deleted. This can't be undone.",
+			"Its 2 bots, their chats, automations and connections will be deleted. This can't be undone.",
 	},
 });
 
-/** DeletePod confirms an irreversible deletion with Cancel beside a red action. */
-export const DeletePod = meta.story({
+/** DeleteChannel confirms an irreversible deletion with Cancel beside a red action. */
+export const DeleteChannel = meta.story({
 	play: async ({ args, canvasElement, userEvent }) => {
 		const dialog = await within(canvasElement.ownerDocument.body).findByRole("dialog", {
 			name: "Delete Engineering?",
@@ -40,5 +40,5 @@ export const Pending = meta.story({
 
 /** Failed says why the deletion didn't happen and leaves the dialog open to retry. */
 export const Failed = meta.story({
-	args: { error: "The pod could not be deleted. Try again." },
+	args: { error: "The channel could not be deleted. Try again." },
 });

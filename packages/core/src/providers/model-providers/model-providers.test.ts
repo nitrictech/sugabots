@@ -3,7 +3,7 @@ import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
-import { agent, modelProvider, user, workspace, workspaceMember } from "../../database/schema.ts";
+import { bot, modelProvider, user, workspace, workspaceMember } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -11,7 +11,7 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { AgentRepository } from "../../workspaces/agents/agent-repository.ts";
+import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
 import { ModelInUse } from "./held-models.ts";
@@ -746,8 +746,8 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect((await view(providerId))?.models.map(({ modelId }) => modelId)).toEqual(["own-id"]);
 	});
 
-	describe("the default model and the system agents' models", () => {
-		const agentsOnPostgres = () => servedOnPostgres(AgentRepository.Service, AgentRepository.layer);
+	describe("the default model and the system bots' models", () => {
+		const botsOnPostgres = () => servedOnPostgres(BotRepository.Service, BotRepository.layer);
 
 		/** Adds models to the gateway by hand, switches it on, and returns their row ids by model id. */
 		const offerable = async (...modelIds: string[]) => {
@@ -769,16 +769,19 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 
 		const answering = () => setupWith(() => Response.json({ data: [] }));
 
-		const systemAgentModels = () =>
+		const systemBotModels = () =>
 			onDatabase((db) =>
 				db
-					.select({ model: agent.model })
-					.from(agent)
-					.where(and(eq(agent.workspaceId, workspaceId), isNotNull(agent.systemAgentKey))),
+					.select({ model: bot.model })
+					.from(bot)
+					.where(and(eq(bot.workspaceId, workspaceId), isNotNull(bot.systemBotKey))),
 			).then((rows) => rows.map(({ model }) => model));
 
-		it("makes the first model switched on the default and every system agent's", async () => {
-			await (await agentsOnPostgres()).ensureSystemAgents({ workspaceId, createdById: userId });
+		it("makes the first model switched on the default and every system bot's and Personal Assistant's", async () => {
+			const bots = await botsOnPostgres();
+			await bots.ensureSystemBots({ workspaceId, createdById: userId });
+			// Made while the workspace offered no model, as for somebody who joined then.
+			const assistant = await bots.provisionPersonalAssistant({ workspaceId, userId });
 			const ids = await offerable("first", "second");
 			const setup = await answering();
 
@@ -798,7 +801,11 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
 				defaultModel: "first",
 			});
-			expect(await systemAgentModels()).toEqual(["first", "first"]);
+			expect(await systemBotModels()).toEqual(["first", "first"]);
+			const [assistantModel] = await onDatabase((db) =>
+				db.select({ model: bot.model }).from(bot).where(eq(bot.id, assistant.id)),
+			);
+			expect(assistantModel?.model).toBe("first");
 		});
 
 		it("refuses to switch the default off until another model replaces it", async () => {
@@ -838,8 +845,8 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			});
 		});
 
-		it("refuses to switch off a model a system agent runs on", async () => {
-			await (await agentsOnPostgres()).ensureSystemAgents({ workspaceId, createdById: userId });
+		it("refuses to switch off a model a system bot runs on", async () => {
+			await (await botsOnPostgres()).ensureSystemBots({ workspaceId, createdById: userId });
 			const ids = await offerable("first", "second");
 			const setup = await answering();
 			for (const modelId of ["first", "second"]) {
@@ -862,7 +869,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			await expect(refused).rejects.toMatchObject({
 				_tag: "ModelInUse",
 				modelId: "first",
-				holders: { workspaceDefault: false, systemAgents: ["Compaction", "Scribe"] },
+				holders: { workspaceDefault: false, systemBots: ["Compaction", "Summariser"] },
 			});
 		});
 
@@ -899,7 +906,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				});
 				await setup.setDefaultModel({ workspace: workspaceId, model: "third" });
 				await onDatabase((db) =>
-					db.insert(agent).values(
+					db.insert(bot).values(
 						["Ada", "Grace"].map((name) => ({
 							workspaceId,
 							name,
@@ -913,12 +920,12 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				return { ids, setup };
 			};
 
-			const crewModels = () =>
+			const botModels = () =>
 				onDatabase((db) =>
 					db
-						.select({ model: agent.model })
-						.from(agent)
-						.where(and(eq(agent.workspaceId, workspaceId), isNull(agent.systemAgentKey))),
+						.select({ model: bot.model })
+						.from(bot)
+						.where(and(eq(bot.workspaceId, workspaceId), isNull(bot.systemBotKey))),
 				).then((rows) => rows.map(({ model }) => model));
 
 			it("moves the bots to the chosen model as it switches the model off", async () => {
@@ -932,7 +939,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				});
 
 				expect(moved).toBe(2);
-				expect(await crewModels()).toEqual(["second", "second"]);
+				expect(await botModels()).toEqual(["second", "second"]);
 				expect(
 					(await setup.listEnabledModels({ workspace: workspaceId })).models.map(
 						({ modelId }) => modelId,
@@ -975,7 +982,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				});
 
 				expect(moved).toBe(2);
-				expect(await crewModels()).toEqual(["elsewhere", "elsewhere"]);
+				expect(await botModels()).toEqual(["elsewhere", "elsewhere"]);
 				expect(await view(providerId)).toMatchObject({ active: false });
 			});
 
@@ -990,7 +997,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 						moveBotsTo: "first",
 					}),
 				).rejects.toMatchObject({ _tag: "ModelNotEnabled" });
-				expect(await crewModels()).toEqual(["first", "first"]);
+				expect(await botModels()).toEqual(["first", "first"]);
 				expect(
 					(await view(providerId))?.models.find(({ modelId }) => modelId === "first"),
 				).toMatchObject({ enabled: true });
@@ -998,9 +1005,9 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		});
 
 		describe("switching off the model new bots and summaries use", () => {
-			/** `first` and `second` on, with `first` the default and every system agent's. */
+			/** `first` and `second` on, with `first` the default and every system bot's. */
 			const withSettingsOnFirst = async () => {
-				await (await agentsOnPostgres()).ensureSystemAgents({ workspaceId, createdById: userId });
+				await (await botsOnPostgres()).ensureSystemBots({ workspaceId, createdById: userId });
 				const ids = await offerable("first", "second");
 				const setup = await answering();
 				for (const modelId of ["first", "second"]) {
@@ -1029,7 +1036,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 					models: [expect.objectContaining({ modelId: "second" })],
 					defaultModel: "second",
 				});
-				expect(await systemAgentModels()).toEqual(["second", "second"]);
+				expect(await systemBotModels()).toEqual(["second", "second"]);
 			});
 
 			it("refuses, changing nothing, when one is left on the model", async () => {
@@ -1044,7 +1051,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 					}),
 				).rejects.toMatchObject({
 					_tag: "ModelInUse",
-					holders: { workspaceDefault: false, systemAgents: ["Compaction", "Scribe"] },
+					holders: { workspaceDefault: false, systemBots: ["Compaction", "Summariser"] },
 				});
 				expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
 					defaultModel: "first",

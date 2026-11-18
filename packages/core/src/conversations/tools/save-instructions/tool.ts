@@ -3,14 +3,14 @@ import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import { AuthenticatedUserId, CurrentActor } from "../../../authorization/current-actor.ts";
 import type { RunEffect } from "../../../database/database.ts";
-import type { AgentAdministration } from "../../../workspaces/agents/agent-administration.ts";
+import type { BotAdministration } from "../../../workspaces/bots/bot-administration.ts";
 
 export const SAVE_INSTRUCTIONS_TOOL = "save_instructions";
 
 export type SaveInstructionsResult =
 	| {
 			saved: true;
-			/** The agent's settings page, where people read and change what was saved. */
+			/** The bot's settings page, where people read and change what was saved. */
 			settingsUrl: string;
 	  }
 	| { refused: string };
@@ -22,25 +22,25 @@ const MAY_NOT_EDIT =
 	"The person you're answering may not change your settings, so nothing was saved. Someone who can edit you can save them.";
 
 /**
- * The `save_instructions` tool: an agent replaces its own instructions and
- * description, which its pod mates choose whom to ask by: when it sets itself
+ * The `save_instructions` tool: a bot replaces its own instructions and
+ * description, which other bots choose whom to ask by: when it sets itself
  * up in its interview, or when someone asks it to change how it works. It
  * saves as the person it is answering, with their permission to edit the
- * agent, so it is offered on every turn and refused for anyone who could not
+ * bot, so it is offered on every turn and refused for anyone who could not
  * make the same change in settings.
  */
 export function saveInstructionsTool({
-	agentId,
+	botId,
 	askedBy,
-	agents,
+	bots,
 	settingsUrl,
 	run,
 }: {
-	agentId: string;
+	botId: string;
 	/** The person whose message the turn answers, or none. */
 	askedBy: string | null;
-	agents: Pick<AgentAdministration.Interface, "update">;
-	/** The agent's settings page, which shows what it saved. */
+	bots: Pick<BotAdministration.Interface, "update">;
+	/** The bot's settings page, which shows what it saved. */
 	settingsUrl: string;
 	run: RunEffect;
 }) {
@@ -65,7 +65,7 @@ export function saveInstructionsTool({
 		execute: async ({ instructions, description }): Promise<SaveInstructionsResult> => {
 			if (!askedBy) return { refused: NOBODY_ASKED };
 			return run(
-				agents.update({ agentId, changes: { prompt: instructions, description } }).pipe(
+				bots.update({ botId, changes: { prompt: instructions, description } }).pipe(
 					Effect.as<SaveInstructionsResult>({ saved: true, settingsUrl }),
 					CurrentActor.provide(AuthenticatedUserId.vouchedFor(askedBy)),
 					Effect.catchTag(["ActionForbidden", "ResourceHidden"], () =>

@@ -1,11 +1,11 @@
 import { meSchema, type WorkspaceMember } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { noComputers } from "@sugabots/core/computers/testing";
 import { user } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
 import { Installation } from "@sugabots/core/installation/installation";
-import { noComputers } from "@sugabots/core/sandboxes/testing";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";

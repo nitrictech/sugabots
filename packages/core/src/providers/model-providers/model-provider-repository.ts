@@ -114,7 +114,7 @@ export interface Interface {
 		enabled: boolean,
 	) => Effect.Effect<number>;
 	/**
-	 * One model's switch, the capabilities switched off for agents, or, for a
+	 * One model's switch, the capabilities switched off for bots, or, for a
 	 * model added by hand, what it can do; a fetched model's capabilities are
 	 * the provider's to say, so `capabilities` changes only a manual one.
 	 */
@@ -146,7 +146,7 @@ export interface Interface {
 	) => Effect.Effect<ResolvedModel | undefined>;
 	/**
 	 * Whether the workspace offers a model: it is switched on, at a provider that
-	 * is. The one rule for what an agent may run on.
+	 * is. The one rule for what a bot may run on.
 	 */
 	readonly isEnabled: (workspaceId: string, modelId: string) => Effect.Effect<boolean>;
 	/** {@link Interface.isEnabled}, as a refusal. */
@@ -154,7 +154,7 @@ export interface Interface {
 		workspaceId: string,
 		modelId: string,
 	) => Effect.Effect<void, ModelNotEnabled>;
-	/** The model the workspace's new agents start on, or nothing until it first offers one. */
+	/** The model the workspace's new bots start on, or nothing until it first offers one. */
 	readonly defaultModel: (workspaceId: string) => Effect.Effect<string | undefined>;
 	/**
 	 * Makes `modelId` the default. Only inside `holdingModel` from
@@ -709,7 +709,7 @@ export class ModelNotEnabled
 	}
 }
 
-/** The model the workspace's new agents start on, or nothing until it first offers one. */
+/** The model the workspace's new bots start on, or nothing until it first offers one. */
 export const defaultModelOf = (workspaceId: string) =>
 	query((db) =>
 		db
@@ -734,7 +734,7 @@ export function offeredIn(workspaceId: string) {
 }
 
 /**
- * An embedding model cannot hold a conversation, so no agent runs on one. It
+ * An embedding model cannot hold a conversation, so no bot runs on one. It
  * is one while it has the capability and an admin has not switched it off.
  */
 const notEmbedding = sql`not (${providerModel.capabilities} @> '["embeddings"]' and not ${providerModel.disabledCapabilities} @> '["embeddings"]')`;

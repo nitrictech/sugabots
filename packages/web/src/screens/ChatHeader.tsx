@@ -1,4 +1,4 @@
-import type { Agent, Pod } from "@sugabots/contracts";
+import type { Bot, Channel } from "@sugabots/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import {
@@ -11,11 +11,11 @@ import {
 	RotateCcw,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { useModelName } from "@/lib/agents.ts";
+import { useModelName } from "@/lib/bots.ts";
 import { useAttentionCounts, useBotTasks } from "@/lib/chats.ts";
-import { activityLink, botLink, directMessagesLink, podLink } from "@/lib/links.ts";
+import { botLink, channelLink, directMessagesLink, inboxLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { FAILED_DOT_LABEL, FailedDot } from "@/shell/FailedDot.tsx";
 import { InboxNews } from "@/shell/InboxNews.tsx";
 import { StageBack, type StageParent } from "@/shell/Stage.tsx";
@@ -28,22 +28,22 @@ import {
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
+import { ChatComputer } from "./ComputerButton.tsx";
 import { ComputerSheet } from "./ComputerSheet.tsx";
 import { CHAT_HEADER_CONTAINER, HeaderButton } from "./HeaderButton.tsx";
-import { ChatSandbox } from "./SandboxButton.tsx";
 
-/** Where a page's Back on a phone returns to: the list it covers, or for a thread, where the thread lives. */
+/** Where a page's Back on a phone returns to: the list it covers, or for a conversation, where it lives. */
 export type BackTo =
-	| { to: "pod"; pod: Pod }
-	| { to: "activity" }
+	| { to: "channel"; channel: Channel }
+	| { to: "inbox" }
 	/** A task goes back to its bot. */
-	| { to: "bot"; agent: Agent }
+	| { to: "bot"; bot: Bot }
 	/** A direct message goes back to the list of them. */
 	| { to: "directMessages" };
 
 /**
  * Where a chat is shown. On its own page it has Details, opened and closed
- * from its header. Shown elsewhere, as Activity shows one, it has none: its
+ * from its header. Shown elsewhere, as Inbox shows one, it has none: its
  * header has a Back to where it was opened from, and a way to the chat itself.
  */
 export type ChatPlace =
@@ -78,33 +78,33 @@ export interface DetailsToggle {
 
 /**
  * The bar across the top of a bot's chat: its name, the way into its
- * sandbox's desktop when it has one, the way into its routines, and, with
+ * computer's desktop when it has one, the way into its automations, and, with
  * `details`, the way into its Details: the ⓘ, or the name, which is how a
  * phone reaches them.
  */
 export function ChatHeader({
-	agent,
+	bot,
 	title,
 	done,
 	conversationId,
 	onOpenDesktop,
-	onOpenRoutines,
+	onOpenAutomations,
 	back,
 	trailing,
 	details,
 }: HeaderPlace & {
-	agent: Agent;
-	/** The thread's title, shown in place of the bot's name once it is loaded. */
+	bot: Bot;
+	/** The task's title, shown in place of the bot's name once it is loaded. */
 	title?: string;
-	/** Whether the thread is done, and how to mark it done or reopen it. */
+	/** Whether the task is done, and how to mark it done or reopen it. */
 	done?: DoneToggle;
 	conversationId: string;
 	onOpenDesktop: () => void;
-	/** Opens the bot's routines beside the chat. */
-	onOpenRoutines: () => void;
+	/** Opens the bot's automations beside the chat. */
+	onOpenAutomations: () => void;
 }) {
-	const name = title ?? agent.name;
-	const modelName = useModelName(agent.model);
+	const name = title ?? bot.name;
+	const modelName = useModelName(bot.model);
 	const openDetails = details && (() => details.onChange(!details.open));
 	// A phone shows the computer in a sheet first, from which it opens full screen.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
@@ -117,21 +117,21 @@ export function ChatHeader({
 				title === undefined ? (
 					<FaceBadge
 						face={
-							<AgentAvatar
-								color={agent.color}
-								face={agent.face}
-								shape={agent.shape}
+							<BotAvatar
+								color={bot.color}
+								face={bot.face}
+								shape={bot.shape}
 								size={PHONE_FACE_SIZE_PX}
 							/>
 						}
-						name={agent.name}
+						name={bot.name}
 						detail={modelName ?? undefined}
 						onClick={openDetails}
 					/>
 				) : (
-					<ThreadBadge
+					<TitleBadge
 						title={title}
-						within={modelName ? `${agent.name} · ${modelName}` : agent.name}
+						within={modelName ? `${bot.name} · ${modelName}` : bot.name}
 						onClick={openDetails}
 					/>
 				)
@@ -159,16 +159,16 @@ export function ChatHeader({
 			</div>
 			{done ? (
 				<>
-					{/* A phone has room for one control beside a thread's title, which holds the computer and done. */}
+					{/* A phone has room for one control beside a task's title, which holds the computer and done. */}
 					<span className="contents max-md:hidden">
-						<ChatSandbox agent={agent} threadId={conversationId} onOpen={onOpenDesktop} />
+						<ChatComputer bot={bot} conversationId={conversationId} onOpen={onOpenDesktop} />
 					</span>
-					<ThreadMenu done={done} back={back} onOpenDesktop={openComputer} />
+					<ConversationMenu done={done} back={back} onOpenDesktop={openComputer} />
 				</>
 			) : (
-				<ChatSandbox agent={agent} threadId={conversationId} onOpen={openComputer} />
+				<ChatComputer bot={bot} conversationId={conversationId} onOpen={openComputer} />
 			)}
-			<RoutinesButton agent={agent} onOpen={onOpenRoutines} />
+			<AutomationsButton bot={bot} onOpen={onOpenAutomations} />
 			{done && (
 				<span className="contents max-md:hidden">
 					<DoneButton {...done} />
@@ -178,8 +178,8 @@ export function ChatHeader({
 			{trailing}
 			<Dialog open={computerOpen} onOpenChange={setComputerOpen}>
 				<ComputerSheet
-					agent={agent}
-					threadId={conversationId}
+					bot={bot}
+					conversationId={conversationId}
 					onDismiss={() => setComputerOpen(false)}
 					onOpenFull={() => {
 						setComputerOpen(false);
@@ -191,20 +191,20 @@ export function ChatHeader({
 	);
 }
 
-/** On a phone, the ⋯ beside a thread's title: its bot's computer, and marking it done or reopening it. */
-function ThreadMenu({
+/** On a phone, the ⋯ beside a task's title: its bot's computer, and marking it done or reopening it. */
+function ConversationMenu({
 	done,
 	back,
 	onOpenDesktop,
 }: {
 	done: DoneToggle;
-	/** Where the thread is left for once it is done. */
+	/** Where the task is left for once it is done. */
 	back: BackTo;
 	onOpenDesktop: () => void;
 }) {
 	const place = useBackPlace(back);
 	// Done with, it is left as Back leaves it, rather than stayed in; once saved, so a failure
-	// is seen on the thread it was for.
+	// is seen on the task it was for.
 	const markDone = async () => {
 		if (await done.onChange(true)) place.leave();
 	};
@@ -265,7 +265,7 @@ function HeaderBar({
 }: {
 	back: BackTo;
 	parent?: StageParent;
-	/** What a phone shows after Back: a `FaceBadge` or a `ThreadBadge`. */
+	/** What a phone shows after Back: a `FaceBadge` or a `TitleBadge`. */
 	badge: ReactNode;
 	children: ReactNode;
 }) {
@@ -343,7 +343,7 @@ function ChannelFace({ mark }: { mark: ChatMark }) {
 			className="grid shrink-0 place-items-center rounded-xl bg-chip text-soft-foreground"
 			style={{ width: PHONE_FACE_SIZE_PX, height: PHONE_FACE_SIZE_PX }}
 		>
-			{mark === "routine" ? (
+			{mark === "automation" ? (
 				<RefreshCcw size={16} strokeWidth={2} />
 			) : (
 				<Hash size={18} strokeWidth={2} />
@@ -352,20 +352,20 @@ function ChannelFace({ mark }: { mark: ChatMark }) {
 	);
 }
 
-/** What a chat with no bot's face is marked with: a channel's #, or a routine's ↻. */
-type ChatMark = "channel" | "routine";
+/** What a chat with no bot's face is marked with: a channel's #, or an automation's ↻. */
+type ChatMark = "channel" | "automation";
 
 /**
- * A thread's name in a phone's header: its title, and under it where it is,
+ * A task's or thread's name in a phone's header: its title, and under it where it is,
  * a bot or a channel, each cut short to the room the header leaves.
  */
-function ThreadBadge({
+function TitleBadge({
 	title,
 	within,
 	onClick,
 }: {
 	title: string;
-	/** What the thread is in or with, such as its bot. */
+	/** What it is in or with, such as its bot. */
 	within?: string;
 	onClick?: () => void;
 }) {
@@ -392,8 +392,8 @@ function ThreadBadge({
  * Opens the bot's automations beside its task, with a red dot while one of
  * them failed its latest run. A phone reaches them from the bot's Details instead.
  */
-function RoutinesButton({ agent, onOpen }: { agent: Agent; onOpen: () => void }) {
-	const failed = useBotTasks(agent.id).data?.routines.some((row) => row.routine.failed);
+function AutomationsButton({ bot, onOpen }: { bot: Bot; onOpen: () => void }) {
+	const failed = useBotTasks(bot.id).data?.automations.some((row) => row.automation.failed);
 	return (
 		<HeaderButton
 			label="Automations"
@@ -422,7 +422,7 @@ function DetailsButton({ open, onChange }: DetailsToggle) {
 
 /**
  * The bar across the top of a chat with no bot's controls in it: between
- * people, the pod's chat, a thread started from it, or a routine's thread.
+ * people, a channel's main chat or thread, or an automation's feed.
  * What it is called, and its Details where it has them.
  */
 export function PeopleChatHeader({
@@ -441,11 +441,11 @@ export function PeopleChatHeader({
 	title: string;
 	/** What else can be done with it, at the end of the header. */
 	menu?: ReactNode;
-	/** Whether the thread is done, and how to mark it done or reopen it; absent on the pod's chat. */
+	/** Whether the task is done, and how to mark it done or reopen it; absent on a channel's conversation. */
 	done?: DoneToggle;
-	/** Where a thread is, such as the channel it was started from, which a phone names under it. */
+	/** Where a task or thread is, such as its bot or channel, which a phone names under it. */
 	within?: string;
-	/** What a phone shows over the name of a chat that is not a thread. */
+	/** What a phone shows over the name of a chat that is not a task or thread. */
 	mark?: ChatMark;
 	/** Whose the chat is, as a face, such as a direct message's people, which a phone shows in place of `mark`. */
 	face?: ReactNode;
@@ -458,9 +458,9 @@ export function PeopleChatHeader({
 			back={back}
 			parent={parent}
 			badge={
-				// A thread can be marked done; a channel or a routine goes by its name.
+				// A task can be marked done; a channel or an automation goes by its name.
 				done ? (
-					<ThreadBadge title={title} within={within} onClick={openDetails} />
+					<TitleBadge title={title} within={within} onClick={openDetails} />
 				) : (
 					<FaceBadge
 						face={face ?? <ChannelFace mark={mark} />}
@@ -480,15 +480,15 @@ export function PeopleChatHeader({
 	);
 }
 
-/** Whether a thread is done, and what marks it done or reopens it. */
+/** Whether a task is done, and what marks it done or reopens it. */
 export interface DoneToggle {
 	isDone: boolean;
-	/** Saves the change, resolving to whether it saved; a failure is shown where the thread is. */
+	/** Saves the change, resolving to whether it saved; a failure is shown where the task is. */
 	onChange: (done: boolean) => Promise<boolean>;
 }
 
 /**
- * Marks the thread done, which takes it off the sidebar once it is left, or
+ * Marks the task done, which takes it off the sidebar once it is left, or
  * reopens it; its name, and tooltip, say which it will do.
  */
 function DoneButton({ isDone, onChange }: DoneToggle) {
@@ -572,12 +572,15 @@ function useBackPlace(back: BackTo) {
 
 function backAddress(router: ReturnType<typeof useRouter>, back: BackTo) {
 	switch (back.to) {
-		case "pod":
-			return { href: router.buildLocation(podLink(back.pod)).href, name: back.pod.name };
+		case "channel":
+			return {
+				href: router.buildLocation(channelLink(back.channel)).href,
+				name: back.channel.name,
+			};
 		case "bot":
-			return { href: router.buildLocation(botLink(back.agent)).href, name: back.agent.name };
-		case "activity":
-			return { href: router.buildLocation(activityLink()).href, name: "Inbox" };
+			return { href: router.buildLocation(botLink(back.bot)).href, name: back.bot.name };
+		case "inbox":
+			return { href: router.buildLocation(inboxLink()).href, name: "Inbox" };
 		case "directMessages":
 			return { href: router.buildLocation(directMessagesLink()).href, name: "Direct messages" };
 	}

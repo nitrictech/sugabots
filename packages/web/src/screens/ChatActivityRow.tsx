@@ -1,22 +1,19 @@
-import type {
-	ChatHistoryEntry,
-	RoutineExecutionTriggerKind,
-	ThreadParticipant,
-} from "@sugabots/contracts";
+import type { ChatHistoryEntry, Participant, RunTriggerKind } from "@sugabots/contracts";
 import { Clock, GitBranch, type LucideProps, RefreshCw, Webhook } from "lucide-react";
 import { formatClockTime } from "@/lib/list-time.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
-import { formatFullTimestamp } from "./ThreadConversation.tsx";
+import { formatFullTimestamp } from "./ConversationMessages.tsx";
 
-export type ChatThreadType = ChatHistoryEntry["type"];
+export type ItemConversationKind = ChatHistoryEntry["kind"];
 
-/** What each kind of thread is called where it is named. */
-const threadTypeLabel = { collaboration: "Collaboration", routine: "Routine run" } as const;
+/** What a collaboration or an automation run is called where it is named. */
+const itemConversationLabel = (type: "collaboration" | "run") =>
+	type === "collaboration" ? "Collaboration" : "Automation run";
 
-type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
+type BotParticipant = Extract<Participant, { kind: "bot" }>;
 
-/** How a collaboration or routine run stands, as its line says it. */
+/** How a collaboration or automation run stands, as its line says it. */
 export type ActivityState = "running" | "done" | "failed";
 
 /** A history entry's status in the terms of the line. */
@@ -28,46 +25,46 @@ export function activityStateOf(entry: ChatHistoryEntry | undefined): ActivitySt
 
 /**
  * A quiet row for something that happened in the chat around the bot's
- * messages: a collaboration another bot asked it into, or a routine run. It
+ * messages: a collaboration another bot asked it into, or an automation run. It
  * lines up with the messages, its mark where their faces are, and the whole of
- * it opens the thread.
+ * it opens its conversation.
  */
 export function ChatActivityRow(
 	props: { state: ActivityState; at?: string; onOpen: () => void } & (
 		| {
 				type: "collaboration";
-				initiator: AgentParticipant;
-				recipient: AgentParticipant;
+				initiator: BotParticipant;
+				recipient: BotParticipant;
 				/** What the bot was asked, after the line, quieter. */
 				title?: string;
 		  }
-		| { type: "routine"; routineName: string; triggerKind: RoutineExecutionTriggerKind }
+		| { type: "run"; automationName: string; triggerKind: RunTriggerKind }
 	),
 ) {
 	const { state, at, onOpen } = props;
 	const text =
 		props.type === "collaboration"
 			? helpedText(props.recipient.name, props.initiator.name, state)
-			: routineText(props.routineName, state);
+			: automationText(props.automationName, state);
 	const detail = props.type === "collaboration" ? props.title : undefined;
 	return (
 		<button
 			type="button"
 			onClick={onOpen}
-			aria-label={`Open ${threadTypeLabel[props.type]}: ${[text, detail].filter(Boolean).join(", ")}`}
+			aria-label={`Open ${itemConversationLabel(props.type)}: ${[text, detail].filter(Boolean).join(", ")}`}
 			className="focus-ring group/activity flex w-full min-w-0 items-center gap-3.5 px-5 py-1.5 text-left"
 		>
 			<span aria-hidden className="grid w-9 shrink-0 place-items-center text-muted-foreground">
 				{props.type === "collaboration" ? (
 					<span className="relative h-4.5 w-7.5">
-						<AgentAvatar
+						<BotAvatar
 							color={props.initiator.color}
 							face={props.initiator.face}
 							shape={props.initiator.shape}
 							size={18}
 							className="absolute top-0 left-0"
 						/>
-						<AgentAvatar
+						<BotAvatar
 							color={props.recipient.color}
 							face={props.recipient.face}
 							shape={props.recipient.shape}
@@ -81,7 +78,7 @@ export function ChatActivityRow(
 						!
 					</span>
 				) : (
-					<RoutineTriggerIcon kind={props.triggerKind} size={15} strokeWidth={2.2} />
+					<AutomationTriggerIcon kind={props.triggerKind} size={15} strokeWidth={2.2} />
 				)}
 			</span>
 			<span className="min-w-0 truncate font-medium text-xs text-muted-foreground transition-colors group-hover/activity:text-soft-foreground">
@@ -113,14 +110,11 @@ export function ChatActivityRow(
 }
 
 /**
- * What started a routine run, as a mark: a clock for its schedule, a hook
+ * What started an automation run, as a mark: a clock for its schedule, a hook
  * for its webhook, a branch for its repository.
  */
-export function RoutineTriggerIcon({
-	kind,
-	...props
-}: { kind: RoutineExecutionTriggerKind } & LucideProps) {
-	if (kind === "cron") return <Clock {...props} />;
+export function AutomationTriggerIcon({ kind, ...props }: { kind: RunTriggerKind } & LucideProps) {
+	if (kind === "schedule") return <Clock {...props} />;
 	if (kind === "webhook") return <Webhook {...props} />;
 	if (kind === "github") return <GitBranch {...props} />;
 	return <RefreshCw {...props} />;
@@ -149,7 +143,7 @@ function helpedText(helper: string, asker: string, state: ActivityState): string
 	}
 }
 
-export function routineText(name: string, state: ActivityState): string {
+export function automationText(name: string, state: ActivityState): string {
 	switch (state) {
 		case "running":
 			return `${name} is running`;

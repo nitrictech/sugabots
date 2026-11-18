@@ -6,12 +6,12 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../../../database/events/bus.ts";
 import { EventStore } from "../../../database/events/store.ts";
 import {
-	agent,
+	bot,
 	collaboration,
+	conversationSummary,
 	event,
 	message,
-	thread,
-	threadSummary,
+	placedConversation,
 	turn,
 	user,
 	workspace,
@@ -20,8 +20,8 @@ import {
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../../database/testing.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Chats } from "../../chats/chats.ts";
+import { ConversationView } from "../../conversation-view.ts";
 import { conversationsForTests } from "../../testing.ts";
-import { ThreadView } from "../../thread-view.ts";
 import {
 	modelPrompt,
 	prepareRunnable,
@@ -37,7 +37,7 @@ import { collaborateTool } from "./tool.ts";
 
 /**
  * Collaboration against Postgres: what `open` writes, what policy refuses, and
- * how a collaboration moves between the asking agent and the answering one.
+ * how a collaboration moves between the asking bot and the answering one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", async () => {
 	const conversations = await conversationsForTests(
@@ -48,8 +48,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		Collaborations.Service,
 	);
 	const collaborations = onPostgres({ open, collectAnswer, answer, failUnder });
-	const threadsAs = (userId: string) =>
-		onPostgresAs(userId)(Context.get(conversations, ThreadView.Service));
+	const conversationsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, ConversationView.Service));
 	const chatsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
 	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
@@ -59,8 +59,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	let host: { id: string; name: string };
 	let helper: { id: string; name: string };
 	let checker: { id: string; name: string };
-	let rootThreadId: string;
-	/** The host's reply in the root thread, which its collaborations hang off. */
+	let taskId: string;
+	/** The host's reply in the task, which its collaborations hang off. */
 	let reply: Awaited<ReturnType<typeof openReply>>;
 
 	afterAll(async () => {
@@ -85,9 +85,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		workspaceId = space.id;
 		memberId = member.id;
 		await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId: memberId }));
-		const crew = await onDatabase((db) =>
+		const bots = await onDatabase((db) =>
 			db
-				.insert(agent)
+				.insert(bot)
 				.values([
 					{
 						workspaceId,
@@ -119,25 +119,25 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 						createdById: memberId,
 					},
 				])
-				.returning({ id: agent.id, name: agent.name }),
+				.returning({ id: bot.id, name: bot.name }),
 		);
-		const [hostRow, helperRow, checkerRow] = crew;
+		const [hostRow, helperRow, checkerRow] = bots;
 		if (!hostRow || !helperRow || !checkerRow) throw new Error("fixture");
 		host = hostRow;
 		helper = helperRow;
 		checker = checkerRow;
 		const started = await chatsAs(memberId).startTask({
-			agentId: host.id,
+			botId: host.id,
 			messageId: crypto.randomUUID(),
 			content: "Please look into the release",
 		});
-		rootThreadId = started.conversation.id;
-		reply = await openReply(rootThreadId, host.id);
+		taskId = started.conversation.id;
+		reply = await openReply(taskId, host.id);
 	});
 
-	/** Prepares the turn running for a thread's host, so a reply message exists. */
-	async function openReply(threadId: string, agentId: string) {
-		const [run] = await runOnPostgres(runningTurns(threadId));
+	/** Prepares the turn running for a conversation's bot, so a reply message exists. */
+	async function openReply(conversationId: string, botId: string) {
+		const [run] = await runOnPostgres(runningTurns(conversationId));
 		if (!run) throw new Error("no turn running");
 		const prepared = await prepareRunnable(turns, run);
 		return {
@@ -145,20 +145,20 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			prepared,
 			turnId: prepared.turnId,
 			messageId: prepared.responseMessage.id,
-			agentId,
+			botId,
 			context: prepared.context,
 		};
 	}
 
 	const from = (atOffset = 0) => ({
-		threadId: rootThreadId,
-		agentId: host.id,
+		conversationId: taskId,
+		botId: host.id,
 		turnId: reply.turnId,
 		messageId: reply.messageId,
 		atOffset,
 	});
 
-	it("opens the collaborator's thread with the brief, and records the collaboration on the reply", async () => {
+	it("opens the collaborator's conversation with the brief, and records the collaboration on the reply", async () => {
 		const opened = await collaborations.open({
 			from: from(7),
 			to: helper.name.toUpperCase(),
@@ -168,31 +168,31 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		expect(opened.collaborator).toEqual(helper);
 		expect(opened.collaboration).toMatchObject({
 			type: "collaboration",
-			agentId: helper.id,
-			agentName: helper.name,
+			botId: helper.id,
+			botName: helper.name,
 			status: "waiting",
 			answer: null,
 			atOffset: 7,
 		});
-		const child = await threadsAs(memberId).get(opened.collaboration.threadId);
-		expect(child?.thread).toMatchObject({
-			parentThreadId: rootThreadId,
-			hostAgentId: helper.id,
+		const child = await conversationsAs(memberId).get(opened.collaboration.conversationId);
+		expect(child?.conversation).toMatchObject({
+			parentConversationId: taskId,
+			botId: helper.id,
 			title: "Check the changelog",
 			status: "running",
 		});
 		expect(child?.messages).toMatchObject([
 			{
-				author: { kind: "agent", id: host.id },
+				author: { kind: "bot", id: host.id },
 				content: "Check the changelog\nfor anything alarming",
 			},
 		]);
 		expect(child?.participants.map(({ id }) => id)).toEqual([host.id, helper.id]);
 		// The collaboration's task hangs off the asking task rather than being listed beside it.
-		const visibleThreadIds = (await threadsAs(memberId).list(workspaceId)).map(({ id }) => id);
-		expect(visibleThreadIds).toEqual([rootThreadId]);
-		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
-			{ request: { agentId: helper.id } },
+		const visibleIds = (await conversationsAs(memberId).list(workspaceId)).map(({ id }) => id);
+		expect(visibleIds).toEqual([taskId]);
+		expect(await runOnPostgres(runningTurns(opened.collaboration.conversationId))).toMatchObject([
+			{ request: { botId: helper.id } },
 		]);
 		// The lists showing the collaboration's task are told of it.
 		const recipientEvents = await onDatabase((db) =>
@@ -203,8 +203,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		);
 		expect(recipientEvents.map(({ payload }) => payload)).toContainEqual(
 			expect.objectContaining({
-				type: "thread.changed",
-				threadId: opened.collaboration.threadId,
+				type: "conversation.changed",
+				conversationId: opened.collaboration.conversationId,
 			}),
 		);
 	});
@@ -219,16 +219,16 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		if (!other) throw new Error("fixture");
 		await onDatabase((db) =>
 			db
-				.update(agent)
+				.update(bot)
 				.set({ visibility: "private", createdById: other.id })
-				.where(eq(agent.id, checker.id)),
+				.where(eq(bot.id, checker.id)),
 		);
 
 		const opened = await collaborations.open({ from: from(), to: checker.name, brief: "Check" });
 
 		expect(opened.collaborator).toEqual(checker);
-		expect(await runOnPostgres(runningTurns(opened.collaboration.threadId))).toMatchObject([
-			{ request: { agentId: checker.id } },
+		expect(await runOnPostgres(runningTurns(opened.collaboration.conversationId))).toMatchObject([
+			{ request: { botId: checker.id } },
 		]);
 	});
 
@@ -240,7 +240,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			toolCalls: [],
 		});
 
-		const parent = await threadsAs(memberId).get(rootThreadId);
+		const parent = await conversationsAs(memberId).get(taskId);
 		const replyMessage = parent?.messages.find(({ id }) => id === reply.messageId);
 		expect(replyMessage?.parts).toEqual([
 			{ type: "text", text: "Hello." },
@@ -261,27 +261,30 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			/cannot collaborate with itself/,
 		);
 		const rows = await onDatabase((db) =>
-			db.select().from(thread).where(eq(thread.parentThreadId, rootThreadId)),
+			db
+				.select()
+				.from(placedConversation)
+				.where(eq(placedConversation.parentConversationId, taskId)),
 		);
 		expect(rows).toHaveLength(0);
 	});
 
-	it("asks each crew agent at most once per turn, and never back up the chain", async () => {
+	it("asks each bot at most once per turn, and never back up the chain", async () => {
 		const first = await collaborations.open({ from: from(), to: helper.name, brief: "One" });
 		const second = await collaborations.open({ from: from(), to: checker.name, brief: "Two" });
-		expect(second.collaboration.threadId).not.toBe(first.collaboration.threadId);
+		expect(second.collaboration.conversationId).not.toBe(first.collaboration.conversationId);
 		await expect(
 			collaborations.open({ from: from(), to: helper.name, brief: "Again" }),
 		).rejects.toThrow(/already asked .* this turn/);
 
-		// The helper, in its child thread, may not ask the host back: the host is
+		// The helper, in its collaboration, may not ask the host back: the host is
 		// the one waiting on it.
-		const helperReply = await openReply(first.collaboration.threadId, helper.id);
+		const helperReply = await openReply(first.collaboration.conversationId, helper.id);
 		await expect(
 			collaborations.open({
 				from: {
-					threadId: first.collaboration.threadId,
-					agentId: helper.id,
+					conversationId: first.collaboration.conversationId,
+					botId: helper.id,
 					turnId: helperReply.turnId,
 					messageId: helperReply.messageId,
 					atOffset: 0,
@@ -289,14 +292,14 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 				to: host.name,
 				brief: "Back",
 			}),
-		).rejects.toThrow(/already waiting on this thread/);
+		).rejects.toThrow(/already waiting on this conversation/);
 	});
 
 	it("records the answer without a resume turn while the asker is still waiting", async () => {
 		const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
 
 		await collaborations.answer({
-			threadId: opened.collaboration.threadId,
+			conversationId: opened.collaboration.conversationId,
 			answer: "Nothing alarming.",
 		});
 
@@ -305,14 +308,14 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			answer: "Nothing alarming.",
 		});
 		expect(
-			await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id })),
+			await runOnPostgres(waitingTurns({ conversationId: taskId, botId: host.id })),
 		).toHaveLength(0);
 	});
 
-	it("keeps a collaboration in model history when the thread has a summary", async () => {
+	it("keeps a collaboration in model history when the task has a summary", async () => {
 		const opened = await collaborations.open({ from: from(6), to: helper.name, brief: "Look" });
 		await collaborations.answer({
-			threadId: opened.collaboration.threadId,
+			conversationId: opened.collaboration.conversationId,
 			answer: "Nothing alarming.",
 		});
 		await onDatabase((db) =>
@@ -337,19 +340,19 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		);
 		await runOnPostgres(releaseTurn(reply.run));
 		await onDatabase((db) =>
-			db.insert(threadSummary).values({
-				threadId: rootThreadId,
+			db.insert(conversationSummary).values({
+				conversationId: taskId,
 				sourceMessageId: reply.messageId,
 				content: "The release was checked.",
 			}),
 		);
 		await chatsAs(memberId).post({
-			conversationId: rootThreadId,
+			conversationId: taskId,
 			messageId: crypto.randomUUID(),
 			content: "Who did you ask?",
 		});
 
-		const next = await openReply(rootThreadId, host.id);
+		const next = await openReply(taskId, host.id);
 		const covered = next.context.messages.find(({ id }) => id === reply.messageId);
 
 		expect(next.context).not.toHaveProperty("summary");
@@ -357,7 +360,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			{ type: "text", text: "I asked for help." },
 			expect.objectContaining({
 				type: "collaboration",
-				agentId: helper.id,
+				botId: helper.id,
 				brief: "Look",
 				status: "answered",
 				answer: "Nothing alarming.",
@@ -368,7 +371,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			now: new Date(),
 			builtInTools: [],
 			toolCatalog: undefined,
-			sandbox: undefined,
+			computer: undefined,
 		}).messages;
 		expect(promptMessages).toContainEqual(
 			expect.objectContaining({
@@ -392,22 +395,22 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		});
 
 		await collaborations.answer({
-			threadId: opened.collaboration.threadId,
+			conversationId: opened.collaboration.conversationId,
 			answer: "Late, but fine.",
 		});
 
 		expect(
-			await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id })),
-		).toMatchObject([{ agentId: host.id, triggerMessageId: reply.messageId }]);
+			await runOnPostgres(waitingTurns({ conversationId: taskId, botId: host.id })),
+		).toMatchObject([{ botId: host.id, triggerMessageId: reply.messageId }]);
 		const [row] = await onDatabase((db) => db.select().from(turn).where(eq(turn.id, reply.turnId)));
 		expect(row?.status).toBe("running");
 	});
-	describe("when the collaborator's turn ends without answering, outside any routine", () => {
+	describe("when the collaborator's turn ends without answering, outside any automation", () => {
 		/** A collaboration the asker stopped waiting for, and the collaborator's turn on it, prepared. */
 		const aPendingCollaboration = async () => {
 			const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
 			await collaborations.collectAnswer(opened.collaboration.id);
-			return { opened, threadId: opened.collaboration.threadId };
+			return { opened, conversationId: opened.collaboration.conversationId };
 		};
 		const statusOf = async (collaborationId: string) => {
 			const [row] = await onDatabase((db) =>
@@ -417,8 +420,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		};
 
 		it("fails the collaboration once the turn fails for good", async () => {
-			const { opened, threadId } = await aPendingCollaboration();
-			const collaborator = await openReply(threadId, helper.id);
+			const { opened, conversationId } = await aPendingCollaboration();
+			const collaborator = await openReply(conversationId, helper.id);
 
 			await turnRecords.markActed(collaborator.prepared.turnId);
 			const willRetry = await turnRecords.fail(
@@ -431,13 +434,13 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			expect(await statusOf(opened.collaboration.id)).toBe("failed");
 			// It told the person it would follow up, so it gets a turn to say what happened.
 			expect(
-				await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id })),
-			).toMatchObject([{ agentId: host.id, triggerMessageId: reply.messageId, reason: "resume" }]);
+				await runOnPostgres(waitingTurns({ conversationId: taskId, botId: host.id })),
+			).toMatchObject([{ botId: host.id, triggerMessageId: reply.messageId, reason: "resume" }]);
 		});
 
 		it("keeps the collaboration open while the failed turn runs again", async () => {
-			const { opened, threadId } = await aPendingCollaboration();
-			const collaborator = await openReply(threadId, helper.id);
+			const { opened, conversationId } = await aPendingCollaboration();
+			const collaborator = await openReply(conversationId, helper.id);
 
 			const willRetry = await turnRecords.fail(
 				replyTurnOf(collaborator.prepared),
@@ -450,8 +453,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		});
 
 		it("fails the collaboration once the turn is cancelled", async () => {
-			const { opened, threadId } = await aPendingCollaboration();
-			const collaborator = await openReply(threadId, helper.id);
+			const { opened, conversationId } = await aPendingCollaboration();
+			const collaborator = await openReply(conversationId, helper.id);
 
 			await turnRecords.cancel(replyTurnOf(collaborator.prepared), {
 				content: "Let me",
@@ -463,11 +466,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		});
 
 		it("fails the collaboration when the collaborator's turn may not run", async () => {
-			const { opened, threadId } = await aPendingCollaboration();
-			await onDatabase((db) =>
-				db.update(agent).set({ model: null }).where(eq(agent.id, helper.id)),
-			);
-			const [run] = await runOnPostgres(runningTurns(threadId));
+			const { opened, conversationId } = await aPendingCollaboration();
+			await onDatabase((db) => db.update(bot).set({ model: null }).where(eq(bot.id, helper.id)));
+			const [run] = await runOnPostgres(runningTurns(conversationId));
 			if (!run) throw new Error("no turn running");
 
 			expect(await turns.prepare(run)).toMatchObject({ _tag: "NotRunnable" });
@@ -475,13 +476,13 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		});
 	});
 
-	it("gives the asker no turn when the routine run its collaboration worked for ends", async () => {
+	it("gives the asker no turn when the automation run its collaboration worked for ends", async () => {
 		const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
 		await collaborations.collectAnswer(opened.collaboration.id);
 
-		await collaborations.failUnder([rootThreadId]);
+		await collaborations.failUnder([taskId]);
 
-		expect(await runOnPostgres(waitingTurns({ threadId: rootThreadId, agentId: host.id }))).toEqual(
+		expect(await runOnPostgres(waitingTurns({ conversationId: taskId, botId: host.id }))).toEqual(
 			[],
 		);
 	});
@@ -489,8 +490,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	it("tells the asking model a collaboration failed while it waited, rather than that an answer is coming", async () => {
 		const tool = collaborateTool({
 			from: {
-				threadId: rootThreadId,
-				agentId: host.id,
+				conversationId: taskId,
+				botId: host.id,
 				turnId: reply.turnId,
 				messageId: reply.messageId,
 			},
@@ -498,8 +499,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			bus: EventBus.inProcess({ store: EventStore.inMemory() }),
 			run: runOnPostgres,
 			replyLength: () => 0,
-			// The routine run it works for ends as soon as it is opened.
-			noteCollaboration: () => Effect.promise(() => collaborations.failUnder([rootThreadId])),
+			// The automation run it works for ends as soon as it is opened.
+			noteCollaboration: () => Effect.promise(() => collaborations.failUnder([taskId])),
 			signal: new AbortController().signal,
 			wait: "50 millis",
 		});
@@ -511,7 +512,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 
 		expect(result).toMatchObject({ status: "failed" });
 		const [made] = await onDatabase((db) =>
-			db.select().from(collaboration).where(eq(collaboration.parentThreadId, rootThreadId)),
+			db.select().from(collaboration).where(eq(collaboration.parentConversationId, taskId)),
 		);
 		expect(made?.status).toBe("failed");
 		if (!made) throw new Error("no collaboration");

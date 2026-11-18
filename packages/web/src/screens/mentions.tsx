@@ -1,15 +1,15 @@
 import {
-	type AgentParticipant,
+	type BotParticipant,
+	type ConversationDetails,
+	type ConversationKind,
 	GROUP_MENTION_HANDLES,
 	type GroupMentionHandle,
 	type MessageAuthor,
 	mentionedHandles,
-	NOTIFYING_THREAD_TYPES,
+	NOTIFYING_CONVERSATION_KINDS,
+	type Participant,
 	type PersonParticipant,
 	splitAroundMentions,
-	type ThreadDetails,
-	type ThreadParticipant,
-	type ThreadType,
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { PhrasingContent, Root } from "mdast";
@@ -17,7 +17,7 @@ import { type ComponentProps, createContext, type ReactNode, useContext, useStat
 import type { ExtraProps } from "streamdown";
 import type { Plugin } from "unified";
 import { SKIP, visit } from "unist-util-visit";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { MentionCard } from "./MentionCard.tsx";
 
 /*
@@ -30,36 +30,36 @@ import { MentionCard } from "./MentionCard.tsx";
  */
 
 /**
- * Everyone a mention in the thread can name: those in it, then the pod's bots
+ * Everyone a mention in the conversation can name: those in it, then the channel's bots
  * and people who are not.
  */
 export function mentionableIn(
-	details: Pick<ThreadDetails, "participants" | "crew" | "members">,
-): ThreadParticipant[] {
+	details: Pick<ConversationDetails, "participants" | "channelBots" | "members">,
+): Participant[] {
 	const joined = new Set(details.participants.map(({ id }) => id));
 	return [
 		...details.participants,
-		...details.crew.filter(({ id }) => !joined.has(id)),
+		...details.channelBots.filter(({ id }) => !joined.has(id)),
 		...details.members.filter(({ id }) => !joined.has(id)),
 	];
 }
 
-/** The bots among `crew` that `draft` names, each once, in the order it first names them. */
-export function botsNamed(draft: string, crew: readonly ThreadParticipant[]): AgentParticipant[] {
-	const bots = crew.filter((member): member is AgentParticipant => member.kind === "agent");
+/** The bots among `channelBots` that `draft` names, each once, in the order it first names them. */
+export function botsNamed(draft: string, channelBots: readonly Participant[]): BotParticipant[] {
+	const bots = channelBots.filter((member): member is BotParticipant => member.kind === "bot");
 	const handles = new Set(mentionedHandles(draft));
 	return [...handles].flatMap((handle) => bots.filter((bot) => bot.handle === handle));
 }
 
 /**
- * The bot named first in `draft` among `crew`, which sending a new thread's
+ * The bot named first in `draft` among `channelBots`, which sending a new thread's
  * first message starts it with; any named after it are only mentioned.
  */
 export function firstBotNamed(
 	draft: string,
-	crew: readonly ThreadParticipant[],
-): AgentParticipant | undefined {
-	return botsNamed(draft, crew).at(0);
+	channelBots: readonly Participant[],
+): BotParticipant | undefined {
+	return botsNamed(draft, channelBots).at(0);
 }
 
 /** `@here` or `@channel`, which a person writes to notify everyone who can see the conversation. */
@@ -67,32 +67,32 @@ export interface GroupMention {
 	kind: "group";
 	handle: GroupMentionHandle;
 	/**
-	 * The people it would notify: the pod's people but its writer, never a bot.
+	 * The people it would notify: the channel's people but its writer, never a bot.
 	 * Each one's own notification settings can still hold theirs back.
 	 */
 	notifies: readonly PersonParticipant[];
 }
 
 /** Whom a mention can name: a person or a bot, or with `@here` or `@channel`, everyone. */
-export type MentionTarget = ThreadParticipant | GroupMention;
+export type MentionTarget = Participant | GroupMention;
 
 /** Who writes a message, as far as `@here` and `@channel` care: a person, by id, or not a person. */
 type Writer = { kind: "person"; id: string } | { kind: Exclude<MessageAuthor["kind"], "person"> };
 
 /**
- * `@here` and `@channel` as `writer` can use them in a thread of `threadType`,
- * each notifying `members`, the pod's people, but the writer. None where they
- * would notify nobody, so they stay text: written by a bot or a routine, in a
- * thread that notifies nobody, or in a pod with nobody else in it. None in a
+ * `@here` and `@channel` as `writer` can use them in a conversation of kind
+ * `conversationKind`, each notifying `members`, the channel's people, but the
+ * writer. None where they would notify nobody, so they stay text: written by a
+ * bot or an automation, in a conversation that notifies nobody, or in a channel with nobody else in it. None in a
  * direct message either, where everybody in it is told of every message.
  */
 export function groupMentionsBy(
 	writer: Writer,
 	members: readonly PersonParticipant[],
-	threadType: ThreadType,
+	conversationKind: ConversationKind,
 ): GroupMention[] {
-	if (writer.kind !== "person" || !NOTIFYING_THREAD_TYPES.has(threadType)) return [];
-	if (threadType === "direct") return [];
+	if (writer.kind !== "person" || !NOTIFYING_CONVERSATION_KINDS.has(conversationKind)) return [];
+	if (conversationKind === "direct_message") return [];
 	const notifies = members.filter((member) => member.id !== writer.id);
 	if (notifies.length === 0) return [];
 	return GROUP_MENTION_HANDLES.map((handle) => ({ kind: "group", handle, notifies }));
@@ -142,9 +142,9 @@ export function MentionChip({
 				className,
 			)}
 		>
-			{target.kind === "agent" ? (
+			{target.kind === "bot" ? (
 				<>
-					<AgentAvatar
+					<BotAvatar
 						color={target.color}
 						face={target.face}
 						shape={target.shape}

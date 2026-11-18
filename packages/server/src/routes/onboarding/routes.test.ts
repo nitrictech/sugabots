@@ -7,8 +7,8 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const USER_ID = "0199a3a0-0000-7000-8000-0000000000ff";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
-const POD_ID = "0199a3a0-0000-7000-8000-000000000002";
-const AGENT_ID = "0199a3a0-0000-7000-8000-000000000003";
+const CHANNEL_ID = "0199a3a0-0000-7000-8000-000000000002";
+const BOT_ID = "0199a3a0-0000-7000-8000-000000000003";
 
 const resolveUser: UserResolver = async (headers) =>
 	headers.get("authorization") === "Bearer good-token"
@@ -29,7 +29,7 @@ describe("onboarding routes", () => {
 		}).request("/onboarding/complete", {
 			method: "POST",
 			headers: authorization,
-			body: JSON.stringify({ workspaceId: WORKSPACE_ID, podId: POD_ID, agentId: AGENT_ID }),
+			body: JSON.stringify({ workspaceId: WORKSPACE_ID, channelId: CHANNEL_ID, botId: BOT_ID }),
 		});
 
 		expect(response.status).toBe(400);

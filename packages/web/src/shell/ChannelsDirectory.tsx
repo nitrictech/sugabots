@@ -1,14 +1,14 @@
-import type { Pod } from "@sugabots/contracts";
+import type { Channel } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Lock, Plus } from "lucide-react";
 import { useState } from "react";
+import { useChannels, useJoinChannel } from "@/lib/channels.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { podLink } from "@/lib/links.ts";
-import { useJoinPod, usePods } from "@/lib/pods.ts";
+import { channelLink } from "@/lib/links.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
-import { NewPodDialog } from "@/shell/NewPod.tsx";
+import { NewChannelDialog } from "@/shell/NewChannel.tsx";
 import { Page } from "@/shell/Page.tsx";
-import { PodInitial } from "@/shell/SidebarPod.tsx";
+import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -22,19 +22,19 @@ import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
  * A + makes another.
  */
 export function ChannelsDirectory() {
-	const { data: pods, isPending, error } = usePods();
+	const { data: channels, isPending, error } = useChannels();
 	const may = useWorkspacePermissions();
-	const join = useJoinPod();
+	const join = useJoinChannel();
 	const navigate = useNavigate();
 	const [creating, setCreating] = useState(false);
-	const yours = pods?.filter((pod) => pod.isMember) ?? [];
-	const others = pods?.filter((pod) => !pod.isMember) ?? [];
+	const yours = channels?.filter((channel) => channel.isMember) ?? [];
+	const others = channels?.filter((channel) => !channel.isMember) ?? [];
 	return (
 		<Page
 			title="Channels"
 			place={{ kind: "tab" }}
 			actions={
-				may.createPods && (
+				may.createChannels && (
 					<IconButton label="New channel" variant="bar" onClick={() => setCreating(true)}>
 						<Plus size={16} strokeWidth={1.75} />
 					</IconButton>
@@ -44,45 +44,46 @@ export function ChannelsDirectory() {
 			<div className="mx-auto flex w-full max-w-180 flex-col gap-6 px-4 pt-6 pb-12">
 				{error && <Alert>{failureMessage(error)}</Alert>}
 				{join.error && <Alert>{failureMessage(join.error)}</Alert>}
-				{!isPending && pods?.length === 0 && (
+				{!isPending && channels?.length === 0 && (
 					<EmptyState title="No channels yet">
-						{may.createPods
+						{may.createChannels
 							? "Make the first one with the + above."
 							: "Ask someone in the workspace to make one."}
 					</EmptyState>
 				)}
 				{yours.length > 0 && (
 					<SettingsGroup label="Yours" headingLevel={2}>
-						{yours.map((pod) => (
-							<ChannelRow key={pod.id} pod={pod} />
+						{yours.map((channel) => (
+							<ChannelRow key={channel.id} channel={channel} />
 						))}
 					</SettingsGroup>
 				)}
 				{others.length > 0 && (
 					<SettingsGroup label="To join" headingLevel={2}>
-						{others.map((pod) => (
+						{others.map((channel) => (
 							<ChannelRow
-								key={pod.id}
-								pod={pod}
+								key={channel.id}
+								channel={channel}
 								onJoin={
-									pod.permissions.join
-										? async () => {
-												await join.mutateAsync(pod.id);
-												await navigate(podLink(pod));
-											}
+									channel.permissions.join
+										? () =>
+												// Why it failed shows above the list.
+												join.mutate(channel.id, {
+													onSuccess: () => void navigate(channelLink(channel)),
+												})
 										: undefined
 								}
-								joining={join.isPending && join.variables === pod.id}
+								joining={join.isPending && join.variables === channel.id}
 							/>
 						))}
 					</SettingsGroup>
 				)}
 			</div>
 			<Dialog open={creating} onOpenChange={setCreating}>
-				<NewPodDialog
-					onCreated={async (pod) => {
+				<NewChannelDialog
+					onCreated={async (channel) => {
 						setCreating(false);
-						await navigate(podLink(pod));
+						await navigate(channelLink(channel));
 					}}
 				/>
 			</Dialog>
@@ -92,42 +93,48 @@ export function ChannelsDirectory() {
 
 /** A channel in the directory: its mark, name and what it's for, opening it once you're in. */
 function ChannelRow({
-	pod,
+	channel,
 	onJoin,
 	joining = false,
 }: {
-	pod: Pod;
+	channel: Channel;
 	/** Joins it, for a channel the viewer is not in and may join. */
-	onJoin?: () => Promise<void>;
+	onJoin?: () => void;
 	joining?: boolean;
 }) {
 	const label = (
 		<span className="flex min-w-0 items-center gap-1.5">
-			<span className="truncate">{pod.name}</span>
-			{pod.visibility === "private" && (
-				<Lock aria-label="Private" size={11} strokeWidth={2.25} className="shrink-0" />
+			<span className="truncate">{channel.name}</span>
+			{channel.visibility === "private" && (
+				<Lock role="img" aria-label="Private" size={11} strokeWidth={2.25} className="shrink-0" />
 			)}
 		</span>
 	);
-	if (pod.isMember) {
+	if (channel.isMember) {
 		return (
 			<SettingsRow
-				icon={<PodInitial pod={pod} />}
+				icon={<ChannelInitial channel={channel} />}
 				label={label}
-				sub={pod.description ?? undefined}
+				sub={channel.description ?? undefined}
 				chevron
-				render={<Link {...podLink(pod)} />}
+				render={<Link {...channelLink(channel)} />}
 			/>
 		);
 	}
 	return (
 		<SettingsRow
-			icon={<PodInitial pod={pod} />}
+			icon={<ChannelInitial channel={channel} />}
 			label={label}
-			sub={pod.description ?? undefined}
+			sub={channel.description ?? undefined}
 			trailing={
 				onJoin && (
-					<Button size="sm" variant="secondary" disabled={joining} onClick={() => void onJoin()}>
+					<Button
+						size="sm"
+						variant="secondary"
+						aria-label={`Join ${channel.name}`}
+						disabled={joining}
+						onClick={onJoin}
+					>
 						Join
 					</Button>
 				)

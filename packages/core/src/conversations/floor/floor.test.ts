@@ -12,33 +12,33 @@ const scout = "0199a3a0-0000-7000-8000-000000000009";
 
 function input(overrides: Partial<FloorInput> = {}): FloorInput {
 	return {
-		threadType: "conversation",
+		conversationKind: "task",
 		content: "Hello",
-		hostAgentId: host,
-		crew: [
-			{ id: host, handle: "host-agent" },
+		conversationBotId: host,
+		mentionableBots: [
+			{ id: host, handle: "host-bot" },
 			{ id: reviewer, handle: "reviewer" },
 			{ id: scout, handle: "scout" },
 		],
 		peopleHandles: new Set(["sam"]),
-		repliedToAgentId: undefined,
+		repliedToBotId: undefined,
 		...overrides,
 	};
 }
 
 describe("a person's message", () => {
-	it("goes to an automation's own bot in its thread, not to the bots mentioned", () => {
+	it("goes to an automation's own bot in its conversation, not to the bots mentioned", () => {
 		// Another bot, a private one too, is reached by the automation's bot collaborating.
 		expect(
 			decideFloor(
-				input({ threadType: "routine_feed", content: "@reviewer and @scout, thoughts?" }),
+				input({ conversationKind: "automation_feed", content: "@reviewer and @scout, thoughts?" }),
 			),
-		).toEqual({ kind: "turns", agents: [{ agentId: host, reason: "default" }] });
+		).toEqual({ kind: "turns", bots: [{ botId: host, reason: "default" }] });
 	});
 
 	it("goes to nobody when only people are mentioned", () => {
 		expect(
-			decideFloor(input({ threadType: "routine_feed", content: "@sam can you look?" })),
+			decideFloor(input({ conversationKind: "automation_feed", content: "@sam can you look?" })),
 		).toEqual({
 			kind: "nobody",
 		});
@@ -46,7 +46,9 @@ describe("a person's message", () => {
 
 	it("goes to nobody when it mentions everyone", () => {
 		expect(
-			decideFloor(input({ threadType: "routine_feed", content: "@channel the report is late" })),
+			decideFloor(
+				input({ conversationKind: "automation_feed", content: "@channel the report is late" }),
+			),
 		).toEqual({ kind: "nobody" });
 		expect(decideFloor(input({ content: "@here quick poll: lunch?" }))).toEqual({
 			kind: "nobody",
@@ -57,20 +59,20 @@ describe("a person's message", () => {
 		// The conversation's bot brings a mentioned bot in by collaborating.
 		expect(decideFloor(input({ content: "@reviewer, thoughts?" }))).toEqual({
 			kind: "turns",
-			agents: [{ agentId: host, reason: "default" }],
+			bots: [{ botId: host, reason: "default" }],
 		});
 	});
 
-	it("goes to nobody in a conversation when only people are mentioned", () => {
+	it("goes to nobody in a task when only people are mentioned", () => {
 		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual({ kind: "nobody" });
 	});
 
-	it.each(["conversation", "routine_feed"] as const)(
+	it.each(["task", "automation_feed"] as const)(
 		"goes to the bot in a %s when it mentions a handle that is nobody's",
-		(threadType) => {
-			expect(decideFloor(input({ threadType, content: "Raise it with @Backlog Manager" }))).toEqual(
-				{ kind: "turns", agents: [{ agentId: host, reason: "default" }] },
-			);
+		(conversationKind) => {
+			expect(
+				decideFloor(input({ conversationKind, content: "Raise it with @Backlog Manager" })),
+			).toEqual({ kind: "turns", bots: [{ botId: host, reason: "default" }] });
 		},
 	);
 
@@ -78,50 +80,58 @@ describe("a person's message", () => {
 		expect(
 			decideFloor(
 				input({
-					threadType: "pod_chat",
-					hostAgentId: null,
-					repliedToAgentId: scout,
+					conversationKind: "channel_conversation",
+					conversationBotId: null,
+					repliedToBotId: scout,
 					content: "And @Backlog Manager too?",
 				}),
 			),
-		).toEqual({ kind: "turns", agents: [{ agentId: scout, reason: "reply" }] });
+		).toEqual({ kind: "turns", bots: [{ botId: scout, reason: "reply" }] });
 	});
 
 	it("goes to the conversation's bot when it is mentioned", () => {
-		expect(decideFloor(input({ content: "@host-agent can you check?" }))).toEqual({
+		expect(decideFloor(input({ content: "@host-bot can you check?" }))).toEqual({
 			kind: "turns",
-			agents: [{ agentId: host, reason: "mention" }],
+			bots: [{ botId: host, reason: "mention" }],
 		});
 	});
 
-	it("goes to the bots a pod's chat message mentions, and otherwise to nobody there", () => {
-		const podChat = { threadType: "pod_chat", hostAgentId: null } as const;
-		expect(decideFloor(input({ ...podChat, content: "@reviewer and @scout, thoughts?" }))).toEqual({
+	it("goes to the bots a message in a channel's conversation mentions, and otherwise to nobody there", () => {
+		const channelConversation = {
+			conversationKind: "channel_conversation",
+			conversationBotId: null,
+		} as const;
+		expect(
+			decideFloor(input({ ...channelConversation, content: "@reviewer and @scout, thoughts?" })),
+		).toEqual({
 			kind: "turns",
-			agents: [
-				{ agentId: reviewer, reason: "mention" },
-				{ agentId: scout, reason: "mention" },
+			bots: [
+				{ botId: reviewer, reason: "mention" },
+				{ botId: scout, reason: "mention" },
 			],
 		});
-		expect(decideFloor(input({ ...podChat, content: "Morning all" }))).toEqual({ kind: "nobody" });
+		expect(decideFloor(input({ ...channelConversation, content: "Morning all" }))).toEqual({
+			kind: "nobody",
+		});
 	});
 
-	it("goes to the bot a channel message replies to, unless it mentions someone", () => {
+	it("goes to the bot a channel message replies to, unless it mentions other bots", () => {
 		const replyToScout = {
-			threadType: "pod_chat",
-			hostAgentId: null,
-			repliedToAgentId: scout,
+			conversationKind: "channel_conversation",
+			conversationBotId: null,
+			repliedToBotId: scout,
 		} as const;
-		expect(decideFloor(input({ ...replyToScout, content: "And the routines?" }))).toEqual({
+		expect(decideFloor(input({ ...replyToScout, content: "And the automations?" }))).toEqual({
 			kind: "turns",
-			agents: [{ agentId: scout, reason: "reply" }],
+			bots: [{ botId: scout, reason: "reply" }],
 		});
 		expect(decideFloor(input({ ...replyToScout, content: "@reviewer can you check?" }))).toEqual({
 			kind: "turns",
-			agents: [{ agentId: reviewer, reason: "mention" }],
+			bots: [{ botId: reviewer, reason: "mention" }],
 		});
 		expect(decideFloor(input({ ...replyToScout, content: "@sam what do you think?" }))).toEqual({
-			kind: "nobody",
+			kind: "turns",
+			bots: [{ botId: scout, reason: "reply" }],
 		});
 	});
 });

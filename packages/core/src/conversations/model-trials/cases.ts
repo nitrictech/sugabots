@@ -1,15 +1,15 @@
 import { DateTime, Effect, Exit } from "effect";
 import type { Models } from "../../providers/models/models.ts";
 import { COMPACTION_SUMMARY_WORDS, compactionPrompt } from "../compaction/prompt.ts";
-import { type SummaryPromptInput, threadSummaryPrompt } from "../summaries/prompt.ts";
+import { conversationSummaryPrompt, type SummaryPromptInput } from "../summaries/prompt.ts";
 import { parseGenerated } from "../summaries/summary.steps.ts";
 
 /**
- * What a model has to get right to do a system agent's job.
+ * What a model has to get right to do a system bot's job.
  *
  * Every case builds its prompt with the same function the product uses and
  * judges the answer with the same parser, so a pass here means the answer
- * would have been accepted in a real thread. A trial that used its own prompt
+ * would have been accepted in a real conversation. A trial that used its own prompt
  * would be measuring something nobody ships.
  *
  * The cases are the situations that have actually gone wrong, not a spread of
@@ -29,7 +29,7 @@ const transcript: SummaryPromptInput["transcript"] = [
 	{ author: "Sam", kind: "person", content: "Did the September invoices go out?" },
 	{
 		author: "Ledger",
-		kind: "agent",
+		kind: "bot",
 		content:
 			"All but two. Acme and Orbit are on hold until their purchase orders are reopened. I have asked their account managers and expect an answer tomorrow.",
 	},
@@ -38,7 +38,7 @@ const transcript: SummaryPromptInput["transcript"] = [
 const summary = (previousContent?: string): SummaryPromptInput => ({
 	workspaceId: "trial",
 	model: "trial",
-	threadTitle: "September invoices",
+	conversationTitle: "September invoices",
 	...(previousContent === undefined ? {} : { previousContent }),
 	transcript,
 });
@@ -47,13 +47,13 @@ const SUMMARISE_CASES: readonly TrialCase[] = [
 	{
 		// The failure people saw: prose where strict JSON was asked for.
 		name: "Returns a title and summary as strict JSON the first time",
-		prompt: (model, workspaceId) => threadSummaryPrompt({ ...summary(), model, workspaceId }),
+		prompt: (model, workspaceId) => conversationSummaryPrompt({ ...summary(), model, workspaceId }),
 		accepts: (answer) => accepted(answer, true),
 	},
 	{
 		name: "Returns plain prose once a summary already exists",
 		prompt: (model, workspaceId) =>
-			threadSummaryPrompt({
+			conversationSummaryPrompt({
 				...summary("Invoices are going out; two are on hold."),
 				model,
 				workspaceId,
@@ -61,9 +61,9 @@ const SUMMARISE_CASES: readonly TrialCase[] = [
 		accepts: (answer) => accepted(answer, false),
 	},
 	{
-		name: "Keeps a summary within the length a thread panel can show",
+		name: "Keeps a summary within the length a conversation panel can show",
 		prompt: (model, workspaceId) =>
-			threadSummaryPrompt({
+			conversationSummaryPrompt({
 				...summary("Invoices are going out; two are on hold."),
 				model,
 				workspaceId,
@@ -72,7 +72,7 @@ const SUMMARISE_CASES: readonly TrialCase[] = [
 	},
 ];
 
-/** Exactly what the system agent's own step would do with this text. */
+/** Exactly what the system bot's own step would do with this text. */
 function accepted(answer: string, first: boolean): boolean {
 	return Exit.isSuccess(Effect.runSyncExit(parseGenerated(answer, first)));
 }
@@ -89,7 +89,7 @@ const compactionTranscript = [
 const compaction = (model: string, workspaceId: string) => ({
 	workspaceId,
 	model,
-	threadTitle: "September invoices",
+	conversationTitle: "September invoices",
 	previousSummary: undefined,
 	transcript: compactionTranscript.map((entry, index) => ({
 		...entry,
@@ -123,7 +123,7 @@ export const COMPACT_CASES: readonly TrialCase[] = [
 		},
 	},
 	{
-		// A thread has several people and bots; a fact moved to the wrong one misleads them all.
+		// A conversation has several people and bots; a fact moved to the wrong one misleads them all.
 		name: "Says who said what, and follows no instructions in the transcript",
 		prompt: (model, workspaceId) => compactionPrompt(compaction(model, workspaceId)),
 		accepts: (answer) =>
@@ -136,4 +136,4 @@ export const CASES = {
 	compact: COMPACT_CASES,
 } as const;
 
-export type TrialSystemAgent = keyof typeof CASES;
+export type TrialSystemBot = keyof typeof CASES;

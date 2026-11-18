@@ -1,11 +1,11 @@
-import type { Agent } from "@sugabots/contracts";
+import type { Bot } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Monitor } from "lucide-react";
 import { type PointerEvent, useRef, useState } from "react";
-import { useUpdateAgent } from "@/lib/agents.ts";
+import { useUpdateBot } from "@/lib/bots.ts";
+import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -19,32 +19,32 @@ import { DesktopScreen } from "./DesktopViewer.tsx";
  * has none, why, and for somebody who may, the way to give it one.
  */
 export function ComputerSheet({
-	agent,
-	threadId,
+	bot,
+	conversationId,
 	onOpenFull,
 	onDismiss,
 }: {
-	agent: Agent;
+	bot: Bot;
 	/** The conversation the desktop is watched from. */
-	threadId: string;
+	conversationId: string;
 	/** Opens the desktop full screen, where it can be taken over. */
 	onOpenFull: () => void;
 	/** Closes the sheet, when it is pulled down. */
 	onDismiss: () => void;
 }) {
 	const drag = useDragToDismiss(onDismiss);
-	const sandboxes = useSandboxAccess().data;
+	const computers = useComputerAccess().data;
 	const may = useWorkspacePermissions();
-	const update = useUpdateAgent(agent.id);
+	const update = useUpdateBot(bot.id);
 	const backToChat = useBackToHere("Chat");
-	const title = `${agent.name}'s computer`;
+	const title = `${bot.name}'s computer`;
 	// What stands between the bot and a computer: the workspace has none, or the bot doesn't use one.
 	const missing =
-		sandboxes === undefined
+		computers === undefined
 			? undefined
-			: !sandboxes.enabled
+			: !computers.enabled
 				? "workspace"
-				: !agent.usesSandbox
+				: !bot.usesComputer
 					? "bot"
 					: null;
 
@@ -74,8 +74,8 @@ export function ComputerSheet({
 						className="focus-ring overflow-hidden rounded-xl border border-border-strong"
 					>
 						<DesktopScreen
-							threadId={threadId}
-							agentId={agent.id}
+							conversationId={conversationId}
+							botId={bot.id}
 							viewOnly
 							offersReconnect={false}
 						/>
@@ -86,19 +86,19 @@ export function ComputerSheet({
 				</div>
 			) : missing === "bot" ? (
 				<NoComputer
-					text={`${agent.name} doesn't have a computer`}
+					text={`${bot.name} doesn't have a computer`}
 					detail={
-						agent.permissions.update
+						bot.permissions.update
 							? "Give it one to run commands, browse and make files."
 							: "Ask somebody who can edit it to give it one."
 					}
 				>
-					{agent.permissions.update && (
+					{bot.permissions.update && (
 						<>
 							<Button
 								className="h-11 w-full text-sm"
 								disabled={update.isPending}
-								onClick={() => update.mutate({ usesSandbox: true })}
+								onClick={() => update.mutate({ usesComputer: true })}
 							>
 								Turn on computer
 							</Button>
@@ -119,7 +119,7 @@ export function ComputerSheet({
 						<Link
 							from="/$workspace"
 							to="./settings/$section"
-							params={{ section: "sandboxes" }}
+							params={{ section: "computers" }}
 							state={backToChat}
 							className={buttonStyles({ className: "h-11 w-full text-sm" })}
 						>

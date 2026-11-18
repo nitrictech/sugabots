@@ -1,5 +1,5 @@
 import { mediaTypeEssence } from "@sugabots/contracts";
-import type { ThreadFiles } from "@sugabots/core/conversations/thread-files/thread-files";
+import type { ConversationFiles } from "@sugabots/core/files/conversation-files";
 import { HttpServerResponse } from "effect/unstable/http";
 
 /**
@@ -21,7 +21,9 @@ const SHOWN_IN_PLACE = new Set([
  * browser open it anyway. Files never change once kept, so a browser may keep
  * its copy.
  */
-export function fileResponse(file: ThreadFiles.StoredFile): HttpServerResponse.HttpServerResponse {
+export function fileResponse(
+	file: ConversationFiles.StoredFile,
+): HttpServerResponse.HttpServerResponse {
 	const shownInPlace = SHOWN_IN_PLACE.has(mediaTypeEssence(file.contentType));
 	return HttpServerResponse.stream(file.stream, {
 		contentType: file.contentType,

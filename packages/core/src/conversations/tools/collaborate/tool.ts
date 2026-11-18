@@ -1,9 +1,9 @@
 import {
-	AGENT_NAME_MAX_LENGTH,
+	BOT_NAME_MAX_LENGTH,
 	type CollaborationPart,
+	conversationChannel,
+	conversationUpdateEventSchema,
 	MESSAGE_MAX_LENGTH,
-	threadChannel,
-	threadUpdateEventSchema,
 } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Duration, Effect, Option, Schema } from "effect";
@@ -11,14 +11,16 @@ import type { RunEffect } from "../../../database/database.ts";
 import type { EventBus } from "../../../database/events/bus.ts";
 import type { Collaborations } from "./collaborations.ts";
 
-/** How long the asking agent's turn waits for the collaborator before moving on. */
+export const COLLABORATE_TOOL = "collaborate";
+
+/** How long the asking bot's turn waits for the collaborator before moving on. */
 const DEFAULT_WAIT = Duration.seconds(120);
 
-const readThreadUpdate = Schema.decodeUnknownOption(threadUpdateEventSchema);
+const readConversationUpdate = Schema.decodeUnknownOption(conversationUpdateEventSchema);
 
 export interface CollaborateToolOptions {
-	/** The turn the tool runs in: its thread, its agent, its turn and its reply. */
-	from: { threadId: string; agentId: string; turnId: string; messageId: string };
+	/** The turn the tool runs in: its conversation, its bot, its turn and its reply. */
+	from: { conversationId: string; botId: string; turnId: string; messageId: string };
 	collaborations: Pick<Collaborations.Interface, "open" | "collectAnswer">;
 	/** For noticing the collaboration being answered. */
 	bus: Pick<EventBus.Interface, "subscribe">;
@@ -37,17 +39,17 @@ export interface CollaborateToolOptions {
 
 export type CollaborateResult =
 	| { status: "answered"; answer: string }
-	| { status: "pending"; threadId: string; note: string }
-	| { status: "failed"; threadId: string; note: string }
+	| { status: "pending"; conversationId: string; note: string }
+	| { status: "failed"; conversationId: string; note: string }
 	| { status: "refused"; reason: string };
 
 /**
  * The `collaborate` tool, bound to one turn.
  *
  * Opening the collaboration is one transaction. Waiting for the answer is
- * not: it watches the asking thread's channel for the collaboration to be
+ * not: it watches the asking conversation's channel for the collaboration to be
  * answered, up to `wait`, then takes the answer if there is one, reports a
- * collaboration that failed, or records that the asking agent moved on so the
+ * collaboration that failed, or records that the asking bot moved on so the
  * answer resumes it later.
  */
 export function collaborateTool({
@@ -64,7 +66,7 @@ export function collaborateTool({
 		description:
 			"Ask another bot in the workspace, any bot, private ones included, to help. Write a self-contained brief: the bot sees only what you write here, not this conversation. You get its answer back, or a note that it is still coming.",
 		inputSchema: Schema.Struct({
-			to: Schema.String.check(Schema.isMaxLength(AGENT_NAME_MAX_LENGTH)).annotate({
+			to: Schema.String.check(Schema.isMaxLength(BOT_NAME_MAX_LENGTH)).annotate({
 				description: "The other bot's name, exactly as listed",
 			}),
 			brief: Schema.String.check(
@@ -89,7 +91,7 @@ export function collaborateTool({
 			}
 			const { collaboration, collaborator } = opened.opened;
 
-			await waitUntilSettled(bus, from.threadId, collaboration.id, wait, signal);
+			await waitUntilSettled(bus, from.conversationId, collaboration.id, wait, signal);
 			const outcome = await run(collaborations.collectAnswer(collaboration.id));
 			if (outcome._tag === "Answered") {
 				return { status: "answered", answer: outcome.answer };
@@ -97,13 +99,13 @@ export function collaborateTool({
 			if (outcome._tag === "Failed") {
 				return {
 					status: "failed",
-					threadId: collaboration.threadId,
+					conversationId: collaboration.conversationId,
 					note: `${collaborator.name} will not answer: the collaboration was stopped. Carry on without their answer.`,
 				};
 			}
 			return {
 				status: "pending",
-				threadId: collaboration.threadId,
+				conversationId: collaboration.conversationId,
 				note: `${collaborator.name} is still working on it. When they answer, or it turns out they cannot, you get a new turn to tell the person. For now, tell the person you have asked ${collaborator.name} and will follow up.`,
 			};
 		},
@@ -111,12 +113,12 @@ export function collaborateTool({
 }
 
 /**
- * Waits until the collaboration, made in `threadId`, is answered or failed,
+ * Waits until the collaboration, made in `conversationId`, is answered or failed,
  * `wait` passes, or `signal` aborts.
  */
 async function waitUntilSettled(
 	bus: Pick<EventBus.Interface, "subscribe">,
-	threadId: string,
+	conversationId: string,
 	collaborationId: string,
 	wait: Duration.Input,
 	signal: AbortSignal,
@@ -129,10 +131,10 @@ async function waitUntilSettled(
 	const onAbort = () => giveUp.abort();
 	signal.addEventListener("abort", onAbort, { once: true });
 	try {
-		for await (const { event } of bus.subscribe(threadChannel(threadId), {
+		for await (const { event } of bus.subscribe(conversationChannel(conversationId), {
 			signal: giveUp.signal,
 		})) {
-			const update = Option.getOrUndefined(readThreadUpdate(event));
+			const update = Option.getOrUndefined(readConversationUpdate(event));
 			if (
 				update?.type === "collaboration.updated" &&
 				update.collaboration.id === collaborationId &&

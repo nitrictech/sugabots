@@ -37,6 +37,17 @@ UPDATE "agent" SET "assistant_of" = "pod"."owner_id"
 FROM "pod"
 WHERE "pod"."id" = "agent"."pod_id" AND "pod"."kind" = 'personal'
 	AND "agent"."provisioned_key" = 'personal-assistant';--> statement-breakpoint
+-- Sugabots manages a Personal Assistant, which has no automations: nobody can
+-- change or run one now, nor would its runs reach its person in a task. Any an
+-- assistant had are paused, with no next time, rather than running unmanaged.
+UPDATE "routine" SET "state" = 'paused'
+FROM "agent"
+WHERE "agent"."id" = "routine"."agent_id" AND "agent"."assistant_of" IS NOT NULL
+	AND "routine"."state" = 'enabled';--> statement-breakpoint
+UPDATE "routine_trigger" SET "next_scheduled_at" = NULL
+FROM "routine", "agent"
+WHERE "routine"."id" = "routine_trigger"."routine_id" AND "agent"."id" = "routine"."agent_id"
+	AND "agent"."assistant_of" IS NOT NULL AND "routine_trigger"."next_scheduled_at" IS NOT NULL;--> statement-breakpoint
 -- Handles and names become unique across the workspace, among the bots people
 -- address: the oldest keeps its own, and each other gets the lowest number from
 -- 2 that no bot has taken, shortened to fit (handles 48 characters, names 64).
@@ -140,7 +151,8 @@ JOIN "pod" ON "pod"."id" = "main_chat"."pod_id"
 WHERE "main_chat"."main" AND "pod"."kind" = 'shared'
 	AND "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL;--> statement-breakpoint
 -- A Personal pod's goes to a task of the bot that made it, or else of the
--- pod's oldest bot: the bot's latest task, or a new one with the pod's owner
+-- pod's oldest bot other than its Personal Assistant, which only when it is
+-- the pod's only bot: the bot's latest task, or a new one with the pod's owner
 -- when it has none. A Personal pod with no bots left has no conversation to
 -- give its files, and no channel survives it, so they're deleted with it.
 DO $$
@@ -157,7 +169,8 @@ BEGIN
 	LOOP
 		SELECT "id" INTO chosen_bot FROM "agent"
 		WHERE "pod_id" = orphan.pod_id
-		ORDER BY "id" = orphan.created_by_agent_id DESC NULLS LAST, "created_at", "id"
+		ORDER BY "id" = orphan.created_by_agent_id DESC NULLS LAST, "assistant_of" IS NOT NULL,
+			"created_at", "id"
 		LIMIT 1;
 		CONTINUE WHEN chosen_bot IS NULL;
 		SELECT "id" INTO task FROM "thread"

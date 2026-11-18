@@ -6,9 +6,9 @@ import {
 	type SearchOutcome,
 	type SearchRequest,
 } from "../../providers/search-providers/backends.ts";
-import { artifactTools } from "./artifacts/tool.ts";
+import { automationTools } from "./automations/tool.ts";
 import { collaborateTool } from "./collaborate/tool.ts";
-import { routineTools } from "./routines/tool.ts";
+import { fileTools } from "./files/tool.ts";
 import { webFetchTool } from "./web-fetch/tool.ts";
 import { webSearchTool } from "./web-search/tool.ts";
 
@@ -19,7 +19,7 @@ function unexpectedExecution(): never {
 const SETTINGS_PAGE = "https://sugabots.example/acme/settings/search";
 const fetchTool = webFetchTool({ fetchPage: unexpectedExecution });
 const collaborate = collaborateTool({
-	from: { threadId: "thread", agentId: "agent", turnId: "turn", messageId: "message" },
+	from: { conversationId: "conversation", botId: "bot", turnId: "turn", messageId: "message" },
 	collaborations: { open: unexpectedExecution, collectAnswer: unexpectedExecution },
 	bus: { subscribe: unexpectedExecution },
 	run: unexpectedExecution,
@@ -142,8 +142,8 @@ describe("native Effect tool schemas through the AI SDK", () => {
 
 	it.each([
 		...Object.entries(
-			artifactTools({
-				by: { workspaceId: "workspace", agentId: "agent", threadId: "thread" },
+			fileTools({
+				by: { workspaceId: "workspace", botId: "bot", conversationId: "conversation" },
 				turnId: "turn",
 				calls: { completedOutputs: unexpectedExecution },
 				authoring: {
@@ -157,10 +157,10 @@ describe("native Effect tool schemas through the AI SDK", () => {
 			}),
 		),
 		...Object.entries(
-			routineTools({
-				bot: { agentId: "agent", askedBy: "user" },
+			automationTools({
+				bot: { botId: "bot", askedBy: "user" },
 				timeZone: "UTC",
-				routines: {
+				automations: {
 					list: unexpectedExecution,
 					create: unexpectedExecution,
 					update: unexpectedExecution,

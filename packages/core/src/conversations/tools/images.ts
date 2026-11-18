@@ -1,8 +1,8 @@
 import { detectMediaType } from "@ai-sdk/provider-utils";
 
 /**
- * Images the tools show the model: a screenshot, an image in the sandbox, or
- * one a person attached to the thread.
+ * Images the tools show the model: a screenshot, an image in the computer, or
+ * one a person attached to the conversation.
  */
 
 /** An image a tool's result carries for the model to look at. */

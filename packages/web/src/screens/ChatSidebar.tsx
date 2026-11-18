@@ -5,7 +5,7 @@ import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 
 /**
- * The column beside a chat: Details, or a collaboration or routine run opened
+ * The column beside a chat: Details, or a collaboration or automation run opened
  * from its line. Only a wide screen has room for both side by side; on a
  * tablet it slides over the dimmed chat from the right, and on a phone it
  * covers the chat or, as a `sheet`, rises from the bottom over it.

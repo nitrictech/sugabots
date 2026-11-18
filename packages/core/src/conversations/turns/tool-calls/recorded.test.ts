@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { BlobStore } from "../../../blob-store/blob-store.ts";
 import { effectRunner } from "../../../database/database.ts";
 import { noDatabase } from "../../../database/testing.ts";
-import { ThreadFiles } from "../../thread-files/thread-files.ts";
+import { ConversationFiles } from "../../../files/conversation-files.ts";
 import { ToolExecutionRefused } from "../approvals/approved-calls.ts";
 import { type LongResult, MAX_RESULT_CHARACTERS } from "./large-results.ts";
 import { recorded, refused } from "./recorded.ts";
@@ -19,14 +19,14 @@ import type { ToolCallRepository } from "./repository.ts";
 const run = effectRunner(ManagedRuntime.make(noDatabase));
 const callId = "0199a3a0-0000-7000-8000-0000000000aa";
 const from = {
-	threadId: "0199a3a0-0000-7000-8000-000000000001",
+	conversationId: "0199a3a0-0000-7000-8000-000000000001",
 	messageId: "0199a3a0-0000-7000-8000-000000000012",
 	turnId: "0199a3a0-0000-7000-8000-000000000011",
 };
 const callOptions = { toolCallId: "sdk-1", messages: [] } as never;
 
 /** For the cases whose results are short enough that nothing is kept as a file. */
-const noFiles: Pick<ThreadFiles.Interface, "write"> = {
+const noFiles: Pick<ConversationFiles.Interface, "write"> = {
 	write: () => Effect.die(new Error("No result here is long enough to keep as a file")),
 };
 
@@ -222,7 +222,7 @@ describe("a recorded tool with a long result", () => {
 				Effect.gen(function* () {
 					const text = yield* Stream.mkString(Stream.decodeText(content.stream));
 					const size = new TextEncoder().encode(text).byteLength;
-					if (size > maxSize) return yield* new ThreadFiles.FileTooLarge({ maxSize });
+					if (size > maxSize) return yield* new ConversationFiles.FileTooLarge({ maxSize });
 					written.push({ text, contentType: content.contentType, toolCallId });
 					return { id: fileId, contentType: content.contentType, size };
 				}),
@@ -231,7 +231,7 @@ describe("a recorded tool with a long result", () => {
 	}
 
 	/** Runs `probe` returning `output`, with its files written to `files`. */
-	async function callWith(output: unknown, files: Pick<ThreadFiles.Interface, "write">) {
+	async function callWith(output: unknown, files: Pick<ConversationFiles.Interface, "write">) {
 		const calls = fakeCalls();
 		const probe = recorded(
 			"probe",
@@ -263,7 +263,7 @@ describe("a recorded tool with a long result", () => {
 		});
 		expect(written[0]?.text.startsWith(given.preview)).toBe(true);
 		expect(given.preview.length).toBeLessThan(MAX_RESULT_CHARACTERS);
-		expect(given.note).toContain("read_thread_file");
+		expect(given.note).toContain("read_conversation_file");
 	});
 
 	it("keeps a connection's text, with JSON sent on one line pretty-printed so it has lines to read", async () => {
@@ -328,7 +328,7 @@ describe("a recorded tool with a long result", () => {
 		expect(given).toMatchObject({ status: "failed" });
 	});
 
-	it("counts a final newline as ending the last line, as read_thread_file does", async () => {
+	it("counts a final newline as ending the last line, as read_conversation_file does", async () => {
 		const output = "line\n".repeat(20_000);
 
 		const { given } = await callReturning(output);

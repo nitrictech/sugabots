@@ -8,10 +8,10 @@ import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import type { BlobStore } from "../../blob-store/blob-store.ts";
 import { serviceOperations } from "../../database/database.ts";
-import { ThreadFiles } from "../thread-files/thread-files.ts";
+import { ConversationFiles } from "../../files/conversation-files.ts";
 
 /**
- * Files people attach to messages in a conversation, kept in its thread.
+ * Files people attach to messages in a conversation, kept in its conversation.
  * Anyone who can see the conversation can upload to it, and read what was attached there.
  */
 export interface Interface {
@@ -19,7 +19,7 @@ export interface Interface {
 	 * Keeps `stream` as an upload the actor can attach to a message they send
 	 * to the conversation, as `type`, or, when that is missing or says only that it is
 	 * bytes, as the type its name suggests. Fails with `FileTooLarge` past
-	 * `MAX_ATTACHMENT_BYTES`, or below it past what the thread keeps, and with
+	 * `MAX_ATTACHMENT_BYTES`, or below it past what the conversation keeps, and with
 	 * `TooManyUnsentUploads` once the actor has a message's worth unsent.
 	 */
 	readonly upload: <E>(input: {
@@ -28,11 +28,11 @@ export interface Interface {
 		type: string | undefined;
 		stream: Stream.Stream<Uint8Array, E>;
 	}) => Effect.Effect<
-		ThreadFiles.Upload,
+		ConversationFiles.Upload,
 		| E
 		| ResourceHidden
-		| ThreadFiles.FileTooLarge
-		| ThreadFiles.TooManyUnsentUploads
+		| ConversationFiles.FileTooLarge
+		| ConversationFiles.TooManyUnsentUploads
 		| BlobStore.Failure,
 		CurrentActor.Service
 	>;
@@ -45,15 +45,15 @@ export interface Interface {
 		fileId: string;
 	}) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
 	/**
-	 * A file attached to a message in the conversation. Any other file in its thread,
+	 * A file attached to a message in the conversation. Any other file in its conversation,
 	 * such as an upload not yet sent or a tool call's result, is not found.
 	 */
 	readonly read: (input: {
 		conversationId: string;
 		fileId: string;
 	}) => Effect.Effect<
-		ThreadFiles.StoredFile,
-		ResourceHidden | ThreadFiles.FileNotFound | BlobStore.Failure,
+		ConversationFiles.StoredFile,
+		ResourceHidden | ConversationFiles.FileNotFound | BlobStore.Failure,
 		CurrentActor.Service
 	>;
 }
@@ -63,7 +63,7 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ChatFiles");
 	const visibility = yield* Visibility.Service;
-	const files = yield* ThreadFiles.Service;
+	const files = yield* ConversationFiles.Service;
 
 	return Service.of({
 		upload: ({ conversationId, name, type, stream }) =>
@@ -73,7 +73,7 @@ export const make = Effect.gen(function* () {
 					const conversation = yield* visibility.conversation(conversationId);
 					const { userId } = yield* CurrentActor.Service;
 					return yield* files.upload({
-						threadId: conversation.id,
+						conversationId: conversation.id,
 						uploaderId: userId,
 						name,
 						maxSize: MAX_ATTACHMENT_BYTES,
@@ -89,7 +89,7 @@ export const make = Effect.gen(function* () {
 					const conversation = yield* visibility.conversation(conversationId);
 					const { userId } = yield* CurrentActor.Service;
 					yield* files.removeUnsentUpload({
-						threadId: conversation.id,
+						conversationId: conversation.id,
 						uploaderId: userId,
 						fileId,
 					});
@@ -99,7 +99,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"read",
 				Effect.flatMap(visibility.conversation(conversationId), (conversation) =>
-					files.readMessageFile({ threadId: conversation.id, fileId }),
+					files.readMessageFile({ conversationId: conversation.id, fileId }),
 				),
 			),
 	});
@@ -107,7 +107,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([Visibility.layer, ThreadFiles.layer]));
+export const layer = layerNoDeps.pipe(Layer.provide([Visibility.layer, ConversationFiles.layer]));
 
 /** What a browser calls a file whose type it does not know. */
 const UNKNOWN_MEDIA_TYPE = "application/octet-stream";

@@ -1,43 +1,43 @@
 import {
+	type ConversationKind,
 	handleFromName,
 	mentionedHandles,
 	mentionsOnlyPeople,
-	type ThreadType,
 } from "@sugabots/contracts";
 import { eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import type { Executor, QueryFailure } from "../../database/database.ts";
 import {
-	agent,
+	bot,
+	channelMember,
+	conversationParticipant,
 	message,
-	podMember,
+	placedConversation,
 	type TurnReason,
-	thread,
-	threadParticipant,
 	user,
 } from "../../database/schema.ts";
-import { crewAgent, inChannel } from "../threads/participants.ts";
+import { inChannel, madeByPeople } from "../repository/participants.ts";
 
 /** The message a person's message replies to. */
 const repliedTo = alias(message, "replied_to");
 
 /**
- * Who has the floor: which agent, if any, speaks after a person's message.
- * An agent's message hands the floor to nobody: the person who asked reads
+ * Who has the floor: which bot, if any, speaks after a person's message.
+ * A bot's message hands the floor to nobody: the person who asked reads
  * the answer and decides what happens next.
  *
- * The decision is a pure function of the message and the thread, so it can be
+ * The decision is a pure function of the message and the conversation, so it can be
  * read and tested on its own; `FloorControl.giveFloor` loads what it needs,
- * applies it, and asks for the turns. People post in three types of thread:
+ * applies it, and asks for the turns. People post in three types of conversation:
  *
- * - A channel's chat or thread (`pod_chat`), where bots reply only when asked:
- *   1. Mentioning anyone: every bot it mentions, each taking a turn at once.
- *   2. Otherwise, replying to a bot's message: that bot.
+ * - A channel's main chat or thread (`channel_conversation`), where bots reply only when asked:
+ *   1. Mentioning bots: every bot it mentions, each taking a turn at once.
+ *   2. Otherwise, replying to a bot's message: that bot, though it mentions only people.
  *   3. Otherwise nobody, as its people talk to each other.
- * - A bot's task (`conversation`) or an automation's thread (`routine_feed`):
+ * - A bot's task (`task`) or an automation's feed (`automation_feed`):
  *   1. Mentioning only people: nobody.
- *   2. Otherwise its bot, whichever bots the person mentions. The thread is
+ *   2. Otherwise its bot, whichever bots the person mentions. The conversation is
  *      that bot's, so another bot the person names is reached by that bot
  *      collaborating, not by joining.
  *
@@ -46,114 +46,113 @@ const repliedTo = alias(message, "replied_to");
  */
 
 export interface FloorInput {
-	threadType: ThreadType;
+	conversationKind: ConversationKind;
 	/** What the message says, for mentions. */
 	content: string;
-	/** The bot the thread is with; null in a channel or a direct message. */
-	hostAgentId: string | null;
+	/** The bot the conversation is with; null in a channel or a direct message. */
+	conversationBotId: string | null;
 	/** The bots addressable by handle: a channel's bots, or else every bot in the workspace. */
-	crew: ReadonlyArray<{ id: string; handle: string }>;
-	/** Handles of the people who may be mentioned here: the thread's people and the channel's members. */
+	mentionableBots: ReadonlyArray<{ id: string; handle: string }>;
+	/** Handles of the people who may be mentioned here: the conversation's people and the channel's members. */
 	peopleHandles: ReadonlySet<string>;
-	/** The agent that wrote the message this one replies to, if an agent did. */
-	repliedToAgentId: string | undefined;
+	/** The bot that wrote the message this one replies to, if a bot did. */
+	repliedToBotId: string | undefined;
 }
 
 export type FloorDecision =
-	| { kind: "turns"; agents: Array<{ agentId: string; reason: TurnReason }> }
+	| { kind: "turns"; bots: Array<{ botId: string; reason: TurnReason }> }
 	| { kind: "nobody" };
 
 const NOBODY: FloorDecision = { kind: "nobody" };
 
 export function decideFloor(input: FloorInput): FloorDecision {
 	const mentioned = mentionedHandles(input.content);
-	const mentionedAgents = input.crew.filter((member) => mentioned.includes(member.handle));
+	const mentionedBots = input.mentionableBots.filter((member) => mentioned.includes(member.handle));
 	const forPeopleOnly = mentionsOnlyPeople(mentioned, {
-		botHandles: new Set(input.crew.map((member) => member.handle)),
+		botHandles: new Set(input.mentionableBots.map((member) => member.handle)),
 		peopleHandles: input.peopleHandles,
 	});
-	if (input.threadType === "pod_chat") {
-		if (mentionedAgents.length > 0) {
+	if (input.conversationKind === "channel_conversation") {
+		if (mentionedBots.length > 0) {
 			return {
 				kind: "turns",
-				agents: mentionedAgents.map((member) => ({ agentId: member.id, reason: "mention" })),
+				bots: mentionedBots.map((member) => ({ botId: member.id, reason: "mention" })),
 			};
 		}
-		const repliedTo = input.crew.find((member) => member.id === input.repliedToAgentId);
-		return repliedTo && !forPeopleOnly
-			? { kind: "turns", agents: [{ agentId: repliedTo.id, reason: "reply" }] }
-			: NOBODY;
+		const repliedTo = input.mentionableBots.find((member) => member.id === input.repliedToBotId);
+		return repliedTo ? { kind: "turns", bots: [{ botId: repliedTo.id, reason: "reply" }] } : NOBODY;
 	}
-	const { hostAgentId } = input;
-	if (hostAgentId === null || forPeopleOnly) return NOBODY;
-	if (input.threadType !== "conversation" && input.threadType !== "routine_feed") return NOBODY;
-	const reason = mentionedAgents.some((member) => member.id === hostAgentId)
+	const { conversationBotId } = input;
+	if (conversationBotId === null || forPeopleOnly) return NOBODY;
+	if (input.conversationKind !== "task" && input.conversationKind !== "automation_feed")
+		return NOBODY;
+	const reason = mentionedBots.some((member) => member.id === conversationBotId)
 		? "mention"
 		: "default";
-	return { kind: "turns", agents: [{ agentId: hostAgentId, reason }] };
+	return { kind: "turns", bots: [{ botId: conversationBotId, reason }] };
 }
 
 /** A person's message, committed, that somebody may answer. */
 export interface FloorMessage {
 	id: string;
-	threadId: string;
+	conversationId: string;
 	content: string;
 }
 
 /**
- * What `decideFloor` needs from the database, for one thread and message.
+ * What `decideFloor` needs from the database, for one conversation and message.
  *
- * `crew` is every bot added to the channel, or outside a channel every bot in
- * the workspace, rather than the thread's participants: a person may mention
- * a bot that has not joined the thread yet, and reading the mention against
+ * `mentionableBots` is every bot added to the channel, or outside a channel every bot in
+ * the workspace, rather than the conversation's participants: a person may mention
+ * a bot that has not joined the conversation yet, and reading the mention against
  * who is already in it would leave every first mention unrecognised. People
- * are read the same way: the channel's members, and anyone in the thread who
+ * are read the same way: the channel's members, and anyone in the conversation who
  * no longer is one.
  */
 export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 	db: Executor,
 	committed: FloorMessage,
 ): Effect.fn.Return<Omit<FloorInput, "content">, QueryFailure> {
-	// One round trip: the crew and the people ride along as JSON beside the thread.
+	// One round trip: the mentionableBots and the people ride along as JSON beside the conversation.
 	const [scope] = yield* db
 		.select({
-			hostAgentId: thread.hostAgentId,
-			threadType: thread.type,
-			crew: sql<Array<{ id: string; handle: string }>>`(
-				select coalesce(json_agg(json_build_object('id', ${agent.id}, 'handle', ${agent.handle})), '[]'::json)
-				from ${agent}
-				where case when ${thread.podId} is null
-					then ${agent.workspaceId} = ${thread.workspaceId} and ${crewAgent}
-					else ${inChannel(thread.podId)} end
+			conversationBotId: placedConversation.botId,
+			conversationKind: placedConversation.kind,
+			mentionableBots: sql<Array<{ id: string; handle: string }>>`(
+				select coalesce(json_agg(json_build_object('id', ${bot.id}, 'handle', ${bot.handle})), '[]'::json)
+				from ${bot}
+				where case when ${placedConversation.channelId} is null
+					then ${bot.workspaceId} = ${placedConversation.workspaceId} and ${madeByPeople}
+					else ${inChannel(placedConversation.channelId)} end
 			)`,
 			// Not only the channel's members: people who left the channel stay in its
-			// threads, and can still be mentioned there.
+			// conversations, and can still be mentioned there.
 			peopleNames: sql<string[]>`(
 				select coalesce(json_agg(${user.name}), '[]'::json)
 				from ${user}
 				where ${user.id} in (
-					select ${podMember.userId} from ${podMember} where ${podMember.podId} = ${thread.podId}
+					select ${channelMember.userId} from ${channelMember} where ${channelMember.channelId} = ${placedConversation.channelId}
 					union
-					select ${threadParticipant.userId} from ${threadParticipant} where ${threadParticipant.threadId} = ${thread.id}
+					select ${conversationParticipant.userId} from ${conversationParticipant} where ${conversationParticipant.conversationId} = ${placedConversation.id}
 				)
 			)`,
-			repliedToAgentId: sql<string | null>`(${db
-				.select({ authorAgentId: repliedTo.authorAgentId })
+			repliedToBotId: sql<string | null>`(${db
+				.select({ authorBotId: repliedTo.authorBotId })
 				.from(message)
 				.innerJoin(repliedTo, eq(repliedTo.id, message.replyToMessageId))
 				.where(eq(message.id, committed.id))})`,
 		})
-		.from(thread)
-		.where(eq(thread.id, committed.threadId))
+		.from(placedConversation)
+		.where(eq(placedConversation.id, committed.conversationId))
 		.limit(1);
 	if (!scope) {
-		throw new Error("The thread this message is in no longer exists");
+		throw new Error("The conversation this message is in no longer exists");
 	}
 	return {
-		threadType: scope.threadType,
-		hostAgentId: scope.hostAgentId,
-		crew: scope.crew,
+		conversationKind: scope.conversationKind,
+		conversationBotId: scope.conversationBotId,
+		mentionableBots: scope.mentionableBots,
 		peopleHandles: new Set(scope.peopleNames.map(handleFromName)),
-		repliedToAgentId: scope.repliedToAgentId ?? undefined,
+		repliedToBotId: scope.repliedToBotId ?? undefined,
 	};
 });

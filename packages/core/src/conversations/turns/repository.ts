@@ -16,23 +16,23 @@ import {
 } from "../../database/database.ts";
 import {
 	ACTIVE_TURN_STATUSES,
+	conversation,
 	message,
 	type StoredMessagePart,
 	type TurnReason,
-	thread,
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
+import { ConversationFiles } from "../../files/conversation-files.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { ThreadFiles } from "../thread-files/thread-files.ts";
-import { type ParticipantRow, toMessage } from "../threads/participants.ts";
+import { type ParticipantRow, toMessage } from "../repository/participants.ts";
 import {
 	type Ended,
 	endedAs,
 	type FollowUp,
-	ROUTINE_EXECUTION_ENDED,
+	RUN_ENDED,
 	runsAgainAfterFailure,
 	TURN_CANCELLED,
 	TURN_STOPPED_UNEXPECTEDLY,
@@ -52,25 +52,25 @@ import { WorkAdmission } from "./work-admission.ts";
  * refuses writes nothing. Commands that end a turn's run also end its
  * unfinished tool calls, through `ToolCallRepository`.
  *
- * An agent's turn writes a reply into its thread. A system agent's turn (the
- * Scribe summarising, the Compaction agent compacting) writes something else
+ * A bot's turn writes a reply into its conversation. A system bot's turn (the
+ * Summariser summarising, the Compaction bot compacting) writes something else
  * instead, so those have commands of their own and announce nothing.
  */
 export interface Interface {
 	/**
-	 * Opens the turn an agent takes on a trigger message, with its reply: starts
+	 * Opens the turn a bot takes on a trigger message, with its reply: starts
 	 * it, or reopens it for another run. A turn that may not run again says
-	 * why, and how it ended if opening it ended it. A routine run that takes no
+	 * why, and how it ended if opening it ended it. An automation run that takes no
 	 * more work (see `WorkAdmission`) opens no turn, and ends the one it
 	 * finds.
 	 */
 	readonly openReplyTurn: (
 		request: ReplyTurnRequest,
 	) => Effect.Effect<OpenedReplyTurn | NotRunnable>;
-	/** Opens a system agent's turn on the message it works up to, as `openReplyTurn` does. */
-	readonly openSystemAgentTurn: (
-		request: SystemAgentTurnRequest,
-	) => Effect.Effect<OpenedSystemAgentTurn | NotRunnable>;
+	/** Opens a system bot's turn on the message it works up to, as `openReplyTurn` does. */
+	readonly openSystemBotTurn: (
+		request: SystemBotTurnRequest,
+	) => Effect.Effect<OpenedSystemBotTurn | NotRunnable>;
 	/** Persists the reply so far, so a crash loses at most a second of text. */
 	readonly saveReply: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
 	/**
@@ -84,14 +84,17 @@ export interface Interface {
 		file: ReplyFile,
 	) => Effect.Effect<
 		FilePart,
-		ReplyEnded | ThreadFiles.TooManyReplyFiles | ThreadFiles.FileTooLarge | BlobStore.Failure
+		| ReplyEnded
+		| ConversationFiles.TooManyReplyFiles
+		| ConversationFiles.FileTooLarge
+		| BlobStore.Failure
 	>;
 	/** The files the turn's reply carries, in the order attached. */
 	readonly replyFiles: (turn: ReplyTurn) => Effect.Effect<readonly FilePart[]>;
 	/**
 	 * Parks the turn with this model transcript until people decide the tool
 	 * approvals it asked for. `false` when the turn is no longer running,
-	 * somebody asked it to stop, or its routine run takes no more turns.
+	 * somebody asked it to stop, or its automation run takes no more turns.
 	 */
 	readonly suspend: (
 		turn: ReplyTurn,
@@ -115,18 +118,18 @@ export interface Interface {
 	) => Effect.Effect<boolean>;
 	/** Stops the run short, keeping the reply written so far. */
 	readonly cancel: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
-	readonly completeSystemAgentTurn: (
+	readonly completeSystemBotTurn: (
 		turnId: string,
 		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
-	readonly failSystemAgentTurn: (turnId: string, userMessage: UserText) => Effect.Effect<void>;
+	readonly failSystemBotTurn: (turnId: string, userMessage: UserText) => Effect.Effect<void>;
 	/** Asks the turn to stop, and says who has to be told. */
 	readonly requestCancel: (turnId: string) => Effect.Effect<CancelRequest>;
 	/** isCancellationRequested reports whether somebody asked the turn to stop, or it is gone. */
 	readonly isCancellationRequested: (turnId: string) => Effect.Effect<boolean>;
 	/** Records a turn waiting for approvals as cancelled. Does nothing once it stopped waiting. */
 	readonly cancelWaiting: (request: {
-		agentId: string;
+		botId: string;
 		triggerMessageId: string;
 	}) => Effect.Effect<void>;
 	/**
@@ -145,13 +148,13 @@ export interface Interface {
 	 */
 	readonly markActed: (turnId: string) => Effect.Effect<void>;
 	/**
-	 * Cancels the turns waiting in these threads, and asks the running ones to
-	 * stop, because the routine run they work for ended. A running turn another
+	 * Cancels the turns waiting in these conversations, and asks the running ones to
+	 * stop, because the automation run they work for ended. A running turn another
 	 * transaction holds is skipped: its workflow is recording how it ended.
 	 * Returns the workflow executions of the waiting turns it cancelled, which
 	 * are still waiting and have to be told.
 	 */
-	readonly cancelUnder: (threadIds: readonly string[]) => Effect.Effect<readonly string[]>;
+	readonly cancelUnder: (conversationIds: readonly string[]) => Effect.Effect<readonly string[]>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -163,7 +166,7 @@ export const make = Effect.gen(function* () {
 	const { emit } = yield* ConversationEvents.Service;
 	const admission = yield* WorkAdmission.Service;
 	const toolCalls = yield* ToolCallRepository.Service;
-	const files = yield* ThreadFiles.Service;
+	const files = yield* ConversationFiles.Service;
 
 	/** Writes the state the lifecycle decided, plus what else the command records. */
 	const write = (
@@ -193,7 +196,7 @@ export const make = Effect.gen(function* () {
 	/**
 	 * Ends the reply and the unfinished tool calls of a turn the lifecycle
 	 * ended mid-run, telling people `userMessage` of the calls, and announces
-	 * how it ended. A system agent's turn has no reply, so there is nothing to
+	 * how it ended. A system bot's turn has no reply, so there is nothing to
 	 * announce.
 	 */
 	const endRun = (turnId: string, state: TurnState, userMessage: UserText) =>
@@ -204,13 +207,13 @@ export const make = Effect.gen(function* () {
 					.select({
 						messageId: message.id,
 						content: message.content,
-						threadId: turn.threadId,
-						agentId: turn.agentId,
-						workspaceId: thread.workspaceId,
+						conversationId: turn.conversationId,
+						botId: turn.botId,
+						workspaceId: conversation.workspaceId,
 					})
 					.from(message)
 					.innerJoin(turn, eq(turn.id, message.turnId))
-					.innerJoin(thread, eq(thread.id, turn.threadId))
+					.innerJoin(conversation, eq(conversation.id, turn.conversationId))
 					.where(eq(message.turnId, turnId))
 					.limit(1),
 			);
@@ -232,7 +235,7 @@ export const make = Effect.gen(function* () {
 			locked
 				? {
 						id: locked.id,
-						agentId: locked.agentId,
+						botId: locked.botId,
 						state: locked.state,
 						decided: transition(locked.state, event),
 					}
@@ -291,7 +294,7 @@ export const make = Effect.gen(function* () {
 		});
 
 	const insertTurn = (
-		request: SystemAgentTurnRequest & Partial<Pick<ReplyTurnRequest, "reason" | "owner">>,
+		request: SystemBotTurnRequest & Partial<Pick<ReplyTurnRequest, "reason" | "owner">>,
 	) =>
 		Effect.gen(function* () {
 			const startedAt = yield* DateTime.nowAsDate;
@@ -299,8 +302,8 @@ export const make = Effect.gen(function* () {
 				db
 					.insert(turn)
 					.values({
-						threadId: request.threadId,
-						agentId: request.agentId,
+						conversationId: request.conversationId,
+						botId: request.botId,
 						triggerMessageId: request.triggerMessageId,
 						owner: request.owner ?? null,
 						runs: 1,
@@ -314,30 +317,27 @@ export const make = Effect.gen(function* () {
 			return created.id;
 		});
 
-	/** Ends `existing`, if it is still active, because its routine run takes no more work. */
-	const endForEndedRoutine = (existing: { id: string; state: TurnState } | undefined) =>
+	/** Ends `existing`, if it is still active, because its automation run takes no more work. */
+	const endForEndedAutomation = (existing: { id: string; state: TurnState } | undefined) =>
 		Effect.gen(function* () {
-			const reason = "The Routine execution has ended";
+			const reason = "The automation run has ended";
 			const decided =
 				existing &&
 				transition(
 					existing.state,
-					TurnEvent.Abandon({ status: "cancelled", userMessage: ROUTINE_EXECUTION_ENDED }),
+					TurnEvent.Abandon({ status: "cancelled", userMessage: RUN_ENDED }),
 				);
 			if (!existing || decided?._tag !== "Next") return notRunnable(reason);
 			yield* write(existing.id, decided.state);
-			return notRunnable(
-				reason,
-				yield* endRun(existing.id, decided.state, ROUTINE_EXECUTION_ENDED),
-			);
+			return notRunnable(reason, yield* endRun(existing.id, decided.state, RUN_ENDED));
 		});
 
 	const announceStart = (request: ReplyTurnRequest, turnId: string, reply: Message) =>
 		emit([
 			ConversationEvent.TurnStarted({
-				threadId: request.threadId,
+				conversationId: request.conversationId,
 				turnId,
-				agentId: request.agentId,
+				botId: request.botId,
 				reply,
 			}),
 		]);
@@ -352,13 +352,13 @@ export const make = Effect.gen(function* () {
 						never,
 						Database | Transaction
 					> {
-						const acceptsWork = yield* admission.admits(request.threadId);
+						const acceptsWork = yield* admission.admits(request.conversationId);
 						const existing = yield* lockedTurn(onTrigger(request));
-						if (!acceptsWork) return yield* endForEndedRoutine(existing);
+						if (!acceptsWork) return yield* endForEndedAutomation(existing);
 						if (!existing) {
 							const replyValues = {
-								threadId: request.threadId,
-								authorAgentId: request.agentId,
+								conversationId: request.conversationId,
+								authorBotId: request.botId,
 								kind: "text" as const,
 								status: "streaming" as const,
 								parts: [],
@@ -425,7 +425,7 @@ export const make = Effect.gen(function* () {
 						// parts, and the files it attached with them.
 						yield* toolCalls.forgetReply(restarted.id);
 						yield* files.removeReplyAttachments({
-							threadId: restarted.threadId,
+							conversationId: restarted.conversationId,
 							messageId: restarted.id,
 						});
 						const reply = toMessage(restarted, request.author);
@@ -435,12 +435,12 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		openSystemAgentTurn: (request) =>
+		openSystemBotTurn: (request) =>
 			operation(
-				"openSystemAgentTurn",
+				"openSystemBotTurn",
 				transaction(
 					Effect.gen(function* (): Effect.fn.Return<
-						OpenedSystemAgentTurn | NotRunnable,
+						OpenedSystemBotTurn | NotRunnable,
 						never,
 						Database | Transaction
 					> {
@@ -458,7 +458,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"attachFile",
 				files.withReplyFile(
-					{ threadId: reply.threadId, messageId: reply.messageId, ...file },
+					{ conversationId: reply.conversationId, messageId: reply.messageId, ...file },
 					(stored) =>
 						transaction(
 							Effect.gen(function* () {
@@ -476,7 +476,7 @@ export const make = Effect.gen(function* () {
 								const carried = yield* files.replyAttachments(reply.messageId);
 								yield* emit([
 									ConversationEvent.MessageFilesChanged({
-										threadId: reply.threadId,
+										conversationId: reply.conversationId,
 										messageId: reply.messageId,
 										files: carried,
 									}),
@@ -493,18 +493,22 @@ export const make = Effect.gen(function* () {
 				"suspend",
 				transaction(
 					Effect.gen(function* () {
-						if (!(yield* admission.admits(reply.threadId))) return false;
+						if (!(yield* admission.admits(reply.conversationId))) return false;
 						const locked = yield* lockAndTransition(eq(turn.id, reply.turnId), TurnEvent.Suspend());
 						if (locked?.decided._tag !== "Next") return false;
 						yield* write(locked.id, locked.decided.state, { checkpoint });
 						yield* toolCalls.requestApprovals(
-							{ threadId: reply.threadId, messageId: reply.messageId, turnId: locked.id },
+							{
+								conversationId: reply.conversationId,
+								messageId: reply.messageId,
+								turnId: locked.id,
+							},
 							approvals,
 						);
 						yield* writeReply(reply, checkpoint.reply);
 						yield* emit([
 							ConversationEvent.TurnSuspended({
-								threadId: reply.threadId,
+								conversationId: reply.conversationId,
 								workspaceId: reply.workspaceId,
 								turnId: locked.id,
 							}),
@@ -528,10 +532,10 @@ export const make = Effect.gen(function* () {
 						yield* write(locked.id, locked.decided.state, measurementColumns(completion));
 						yield* emit([
 							ConversationEvent.TurnCompleted({
-								threadId: reply.threadId,
+								conversationId: reply.conversationId,
 								workspaceId: reply.workspaceId,
 								turnId: locked.id,
-								agentId: reply.agentId,
+								botId: reply.botId,
 								messageId: reply.messageId,
 								content: draft.content,
 								contextTokens: completion.contextTokens,
@@ -559,10 +563,10 @@ export const make = Effect.gen(function* () {
 						yield* toolCalls.abandonUnfinished([locked.id], userMessage);
 						yield* emit([
 							ConversationEvent.TurnFailed({
-								threadId: reply.threadId,
+								conversationId: reply.conversationId,
 								workspaceId: reply.workspaceId,
 								turnId: locked.id,
-								agentId: locked.agentId,
+								botId: locked.botId,
 								messageId: reply.messageId,
 								userMessage,
 								willRetry,
@@ -585,10 +589,10 @@ export const make = Effect.gen(function* () {
 						yield* toolCalls.abandonUnfinished([locked.id], TURN_CANCELLED);
 						yield* emit([
 							ConversationEvent.TurnCancelled({
-								threadId: reply.threadId,
+								conversationId: reply.conversationId,
 								workspaceId: reply.workspaceId,
 								turnId: locked.id,
-								agentId: locked.agentId,
+								botId: locked.botId,
 								messageId: reply.messageId,
 								content: draft.content,
 							}),
@@ -597,9 +601,9 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		completeSystemAgentTurn: (turnId, contextTokens) =>
+		completeSystemBotTurn: (turnId, contextTokens) =>
 			operation(
-				"completeSystemAgentTurn",
+				"completeSystemBotTurn",
 				transaction(
 					Effect.gen(function* () {
 						const locked = yield* lockAndTransition(eq(turn.id, turnId), TurnEvent.Complete());
@@ -609,9 +613,9 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		failSystemAgentTurn: (turnId, userMessage) =>
+		failSystemBotTurn: (turnId, userMessage) =>
 			operation(
-				"failSystemAgentTurn",
+				"failSystemBotTurn",
 				transaction(
 					Effect.gen(function* () {
 						const locked = yield* lockAndTransition(
@@ -639,7 +643,10 @@ export const make = Effect.gen(function* () {
 						}
 						// The turn's workflow stops on this event; it reads the flag only as a fallback.
 						yield* emit([
-							ConversationEvent.TurnCancelRequested({ threadId: locked.threadId, turnId }),
+							ConversationEvent.TurnCancelRequested({
+								conversationId: locked.conversationId,
+								turnId,
+							}),
 						]);
 						return { _tag: "Announced" };
 					}),
@@ -702,38 +709,38 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.asVoid),
 			),
 
-		cancelUnder: (threadIds) =>
+		cancelUnder: (conversationIds) =>
 			operation(
 				"cancelUnder",
 				transaction(
 					Effect.gen(function* () {
-						if (threadIds.length === 0) return [];
-						const under = inArray(turn.threadId, [...threadIds]);
+						if (conversationIds.length === 0) return [];
+						const under = inArray(turn.conversationId, [...conversationIds]);
 						// Settlement runs in a transaction of its own, after its trigger
 						// commits, so whoever holds a waiting turn is not waiting on it.
 						const waiting = yield* query((db) =>
 							db
-								.select({ ...stateColumns, threadId: turn.threadId })
+								.select({ ...stateColumns, conversationId: turn.conversationId })
 								.from(turn)
 								.where(and(under, eq(turn.status, "waiting")))
 								.for("update"),
 						);
 						const running = yield* query((db) =>
 							db
-								.select({ ...stateColumns, threadId: turn.threadId })
+								.select({ ...stateColumns, conversationId: turn.conversationId })
 								.from(turn)
 								.where(and(under, eq(turn.status, "running")))
 								.for("update", { skipLocked: true }),
 						);
 						const ownersToTell = yield* Effect.forEach([...waiting, ...running], (row) =>
 							Effect.gen(function* () {
-								const decided = transition(stateOf(row), TurnEvent.RoutineEnded());
+								const decided = transition(stateOf(row), TurnEvent.AutomationEnded());
 								if (decided._tag === "Refused") return [];
 								yield* write(row.id, decided.state);
 								if (decided.followUp?._tag === "AnnounceCancelRequest") {
 									yield* emit([
 										ConversationEvent.TurnCancelRequested({
-											threadId: row.threadId,
+											conversationId: row.conversationId,
 											turnId: row.id,
 										}),
 									]);
@@ -753,9 +760,11 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 /** Ending a turn ends its tool calls, and restarting a reply removes the files it attached. */
-export const layer = layerNoDeps.pipe(Layer.provide([ToolCallRepository.layer, ThreadFiles.layer]));
+export const layer = layerNoDeps.pipe(
+	Layer.provide([ToolCallRepository.layer, ConversationFiles.layer]),
+);
 
-/** A file an agent attaches to its reply: its name, media type and bytes. */
+/** A file a bot attaches to its reply: its name, media type and bytes. */
 export interface ReplyFile {
 	readonly name: string;
 	readonly contentType: string;
@@ -772,21 +781,21 @@ export class ReplyEnded extends Data.TaggedError("ReplyEnded") implements UserFa
 	}
 }
 
-/** Where an agent's turn is: its thread and workspace, and the reply it writes. */
+/** Where a bot's turn is: its conversation and workspace, and the reply it writes. */
 export interface ReplyTurn {
 	readonly turnId: string;
-	readonly threadId: string;
+	readonly conversationId: string;
 	readonly workspaceId: string;
-	readonly agentId: string;
+	readonly botId: string;
 	readonly reason: TurnReason | undefined;
 	readonly messageId: string;
 }
 
 interface ReplyTurnRequest {
-	readonly threadId: string;
-	readonly agentId: string;
+	readonly conversationId: string;
+	readonly botId: string;
 	readonly triggerMessageId: string;
-	/** The agent's model, already resolved: a turn is never opened without one. */
+	/** The bot's model, already resolved: a turn is never opened without one. */
 	readonly model: string;
 	readonly reason: TurnReason | undefined;
 	/** The workflow execution running the turn. */
@@ -795,9 +804,9 @@ interface ReplyTurnRequest {
 	readonly author: ParticipantRow;
 }
 
-interface SystemAgentTurnRequest {
-	readonly threadId: string;
-	readonly agentId: string;
+interface SystemBotTurnRequest {
+	readonly conversationId: string;
+	readonly botId: string;
 	readonly triggerMessageId: string;
 	readonly model: string;
 }
@@ -811,7 +820,7 @@ interface OpenedReplyTurn {
 	readonly checkpoint: TurnCheckpoint | undefined;
 }
 
-interface OpenedSystemAgentTurn {
+interface OpenedSystemBotTurn {
 	readonly _tag: "Opened";
 	readonly turnId: string;
 }
@@ -832,7 +841,7 @@ const PlacedPart = Schema.Struct({ id: Schema.String, atOffset: Schema.Int });
 
 /**
  * The reply as the segment has it so far: the text, and where in that text the
- * agent made each collaboration and tool call. Stored as parts in that order.
+ * bot made each collaboration and tool call. Stored as parts in that order.
  */
 export const ReplyDraft = Schema.Struct({
 	content: Schema.String,
@@ -923,12 +932,9 @@ function measurementColumns(measured: ContextMeasurement) {
 	};
 }
 
-/** The turn an agent takes on a trigger message: there is at most one. */
-function onTrigger(request: { agentId: string; triggerMessageId: string }) {
-	return and(
-		eq(turn.triggerMessageId, request.triggerMessageId),
-		eq(turn.agentId, request.agentId),
-	);
+/** The turn a bot takes on a trigger message: there is at most one. */
+function onTrigger(request: { botId: string; triggerMessageId: string }) {
+	return and(eq(turn.triggerMessageId, request.triggerMessageId), eq(turn.botId, request.botId));
 }
 
 /** What the lifecycle needs to know of a turn, and its id. */
@@ -966,19 +972,24 @@ function stateOf(row: {
 		: { ...facts, status: row.status };
 }
 
-/** Locks the turn found by `condition`, and reads its state and thread. */
+/** Locks the turn found by `condition`, and reads its state and conversation. */
 const lockedTurn = (condition: SQL | undefined) =>
 	Effect.map(
 		query((db) =>
 			db
-				.select({ ...stateColumns, threadId: turn.threadId, agentId: turn.agentId })
+				.select({ ...stateColumns, conversationId: turn.conversationId, botId: turn.botId })
 				.from(turn)
 				.where(condition)
 				.limit(1)
 				.for("update"),
 		),
 		([row]) =>
-			row && { id: row.id, threadId: row.threadId, agentId: row.agentId, state: stateOf(row) },
+			row && {
+				id: row.id,
+				conversationId: row.conversationId,
+				botId: row.botId,
+				state: stateOf(row),
+			},
 	);
 
 function notRunnable(reason: string, ended?: Ended): NotRunnable {
@@ -989,9 +1000,9 @@ function notRunnable(reason: string, ended?: Ended): NotRunnable {
 function endAnnouncement(
 	reply: {
 		turnId: string;
-		threadId: string;
+		conversationId: string;
 		workspaceId: string;
-		agentId: string;
+		botId: string;
 		messageId: string;
 		content: string;
 	},
@@ -999,10 +1010,10 @@ function endAnnouncement(
 ): ConversationEvent {
 	return ended.state === "failed"
 		? ConversationEvent.TurnFailed({
-				threadId: reply.threadId,
+				conversationId: reply.conversationId,
 				workspaceId: reply.workspaceId,
 				turnId: reply.turnId,
-				agentId: reply.agentId,
+				botId: reply.botId,
 				messageId: reply.messageId,
 				userMessage: ended.error,
 				willRetry: false,

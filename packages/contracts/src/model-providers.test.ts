@@ -253,7 +253,7 @@ describe("a provider model update", () => {
 		expect(accepts({})).toBe(false);
 	});
 
-	it("leaves agents what the model has less what was switched off", () => {
+	it("leaves bots what the model has less what was switched off", () => {
 		expect(
 			effectiveCapabilities({
 				capabilities: ["tools", "vision", "images"],
