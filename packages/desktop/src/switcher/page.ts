@@ -14,126 +14,141 @@ declare global {
 const SHORTCUT_COUNT = 9;
 const IS_MAC = navigator.userAgent.includes("Mac");
 
-/** A row of the list: a workspace, or an account with none to open, such as one signed out. */
+/** A workspace, or an account with none to open, such as one signed out. */
 interface Place {
 	readonly id: string;
 	readonly slug: string | undefined;
 	readonly name: string;
-	readonly tile: string;
+	/** Where it is: the host, and who it's signed in as. */
+	readonly address: string;
 	readonly open: boolean;
-	/** The name, host and account, lowercased, which the filter matches. */
+	/** The name and address, lowercased, which the filter matches. */
 	readonly searchText: string;
 	readonly shortcut: number | undefined;
 }
 
-interface AccountPlaces {
-	readonly account: SwitcherAccount;
-	readonly places: readonly Place[];
+/** A row of the list, which the arrow keys move through and Enter activates. */
+interface Row {
+	/** Tells a row apart across renders, so it stays chosen when the list refreshes. */
+	readonly key: string;
+	readonly open: boolean;
+	readonly activate: () => void;
 }
 
 const filter = element("#filter", HTMLInputElement);
 const list = element("#places", HTMLDivElement);
 const empty = element("#empty", HTMLParagraphElement);
 
-let groups: readonly AccountPlaces[] = [];
-/** The places the filter leaves, in list order, which the arrow keys move through. */
-let shown: Place[] = [];
+let places: readonly Place[] = [];
+let rows: Row[] = [];
 let active = 0;
 
-/** Every saved account's places, numbered across all of them in order, as the Workspace menu numbers them. */
-function placesOf(accounts: readonly SwitcherAccount[]): AccountPlaces[] {
+/** Every saved account's places, numbered in order, as the Workspace menu numbers them. */
+function placesOf(accounts: readonly SwitcherAccount[]): Place[] {
 	let count = 0;
 	const nextShortcut = () => (++count <= SHORTCUT_COUNT ? count : undefined);
-	return accounts.map((account) => {
-		const context = `${account.host} ${account.account ?? ""}`;
+	return accounts.flatMap((account): Place[] => {
 		if (account.workspaces.length === 0) {
-			const name = account.account ? `Open ${account.host}` : "Sign in";
-			const place: Place = {
-				id: account.id,
-				slug: undefined,
-				name,
-				tile: initial(account.host),
-				open: account.open,
-				searchText: `${name} ${context}`.toLowerCase(),
-				shortcut: nextShortcut(),
-			};
-			return { account, places: [place] };
+			const address = account.account ?? "Not signed in";
+			return [
+				{
+					id: account.id,
+					slug: undefined,
+					name: account.host,
+					address,
+					open: account.open,
+					searchText: `${account.host} ${address}`.toLowerCase(),
+					shortcut: nextShortcut(),
+				},
+			];
 		}
-		const places = account.workspaces.map(
-			(workspace): Place => ({
-				id: account.id,
-				slug: workspace.slug,
-				name: workspace.name,
-				tile: initial(workspace.name),
-				open: workspace.open,
-				searchText: `${workspace.name} ${context}`.toLowerCase(),
-				shortcut: nextShortcut(),
-			}),
-		);
-		return { account, places };
+		const address = `${account.host} · ${account.account ?? ""}`;
+		return account.workspaces.map((workspace) => ({
+			id: account.id,
+			slug: workspace.slug,
+			name: workspace.name,
+			address,
+			open: workspace.open,
+			searchText: `${workspace.name} ${address}`.toLowerCase(),
+			shortcut: nextShortcut(),
+		}));
 	});
 }
 
 /**
- * Lists the places the filter matches, choosing the first match, or with no
- * filter the open one. With `keepActive`, the place chosen stays so while listed.
+ * Lists the places the filter matches, then adding an account, choosing the
+ * first match, or with no filter the open place. With `keepActive`, the row
+ * chosen stays so while listed.
  */
 function render({ keepActive }: { keepActive: boolean }): void {
 	const query = filter.value.trim().toLowerCase();
-	const previous = keepActive ? shown[active] : undefined;
-	shown = [];
+	const previousKey = keepActive ? rows[active]?.key : undefined;
+	const matching = places.filter((place) => place.searchText.includes(query));
+	rows = [];
 	list.replaceChildren(
-		...groups.flatMap(({ account, places }) => {
-			const matching = places.filter((place) => place.searchText.includes(query));
-			return matching.length > 0 ? [groupElement(account, matching)] : [];
-		}),
+		...matching.map((place) =>
+			rowElement(
+				{
+					key: `${place.id}/${place.slug ?? ""}`,
+					open: place.open,
+					activate: () => void window.switcher.open(place.id, place.slug),
+				},
+				placeContent(place),
+			),
+		),
+		rowElement(
+			{ key: "add", open: false, activate: () => void window.switcher.addAccount() },
+			addAccountContent(),
+		),
 	);
-	empty.hidden = shown.length > 0;
-	const keptIndex = previous ? shown.findIndex((place) => samePlace(place, previous)) : -1;
-	const openIndex = shown.findIndex((place) => place.open);
+	empty.textContent = places.length === 0 ? "No accounts added yet." : "No workspace matches.";
+	empty.hidden = matching.length > 0;
+	const keptIndex = rows.findIndex((row) => row.key === previousKey);
+	const openIndex = rows.findIndex((row) => row.open);
 	setActive(keptIndex >= 0 ? keptIndex : query === "" ? Math.max(openIndex, 0) : 0);
 }
 
-function groupElement(account: SwitcherAccount, places: readonly Place[]): HTMLDivElement {
-	const heading = document.createElement("div");
-	heading.className = "group-heading";
-	heading.id = `account-${account.id}`;
-	heading.append(
-		textElement("span", "host", account.host),
-		textElement("span", "account", account.account ?? "Not signed in"),
-	);
-	const group = document.createElement("div");
-	group.className = "group";
-	group.setAttribute("role", "group");
-	group.setAttribute("aria-labelledby", heading.id);
-	group.append(heading, ...places.map(optionElement));
-	return group;
-}
-
-function optionElement(place: Place): HTMLDivElement {
-	const index = shown.push(place) - 1;
+function rowElement(row: Row, content: readonly Node[]): HTMLDivElement {
+	const index = rows.push(row) - 1;
 	const option = document.createElement("div");
-	option.id = `place-${index}`;
-	option.className = "place";
+	option.id = `row-${index}`;
+	option.className = "row";
 	option.setAttribute("role", "option");
 	option.setAttribute("aria-selected", "false");
-	const tile = textElement("span", "tile", place.tile);
-	tile.style.setProperty("--hue", String(hue(`${place.id}/${place.slug ?? ""}`)));
-	tile.setAttribute("aria-hidden", "true");
-	option.append(tile, textElement("span", "name", place.name));
-	if (place.open) option.append(textElement("span", "current", "Open"));
-	if (place.shortcut !== undefined) {
-		option.append(textElement("kbd", "", `${IS_MAC ? "⌘" : "Ctrl+"}${place.shortcut}`));
-	}
+	option.append(...content);
 	option.addEventListener("mousemove", () => setActive(index));
-	option.addEventListener("click", () => void openPlace(place));
+	option.addEventListener("click", row.activate);
 	return option;
 }
 
+function placeContent(place: Place): Node[] {
+	const tile = textElement("span", "tile", initial(place.name));
+	tile.style.setProperty("--hue", String(hue(`${place.id}/${place.slug ?? ""}`)));
+	tile.classList.toggle("open", place.open);
+	tile.setAttribute("aria-hidden", "true");
+	const text = document.createElement("span");
+	text.className = "text";
+	text.append(
+		textElement("span", "name", place.name),
+		textElement("span", "address", place.address),
+	);
+	const content: Node[] = [tile, text];
+	if (place.shortcut !== undefined) {
+		content.push(textElement("kbd", "", `${IS_MAC ? "⌘" : "Ctrl "}${place.shortcut}`));
+	}
+	return content;
+}
+
+function addAccountContent(): Node[] {
+	const tile = textElement("span", "tile add", "+");
+	tile.setAttribute("aria-hidden", "true");
+	return [tile, textElement("span", "text", "Add an account")];
+}
+
 function setActive(index: number): void {
-	document.getElementById(`place-${active}`)?.setAttribute("aria-selected", "false");
+	document.getElementById(`row-${active}`)?.setAttribute("aria-selected", "false");
 	active = index;
-	const option = document.getElementById(`place-${active}`);
+	const option = document.getElementById(`row-${active}`);
 	if (!option) {
 		filter.removeAttribute("aria-activedescendant");
 		return;
@@ -141,14 +156,6 @@ function setActive(index: number): void {
 	option.setAttribute("aria-selected", "true");
 	option.scrollIntoView({ block: "nearest" });
 	filter.setAttribute("aria-activedescendant", option.id);
-}
-
-async function openPlace(place: Place): Promise<void> {
-	await window.switcher.open(place.id, place.slug);
-}
-
-function samePlace(one: Place, other: Place): boolean {
-	return one.id === other.id && one.slug === other.slug;
 }
 
 function textElement<K extends keyof HTMLElementTagNameMap>(
@@ -174,7 +181,14 @@ function hue(key: string): number {
 }
 
 async function load(): Promise<void> {
-	groups = placesOf(await window.switcher.accounts());
+	try {
+		places = placesOf(await window.switcher.accounts());
+	} catch (error) {
+		// Such as a development build started before this page's preload existed, which leaves no bridge.
+		empty.textContent = `Couldn't load your workspaces. ${error instanceof Error ? error.message : ""}`;
+		empty.hidden = false;
+		return;
+	}
 	render({ keepActive: true });
 }
 
@@ -182,23 +196,21 @@ filter.addEventListener("input", () => render({ keepActive: false }));
 filter.addEventListener("keydown", (event) => {
 	const number = Number(event.key);
 	if ((IS_MAC ? event.metaKey : event.ctrlKey) && number >= 1 && number <= SHORTCUT_COUNT) {
-		const place = groups.flatMap(({ places }) => places).find((one) => one.shortcut === number);
-		if (place) void openPlace(place);
+		const place = places.find((one) => one.shortcut === number);
+		if (place) void window.switcher.open(place.id, place.slug);
 		event.preventDefault();
 		return;
 	}
 	switch (event.key) {
 		case "ArrowDown":
-			setActive(Math.min(active + 1, shown.length - 1));
+			setActive(Math.min(active + 1, rows.length - 1));
 			break;
 		case "ArrowUp":
 			setActive(Math.max(active - 1, 0));
 			break;
-		case "Enter": {
-			const place = shown[active];
-			if (place) void openPlace(place);
+		case "Enter":
+			rows[active]?.activate();
 			break;
-		}
 		case "Escape":
 			if (filter.value === "") {
 				window.close();
@@ -212,10 +224,8 @@ filter.addEventListener("keydown", (event) => {
 	}
 	event.preventDefault();
 });
-element("#add", HTMLButtonElement).addEventListener("click", () => {
-	void window.switcher.addAccount();
-});
-window.switcher.onAccountsChanged(() => void load());
 
 filter.focus();
+// Before anything else uses the bridge, so a page without one says so.
 void load();
+window.switcher.onAccountsChanged(() => void load());

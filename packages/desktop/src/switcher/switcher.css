@@ -16,96 +16,80 @@ body {
 
 #places {
 	flex: 1;
-	padding: 6px 8px 8px;
+	padding: 8px;
 	overflow-y: auto;
 }
 
-.group + .group {
-	margin-top: 6px;
-}
-
-.group-heading {
-	display: flex;
-	align-items: baseline;
-	gap: 6px;
-	padding: 8px 8px 4px;
-	font-size: 12px;
-	white-space: nowrap;
-}
-
-.group-heading .host {
-	font-weight: 600;
-}
-
-.group-heading .account {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	color: var(--subtle-foreground);
-}
-
-.place {
+.row {
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 6px 8px;
-	border-radius: 8px;
+	gap: 12px;
+	padding: 8px 10px;
+	border-radius: 10px;
 	cursor: pointer;
 }
 
-.place[aria-selected="true"] {
+.row[aria-selected="true"] {
 	background: var(--hover);
 }
 
 .tile {
 	flex: none;
-	width: 28px;
-	height: 28px;
+	width: 40px;
+	height: 40px;
 	display: grid;
 	place-items: center;
-	border-radius: 7px;
+	border-radius: 10px;
 	background: hsl(var(--hue) 55% 45%);
 	color: #ffffff;
-	font-size: 13px;
+	font-size: 16px;
 	font-weight: 600;
 }
 
-.name {
+/* A ring around the open workspace's tile, set off from it by a gap. */
+.tile.open {
+	box-shadow:
+		0 0 0 2px var(--background),
+		0 0 0 4px var(--foreground);
+}
+
+.tile.add {
+	background: var(--chip);
+	color: var(--foreground);
+	font-size: 22px;
+	font-weight: 400;
+}
+
+.text {
 	flex: 1;
 	min-width: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.name,
+.address {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.current {
-	padding: 1px 8px;
-	border-radius: 999px;
-	background: var(--chip);
+.name {
+	font-weight: 600;
+}
+
+.address {
 	color: var(--muted-foreground);
-	font-size: 12px;
+	font-size: 13px;
 }
 
 kbd {
 	color: var(--subtle-foreground);
 	font: inherit;
-	font-size: 12px;
+	font-size: 13px;
 }
 
 #empty {
-	padding: 16px;
+	padding: 16px 16px 0;
 	text-align: center;
-}
-
-footer {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-	padding: 10px 12px;
-	border-top: 1px solid var(--border);
-}
-
-footer button {
-	padding: 6px 12px;
 }
