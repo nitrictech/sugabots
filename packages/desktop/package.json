@@ -7,7 +7,7 @@
 	"type": "module",
 	"main": "out/main/main.js",
 	"scripts": {
-		"start": "electron-vite dev --watch",
+		"start": "install-electron && electron-vite dev --watch",
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {

@@ -16,8 +16,10 @@ With `bun run dev` running, start it from the repository root with
 on change, reloading the setup page and restarting Electron for the main
 process and preload.
 
-The `electron` package downloads its binary on first run. On NixOS that binary
-can't find its libraries, so use nixpkgs' Electron of the same major version:
+The `electron` package doesn't download its binary when installed, so `start`
+runs its `install-electron` first, which does nothing once the binary is there.
+On NixOS that binary can't find its libraries, so use nixpkgs' Electron of the
+same major version:
 
 ```sh
 ELECTRON_EXEC_PATH=$(nix build --no-link --print-out-paths nixpkgs#electron_45)/bin/electron \
