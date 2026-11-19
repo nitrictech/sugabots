@@ -659,7 +659,7 @@ export function onWideScreen(): void {
 export function mount(
 	path: string,
 	user: SessionUser | null = sam,
-	refresh: () => Promise<void> = vi.fn(),
+	refresh: () => Promise<void> = vi.fn().mockResolvedValue(undefined),
 ) {
 	const router = createAppRouter({
 		history: createMemoryHistory({ initialEntries: [path] }),

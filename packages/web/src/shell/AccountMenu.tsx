@@ -28,6 +28,7 @@ export function AccountMenu({
 	user,
 	current,
 	workspaces,
+	mayCreateWorkspace,
 	settingsBack,
 	onSignOut,
 }: {
@@ -35,6 +36,8 @@ export function AccountMenu({
 	current: Workspace;
 	/** Every workspace you belong to, `current` among them. */
 	workspaces: readonly Workspace[];
+	/** Whether to offer New workspace, which an installation holding a single workspace stops once it has one. */
+	mayCreateWorkspace: boolean;
 	/** History state for the settings links, so their Back returns to the page they left. */
 	settingsBack?: ReturnType<typeof useBackToHere>;
 	onSignOut: () => void;
@@ -96,10 +99,12 @@ export function AccountMenu({
 								</DropdownMenuItem>
 							),
 						)}
-						<DropdownMenuItem render={<Link to="/onboarding" />}>
-							<Plus />
-							New workspace
-						</DropdownMenuItem>
+						{mayCreateWorkspace && (
+							<DropdownMenuItem render={<Link to="/onboarding" />}>
+								<Plus />
+								New workspace
+							</DropdownMenuItem>
+						)}
 					</DropdownMenuContent>
 				</DropdownMenuSub>
 				<DropdownMenuSeparator />

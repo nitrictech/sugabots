@@ -15,7 +15,7 @@ import {
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, asc, eq, gt, or, sql } from "drizzle-orm";
-import { Context, Data, DateTime, Duration, Effect, Layer } from "effect";
+import { Config, Context, Data, DateTime, Duration, Effect, Layer } from "effect";
 import { Accounts } from "../../accounts/accounts.ts";
 import {
 	ActionForbidden,
@@ -57,12 +57,14 @@ import { PersonalPods } from "../pods/personal-pods.ts";
 export interface Interface {
 	/** In the order they joined them. */
 	readonly workspaces: Effect.Effect<readonly Workspace[], never, CurrentActor.Service>;
+	/** Whether `create` would make a workspace now: always, unless the installation holds a single workspace and has it. */
+	readonly mayCreate: Effect.Effect<boolean>;
 	/** Owned by the person who created it. */
 	readonly create: (input: {
 		details: NewWorkspace;
 	}) => Effect.Effect<
 		Workspace,
-		SlugTaken | SlugShapedLikeUuid | TimeZoneUnknown,
+		SlugTaken | SlugShapedLikeUuid | TimeZoneUnknown | SingleWorkspaceExists,
 		CurrentActor.Service
 	>;
 	/**
@@ -158,7 +160,9 @@ export interface ForInvitation {
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Membership") {}
 
+/** Reads `SINGLE_WORKSPACE`, off unless set, for an installation that serves one workspace. */
 export const make = Effect.gen(function* () {
+	const singleWorkspace = yield* Config.Boolean("SINGLE_WORKSPACE").pipe(Config.withDefault(false));
 	const operation = yield* serviceOperations<Interface>("Membership");
 	const authorization = yield* Authorization.Service;
 	const accounts = yield* Accounts.Service;
@@ -189,6 +193,24 @@ export const make = Effect.gen(function* () {
 				Effect.catchTag("ModelNotEnabled", () => personalPods.provision({ workspaceId, userId })),
 			);
 		});
+
+	const anyWorkspaceExists = Effect.map(
+		query((db) => db.select({ id: workspace.id }).from(workspace).limit(1)),
+		(rows) => rows.length > 0,
+	);
+
+	/**
+	 * Refuses another workspace on an installation that holds one. The lock
+	 * lasts until the transaction ends, so two people creating the first at
+	 * once can't both find none.
+	 */
+	const requireRoomForWorkspace = Effect.gen(function* () {
+		if (!singleWorkspace) return;
+		yield* query((db) =>
+			db.execute(sql`select pg_advisory_xact_lock(hashtextextended('single-workspace', 0))`),
+		);
+		if (yield* anyWorkspaceExists) return yield* new SingleWorkspaceExists();
+	});
 
 	const sendInvitation = (
 		invitationId: string,
@@ -238,6 +260,11 @@ export const make = Effect.gen(function* () {
 			).pipe(Effect.map((rows) => rows.map(workspaceView))),
 		),
 
+		mayCreate: operation(
+			"mayCreate",
+			singleWorkspace ? Effect.map(anyWorkspaceExists, (exists) => !exists) : Effect.succeed(true),
+		),
+
 		create: (input) =>
 			operation(
 				"create",
@@ -249,6 +276,7 @@ export const make = Effect.gen(function* () {
 					}
 					return yield* transaction(
 						Effect.gen(function* () {
+							yield* requireRoomForWorkspace;
 							const [created] = yield* queryCatching(
 								(db) => db.insert(workspace).values(input.details).returning(workspaceColumns),
 								(failure) => (isUniqueViolation(failure) ? new SlugTaken() : undefined),
@@ -655,6 +683,16 @@ export class SlugShapedLikeUuid
 {
 	get userMessage() {
 		return userText`A workspace address cannot be shaped like a UUID`;
+	}
+}
+
+/** The installation holds a single workspace (`SINGLE_WORKSPACE`), and it has been created. */
+export class SingleWorkspaceExists
+	extends Data.TaggedError("SingleWorkspaceExists")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`This server holds one workspace, which already exists. Ask somebody in it to invite you.`;
 	}
 }
 

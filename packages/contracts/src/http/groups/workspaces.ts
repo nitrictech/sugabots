@@ -16,7 +16,7 @@ import {
 } from "../../membership.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
-import { BadRequest, Conflict, refused } from "../errors.ts";
+import { BadRequest, Conflict, Forbidden, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 const workspace = { workspace: workspaceIdOrSlugSchema };
@@ -29,7 +29,7 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 		HttpApiEndpoint.post("create", "/workspaces", {
 			payload: newWorkspaceSchema,
 			success: workspaceSchema.pipe(HttpApiSchema.status(201)),
-			error: [BadRequest, Conflict],
+			error: [BadRequest, Forbidden, Conflict],
 		}),
 		HttpApiEndpoint.patch("update", "/workspaces/:workspace", {
 			params: workspace,

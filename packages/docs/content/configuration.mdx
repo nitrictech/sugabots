@@ -40,6 +40,7 @@ Generate each with `openssl rand -base64 32`. Keep them private and backed up.
 | ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `SIGNUP_MODE`                | `closed` | Who may create an account. `closed`: nobody signs themselves up; people arrive by invitation to a workspace, except the first account on a new installation. `referral`: also anybody with a member's [referral link](/docs/people-and-roles#referral-links). `open`: anybody. |
 | `REQUIRE_EMAIL_VERIFICATION` | `false`  | Whether a new account must open a link in its inbox before it gets a session. With the console email provider, the link is printed to the server's console.                                                                                                                    |
+| `SINGLE_WORKSPACE`           | `false`  | Whether the installation holds one workspace. Once that workspace exists, nobody can make another and **New workspace** is hidden, so people join it by invitation. Deleting it lets a new one be made.                                                                        |
 
 ## Network
 

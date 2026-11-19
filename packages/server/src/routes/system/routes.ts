@@ -16,7 +16,11 @@ export const systemRoutes = HttpApiBuilder.group(ServerApi, "system", (handlers)
 			)
 			.handle("me", () =>
 				Effect.all(
-					{ user: Effect.service(CurrentUser), workspaces: membership.workspaces },
+					{
+						user: Effect.service(CurrentUser),
+						workspaces: membership.workspaces,
+						mayCreateWorkspace: membership.mayCreate,
+					},
 					{ concurrency: "unbounded" },
 				).pipe(asSessionUser),
 			)

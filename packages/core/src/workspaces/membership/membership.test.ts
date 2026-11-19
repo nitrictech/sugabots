@@ -32,13 +32,17 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	const sent: Email.Message[] = [];
 	const runtimes: Array<ManagedRuntime.ManagedRuntime<Membership.Service, unknown>> = [];
 
-	function membershipWith(requireEmailVerification: boolean) {
+	function membershipWith(
+		options: { requireEmailVerification?: boolean; singleWorkspace?: boolean } = {},
+	) {
 		const runtime = ManagedRuntime.make(
 			Membership.layer.pipe(
 				Layer.provide([
 					testInfrastructure,
 					Installation.layer,
-					unimplemented(Accounts.Service, { requireEmailVerification }),
+					unimplemented(Accounts.Service, {
+						requireEmailVerification: options.requireEmailVerification ?? false,
+					}),
 					Layer.succeed(
 						Email.Service,
 						Email.Service.of({
@@ -55,6 +59,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 							env: {
 								DATABASE_URL: process.env.DATABASE_URL ?? "",
 								WEB_APP_URL,
+								SINGLE_WORKSPACE: String(options.singleWorkspace ?? false),
 							},
 						}),
 					),
@@ -83,7 +88,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		};
 	}
 
-	const membership = membershipWith(false);
+	const membership = membershipWith();
 	const run = membership.run;
 
 	afterAll(async () => {
@@ -200,6 +205,27 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			),
 		).toEqual({ failed: "TimeZoneUnknown" });
 		expect(await run(ada.id, (m) => m.workspaces)).toEqual([]);
+	});
+
+	it("makes no other workspace once an installation that holds one has it", async () => {
+		await workspaceOfAda();
+		const single = membershipWith({ singleWorkspace: true });
+		const bob = await person("Bob");
+
+		expect(await single.run(bob.id, (m) => m.mayCreate)).toBe(false);
+		expect(
+			await single.run(bob.id, (m) =>
+				m.create({ details: { name: "Acme", slug: `acme-${unique()}` } }),
+			),
+		).toEqual({ failed: "SingleWorkspaceExists" });
+		expect(await single.run(bob.id, (m) => m.workspaces)).toEqual([]);
+	});
+
+	it("lets anybody make another workspace on an installation that holds many", async () => {
+		await workspaceOfAda();
+		const bob = await person("Bob");
+
+		expect(await run(bob.id, (m) => m.mayCreate)).toBe(true);
 	});
 
 	it("refuses a slug shaped like a UUID, or one another workspace has", async () => {
@@ -381,7 +407,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		if ("failed" in invitation) throw new Error(invitation.failed);
 
 		expect(
-			await membershipWith(true).run(bob.id, (m) => m.accept({ invitationId: invitation.id })),
+			await membershipWith({ requireEmailVerification: true }).run(bob.id, (m) =>
+				m.accept({ invitationId: invitation.id }),
+			),
 		).toEqual({
 			failed: "EmailUnverified",
 		});
