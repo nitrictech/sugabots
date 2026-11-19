@@ -10,8 +10,8 @@ import { shippedSourceFiles } from "../shipped-source.test-support.ts";
  */
 const OWNERS: Record<string, readonly string[]> = {
 	conversation: ["core/src/conversations/repository/repository.ts"],
-	task: ["core/src/conversations/repository/repository.ts"],
-	channelConversation: ["core/src/conversations/repository/repository.ts"],
+	thread: ["core/src/conversations/repository/repository.ts"],
+	projectThread: ["core/src/conversations/repository/repository.ts"],
 	directMessage: ["core/src/conversations/repository/repository.ts"],
 	directMessageMember: ["core/src/conversations/repository/repository.ts"],
 	automationFeed: ["core/src/conversations/repository/repository.ts"],
@@ -22,7 +22,11 @@ const OWNERS: Record<string, readonly string[]> = {
 		"core/src/conversations/repository/repository.ts",
 		"core/src/conversations/turns/repository.ts",
 	],
-	messageReaction: ["core/src/conversations/repository/repository.ts"],
+	// A bot that stays silent on an optional turn reacts 👀 as its turn ends.
+	messageReaction: [
+		"core/src/conversations/repository/repository.ts",
+		"core/src/conversations/turns/repository.ts",
+	],
 	collaboration: ["core/src/conversations/tools/collaborate/repository.ts"],
 	automation: ["core/src/conversations/automations/repository.ts"],
 	automationTrigger: ["core/src/conversations/automations/repository.ts"],

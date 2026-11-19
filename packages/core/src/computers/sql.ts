@@ -13,14 +13,14 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { bot, user, workspace } from "../workspaces/sql.ts";
+import { project, user, workspace } from "../workspaces/sql.ts";
 import type { DiskUsage } from "./computer-disk.ts";
 import type { Computers } from "./computers.ts";
 
 /**
  * A computer provider a workspace has configured: an account at a service that
  * makes Linux machines. A workspace may have several, but at most one is
- * enabled, and that one makes its bots' computers.
+ * enabled, and that one makes its projects' computers.
  */
 export const computerProvider = pgTable(
 	"computer_provider",
@@ -67,19 +67,21 @@ type ComputerManagedResources = {
 };
 
 /**
- * A bot's computer: the machine it runs commands on, at the provider that
- * made it. One per bot, made the first time the bot needs it.
+ * A project's online computer: the machine its bots run commands on while
+ * they work in its threads, at the provider that made it. One per project,
+ * made the first time one of its bots needs it; a bot's own is its default
+ * project's.
  */
 export const computer = pgTable(
 	"computer",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id").notNull(),
-		botId: uuid("bot_id").notNull(),
+		projectId: uuid("project_id").notNull(),
 		/**
 		 * The provider that made it. Removing a provider destroys its computers
 		 * first; the row cascades only so that deleting a workspace, which
-		 * reaches it through both the provider and the bot, never fails.
+		 * reaches it through both the provider and the project, never fails.
 		 */
 		computerProviderId: uuid("computer_provider_id").notNull(),
 		/** The provider's own id for it. */
@@ -101,16 +103,16 @@ export const computer = pgTable(
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.botId, table.workspaceId],
-			foreignColumns: [bot.id, bot.workspaceId],
-			name: "computer_bot_workspace_fkey",
+			columns: [table.projectId, table.workspaceId],
+			foreignColumns: [project.id, project.workspaceId],
+			name: "computer_project_workspace_fkey",
 		}).onDelete("cascade"),
 		foreignKey({
 			columns: [table.computerProviderId, table.workspaceId],
 			foreignColumns: [computerProvider.id, computerProvider.workspaceId],
 			name: "computer_provider_workspace_fkey",
 		}).onDelete("cascade"),
-		uniqueIndex("computer_bot_id_idx").on(table.botId),
+		uniqueIndex("computer_project_id_idx").on(table.projectId),
 		check(
 			"computer_disk_measured_check",
 			sql`(${table.diskUsage} is null) = (${table.diskMeasuredAt} is null)`,
@@ -166,33 +168,33 @@ export const allowedHost = pgTable(
 );
 
 /**
- * A host one bot's computer may reach, beyond what the workspace lets every
- * computer reach. Added in the bot's settings, or by approving the bot's
- * request for it.
+ * A host one project's computer may reach, beyond what the workspace lets
+ * every computer reach. Added in the project's settings, or by approving a
+ * request for it from one of its bots.
  */
-export const botAllowedHost = pgTable(
-	"bot_allowed_host",
+export const projectAllowedHost = pgTable(
+	"project_allowed_host",
 	{
 		workspaceId: uuid("workspace_id").notNull(),
-		botId: uuid("bot_id").notNull(),
+		projectId: uuid("project_id").notNull(),
 		host: text("host").notNull(),
 		addedById: uuid("added_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		compositePrimaryKey({ columns: [table.botId, table.host] }),
+		compositePrimaryKey({ columns: [table.projectId, table.host] }),
 		foreignKey({
-			columns: [table.botId, table.workspaceId],
-			foreignColumns: [bot.id, bot.workspaceId],
-			name: "bot_allowed_host_bot_workspace_fkey",
+			columns: [table.projectId, table.workspaceId],
+			foreignColumns: [project.id, project.workspaceId],
+			name: "project_allowed_host_project_workspace_fkey",
 		}).onDelete("cascade"),
 	],
 );
 
 /**
  * A host no computer in the workspace may reach, whatever the workspace or a
- * bot allows: blocking it takes it, and any wildcard that covers it, out of
- * every bot's allowed hosts, and bots' requests for it are refused.
+ * project allows: blocking it takes it, and any wildcard that covers it, out of
+ * every project's allowed hosts, and bots' requests for it are refused.
  */
 export const blockedHost = pgTable(
 	"blocked_host",

@@ -1,9 +1,10 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import {
 	bot as botTable,
-	channel,
-	channelMember,
+	project,
+	projectMember,
 	user,
 	workspace,
 	workspaceMember,
@@ -146,8 +147,8 @@ export const reachingGitHub = (github: typeof fetch, publicUrl: string) =>
 		Layer.succeed(Installation.Service, Installation.fromUrls({ isProduction: false, publicUrl })),
 	);
 
-/** A workspace with an admin, a member, and a channel the member is in. */
-export async function workspaceWithChannel(label: string) {
+/** A workspace with an admin, a member, a project the member is in, and a public bot. */
+export async function workspaceWithProject(label: string) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const [space] = await onDatabase((db) =>
 		db
@@ -174,7 +175,7 @@ export async function workspaceWithChannel(label: string) {
 	);
 	const [shared] = await onDatabase((db) =>
 		db
-			.insert(channel)
+			.insert(project)
 			.values({
 				workspaceId,
 				name: "Builders",
@@ -185,7 +186,7 @@ export async function workspaceWithChannel(label: string) {
 	);
 	if (!shared) throw new Error("fixture");
 	await onDatabase((db) =>
-		db.insert(channelMember).values({ workspaceId, channelId: shared.id, userId: member.id }),
+		db.insert(projectMember).values({ workspaceId, projectId: shared.id, userId: member.id }),
 	);
 	const [bot] = await onDatabase((db) =>
 		db
@@ -200,25 +201,32 @@ export async function workspaceWithChannel(label: string) {
 			.returning(),
 	);
 	if (!bot) throw new Error("fixture");
+	const [own] = await onDatabase((db) =>
+		db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, bot.id)),
+	);
+	if (!own) throw new Error("default project fixture");
 	return {
 		workspaceId,
-		channelId: shared.id,
+		/** The project people made, whose GitHub app the tests make. */
+		projectId: shared.id,
 		botId: bot.id,
+		/** The bot's default project, which holds its own GitHub app. */
+		botProjectId: own.id,
 		adminId: admin.id,
 		memberId: member.id,
 	};
 }
 
 /**
- * The bot's GitHub app, made by the fixture's admin but
+ * The project's GitHub app, made by the fixture's admin but
  * not yet installed, and the `state` that installs it.
  */
 export async function madeConnection(
 	gitHubApps: GitHubApps.Interface,
-	{ botId, adminId }: { botId: string; adminId: string },
+	{ projectId, adminId }: { projectId: string; adminId: string },
 ) {
 	const asAdmin = onPostgresAs(adminId)(gitHubApps);
-	const form = await asAdmin.start({ botId, organization: undefined });
+	const form = await asAdmin.start({ projectId, organization: undefined });
 	const made = await asAdmin.made({ code: MANIFEST_CODE, state: stateIn(form.url) });
 	if (made.kind !== "next") throw new Error(`Not made: ${JSON.stringify(made)}`);
 	// The connection's id ends its webhook's address.
@@ -227,10 +235,10 @@ export async function madeConnection(
 	return { connectionId, installState: stateIn(made.url) };
 }
 
-/** The bot's GitHub app, made by the fixture's admin and installed on `acme`. */
+/** The project's GitHub app, made by the fixture's admin and installed on `acme`. */
 export async function installedConnection(
 	gitHubApps: GitHubApps.Interface,
-	fixture: { botId: string; adminId: string },
+	fixture: { projectId: string; adminId: string },
 ) {
 	const { connectionId, installState } = await madeConnection(gitHubApps, fixture);
 	const installed = await onPostgresAs(fixture.adminId)(gitHubApps).installed({

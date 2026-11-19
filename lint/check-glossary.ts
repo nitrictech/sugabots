@@ -32,20 +32,18 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 	{
 		word: "pod",
 		plural: "pods",
-		replacement: "channel, or the bot",
+		replacement: "project, or the bot",
 		failing: true,
-		// Names stored or run from outside, which keep their old words: the
-		// audience field of events stored before, the browser's key for settings
-		// it remembers, the script that destroys the computers bots used to share,
-		// and migrations by their names. And Apple's iPod.
-		otherMeanings:
-			/audiencePodId|sugabots-settings-open-pods|destroy-pod-computers|\b\d{14}_[a-z0-9_]+|iPod/g,
+		// Names run from outside, which keep their old words: the script that
+		// destroys the computers bots used to share, and migrations by their
+		// names. And Apple's iPod.
+		otherMeanings: /destroy-pod-computers|\b\d{14}_[a-z0-9_]+|iPod/g,
 		keptIn: [
 			// Run against a database from before channels had their name.
 			/^packages\/core\/src\/computers\/destroy-pod-computers\.ts$/,
 		],
 	},
-	{ word: "crew", plural: "crews", replacement: "the channel's bots", failing: true },
+	{ word: "crew", plural: "crews", replacement: "the project's bots", failing: true },
 	{
 		word: "artifact",
 		plural: "artifacts",
@@ -88,27 +86,49 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 		replacement: "bot",
 		failing: true,
 		// Others' agents: the HTTP user agent, coding agents and their
-		// AGENTS.md, crawlers and AI agents generally, SSH's and GPG's, and the
-		// repository's address. And names stored or run from outside, which keep
+		// AGENTS.md, crawlers and AI agents generally, and SSH's and GPG's. And
+		// names stored or run from outside, which keep
 		// their old words: the key workflow payloads store the bot's id under, and
 		// the user and folder bots' homes are in on the computers made before.
 		otherMeanings:
-			/user[-_ ]?agents?|AGENTS\.md|AI agents?|your[- ]agent|(?:ssh|gpg)-agent|SSH and GPG agents|nitrictech\/agents|\bagentId(?=: (?:Schema\.String|botId|crypto\.randomUUID\(\)))|\{ agentId,|: agentId\b|stored\.agentId|name: "agent"|\/home\/agent|WORKSPACE_DIRECTORY\}\/agents/gi,
+			/user[-_ ]?agents?|AGENTS\.md|AI agents?|your[- ]agent|(?:ssh|gpg)-agent|SSH and GPG agents|\bagentId(?=: (?:Schema\.String|botId|crypto\.randomUUID\(\)))|\{ agentId,|: agentId\b|stored\.agentId|name: "agent"|\/home\/agent|WORKSPACE_DIRECTORY\}\/agents/gi,
 		keptIn: [
 			// undici's Agent, the connection pool requests are sent through.
 			/^packages\/core\/src\/providers\/network\/egress(\.test)?\.ts$/,
 		],
 	},
 	{
-		word: "routine",
-		plural: "routines",
-		replacement: "automation",
+		word: "channel",
+		plural: "channels",
+		replacement: "project",
 		failing: true,
-		// Names stored or called from outside, which keep their old words: the
-		// turn reason and workflow name "routine", the workflow payload's
-		// `routineId` and its lane keys, and the webhook address other systems
-		// were given.
-		otherMeanings: /(["'])routine\1|`routine:|\broutineId\b|\/hooks\/routines\//g,
+		// Others' channels: Slack's, and its `@channel`, which a person writes to
+		// mention everyone in a conversation; the browser's MessageChannel; the
+		// Postgres notification channel, and the event table's `channel`, the stream
+		// an event is published on; Xfce's settings channels. And migrations by
+		// their names.
+		otherMeanings:
+			/@channel|"here", "channel"|handle: "channel"|name: "Channel"|\[\["channel", "reviewer"\]\]|`here` or `channel`|"here and channel"|Slack's channel|per channel\.|MessageChannel|NOTIFY_CHANNEL|notification channel|text\("channel"\)|event_channel_seq_idx|perchannel|\b\d{14}_[a-z0-9_]+/g,
+		keptIn: [
+			// A colour's red, green and blue channels.
+			/^docker\/computer\/sugabots-desktop-look$/,
+			// Xfce's settings, kept in channels.
+			/^docker\/computer\/xfce\//,
+			// Mock Service Worker's own script, talking to its page over a MessageChannel.
+			/^packages\/web\/\.storybook\/public\/mockServiceWorker\.js$/,
+		],
+	},
+	{
+		word: "main chat",
+		plural: "main chats",
+		replacement: "a project's threads",
+		failing: true,
+	},
+	{
+		word: "main thread",
+		plural: "main threads",
+		replacement: "a project's threads",
+		failing: true,
 	},
 ];
 
@@ -125,17 +145,32 @@ const SKIPPED_PATHS: readonly RegExp[] = [
 /**
  * The word as a whole word or as one part of an identifier: `pod`, `pods`,
  * `podId`, `isPod`, `PodComputers`, `pod_id` and `POD_ID`, but not `tripod`
- * or `podcast`.
+ * or `podcast`. A word of several, such as "main chat", is matched with its
+ * parts apart or joined as an identifier joins them: `main chat`, `main-chat`,
+ * `mainChat`, `MainChat` and `MAIN_CHAT`.
  */
 function wordPattern({ word, plural }: RetiredWord): RegExp {
-	const lower = `(?:${plural}|${word})`;
-	const capitalised = `(?:${capitalise(plural)}|${capitalise(word)})`;
-	const upper = `(?:${plural.toUpperCase()}|${word.toUpperCase()})`;
+	const forms = (casing: (part: string) => string, joinings: (part: string) => string[]) =>
+		[plural, word]
+			.map((phrase) => {
+				const [first = "", ...rest] = phrase.split(" ");
+				return casing(first) + rest.map((part) => `(?:${joinings(part).join("|")})`).join("");
+			})
+			.join("|");
+	const lower = forms(
+		(part) => part,
+		(part) => [`[ _-]${part}`, `[ _-]?${capitalise(part)}`],
+	);
+	const capitalised = forms(capitalise, (part) => [`[ _-]${part}`, `[ _-]?${capitalise(part)}`]);
+	const upper = forms(
+		(part) => part.toUpperCase(),
+		(part) => [`[ _-]?${part.toUpperCase()}`],
+	);
 	return new RegExp(
 		[
-			`(?<![A-Za-z])${lower}(?![a-z])`,
-			`(?<![A-Z])${capitalised}(?![a-z])`,
-			`(?<![A-Za-z])${upper}(?![A-Za-z])`,
+			`(?<![A-Za-z])(?:${lower})(?![a-z])`,
+			`(?<![A-Z])(?:${capitalised})(?![a-z])`,
+			`(?<![A-Za-z])(?:${upper})(?![A-Za-z])`,
 		].join("|"),
 		"g",
 	);

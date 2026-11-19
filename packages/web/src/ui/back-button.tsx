@@ -1,5 +1,6 @@
 import type { useRender } from "@base-ui/react/use-render";
 import { useCanGoBack, useRouter } from "@tanstack/react-router";
+import { cn } from "cn";
 import { ChevronLeft } from "lucide-react";
 import { cloneElement, isValidElement, type MouseEvent, type ReactElement } from "react";
 import { pageBehind, type TrailPage } from "@/lib/history-trail.ts";
@@ -26,6 +27,28 @@ export const BACK_LABEL_ON_PHONE = "max-md:sr-only";
 /** The round Back's chevron. */
 export function BackChevron({ className }: { className?: string }) {
 	return <ChevronLeft aria-hidden size={22} strokeWidth={2.25} className={className} />;
+}
+
+/** The round Back as a button, for a Back that is an action rather than a link. `className` hides it where it isn't wanted. */
+export function BackButton({
+	onClick,
+	label = "Back",
+	className,
+}: {
+	onClick: () => void;
+	label?: string;
+	className?: string;
+}) {
+	return (
+		<button
+			type="button"
+			aria-label={label}
+			onClick={onClick}
+			className={cn(BACK_BUTTON, className)}
+		>
+			<BackChevron />
+		</button>
+	);
 }
 
 /**

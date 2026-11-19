@@ -5,7 +5,7 @@ import { HttpApi } from "effect/unstable/httpapi";
 import { ServerApi } from "./api.ts";
 
 /**
- * Names each request's span by the route it matches, `GET /api/channels/:channelId`,
+ * Names each request's span by the route it matches, `GET /api/projects/:projectId`,
  * rather than Effect's `http.server GET`. The span is named before routing, so
  * the route is looked up here, from the same API definition the router serves.
  */

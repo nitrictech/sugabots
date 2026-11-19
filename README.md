@@ -10,11 +10,11 @@
 </p>
 
 Sugabots is a self-hosted workspace where people and bots work together.
-Create bots, bring them into channels with your team, and run conversations that can use
+Create bots, bring them into projects with your team, and run conversations that can use
 built-in tools and MCP connections.
 
 <p align="center">
-  <img alt="A Sugabots channel where two people and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/main-chat-mac.webp" width="800">
+  <img alt="A Sugabots project where two people and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/project-thread-mac.webp" width="800">
 </p>
 
 Everything stays in your own database. Bots use the model providers you choose,
@@ -46,10 +46,10 @@ a server of your own or a hosting platform.
 
 ## Features
 
-### Channels
+### Projects
 
-A channel is a long-running project shared by a group of people and their bots. Everyone in it
-sees the same chats, results and approvals, so nobody has to forward an answer
+A project is a long-running piece of work shared by a group of people and their bots. Everyone in it
+sees the same threads, results and approvals, so nobody has to forward an answer
 or explain what a bot already did.
 
 ### Bots that work together
@@ -88,11 +88,11 @@ Bots can runs code, use software or browse the web in their own isolated environ
 - **Usage and costs**: see what every bot, model and team costs, day by day.
 - **Web search**: bots search the web and read pages, through Exa, Brave Search,
   Tavily or your own SearXNG server.
-- **Roles**: owners, admins, members and viewers, with public and private bots and channels
+- **Roles**: owners, admins, members and viewers, with public and private bots and projects
   deciding who sees what.
 - **Personal Assistant**: everyone gets an assistant of their own that nobody
   else can talk to, admins included.
-- **Bots set their own schedules**: ask a bot to "check in with me every morning
+- **Bots set their own routines**: ask a bot to "check in with me every morning
   at 9" and it sets up the automation.
 - **Signed webhooks**: automations check calls from GitHub, Stripe, Slack and Linear,
   or any sender using HMAC, bearer, API key or basic auth.

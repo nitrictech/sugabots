@@ -69,7 +69,7 @@ export function MentionEditor({
 	ref,
 	id,
 	label,
-	placeholder = label,
+	placeholder,
 	value,
 	onValueChange,
 	onCaretChange,
@@ -84,10 +84,10 @@ export function MentionEditor({
 }: {
 	ref?: Ref<MentionEditorHandle>;
 	id: string;
-	/** Names the box for assistive technology, and is its placeholder unless `placeholder` says otherwise. */
+	/** Names the box for assistive technology. */
 	label: string;
-	/** What the empty box says, when that is not its name. */
-	placeholder?: string;
+	/** What the empty box says. */
+	placeholder: string;
 	value: string;
 	/** The new text, and where the caret is in it. */
 	onValueChange: (value: string, caret: number) => void;

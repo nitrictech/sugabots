@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { sessionUserSchema } from "./api.ts";
-import { slugSchema } from "./channels.ts";
 import { emailSchema } from "./email.ts";
+import { slugSchema } from "./projects.ts";
 import { timeZoneSchema } from "./time-zones.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -42,12 +42,12 @@ export const newWorkspaceSchema = Schema.Struct({
 export type NewWorkspace = typeof newWorkspaceSchema.Type;
 
 /**
- * The workspace's time zone, and how many of its automations have a schedule in
- * that zone. Those schedules move with the workspace when its zone changes.
+ * The workspace's time zone, and how many of its automations have a routine in
+ * that zone. Those routines move with the workspace when its zone changes.
  */
 export const workspaceTimeZoneSchema = Schema.Struct({
 	timeZone: Schema.String,
-	scheduledAutomations: Schema.Number,
+	automationsWithRoutines: Schema.Number,
 });
 export type WorkspaceTimeZone = typeof workspaceTimeZoneSchema.Type;
 

@@ -1,0 +1,127 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "b379a463-903a-413e-bc59-2369a460e45d",
+  "prevIds": [
+    "f8410de0-c4bf-4736-badf-441cdaf76ec4"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_view",
+      "statementTarget": [
+        "view",
+        "public",
+        "placed_conversation"
+      ],
+      "writes": [
+        "s|view|public.placed_conversation",
+        "n|view|public.placed_conversation",
+        "e|view|public.placed_conversation",
+        "n|rel|public.placed_conversation",
+        "n|type|public.placed_conversation"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "project_thread"
+      ],
+      "writes": [
+        "s|ck|public.project_thread.project_thread_archived_valid",
+        "n|ck|public.project_thread.project_thread_archived_valid",
+        "e|ck|public.project_thread.project_thread_archived_valid",
+        "n|con|public.project_thread.project_thread_archived_valid"
+      ],
+      "reads": [
+        "n|tbl|public.project_thread",
+        "n|sch|public",
+        "e|col|public.project_thread.archived_at",
+        "e|col|public.project_thread.main"
+      ]
+    },
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "project_thread",
+        "project_thread_main_idx"
+      ],
+      "writes": [
+        "s|idx|public.project_thread_main_idx",
+        "n|idx|public.project_thread_main_idx",
+        "e|idx|public.project_thread_main_idx",
+        "n|rel|public.project_thread_main_idx"
+      ],
+      "reads": [
+        "e|tbl|public.project_thread",
+        "n|sch|public",
+        "e|col|public.project_thread.project_id"
+      ],
+      "sharedWrites": []
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "project_thread",
+        "main"
+      ],
+      "writes": [
+        "s|col|public.project_thread.main",
+        "n|col|public.project_thread.main",
+        "e|col|public.project_thread.main"
+      ],
+      "reads": [
+        "n|tbl|public.project_thread",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_view",
+      "statementTarget": [
+        "view",
+        "public",
+        "placed_conversation"
+      ],
+      "writes": [
+        "s|view|public.placed_conversation",
+        "n|view|public.placed_conversation",
+        "e|view|public.placed_conversation",
+        "n|rel|public.placed_conversation",
+        "n|type|public.placed_conversation"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"project_thread\",\"main\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"project_thread_main_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"public\",\"project_thread\",\"project_thread_archived_valid\"]"
+    },
+    {
+      "op": "alter",
+      "key": "views\u0000[\"public\",\"placed_conversation\"]",
+      "set": {
+        "definition": "select\n\tc.id, c.workspace_id, c.kind, c.title, c.created_at, c.updated_at,\n\tcoalesce(t.bot_id, co.collaborator_bot_id, r.bot_id, fa.bot_id, sc.bot_id) as bot_id,\n\tcc.project_id,\n\tcase c.kind\n\t\twhen 'collaboration' then co.root_conversation_id\n\t\twhen 'run' then rf.conversation_id\n\t\twhen 'system' then null\n\t\telse c.id\n\tend as root_conversation_id,\n\tcoalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,\n\tcoalesce(t.started_by_id, cc.started_by_id, dm.started_by_id) as started_by_id,\n\tsc.system_bot_key,\n\tt.done_at,\n\tf.automation_id,\n\tcc.archived_at,\n\tdm.direct_key\nfrom \"conversation\" c\nleft join \"bot_thread\" t on t.conversation_id = c.id\nleft join \"project_thread\" cc on cc.conversation_id = c.id\nleft join \"direct_message\" dm on dm.conversation_id = c.id\nleft join \"collaboration\" co on co.conversation_id = c.id\nleft join \"run\" r on r.conversation_id = c.id\nleft join \"automation_feed\" rf on rf.automation_id = r.automation_id\nleft join \"automation_feed\" f on f.conversation_id = c.id\nleft join \"automation\" fa on fa.id = f.automation_id\nleft join \"system_conversation\" sc on sc.conversation_id = c.id"
+      }
+    }
+  ]
+}

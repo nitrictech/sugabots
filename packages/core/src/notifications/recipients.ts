@@ -10,11 +10,11 @@ import {
 	type QuietHours,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { type AnyColumn, and, eq, ne, type SQL, sql } from "drizzle-orm";
+import { type AnyColumn, and, eq, isNull, ne, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import {
-	botStandingFor,
+	computerProjectStandingFor,
 	conversationStandingFor,
 	mayDecideToolCall,
 	reachesConversationFor,
@@ -27,12 +27,12 @@ import {
 	automation,
 	automationRun,
 	bot,
-	channel,
 	conversationParticipant,
 	message,
 	notificationOverride,
 	notificationSettings,
 	placedConversation,
+	project,
 	toolCall,
 	turn,
 	user,
@@ -46,7 +46,7 @@ import { conversationPath } from "../installation/web-app-paths.ts";
  * would care (they were mentioned, a bot replied to them or failed to, they
  * take part in the conversation, it waits on their approval, an automation of
  * theirs ran, or it is just activity), by the level they chose for the bot it
- * is about, else its channel, else themselves, and never while they are paused or
+ * is about, else its project, else themselves, and never while they are paused or
  * in their quiet hours. Their tabs hold back what they are looking at.
  */
 
@@ -111,7 +111,7 @@ function minutesOfDay(time: string): number {
 	return hour * 60 + minute;
 }
 
-/** A finished message somebody wrote in a task, a channel or a direct message. */
+/** A finished message somebody wrote in a project's thread, a bot's included, or a direct message. */
 interface WrittenMessage {
 	conversationId: string;
 	messageId: string;
@@ -132,7 +132,7 @@ interface WrittenMessage {
 }
 
 /**
- * The notifications a finished message sends. Only tasks, channels and
+ * The notifications a finished message sends. Only threads, a bot's or a project's, and
  * direct messages notify: automation runs, collaborations and system bots'
  * conversations are bots' work, which reaches people through what they post in
  * those. A direct message notifies the person it is to as a mention would. An
@@ -161,9 +161,9 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	}
 	const mentioned = new Set(mentionedHandles(written.content));
 	const { author, authorName } = written;
-	// Only a person's `@here` or `@channel`: a bot's would let whatever it read or was asked to say page the whole channel.
+	// Only a person's `@here` or `@channel`: a bot's would let whatever it read or was asked to say page the whole project.
 	const addressesEveryone = author.kind === "person" && mentionsEveryone(written.content);
-	// A task is its bot's; in a channel, what a bot posts is.
+	// A bot's thread, in its default project, is that bot's; in a project's thread, what a bot posts is.
 	const botId = place.botId ?? (author.kind === "bot" ? author.botId : null);
 	const audience = yield* audienceOf(db, place, botId, now);
 	return audience.flatMap((person): Addressed[] => {
@@ -175,7 +175,7 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 					? "mention"
 					: person.id === written.repliesTo
 						? "reply"
-						: person.participant && place.kind === "task"
+						: person.participant && place.kind === "project_thread" && place.botId !== null
 							? "participant"
 							: "activity";
 		if (automationResult && reason !== "mention") return [];
@@ -419,7 +419,7 @@ function sharedPreview(names: readonly string[]): string {
 
 type Place = NonNullable<Effect.Success<ReturnType<typeof placeOf>>>;
 
-/** The conversation, the one it is in, and the addresses of its workspace and channel, if it has one. */
+/** The conversation, the one it is in, and the addresses of its workspace and project, if it has one. */
 const placeOf = Effect.fn("Notifications.placeOf")(function* (
 	db: Executor,
 	conversationId: string,
@@ -428,16 +428,16 @@ const placeOf = Effect.fn("Notifications.placeOf")(function* (
 	const [row] = yield* db
 		.select({
 			kind: placedConversation.kind,
-			/** A collaboration's is the channel of the conversation it was opened from. */
-			channelId: sql<
+			/** A collaboration's is the project of the conversation it was opened from. */
+			projectId: sql<
 				string | null
-			>`coalesce(${conversation.channelId}, ${placedConversation.channelId})`,
+			>`coalesce(${conversation.projectId}, ${placedConversation.projectId})`,
 			botId: placedConversation.botId,
 			workspaceId: placedConversation.workspaceId,
 			rootConversationId: sql<string>`coalesce(${placedConversation.rootConversationId}, ${placedConversation.id})`,
 			title: sql<string>`coalesce(${conversation.title}, ${placedConversation.title})`,
-			/** Null outside a channel. */
-			channelSlug: channel.slug,
+			/** Null outside a project people made: a bot's thread is reached through the bot. */
+			projectSlug: project.slug,
 			workspaceSlug: workspace.slug,
 			/** On a direct message between people: the key naming everybody in it. */
 			directKey: placedConversation.directKey,
@@ -445,8 +445,11 @@ const placeOf = Effect.fn("Notifications.placeOf")(function* (
 		.from(placedConversation)
 		.leftJoin(conversation, eq(conversation.id, placedConversation.rootConversationId))
 		.leftJoin(
-			channel,
-			eq(channel.id, sql`coalesce(${conversation.channelId}, ${placedConversation.channelId})`),
+			project,
+			and(
+				eq(project.id, sql`coalesce(${conversation.projectId}, ${placedConversation.projectId})`),
+				isNull(project.defaultOfBotId),
+			),
 		)
 		.innerJoin(workspace, eq(workspace.id, placedConversation.workspaceId))
 		.where(eq(placedConversation.id, conversationId))
@@ -458,7 +461,7 @@ type Person = Effect.Success<ReturnType<typeof audienceOf>>[number];
 
 /**
  * Everybody who reaches the place, with the level they chose for `botId`, the
- * bot it is about, else for the channel, else their own: the people who
+ * bot it is about, else for the project, else their own: the people who
  * reach the conversation.
  */
 const audienceOf = Effect.fn("Notifications.audienceOf")(function* (
@@ -468,7 +471,7 @@ const audienceOf = Effect.fn("Notifications.audienceOf")(function* (
 	now: Date,
 ) {
 	const botLevel = alias(notificationOverride, "bot_level");
-	const channelLevel = alias(notificationOverride, "channel_level");
+	const projectLevel = alias(notificationOverride, "project_level");
 	return yield* db
 		.select({
 			id: user.id,
@@ -476,8 +479,8 @@ const audienceOf = Effect.fn("Notifications.audienceOf")(function* (
 			participant: exists(
 				sql`select 1 from ${conversationParticipant} where ${conversationParticipant.conversationId} = ${place.rootConversationId} and ${conversationParticipant.userId} = ${user.id}`,
 			),
-			// A channel muted for a while quiets every bot in it, whatever level the bot has.
-			level: sql<NotificationLevel | null>`coalesce(${mutedOf(channelLevel, now)}, ${mutedOf(botLevel, now)}, ${botLevel.level}, ${channelLevel.level}, ${notificationSettings.level})`,
+			// A project muted for a while quiets every bot in it, whatever level the bot has.
+			level: sql<NotificationLevel | null>`coalesce(${mutedOf(projectLevel, now)}, ${mutedOf(botLevel, now)}, ${botLevel.level}, ${projectLevel.level}, ${notificationSettings.level})`,
 			pausedUntil: notificationSettings.pausedUntil,
 			quietHours: notificationSettings.quietHours,
 			turnFailures: notificationSettings.turnFailures,
@@ -491,10 +494,10 @@ const audienceOf = Effect.fn("Notifications.audienceOf")(function* (
 			and(eq(botLevel.userId, user.id), botId === null ? sql`false` : eq(botLevel.botId, botId)),
 		)
 		.leftJoin(
-			channelLevel,
+			projectLevel,
 			and(
-				eq(channelLevel.userId, user.id),
-				place.channelId === null ? sql`false` : eq(channelLevel.channelId, place.channelId),
+				eq(projectLevel.userId, user.id),
+				place.projectId === null ? sql`false` : eq(projectLevel.projectId, place.projectId),
 			),
 		)
 		.where(
@@ -506,7 +509,7 @@ const audienceOf = Effect.fn("Notifications.audienceOf")(function* (
 						workspaceId: sql`${place.workspaceId}::uuid`,
 						kind: sql`${place.kind}`,
 						rootConversationId: sql`${place.rootConversationId}::uuid`,
-						channelId: sql`${place.channelId}::uuid`,
+						projectId: sql`${place.projectId}::uuid`,
 						botId: sql`${place.botId}::uuid`,
 					},
 					user.id,
@@ -545,8 +548,15 @@ const mayDecideAny = Effect.fn("Notifications.mayDecideAny")(function* (
 	const reached = yield* conversationStandingFor(db, conversationId, userId);
 	if (!reached) return false;
 	for (const call of calls) {
-		const asking = yield* botStandingFor(db, call.botId, userId);
-		if (mayDecideToolCall(reached, asking, inAutomation, decidersOf(call.tool))) return true;
+		const computerProject = yield* computerProjectStandingFor(
+			db,
+			conversationId,
+			call.botId,
+			userId,
+		);
+		if (mayDecideToolCall(reached, computerProject, inAutomation, decidersOf(call.tool))) {
+			return true;
+		}
 	}
 	return false;
 });

@@ -1,17 +1,16 @@
-import type { BotParticipant, Channel, Message, SessionUser } from "@sugabots/contracts";
+import type { BotParticipant, Message, SessionUser } from "@sugabots/contracts";
 import { quotedPreview } from "@sugabots/contracts";
 import { cn } from "cn";
 import { type CSSProperties, type RefObject, useLayoutEffect, useRef, useState } from "react";
-import { useChatDraft, useChatReplyDraft } from "@/lib/chat-draft.ts";
 import {
-	type ConversationPlaceKind,
 	directPeopleTitle,
-	useChatHistory,
-	useChatMessages,
+	useConversationHistory,
+	useConversationMessages,
 	useMarkReadWhileSeen,
 	useOptimisticChatItems,
 } from "@/lib/chats.ts";
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
+import { useConversationDraft, useReplyDraft } from "@/lib/conversation-draft.ts";
 import {
 	useConversationEvents,
 	useConversationNotices,
@@ -30,18 +29,19 @@ import { ChatTimeline } from "./ChatTimeline.tsx";
 import { ConversationComposer } from "./ConversationComposer.tsx";
 import { ConversationHeader } from "./ConversationHeader.tsx";
 import { ConversationIntro } from "./ConversationIntro.tsx";
-import { type MessageLook, typersAfter } from "./ConversationMessages.tsx";
+import { typersAfter } from "./ConversationMessages.tsx";
 import { ConversationNotices } from "./ConversationNotices.tsx";
 import { chatItemRevision, mergeChatItems, messagesIn, sendingIds } from "./chat-items.ts";
 import { useChatLogPosition } from "./chat-log-position.ts";
 import { draftAudience, useChatRecipients } from "./chat-recipients.ts";
+import { type AnyConversationPlace, conversationOwner } from "./conversation-place.ts";
 import { FileDropTarget } from "./FileDropTarget.tsx";
-import { useItemOpening } from "./item-opening.ts";
-import { useListedChannelConversation } from "./listed-channel-conversation.ts";
+import { opensBeside, useItemOpening } from "./item-opening.ts";
+import { useListedProjectThread } from "./listed-project-thread.ts";
 import { mentionableIn } from "./mentions.tsx";
 import { useMessageSending } from "./message-sending.ts";
 import type { Staged, StagedChange } from "./staged.ts";
-import { useTaskDone } from "./task-done.ts";
+import { useThreadDone } from "./thread-done.ts";
 
 /** The narrowest the chat may be dragged beside what is staged large. */
 const MIN_STAGED_CHAT_WIDTH_PX = 320;
@@ -51,8 +51,7 @@ const MIN_STAGED_CHAT_WIDTH_PX = 320;
  * whatever is open beside it.
  */
 export function ConversationChat({
-	conversation,
-	channel,
+	conversationPlace,
 	conversationId,
 	user,
 	itemConversationId,
@@ -65,10 +64,8 @@ export function ConversationChat({
 	onSent,
 	covered = false,
 }: {
-	/** Which kind of conversation it is, and its bot when it has one. */
-	conversation: ConversationPlaceKind;
-	/** The channel it is in; null for a bot's task or a direct message, which are in none. */
-	channel: Channel | null;
+	/** Where the conversation is: one of a project's threads, one of a bot's, or a direct message. */
+	conversationPlace: AnyConversationPlace;
 	/** The conversation shown. */
 	conversationId: string;
 	user: SessionUser;
@@ -84,40 +81,42 @@ export function ConversationChat({
 	headerless?: boolean;
 	/** Once a message written here has been sent. */
 	onSent?: () => void;
-	/** Hidden under something else on the page, so nothing in it counts as seen. */
+	/**
+	 * Hidden under something else on the page, as New message's suggestions
+	 * cover the conversation under them: the viewer is not looking at it, so
+	 * it is neither read nor kept from notifying them.
+	 */
 	covered?: boolean;
 }) {
+	const { conversation, project } = conversationPlace;
 	const openFile = (fileId: string) => onStagedChange({ kind: "file", fileId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
 	const openAutomations = (view: AutomationsView = { kind: "list" }) =>
 		onStagedChange({ kind: "automations", view });
-	const messages = useChatMessages(conversationId);
-	const history = useChatHistory(conversationId);
+	const messages = useConversationMessages(conversationId);
+	const history = useConversationHistory(conversationId);
 	const opened = useConversation(conversationId);
 	const details = opened.data;
-	// Drafts are kept by the channel they are written in; elsewhere, by the conversation alone.
-	const channelId = channel?.id ?? null;
+	// A project's threads' drafts are kept by the project; a bot's thread's or a direct message's, by the conversation alone.
+	const projectId = project?.id ?? null;
 	useConversationEvents(conversationId);
 	const notices = useConversationNotices(conversationId);
 	const optimistic = useOptimisticChatItems(conversationId);
-	const [draft, setDraft] = useChatDraft(user.id, channelId, conversationId);
-	const [replyingTo, setReplyingTo] = useChatReplyDraft(user.id, channelId, conversationId);
+	const [draft, setDraft] = useConversationDraft(user.id, projectId, conversationId);
+	const [replyingTo, setReplyingTo] = useReplyDraft(user.id, projectId, conversationId);
 	const attachments = useComposerAttachments(conversationId);
 	useTypingSignal(conversationId, draft);
 	const peopleTyping = usePeopleTyping(conversationId, user.id);
 
-	const bot = conversation.kind === "botConversation" ? conversation.bot : null;
-	// A bot's conversations read as a task; channels and direct messages keep Slack-like rows.
-	const look: MessageLook = bot ? "task" : "rows";
-	const taskLook = look === "task";
+	const bot = conversation.kind === "botThread" ? conversation.bot : null;
 	const headerBox = useRef<HTMLDivElement>(null);
 	const messageColumn = useRef<HTMLDivElement>(null);
-	// Over a task while there is room beside its column, else a bar above it.
+	// Over the chat while there is room beside its column, else a bar above it.
 	// Measured again once the messages are in, as their column is drawn only then.
-	const headerCrowded = useHeaderCrowding(headerBox, messageColumn, taskLook && messages.isSuccess);
-	// In a channel, the bots people name reply; in a task its own bot does,
+	const headerCrowded = useHeaderCrowding(headerBox, messageColumn, messages.isSuccess);
+	// In a project, the bots people name reply; in a bot's thread its own bot does,
 	// asking any other bot named for its help.
-	const namedBotsReply = conversation.kind === "channelConversation";
+	const namedBotsReply = conversation.kind === "projectThread";
 	const host = bot
 		? details?.participants.find(
 				(participant): participant is BotParticipant =>
@@ -131,7 +130,7 @@ export function ConversationChat({
 		itemConversationId,
 		loaded: details !== undefined,
 		items,
-		bot,
+		owner: conversationOwner(conversationPlace),
 		feedOfAutomationId: details?.automation?.id,
 		onItemChange,
 	});
@@ -144,10 +143,10 @@ export function ConversationChat({
 	useMarkReadWhileSeen(conversationId, items.at(-1), position.latestInView && !covered);
 	const recipients = useChatRecipients({
 		userId: user.id,
-		channelId,
+		projectId,
 		conversationId,
 		namedBotsReply,
-		channelBots: details?.channelBots,
+		projectBots: details?.projectBots,
 		shownMessages,
 		draft,
 		setDraft,
@@ -165,30 +164,29 @@ export function ConversationChat({
 		scrollToLatest: position.scrollToLatest,
 		onSent,
 	});
-	const taskDone = useTaskDone(conversationId, details);
-	const channelConversation = useListedChannelConversation(
-		channel,
+	const threadDone = useThreadDone(conversationId, details);
+	const projectThread = useListedProjectThread(
+		project,
 		conversationId,
 		details?.conversation.title,
 	);
 	// Beside a file or a computer, the chat is as wide as the viewer last dragged it.
 	const [chatWidth, setChatWidth] = usePaneWidth("staged-chat");
 	const chatColumn = useRef<HTMLDivElement>(null);
-	// An automation's feed keeps its bar; a task's header sits over it while there is room.
-	const headerOverChat = taskLook && !details?.automation && !headerCrowded;
+	// An automation's feed keeps its bar; a thread's or a direct message's header sits over it while there is room.
+	const headerOverChat = !details?.automation && !headerCrowded;
 
 	const header = (
 		<ConversationHeader
-			conversation={conversation}
-			channel={channel}
+			conversationPlace={conversationPlace}
 			details={details}
 			conversationId={conversationId}
 			user={user}
 			place={place}
 			detailsAvailable={!staged}
-			channelConversationName={channelConversation.name}
-			channelConversationToChange={channelConversation.toChange}
-			done={taskDone.done}
+			projectThreadName={projectThread.name}
+			projectThreadToChange={projectThread.toChange}
+			done={threadDone.done}
 			overChat={headerOverChat}
 			onOpenDesktop={openDesktop}
 		/>
@@ -210,17 +208,14 @@ export function ConversationChat({
 		if (message.author.kind === "automation_trigger") return;
 		setReplyingTo({ id: message.id, author: message.author, preview: quotedPreview(message) });
 	}
-	// What is open beside the task in Details' place, as `ChatBeside` decides it.
-	const itemOpen =
-		itemConversationId !== undefined &&
-		history.entries.find((entry) => entry.conversationId === itemConversationId)?.kind !== "run";
-	// A bot's Details float as cards under the header's button; from a tablet up the task makes way for them.
+	const itemOpen = opensBeside(itemConversationId, history.entries);
+	// A thread's Details float as cards under the header's button; from a tablet up the thread makes way for them.
 	const floatingDetails =
 		place.kind === "own" &&
 		place.detailsOpen &&
 		!staged &&
 		!itemOpen &&
-		bot !== null &&
+		conversation.kind !== "directMessage" &&
 		!details.automation;
 
 	return (
@@ -257,7 +252,7 @@ export function ConversationChat({
 						ref={headerBox}
 						className={cn(
 							"max-md:pointer-events-none max-md:absolute max-md:inset-x-0 max-md:top-0 max-md:z-10 max-md:[&_a,&_button]:pointer-events-auto",
-							// A bot's task scrolls up under its header from a tablet up too, as a phone's does.
+							// The chat scrolls up under its header from a tablet up too, as a phone's does.
 							headerOverChat &&
 								"md:pointer-events-none md:absolute md:inset-x-0 md:top-0 md:z-10 md:[&_a,&_button]:pointer-events-auto",
 						)}
@@ -276,13 +271,11 @@ export function ConversationChat({
 						position={position}
 						messages={messages}
 						columnRef={messageColumn}
-						centred={taskLook}
 						underHeader={headerOverChat}
 						intro={
 							<ConversationIntro
-								conversation={conversation}
-								channel={channel}
-								channelConversationName={channelConversation.name}
+								conversationPlace={conversationPlace}
+								projectThreadName={projectThread.name}
 								details={details}
 							/>
 						}
@@ -294,7 +287,6 @@ export function ConversationChat({
 							bot={bot}
 							conversationId={conversationId}
 							user={user}
-							look={look}
 							mentionable={mentionable}
 							entries={history.entries}
 							sending={sendingIds(optimistic, messages.items, details.messages)}
@@ -320,7 +312,7 @@ export function ConversationChat({
 						details={details}
 						user={user}
 						namedBotsReply={namedBotsReply}
-						chatName={chatNameOf(conversation, channelConversation.name)}
+						chatName={chatNameOf(conversation, projectThread.name)}
 						draft={draft}
 						onDraftChange={setDraft}
 						replyingTo={replyingTo}
@@ -329,16 +321,13 @@ export function ConversationChat({
 						audience={draftAudience(draft, mentionable, host)}
 						recipients={recipients}
 						sending={sending}
-						doneFailed={taskDone.failed}
+						doneFailed={threadDone.failed}
 						typers={typersAfter(shownMessages, peopleTyping)}
-						pill={taskLook}
 					/>
 				</FileDropTarget>
 			</div>
 			<ChatBeside
-				conversation={conversation}
-				channel={channel}
-				bot={bot}
+				conversationPlace={conversationPlace}
 				details={details}
 				conversationId={conversationId}
 				user={user}
@@ -352,28 +341,31 @@ export function ConversationChat({
 				onOpenFile={openFile}
 				onOpenAutomations={openAutomations}
 				shownMessages={shownMessages}
-				channelConversationName={channelConversation.name}
-				channelConversationToChange={channelConversation.toChange}
+				projectThreadName={projectThread.name}
+				projectThreadToChange={projectThread.toChange}
 			/>
 		</div>
 	);
 }
 
 /**
- * Whom a message here goes to while the draft names nobody: the task's bot,
- * the people in a direct message, or the channel's main chat or thread.
+ * Whom a message here goes to while the draft names nobody: the bot, in a bot's
+ * thread; the people, in a direct message; or the project's thread, by its name.
  */
-function chatNameOf(conversation: ConversationPlaceKind, channelConversationName: string): string {
-	if (conversation.kind === "botConversation") return conversation.bot.name;
+function chatNameOf(
+	conversation: AnyConversationPlace["conversation"],
+	projectThreadName: string,
+): string {
+	if (conversation.kind === "botThread") return conversation.bot.name;
 	if (conversation.kind === "directMessage") return directPeopleTitle(conversation);
-	return channelConversationName;
+	return projectThreadName;
 }
 
-/** How close a header's title or buttons may come to the task's column before the header becomes a bar above it. */
+/** How close a header's title or buttons may come to the thread's column before the header becomes a bar above it. */
 const HEADER_CLEARANCE_PX = 12;
 
 /**
- * Whether a bot's task header would overlap its messages if it sat over them:
+ * Whether a chat's header would overlap its messages if it sat over them:
  * its title reaching into the column from the left, or its buttons from the
  * right. Neither moves sideways when the header becomes a bar, so this does
  * not flip back and forth.

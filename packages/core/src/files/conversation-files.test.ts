@@ -27,13 +27,13 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 	afterAll(closeDatabase);
 
-	/** A task with a bot of its own. */
-	async function aTask() {
+	/** A thread with a bot of its own. */
+	async function aThread() {
 		const owner = await anAutomationOwner();
 		const created = await onDatabase((db) =>
 			seedConversation(db, {
 				workspaceId: owner.workspaceId,
-				kind: "task",
+				kind: "project_thread",
 				botId: owner.botId,
 				title: "Files",
 			}),
@@ -99,7 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 		Buffer.concat(await Effect.runPromise(Stream.runCollect(stream))).toString("utf8");
 
 	it("reads back what was written", async () => {
-		const { conversationId } = await aTask();
+		const { conversationId } = await aThread();
 
 		const written = await files.write({ conversationId, content: text("héllo") });
 		const read = await files.read({ conversationId, fileId: written.id });
@@ -114,7 +114,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("finds the files kept as tool calls' results by call", async () => {
-		const { conversationId, botId } = await aTask();
+		const { conversationId, botId } = await aThread();
 		const toolCallId = await aToolCall(conversationId, botId);
 		const result = await files.write({ conversationId, toolCallId, content: text("long result") });
 		await files.write({ conversationId, content: text("not a result") });
@@ -123,8 +123,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("reads a file only from its own conversation", async () => {
-		const { conversationId } = await aTask();
-		const other = await aTask();
+		const { conversationId } = await aThread();
+		const other = await aThread();
 		const written = await files.write({ conversationId, content: text("secret") });
 
 		await expect(
@@ -133,7 +133,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("finds nothing for an id that is not one", async () => {
-		const { conversationId } = await aTask();
+		const { conversationId } = await aThread();
 
 		await expect(files.read({ conversationId, fileId: "../etc/passwd" })).rejects.toBeInstanceOf(
 			ConversationFiles.FileNotFound,
@@ -150,7 +150,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 				Layer.orDie,
 			),
 		);
-		const { conversationId } = await aTask();
+		const { conversationId } = await aThread();
 		const content = {
 			stream: Stream.fromIterable([new Uint8Array(3), new Uint8Array(3)]),
 			contentType: "application/octet-stream",
@@ -195,7 +195,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 		});
 
 	it("attaches only the uploader's own unsent uploads, all of them or none", async () => {
-		const { conversationId, userId } = await aTask();
+		const { conversationId, userId } = await aThread();
 		const other = await anAutomationOwner();
 		const upload = (uploaderId: string, name: string) =>
 			files.upload({
@@ -225,7 +225,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("keeps an upload unreadable until it is attached to a message", async () => {
-		const { conversationId, userId } = await aTask();
+		const { conversationId, userId } = await aThread();
 		const uploaded = await files.upload({
 			conversationId,
 			uploaderId: userId,
@@ -253,7 +253,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("reads as a message's file only one attached to a message", async () => {
-		const { conversationId, userId } = await aTask();
+		const { conversationId, userId } = await aThread();
 		const result = await files.write({ conversationId, content: text("long result") });
 		const uploaded = await files.upload({
 			conversationId,
@@ -276,7 +276,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("refuses an upload over its own limit, keeping nothing", async () => {
-		const { conversationId, userId } = await aTask();
+		const { conversationId, userId } = await aThread();
 
 		await expect(
 			files.upload({
@@ -296,7 +296,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("refuses an upload past its uploader's unsent ones, counting only those", async () => {
-		const { conversationId, userId } = await aTask();
+		const { conversationId, userId } = await aThread();
 		const other = await anAutomationOwner();
 		const upload = (uploaderId: string, name: string) =>
 			files.upload({
@@ -321,7 +321,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("removes an unsent upload for its uploader only, and never a sent one", async () => {
-		const { conversationId, userId } = await aTask();
+		const { conversationId, userId } = await aThread();
 		const other = await anAutomationOwner();
 		const upload = (name: string) =>
 			files.upload({
@@ -351,7 +351,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("removes uploads left unsent, with their blobs, and nothing else", async () => {
-		const { conversationId, userId } = await aTask();
+		const { conversationId, userId } = await aThread();
 		const upload = (name: string) =>
 			files.upload({
 				conversationId,
@@ -386,7 +386,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("attaches a bot's files to its reply in order, up to what a message carries, and removes them when it starts again", async () => {
-		const { conversationId, botId } = await aTask();
+		const { conversationId, botId } = await aThread();
 		const [reply] = await onDatabase((db) =>
 			db
 				.insert(message)
@@ -439,7 +439,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 	});
 
 	it("deletes a conversation's blobs once a cascade has deleted the conversation", async () => {
-		const { conversationId, botId } = await aTask();
+		const { conversationId, botId } = await aThread();
 		const written = await files.write({ conversationId, content: text("kept until the bot goes") });
 		const folder = BlobStore.key("threads", conversationId);
 		const blobsUnder = () =>

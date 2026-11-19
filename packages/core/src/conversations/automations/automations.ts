@@ -4,13 +4,13 @@ import type {
 	AcceptedRun,
 	Automation,
 	AutomationCurrentSecret,
-	AutomationSchedule,
 	AutomationState,
 	AutomationTriggerInput,
 	AutomationUpdate,
 	AutomationWebhookChallenge,
 	GitHubTrigger,
 	NewAutomation,
+	RoutineSchedule,
 	RunPage,
 	RunPageQuery,
 	WebhookAuth,
@@ -27,21 +27,22 @@ import { Visibility } from "../../authorization/visibility.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { type Database, query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
-import { automation, automationTrigger, bot, connection } from "../../database/schema.ts";
+import { automation, automationTrigger, connection } from "../../database/schema.ts";
 import type { RepositoryActivity } from "../../providers/connections/github/github-events.ts";
 import { ConversationRepository } from "../repository/repository.ts";
 import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
 import {
 	type AutomationDeliveryIdTooLong,
 	AutomationNotFound,
+	type AutomationProjectHasNoLead,
 	AutomationRepositoryNotConnected,
 	type AutomationTriggerConflict,
 	AutomationTriggerKindChanged,
 	AutomationTriggerNotFound,
 	AutomationTriggerRejected,
 	automationWithTriggers,
+	type InProject,
 	inScope,
-	type OnBot,
 	type Scope,
 	scopeOf,
 	TooManyAutomationTriggers,
@@ -54,62 +55,63 @@ import { type InvalidRunCursor, makeView } from "./automation-view.ts";
 import { makeWebhooks } from "./automation-webhooks.ts";
 import { makeConnectionEvents } from "./connection-events.ts";
 import { AutomationRepository } from "./repository.ts";
-import { type InvalidAutomationSchedule, nextOccurrence, upcomingOccurrences } from "./schedule.ts";
+import { type InvalidRoutineSchedule, nextOccurrence, upcomingOccurrences } from "./schedule.ts";
 import { type Delivery, generateSecret } from "./webhook-auth.ts";
 
 /**
- * The automations people define on a bot, and running one when asked,
- * as the current actor with the permission they have on its bot. Each
- * run is in its own conversation in the bot's chat.
+ * The automations people define in a project, and running one when asked,
+ * as the current actor with the permission they have in the project. The
+ * project's lead bot does each run, in a conversation of its own in the
+ * project. A bot's own automations are its default project's.
  *
- * Runs nobody asks for, on a webhook or a schedule, are `Webhooks` and the
+ * Runs nobody asks for, from a routine or a webhook, are `Webhooks` and the
  * scheduler; a run is started by its workflow, one at a time per
  * automation, and ended by `AutomationSettlement`.
  */
 export interface Interface {
 	/**
-	 * Defines an automation on a bot, as made by the actor or, with
-	 * `madeByBot`, by the bot at the actor's request, returning the
-	 * secrets made for its webhook triggers.
+	 * Defines an automation in a project, as made by the actor or, with
+	 * `madeByBotId`, by that bot, working in the project, at the actor's
+	 * request, returning the secrets made for its webhook triggers.
 	 */
 	readonly create: (
-		owner: { botId: string; madeByBot?: boolean },
+		owner: { projectId: string; madeByBotId?: string },
 		input: NewAutomation,
 	) => Effect.Effect<
 		Defined,
 		| AuthorizationDenied
 		| AutomationRepository.AutomationNameTaken
-		| InvalidAutomationSchedule
+		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
 		| WebhookDeliveryIdHeaderRejected
 		| AutomationRepositoryNotConnected,
 		CurrentActor.Service
 	>;
 	/**
-	 * Changes an automation's own settings. Pausing it stops its schedules;
-	 * enabling it again schedules each from now.
+	 * Changes an automation's own settings. Pausing it stops its routines;
+	 * enabling it again sets when each runs next from now.
 	 */
 	readonly update: (
-		automation: OnBot,
+		automation: InProject,
 		input: AutomationUpdate,
 	) => Effect.Effect<
 		Defined,
 		| AuthorizationDenied
 		| AutomationNotFound
 		| AutomationRepository.AutomationNameTaken
-		| InvalidAutomationSchedule,
+		| InvalidRoutineSchedule,
 		CurrentActor.Service
 	>;
 	/** Adds a trigger to an automation, returning a secret made for a webhook. */
 	readonly addTrigger: (
-		automation: OnBot,
+		automation: InProject,
 		input: AutomationTriggerInput,
 	) => Effect.Effect<
 		Defined,
 		| AuthorizationDenied
 		| AutomationNotFound
 		| TooManyAutomationTriggers
-		| InvalidAutomationSchedule
+		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
 		| WebhookDeliveryIdHeaderRejected
 		| AutomationRepositoryNotConnected,
@@ -128,7 +130,7 @@ export interface Interface {
 		| AutomationNotFound
 		| AutomationTriggerNotFound
 		| AutomationTriggerKindChanged
-		| InvalidAutomationSchedule
+		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
 		| WebhookDeliveryIdHeaderRejected
 		| AutomationRepositoryNotConnected,
@@ -142,7 +144,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	readonly remove: (
-		automation: OnBot,
+		automation: InProject,
 	) => Effect.Effect<void, AuthorizationDenied | AutomationNotFound, CurrentActor.Service>;
 	/** A webhook trigger's current secret, for somebody who manages it. */
 	readonly getSecret: (
@@ -172,53 +174,50 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * When a schedule would run next, for somebody choosing one for the
-	 * bot's automations.
+	 * When a routine's schedule would run next, for somebody choosing one for
+	 * the project's automations.
 	 */
 	readonly previewSchedule: (input: {
-		botId: string;
-		schedule: AutomationSchedule;
+		projectId: string;
+		schedule: RoutineSchedule;
 		timezone: string;
-	}) => Effect.Effect<
-		Date[],
-		AuthorizationDenied | InvalidAutomationSchedule,
-		CurrentActor.Service
-	>;
+	}) => Effect.Effect<Date[], AuthorizationDenied | InvalidRoutineSchedule, CurrentActor.Service>;
 	/**
 	 * Runs the automation now, for the actor: opens its conversation, posts the
 	 * trigger, and queues the run. Asking again with the same `requestId`
 	 * returns that run again, as a duplicate.
 	 */
 	readonly run: (
-		automation: OnBot & { requestId: string },
+		automation: InProject & { requestId: string },
 	) => Effect.Effect<
 		AcceptedRun,
 		| AuthorizationDenied
 		| AutomationNotFound
 		| AutomationTriggerConflict
-		| AutomationTriggerRejected,
+		| AutomationTriggerRejected
+		| AutomationProjectHasNoLead,
 		CurrentActor.Service
 	>;
 	/**
-	 * Every automation on a bot the actor reaches, in a workspace
-	 * named by its id or its slug, by name, with its bot and channel.
+	 * Every automation of a project the actor reaches, in a workspace
+	 * named by its id or its slug, by name, with its project's lead bot.
 	 */
 	readonly listInWorkspace: (
 		workspace: string,
 	) => Effect.Effect<WorkspaceAutomation[], AuthorizationDenied, CurrentActor.Service>;
-	/** The bot's automations, by name. */
+	/** The project's automations, by name. */
 	readonly list: (owner: {
-		botId: string;
+		projectId: string;
 	}) => Effect.Effect<Automation[], AuthorizationDenied, CurrentActor.Service>;
 	readonly get: (
-		automation: OnBot,
+		automation: InProject,
 	) => Effect.Effect<Automation, AuthorizationDenied | AutomationNotFound, CurrentActor.Service>;
 	/**
 	 * A page of the automation's runs, newest first. A removed automation keeps its
 	 * history, so this finds it as long as it was ever defined.
 	 */
 	readonly listRuns: (
-		automation: OnBot,
+		automation: InProject,
 		page?: RunPageQuery,
 	) => Effect.Effect<
 		RunPage,
@@ -252,7 +251,10 @@ export interface WebhooksInterface {
 		| { kind: "ignored" }
 		| ({ kind: "challenge" } & AutomationWebhookChallenge)
 		| undefined,
-		AutomationTriggerConflict | AutomationTriggerRejected | AutomationDeliveryIdTooLong
+		| AutomationTriggerConflict
+		| AutomationTriggerRejected
+		| AutomationDeliveryIdTooLong
+		| AutomationProjectHasNoLead
 	>;
 }
 
@@ -293,9 +295,9 @@ export const make = Effect.gen(function* () {
 	const view = yield* makeView;
 
 	/**
-	 * What `input` writes for a trigger of the bot `owner`'s automation, given
+	 * What `input` writes for a trigger of the project `owner`'s automation, given
 	 * the trigger it rewrites, if any, and whether the automation runs: a
-	 * schedule's next time while it does, and a webhook's secret.
+	 * routine's next time while it does, and a webhook's secret.
 	 */
 	const triggerValues = (
 		owner: { id: string; workspaceId: string },
@@ -304,7 +306,7 @@ export const make = Effect.gen(function* () {
 		state: AutomationState,
 	): Effect.Effect<
 		Written,
-		| InvalidAutomationSchedule
+		| InvalidRoutineSchedule
 		| WebhookSecretTooShort
 		| WebhookDeliveryIdHeaderRejected
 		| AutomationRepositoryNotConnected,
@@ -312,9 +314,9 @@ export const make = Effect.gen(function* () {
 	> =>
 		Effect.gen(function* () {
 			switch (input.kind) {
-				case "schedule": {
+				case "routine": {
 					const settings = {
-						kind: "schedule" as const,
+						kind: "routine" as const,
 						schedule: input.schedule,
 						timezone: input.timezone,
 					};
@@ -350,20 +352,20 @@ export const make = Effect.gen(function* () {
 					};
 				}
 				case "github": {
-					const settings = yield* inChannelsConnection(owner, input);
+					const settings = yield* inProjectsConnection(owner, input);
 					return { values: { ...NO_SECRET, settings, nextScheduledAt: null }, secret: null };
 				}
 			}
 		});
 
-	/** Stops the automation's schedules while it is paused, and schedules each from now once it is enabled. */
+	/** Stops the automation's routines while it is paused, and sets when each runs next once it is enabled. */
 	const reschedule = (automationId: string, state: AutomationState) =>
 		Effect.gen(function* () {
 			const triggers = (yield* triggersOf([automationId])).get(automationId) ?? [];
 			const now = yield* DateTime.nowAsDate;
 			const next = yield* Effect.forEach(
 				triggers.flatMap((trigger) =>
-					trigger.settings.kind === "schedule"
+					trigger.settings.kind === "routine"
 						? [{ id: trigger.id, settings: trigger.settings }]
 						: [],
 				),
@@ -380,28 +382,31 @@ export const make = Effect.gen(function* () {
 
 	return Service.of({
 		...view,
-		create: ({ botId, madeByBot = false }, input) =>
+		create: ({ projectId, madeByBotId }, input) =>
 			operation(
 				"create",
 				transaction(
 					Effect.gen(function* () {
-						const { bot: owner, actor } = yield* authorization.bot(botId, "automation.manage");
+						const { project: owner, actor } = yield* authorization.project(
+							projectId,
+							"automation.manage",
+						);
 						const state = input.state ?? "enabled";
 						const written = yield* Effect.forEach(input.triggers, (trigger) =>
 							triggerValues(owner, trigger, undefined, state),
 						);
 						const row = yield* repository.create({
 							workspaceId: owner.workspaceId,
-							botId: owner.id,
+							projectId: owner.id,
 							createdById: actor.userId,
-							createdByBotId: madeByBot ? owner.id : null,
+							createdByBotId: madeByBotId ?? null,
 							name: input.name,
 							instructions: input.instructions,
 							state,
 						});
 						const scope = {
 							workspaceId: owner.workspaceId,
-							botId: owner.id,
+							projectId: owner.id,
 							automationId: row.id,
 						};
 						const triggers = yield* repository.addTriggers(
@@ -453,7 +458,7 @@ export const make = Effect.gen(function* () {
 							return yield* new TooManyAutomationTriggers();
 						}
 						const written = yield* triggerValues(
-							{ id: scope.botId, workspaceId: scope.workspaceId },
+							{ id: scope.projectId, workspaceId: scope.workspaceId },
 							input,
 							undefined,
 							current.state,
@@ -480,7 +485,7 @@ export const make = Effect.gen(function* () {
 						const trigger = yield* triggerIn(scope, addressed.triggerId);
 						if (trigger.kind !== input.kind) return yield* new AutomationTriggerKindChanged();
 						const written = yield* triggerValues(
-							{ id: scope.botId, workspaceId: scope.workspaceId },
+							{ id: scope.projectId, workspaceId: scope.workspaceId },
 							input,
 							trigger,
 							current.state,
@@ -568,24 +573,27 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		previewSchedule: ({ botId, schedule, timezone }) =>
+		previewSchedule: ({ projectId, schedule, timezone }) =>
 			operation(
 				"previewSchedule",
 				Effect.andThen(
-					authorization.bot(botId, "automation.manage"),
+					authorization.project(projectId, "automation.manage"),
 					Effect.flatMap(DateTime.nowAsDate, (now) => upcomingOccurrences(schedule, timezone, now)),
 				),
 			),
 
-		run: ({ botId, automationId, requestId }) =>
+		run: ({ projectId, automationId, requestId }) =>
 			operation(
 				"run",
 				transaction(
 					Effect.gen(function* () {
-						const { bot: owner, actor } = yield* authorization.bot(botId, "automation.run");
+						const { project: owner, actor } = yield* authorization.project(
+							projectId,
+							"automation.run",
+						);
 						const accepted = yield* acceptTrigger({
 							workspaceId: owner.workspaceId,
-							botId: owner.id,
+							projectId: owner.id,
 							automationId,
 							triggerId: null,
 							triggerIdentity: requestId,
@@ -599,7 +607,7 @@ export const make = Effect.gen(function* () {
 						if (accepted.duplicate) return accepted;
 						// Running one that paused itself after failing is trying again: it is turned back on.
 						if (yield* repository.resumeAfterFailures(automationId)) {
-							// A schedule it was saved with is one that has a next time.
+							// A routine it was saved with is one that has a next time.
 							yield* Effect.orDie(reschedule(automationId, "enabled"));
 						}
 						return accepted;
@@ -629,7 +637,7 @@ export const connectionEventsLayer = Layer.effect(ConnectionEvents, makeConnecti
 );
 
 export { InvalidRunCursor } from "./automation-view.ts";
-/** Accepts the runs of scheduled automations as they fall due. */
+/** Accepts the runs of automations' routines as they fall due. */
 export { layer as schedulerLayer } from "./scheduler.ts";
 /** The automation workflow's steps. */
 export { automationStepsLayer as stepsLayer } from "./steps.ts";
@@ -641,7 +649,7 @@ export interface Defined {
 }
 
 /** One of an automation's triggers, by the automation and its own id. */
-interface OnTrigger extends OnBot {
+interface OnTrigger extends InProject {
 	triggerId: string;
 }
 
@@ -694,11 +702,11 @@ const triggerIn = (scope: Scope, triggerId: string) =>
 	});
 
 /**
- * `trigger`'s settings, once its connection is one of the bot's and
+ * `trigger`'s settings, once its connection is one of the project's and
  * the repository one of the connection's, written as the connection has it,
  * since GitHub's names ignore case.
  */
-const inChannelsConnection = (
+const inProjectsConnection = (
 	owner: { id: string; workspaceId: string },
 	trigger: GitHubTrigger,
 ): Effect.Effect<
@@ -711,14 +719,10 @@ const inChannelsConnection = (
 			db
 				.select({ settings: connection.settings })
 				.from(connection)
-				.innerJoin(
-					bot,
-					and(eq(bot.id, connection.botId), eq(bot.workspaceId, connection.workspaceId)),
-				)
 				.where(
 					and(
-						eq(bot.id, owner.id),
-						eq(bot.workspaceId, owner.workspaceId),
+						eq(connection.projectId, owner.id),
+						eq(connection.workspaceId, owner.workspaceId),
 						eq(connection.id, trigger.connectionId),
 					),
 				)

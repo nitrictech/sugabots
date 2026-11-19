@@ -55,7 +55,7 @@ const collaboration: ConversationDetails = {
 	conversation: {
 		id: COLLABORATION,
 		workspaceId: revenue.workspaceId,
-		channelId: revenue.id,
+		projectId: revenue.id,
 		botId: linearHandler.id,
 		rootConversationId: CHAT,
 		kind: "collaboration",
@@ -70,7 +70,7 @@ const collaboration: ConversationDetails = {
 	capabilities: { approveToolCalls: true },
 	automationRun: null,
 	participants: [answerer, asker],
-	channelBots: [asker, answerer],
+	projectBots: [asker, answerer],
 	members: [],
 	olderMessagesCursor: null,
 	queuedSince: null,
@@ -120,7 +120,7 @@ function automationRun(failed: boolean): ConversationDetails {
 			status: "done",
 		},
 		participants: [asker],
-		channelBots: [asker],
+		projectBots: [asker],
 		automationRun: {
 			id: "0199a3a0-0000-7000-8000-000000000404",
 			automationId: "0199a3a0-0000-7000-8000-000000000405",
@@ -177,7 +177,7 @@ function Preview({ children, run }: { children: React.ReactNode; run?: Conversat
 				},
 			],
 		);
-		client.setQueryData(["channels", revenue.workspaceId], [revenue]);
+		client.setQueryData(["projects", revenue.workspaceId], [revenue]);
 		client.setQueryData(["bots", revenue.workspaceId], [growthDesk, linearHandler]);
 		return client;
 	});
@@ -236,8 +236,9 @@ export const AutomationRun = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { name: "Overnight outbound" }),
 		).toBeInTheDocument();
-		await userEvent.click(canvas.getByLabelText("View webhook payload"));
-		await expect(canvas.getByText(/crm-2026-09-18/)).toBeInTheDocument();
+		await userEvent.click(canvas.getByRole("button", { name: "View webhook payload" }));
+		// The payload opens in a popover, outside the story's own element.
+		await expect(await within(document.body).findByText(/crm-2026-09-18/)).toBeVisible();
 	},
 });
 

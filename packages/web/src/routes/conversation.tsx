@@ -3,9 +3,9 @@ import { Link, useLocation } from "@tanstack/react-router";
 import { cn } from "cn";
 import { MessageSquareOff } from "lucide-react";
 import { type ReactNode, Suspense } from "react";
-import { type ConversationPlace, placeBot } from "@/lib/chats.ts";
-import { conversationLink } from "@/lib/links.ts";
+import type { ConversationPlace } from "@/lib/chats.ts";
 import { matchesMedia, SIDE_BY_SIDE } from "@/lib/media.ts";
+import { ownerLinkOptions, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useSession } from "@/lib/session.ts";
 import type { StagedChange } from "@/screens/staged.ts";
 import { useLeave } from "@/ui/back-button.tsx";
@@ -18,7 +18,6 @@ export const ConversationPage = lazyNamed(
 	() => import("@/screens/ConversationPage.tsx"),
 	"ConversationPage",
 );
-// Its own export, or the module's other exports would decide the props.
 const ItemConversationPage = lazyNamed(
 	() =>
 		import("@/screens/InboxPane.tsx").then(({ ItemConversationPage }) => ({
@@ -28,8 +27,9 @@ const ItemConversationPage = lazyNamed(
 );
 
 /**
- * Where a page opens its conversation beside the sidebar. On a phone, touching a chat's
- * link preloads it instead, through the conversation route's loader.
+ * Where a page opens its conversation beside the sidebar. On a phone, touching
+ * a conversation's link preloads it instead, through the conversation route's
+ * loader.
  */
 export function preloadChatScreenForWideLayout() {
 	if (matchesMedia(SIDE_BY_SIDE)) ConversationPage.preload();
@@ -44,7 +44,7 @@ export type SearchChange = {
 };
 
 /**
- * A conversation at its own address, in a channel or a bot's, keeping what
+ * A conversation at its own address, in a project or a bot's, keeping what
  * the address opens beside it in step with the page.
  */
 export function RoutedConversation({
@@ -63,36 +63,28 @@ export function RoutedConversation({
 	const searchProps = useConversationSearchProps(search, navigate);
 	// A run or collaboration a notification names is the page itself, with the way back to where it is.
 	if (search.itemPage) {
-		const openClassName = cn(
-			buttonStyles({ variant: "outline", size: "sm" }),
-			"shrink-0 max-md:hidden",
-		);
+		const owner: ResourceOwner =
+			found.project !== null ? { project: found.project } : { bot: found.conversation.bot };
 		return (
 			<ItemConversationPage
-				bot={placeBot(found)}
+				conversationPlace={found}
 				conversationId={conversationId}
 				itemConversationId={search.itemPage}
 				back={
-					found.channel !== null
-						? { to: "channel", channel: found.channel }
+					found.project !== null
+						? { to: "project", project: found.project }
 						: { to: "bot", bot: found.conversation.bot }
 				}
 				trailing={
-					found.channel !== null ? (
-						<Link
-							{...conversationLink({ channel: found.channel, conversationId })}
-							className={openClassName}
-						>
-							Open conversation
-						</Link>
-					) : (
-						<Link
-							{...conversationLink({ bot: found.conversation.bot, conversationId })}
-							className={openClassName}
-						>
-							Open conversation
-						</Link>
-					)
+					<Link
+						{...ownerLinkOptions(owner, { page: "thread", conversationId })}
+						className={cn(
+							buttonStyles({ variant: "outline", size: "sm" }),
+							"shrink-0 max-md:hidden",
+						)}
+					>
+						Open conversation
+					</Link>
 				}
 				onOpenItem={(itemPage) => navigate({ search: (previous) => ({ ...previous, itemPage }) })}
 			/>
@@ -100,8 +92,7 @@ export function RoutedConversation({
 	}
 	return (
 		<ConversationPage
-			conversation={found.conversation}
-			channel={found.channel}
+			conversationPlace={found}
 			conversationId={conversationId}
 			user={user}
 			{...searchProps}
@@ -148,7 +139,7 @@ export function ConversationScreen<Place>({
 	if (isPending) return null;
 	if (!found) {
 		return (
-			// Lifted a little above the middle, as a channel's empty pages are.
+			// Lifted a little above the middle, as a project's empty pages are.
 			<div className="flex min-h-0 flex-1 pb-20">
 				<EmptyState
 					title={error ? "Could not load this conversation" : "Conversation not found"}
@@ -170,12 +161,12 @@ export function ConversationScreen<Place>({
 }
 
 /**
- * Opens a run or collaboration over a chat, or closes it, with `go`, which
- * names it in the address. On a phone an item covers its chat as a page of its
- * own, so closing one shows its chat: back to it when the chat is the page
- * behind, else the chat in the item's place, as when the item was opened from
- * Inbox. Opening the chat as a page after the item would have the chat's own
- * Back return to the item.
+ * Opens a run or collaboration over its conversation, or closes it, with `go`,
+ * which names it in the address. On a phone an item covers its conversation
+ * as a page of its own, so closing one shows the conversation: back to it
+ * when that is the page behind, else the conversation in the item's place, as
+ * when the item was opened from Inbox. Opening the conversation as a page
+ * after the item would have its own Back return to the item.
  */
 function useItemChange(go: (item: string | undefined, replace: boolean) => void) {
 	const { leaveFor } = useLeave();

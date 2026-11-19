@@ -6,7 +6,15 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import type { CommittedEvent } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { bot, message, toolCall, turn, workspace, workspaceMember } from "../../database/schema.ts";
+import {
+	bot,
+	message,
+	messageReaction,
+	toolCall,
+	turn,
+	workspace,
+	workspaceMember,
+} from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { Models } from "../../providers/models/models.ts";
 import { chunks, scriptedModel, streamed } from "../../providers/models/testing.ts";
@@ -53,6 +61,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 	let conversationId: string;
 	let connectionId: string;
 	let hostId: string;
+	let memberId: string;
 	let prepared: PreparedTurn;
 
 	afterAll(async () => {
@@ -61,7 +70,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 	// Each case's turn is already prepared, so the segment opens it again for its own run.
 	beforeEach(async () => {
-		({ conversationId, connectionId, hostId } = await aChatAwaitingReply(chatsAs));
+		({ conversationId, connectionId, hostId, memberId } = await aChatAwaitingReply(chatsAs));
 		const [run] = await runOnPostgres(runningTurns(conversationId));
 		if (!run) throw new Error("no turn running");
 		prepared = await prepareRunnable(execution, run);
@@ -230,6 +239,83 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		);
 	});
 
+	describe("an optional turn, on a message in the bot's thread that mentions only people", () => {
+		/** Starts another of the bot's threads with `content`, and prepares the turn it asks for. */
+		const optionalTurnOn = async (content: string) => {
+			const started = await chatsAs(memberId).startThread({
+				botId: hostId,
+				messageId: crypto.randomUUID(),
+				content,
+			});
+			const [run] = await runOnPostgres(runningTurns(started.conversation.id));
+			if (!run) throw new Error("no turn running");
+			expect(run.request.reason).toBe("optional");
+			prepared = await prepareRunnable(execution, run);
+			delivered = [];
+			return started.message;
+		};
+
+		it("lets the bot stay silent: no reply, a 👀 on the message it read, and the turn done", async () => {
+			const read = await optionalTurnOn("@sam can you look at this?");
+
+			const outcome = await segmentWith(
+				Models.fromStream(() => Effect.sync(() => streamed(chunks(" \n")))),
+			);
+
+			expect(outcome).toEqual({ _tag: "Finished" });
+			expect(await storedTurn()).toMatchObject({ status: "done", reason: "optional" });
+			expect(await storedReply()).toBeUndefined();
+			const reactions = await onDatabase((db) =>
+				db.select().from(messageReaction).where(eq(messageReaction.messageId, read.id)),
+			);
+			expect(reactions).toEqual([
+				expect.objectContaining({ botId: hostId, userId: null, emoji: "👀" }),
+			]);
+			expect(deliveredEvents()).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ type: "turn.completed", status: "done" }),
+					expect.objectContaining({
+						type: "message.reactions_changed",
+						messageId: read.id,
+						reactions: [
+							{
+								emoji: "👀",
+								people: [],
+								bots: [expect.objectContaining({ id: hostId })],
+							},
+						],
+					}),
+				]),
+			);
+			expect(deliveredEvents()).not.toContainEqual(
+				expect.objectContaining({ type: "message.failed" }),
+			);
+		});
+
+		it("posts the reply as usual when the bot chooses to answer", async () => {
+			const read = await optionalTurnOn("@sam can you look at this?");
+
+			await segmentWith(Models.fromStream(() => Effect.sync(() => streamed(chunks("I can.")))));
+
+			expect(await storedTurn()).toMatchObject({ status: "done" });
+			expect(await storedReply()).toMatchObject({ status: "complete", content: "I can." });
+			expect(
+				await onDatabase((db) =>
+					db.select().from(messageReaction).where(eq(messageReaction.messageId, read.id)),
+				),
+			).toEqual([]);
+		});
+
+		it("tells the bot it may stay silent", async () => {
+			await optionalTurnOn("@sam can you look at this?");
+			const asked = vi.fn(() => Effect.sync(() => streamed(chunks("I can."))));
+
+			await segmentWith(Models.fromStream(asked));
+
+			expect(JSON.stringify(asked.mock.calls)).toContain("stay silent by writing nothing at all");
+		});
+	});
+
 	// Recording runs outside Effect, in the SDK's callback; with the real
 	// repositories it fails unless the turn's services reach it.
 	it("records a built-in tool's call where the reply made it", async () => {
@@ -305,7 +391,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		const outcome = await segmentWith(model, {
 			connectionTools: {
-				forBot: () =>
+				forTurn: () =>
 					Effect.succeed({
 						tools: {
 							wiki__wipe: {
@@ -330,6 +416,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 						signInExpired: [],
 						instructions: {},
 						addable: [],
+						fromProjectAndBot: false,
 						close: async () => undefined,
 					}),
 			},
@@ -370,7 +457,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		await segmentWith(model, {
 			connectionTools: {
-				forBot: () =>
+				forTurn: () =>
 					Effect.succeed({
 						tools: {
 							wiki__wipe: {
@@ -395,6 +482,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 						signInExpired: [],
 						instructions: {},
 						addable: [],
+						fromProjectAndBot: false,
 						close: async () => undefined,
 					}),
 			},

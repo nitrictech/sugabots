@@ -7,14 +7,14 @@ import {
 	streamEvent,
 } from "@sugabots/contracts";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
-import { toTask } from "@sugabots/core/conversations/chats/conversation";
-import { taskTitleFrom } from "@sugabots/core/conversations/chats/task-title";
+import { toProjectThread } from "@sugabots/core/conversations/chats/conversation";
+import { threadTitleFrom } from "@sugabots/core/conversations/chats/thread-title";
 import { ConversationEvents } from "@sugabots/core/conversations/conversation-events";
 import { ConversationFeed } from "@sugabots/core/conversations/conversation-feed";
 import { ConversationEvent, type ToolCallChange } from "@sugabots/core/conversations/events";
 import { toCollaborationPart } from "@sugabots/core/conversations/repository/collaboration-parts";
 import {
-	type ParticipantRow,
+	authorRow,
 	personAuthor,
 	toMessage,
 	toPerson,
@@ -32,8 +32,6 @@ import { EventStore } from "@sugabots/core/database/events/store";
 import {
 	type BotRow,
 	bot as botTable,
-	channel,
-	channelMember,
 	collaboration,
 	connection,
 	conversation,
@@ -44,8 +42,9 @@ import {
 	messageReaction,
 	type PlacedConversationRow,
 	placedConversation,
+	project,
+	projectMember,
 	type StoredMessagePart,
-	task,
 	toolCall,
 	turn,
 	user,
@@ -56,9 +55,10 @@ import {
 import { Files } from "@sugabots/core/files/files";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
-import { and, eq, getColumns, gt, inArray } from "drizzle-orm";
+import { defaultProjectIdOf } from "@sugabots/core/workspaces/bots/bot";
+import { and, eq, getColumns, gt, inArray, isNull, sql } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { STAGED_TURN_OWNER } from "./conversations.ts";
+import { STAGED_TURN_OWNER, SUPPORT_HANDOVER_THREAD } from "./conversations.ts";
 
 /**
  * Plays the demo video's story in the showcase seed (see `seed.ts`),
@@ -72,15 +72,15 @@ import { STAGED_TURN_OWNER } from "./conversations.ts";
  *   node --env-file=.env packages/demo/src/showcase/stage.ts allow <toolCallId>
  *   node --env-file=.env packages/demo/src/showcase/stage.ts cue mention
  *
- * `reset` takes the story back to where it starts. `start` starts a task with
+ * `reset` takes the story back to where it starts. `start` starts a thread with
  * the bot, with the owner's message in it, prints them as the API would
- * answer, then plays the bot's part in the task. `send` posts the owner's
- * message in a channel's conversation or a task, and plays whoever answers her
+ * answer, then plays the bot's part in the thread. `send` posts the owner's
+ * message in a project's thread or a bot's thread, and plays whoever answers her
  * there. `allow` plays what follows an allowed approval, and `cue mention`
  * has Doreen ask Anita something when the demo is looking.
  *
- * The story: in Support's chat, Lorraine says Kestrel Freight was charged
- * twice. Anita starts a task asking Ticket Desk to refund it, and Ticket Desk
+ * The story: in Support's handover thread, Lorraine says Kestrel Freight was charged
+ * twice. Anita starts a thread asking Ticket Desk to refund it, and Ticket Desk
  * offers to find out why too. Told to go ahead, it checks Stripe and hands
  * the why to Billing Engineer, which runs the billing tests on its computer
  * and writes the incident up; then it asks to refund. Support's people answer
@@ -88,8 +88,8 @@ import { STAGED_TURN_OWNER } from "./conversations.ts";
  */
 
 const WORKSPACE_SLUG = "fieldnote";
-/** The channel whose people the story is told with, by slug. */
-const SUPPORT_CHANNEL = "support";
+/** The project whose people the story is told with, by slug. */
+const SUPPORT_PROJECT = "support";
 
 /** Pauses that make the staged work read as a model's pace. */
 const BEFORE_REPLY_STARTS = 1_200;
@@ -184,9 +184,9 @@ const BILLING_ENGINEER = {
 
 /** What Support's people do while Anita works through the story. */
 const PEOPLE = {
-	/** Lorraine, in the task, once the refund is through. */
+	/** Lorraine, in the thread, once the refund is through. */
 	thanks: { person: "Lorraine Delgado", emoji: "🙏", text: "Thanks! I'll let Kestrel know." },
-	/** Doreen, in Support's chat, asking Anita what to tell Kestrel: written after Anita's handle. */
+	/** Doreen, in Support's handover thread, asking Anita what to tell Kestrel: written after Anita's handle. */
 	mention: {
 		person: "Doreen Nakamura",
 		text: "Kestrel are asking whether this could happen again. Anything I can tell them?",
@@ -231,40 +231,28 @@ const botNamed = (workspaceId: string, name: string) =>
 		([row]) => (row ? Effect.succeed(row) : Effect.die(new Error(`No bot named ${name}`))),
 	);
 
-/** The main chat of the showcase channel whose slug is `channelSlug`, which the seed writes in. */
-const mainChatOf = (workspaceId: string, channelSlug: string) =>
+/** Support's handover thread, which the seed writes in and the story starts from. */
+const handoverThreadOf = (workspaceId: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
 				.select({ conversation: getColumns(placedConversation) })
 				.from(placedConversation)
-				.innerJoin(channel, eq(channel.id, placedConversation.channelId))
+				.innerJoin(project, eq(project.id, placedConversation.projectId))
 				.where(
 					and(
-						eq(channel.workspaceId, workspaceId),
-						eq(channel.slug, channelSlug),
-						eq(placedConversation.main, true),
+						eq(project.workspaceId, workspaceId),
+						eq(project.slug, SUPPORT_PROJECT),
+						eq(placedConversation.title, SUPPORT_HANDOVER_THREAD),
+						isNull(placedConversation.archivedAt),
 					),
 				),
 		),
 		([row]) =>
-			row ? Effect.succeed(row.conversation) : Effect.die(new Error(`${channelSlug} has no chat`)),
+			row
+				? Effect.succeed(row.conversation)
+				: Effect.die(new Error(`${SUPPORT_PROJECT} has no ${SUPPORT_HANDOVER_THREAD} thread`)),
 	);
-
-function botAuthor(bot: BotRow): ParticipantRow {
-	return {
-		userId: null,
-		userName: null,
-		userEmail: null,
-		userImage: null,
-		botId: bot.id,
-		botName: bot.name,
-		botHandle: bot.handle,
-		botColor: bot.color,
-		botFace: bot.face,
-		botShape: bot.shape,
-	};
-}
 
 /** Where a reply is being written: its conversation, turn and message, and its parts so far. */
 interface Reply {
@@ -380,6 +368,7 @@ const react = (
 							emoji: messageReaction.emoji,
 							createdAt: messageReaction.createdAt,
 							user: { id: user.id, name: user.name },
+							bot: sql<null>`null`,
 						})
 						.from(messageReaction)
 						.innerJoin(user, eq(user.id, messageReaction.userId))
@@ -445,7 +434,7 @@ const startReply = (bot: BotRow, inConversation: PlacedConversationRow, triggerM
 						conversationId: inConversation.id,
 						turnId: started.id,
 						botId: bot.id,
-						reply: toMessage(replyRow, botAuthor(bot)),
+						reply: toMessage(replyRow, authorRow(null, bot)),
 					}),
 				]);
 				const reply: Reply = {
@@ -764,7 +753,12 @@ const playTicketDeskWork = (
 			db
 				.select({ id: connection.id })
 				.from(connection)
-				.where(and(eq(connection.botId, bot.id), eq(connection.handle, STRIPE))),
+				.where(
+					and(
+						eq(connection.projectId, defaultProjectIdOf(sql`${bot.id}::uuid`)),
+						eq(connection.handle, STRIPE),
+					),
+				),
 		);
 		if (!stripe) return yield* Effect.die(new Error(`${bot.name} has no Stripe connection`));
 		const stripeCall = (name: string) => ({
@@ -832,10 +826,10 @@ const playBillingEngineer = (reply: Reply) =>
 		return yield* finishReply(reply, BILLING_ENGINEER.answer);
 	});
 
-/** Doreen mentions Anita in Support's chat, which brings it to Anita's Inbox wherever she is. */
+/** Doreen mentions Anita in Support's handover thread, which brings it to Anita's Inbox wherever she is. */
 const cueMention = Effect.gen(function* () {
 	const { workspace: showcaseWorkspace, owner } = yield* showcase;
-	const support = yield* mainChatOf(showcaseWorkspace.id, SUPPORT_CHANNEL);
+	const support = yield* handoverThreadOf(showcaseWorkspace.id);
 	const asking = yield* personNamed(showcaseWorkspace.id, PEOPLE.mention.person);
 	yield* typeAndPost(asking, support, `@${handleFromName(owner.name)} ${PEOPLE.mention.text}`);
 });
@@ -853,7 +847,6 @@ const writeIncident = (reply: Reply) =>
 		const written = yield* authoring
 			.create(
 				{
-					workspaceId: reply.conversation.workspaceId,
 					botId: reply.bot.id,
 					conversationId: reply.conversation.id,
 				},
@@ -870,16 +863,16 @@ const writeIncident = (reply: Reply) =>
 		});
 	});
 
-/** What each bot in the story does when Anita starts a task with it. */
+/** What each bot in the story does when Anita starts a thread with it. */
 const PARTS = new Map([[TICKET_DESK.bot as string, playTicketDesk]]);
 
-/** What each bot in the story does when Anita answers it in its task. */
+/** What each bot in the story does when Anita answers it in its thread. */
 const BOT_WORK = new Map([[TICKET_DESK.bot as string, playTicketDeskWork]]);
 
-/** Who answers Anita when she writes in a channel's conversation, by the channel's slug. */
+/** Who answers Anita when she writes in a project's thread, by the project's slug. */
 const PEOPLE_PARTS = new Map([
 	[
-		SUPPORT_CHANNEL,
+		SUPPORT_PROJECT,
 		(inConversation: PlacedConversationRow) =>
 			Effect.gen(function* () {
 				const answering = yield* personNamed(inConversation.workspaceId, PEOPLE.closing.person);
@@ -889,8 +882,8 @@ const PEOPLE_PARTS = new Map([
 ]);
 
 /**
- * The conversation `conversationId`, a channel's conversation or a task, with its
- * channel's slug if it is in one, and its bot if it has one.
+ * The conversation `conversationId`, a project's thread or a bot's thread, with its
+ * project's slug if it is in one, and its bot if it has one.
  */
 const conversationById = (conversationId: string) =>
 	Effect.flatMap(
@@ -898,11 +891,11 @@ const conversationById = (conversationId: string) =>
 			db
 				.select({
 					conversation: getColumns(placedConversation),
-					channelSlug: channel.slug,
+					projectSlug: project.slug,
 					bot: botTable,
 				})
 				.from(placedConversation)
-				.leftJoin(channel, eq(channel.id, placedConversation.channelId))
+				.leftJoin(project, eq(project.id, placedConversation.projectId))
 				.leftJoin(botTable, eq(botTable.id, placedConversation.botId))
 				.where(eq(placedConversation.id, conversationId)),
 		),
@@ -911,8 +904,8 @@ const conversationById = (conversationId: string) =>
 	);
 
 /**
- * Starts a task with `botId` and posts the owner's message in it, as the API
- * does, prints them as it answers, then plays the bot's part in the task,
+ * Starts a thread with `botId` and posts the owner's message in it, as the API
+ * does, prints them as it answers, then plays the bot's part in the thread,
  * answering the message.
  */
 const start = (botId: string, messageId: string, text: string) =>
@@ -926,16 +919,16 @@ const start = (botId: string, messageId: string, text: string) =>
 				const { id } = yield* query((db) =>
 					seedConversation(db, {
 						workspaceId: bot.workspaceId,
-						kind: "task",
+						kind: "project_thread",
 						botId: bot.id,
 						startedById: owner.id,
-						title: taskTitleFrom(text),
+						title: threadTitleFrom(text),
 					}),
 				);
 				const [row] = yield* query((db) =>
 					db.select().from(placedConversation).where(eq(placedConversation.id, id)).limit(1),
 				);
-				if (!row) return yield* Effect.die(new Error("The task wasn't started"));
+				if (!row) return yield* Effect.die(new Error("The thread wasn't started"));
 				yield* query((db) =>
 					db.insert(conversationParticipant).values([
 						{ conversationId: id, userId: owner.id },
@@ -943,22 +936,22 @@ const start = (botId: string, messageId: string, text: string) =>
 					]),
 				);
 				yield* emit([
-					ConversationEvent.TaskStarted({ workspaceId: row.workspaceId, conversationId: row.id }),
+					ConversationEvent.ThreadStarted({ workspaceId: row.workspaceId, conversationId: row.id }),
 				]);
 				return row;
 			}),
 		);
 		const posted = yield* postAs(owner, started, text, messageId);
 		// The first line out is the start's answer, which the autopilot hands the page.
-		console.log(JSON.stringify({ conversation: toTask(started), message: posted }));
+		console.log(JSON.stringify({ conversation: toProjectThread(started), message: posted }));
 		const part = PARTS.get(bot.name);
 		if (part) yield* part(bot, started, messageId);
 	});
 
 /**
  * Posts the owner's message in the conversation, prints it as the API answers
- * a send, then plays who answers her: in a channel's conversation its people, and in
- * a task its bot.
+ * a send, then plays who answers her: in a project's thread its people, and in
+ * a bot's thread that bot.
  */
 const send = (conversationId: string, messageId: string, text: string) =>
 	Effect.gen(function* () {
@@ -971,7 +964,7 @@ const send = (conversationId: string, messageId: string, text: string) =>
 			if (part) yield* part(found.bot, found.conversation, messageId);
 			return;
 		}
-		const answer = found.channelSlug ? PEOPLE_PARTS.get(found.channelSlug) : undefined;
+		const answer = found.projectSlug ? PEOPLE_PARTS.get(found.projectSlug) : undefined;
 		if (answer) yield* answer(found.conversation);
 	});
 
@@ -1039,9 +1032,9 @@ const allow = (toolCallId: string) =>
 	});
 
 /**
- * Takes the story back to where it starts: what the seed wrote. The tasks
+ * Takes the story back to where it starts: what the seed wrote. The threads
  * started with the story's bots since go, the collaborations and files made
- * in them included, and so does what was said in Support's chat since; and
+ * in them included, and so does what was said in Support's handover thread since; and
  * Support's people have read what's left there.
  */
 const reset = Effect.gen(function* () {
@@ -1049,7 +1042,7 @@ const reset = Effect.gen(function* () {
 	const seeded = showcaseWorkspace.setupCompletedAt;
 	if (!seeded)
 		return yield* Effect.die(new Error("The showcase isn't seeded as the story expects"));
-	const support = yield* mainChatOf(showcaseWorkspace.id, SUPPORT_CHANNEL);
+	const support = yield* handoverThreadOf(showcaseWorkspace.id);
 	const storyBots = yield* Effect.forEach([...PARTS.keys()], (name) =>
 		Effect.map(botNamed(showcaseWorkspace.id, name), (bot) => bot.id),
 	);
@@ -1057,10 +1050,15 @@ const reset = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const started = yield* query((db) =>
 				db
-					.select({ id: conversation.id })
-					.from(task)
-					.innerJoin(conversation, eq(conversation.id, task.conversationId))
-					.where(and(inArray(task.botId, storyBots), gt(conversation.createdAt, seeded))),
+					.select({ id: placedConversation.id })
+					.from(placedConversation)
+					.where(
+						and(
+							eq(placedConversation.kind, "project_thread"),
+							inArray(placedConversation.botId, storyBots),
+							gt(placedConversation.createdAt, seeded),
+						),
+					),
 			);
 			const startedIds = started.map(({ id }) => id);
 			if (startedIds.length > 0) {
@@ -1081,7 +1079,7 @@ const reset = Effect.gen(function* () {
 							),
 						),
 				);
-				// A task's messages, turns, calls and collaborations go with it.
+				// A thread's messages, turns, calls and collaborations go with it.
 				yield* query((db) => db.delete(conversation).where(inArray(conversation.id, startedIds)));
 			}
 			const gone = yield* query((db) =>
@@ -1092,9 +1090,9 @@ const reset = Effect.gen(function* () {
 			);
 			const readers = yield* query((db) =>
 				db
-					.select({ userId: channelMember.userId })
-					.from(channelMember)
-					.where(eq(channelMember.channelId, support.channelId ?? "")),
+					.select({ userId: projectMember.userId })
+					.from(projectMember)
+					.where(eq(projectMember.projectId, support.projectId ?? "")),
 			);
 			const now = new Date();
 			if (readers.length > 0) {
@@ -1114,11 +1112,11 @@ const reset = Effect.gen(function* () {
 						}),
 				);
 			}
-			return { tasks: startedIds.length, messages: gone.length };
+			return { threads: startedIds.length, messages: gone.length };
 		}),
 	);
 	console.log(
-		`The story is back at its start (${removed.tasks} tasks and ${removed.messages} messages removed).`,
+		`The story is back at its start (${removed.threads} threads and ${removed.messages} messages removed).`,
 	);
 });
 

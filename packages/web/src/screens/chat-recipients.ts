@@ -8,7 +8,7 @@ import {
 	type Participant,
 } from "@sugabots/contracts";
 import type { Dispatch, SetStateAction } from "react";
-import { useTakenOffRecipients } from "@/lib/chat-draft.ts";
+import { useTakenOffRecipients } from "@/lib/conversation-draft.ts";
 import { botsNamed } from "./mentions.tsx";
 
 /** The bots the message being written goes to, and the ways to take them off; see `useChatRecipients`. */
@@ -27,50 +27,50 @@ export interface ChatRecipients {
 
 /**
  * The bots the message being written goes to. Where named bots reply, as in
- * a channel, the bots the person's last message went to stay addressed until
+ * a project, the bots the person's last message went to stay addressed until
  * they take them off: talking to a bot is a conversation, not a mention every
  * time. Taking one off lasts until they send again. Elsewhere only the bots
  * the draft names, and the bot replied to, are counted.
  */
 export function useChatRecipients({
 	userId,
-	channelId,
+	projectId,
 	conversationId,
 	namedBotsReply,
-	channelBots: allChannelBots,
+	projectBots: allProjectBots,
 	shownMessages,
 	draft,
 	setDraft,
 	replyingTo,
 }: {
 	userId: string;
-	channelId: string | null;
+	projectId: string | null;
 	conversationId: string;
-	/** Whether the bots people name reply here, as in a channel. */
+	/** Whether the bots people name reply here, as in a project. */
 	namedBotsReply: boolean;
-	/** The channel's bots, when the conversation has loaded. */
-	channelBots: readonly Participant[] | undefined;
+	/** The project's bots, when the conversation has loaded. */
+	projectBots: readonly Participant[] | undefined;
 	shownMessages: readonly Message[];
 	draft: string;
 	setDraft: Dispatch<SetStateAction<string>>;
 	replyingTo: MessageReplyTo | undefined;
 }): ChatRecipients {
-	const channelBots = namedBotsReply ? (allChannelBots ?? []) : [];
+	const projectBots = namedBotsReply ? (allProjectBots ?? []) : [];
 	const lastOwnMessage = namedBotsReply
 		? shownMessages.findLast(
 				(message) => message.author.kind === "person" && message.author.id === userId,
 			)
 		: undefined;
-	const [takenOff, setTakenOff] = useTakenOffRecipients(userId, channelId, conversationId);
+	const [takenOff, setTakenOff] = useTakenOffRecipients(userId, projectId, conversationId);
 	const takenOffIds = takenOff.after === lastOwnMessage?.id ? takenOff.botIds : [];
-	const named = botsNamed(draft, channelBots);
-	const repliedToBot = channelBots.find(
+	const named = botsNamed(draft, projectBots);
+	const repliedToBot = projectBots.find(
 		(member): member is BotParticipant =>
 			member.kind === "bot" &&
 			replyingTo?.author.kind === "bot" &&
 			member.id === replyingTo.author.id,
 	);
-	const addressed = (lastOwnMessage ? botsAddressedBy(lastOwnMessage, channelBots) : []).filter(
+	const addressed = (lastOwnMessage ? botsAddressedBy(lastOwnMessage, projectBots) : []).filter(
 		(bot) =>
 			!takenOffIds.includes(bot.id) &&
 			bot.id !== repliedToBot?.id &&
@@ -129,13 +129,13 @@ function handlesOf(participants: readonly Participant[], kind: Participant["kind
 	return new Set(participants.filter((one) => one.kind === kind).map((one) => one.handle));
 }
 
-/** The bots among `channelBots` that `message` went to: those it names, and the one it replied to. */
-function botsAddressedBy(message: Message, channelBots: readonly Participant[]): BotParticipant[] {
-	const named = botsNamed(message.content, channelBots);
+/** The bots among `projectBots` that `message` went to: those it names, and the one it replied to. */
+function botsAddressedBy(message: Message, projectBots: readonly Participant[]): BotParticipant[] {
+	const named = botsNamed(message.content, projectBots);
 	const repliedTo = message.replyTo?.author;
 	const replied =
 		repliedTo?.kind === "bot" && !named.some((bot) => bot.id === repliedTo.id)
-			? channelBots.filter(
+			? projectBots.filter(
 					(member): member is BotParticipant => member.kind === "bot" && member.id === repliedTo.id,
 				)
 			: [];

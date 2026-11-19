@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { accountManager, growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyTaskFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyThreadFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * Inbox, opened from the sidebar: what is new across the workspace's chats,
@@ -28,8 +28,8 @@ const feed: InboxFeed = {
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
 			preview: "@rowan-ellis can you sign off the Acme quote before 5?",
 			at: minutesAgo(4),
-			channelId: null,
-			rootConversationId: storyTaskFor(growthDesk).id,
+			projectId: null,
+			rootConversationId: storyThreadFor(growthDesk).id,
 		},
 		{
 			kind: "message",
@@ -46,15 +46,15 @@ const feed: InboxFeed = {
 			},
 			preview: "Renewal notes for Halcyon are ready.",
 			at: minutesAgo(40),
-			channelId: null,
-			rootConversationId: storyTaskFor(accountManager).id,
+			projectId: null,
+			rootConversationId: storyThreadFor(accountManager).id,
 		},
 		{
 			kind: "run",
 			conversationId: "0199a3a0-0000-7000-8000-000000000811",
 			automationName: "Overnight outbound",
 			state: "completed",
-			triggerKind: "schedule",
+			triggerKind: "routine",
 			preview:
 				"Queued 38 leads overnight and six have already replied. The two Northwind accounts both asked for pricing.",
 			mentionsYou: false,
@@ -69,7 +69,7 @@ const feed: InboxFeed = {
 			},
 			at: minutesAgo(90),
 			unread: true,
-			rootConversationId: storyTaskFor(growthDesk).id,
+			rootConversationId: storyThreadFor(growthDesk).id,
 		},
 		{
 			kind: "collaboration",
@@ -96,7 +96,7 @@ const feed: InboxFeed = {
 			brief: "Check whether Acme can have 25% off the annual tier.",
 			at: minutesAgo(120),
 			unread: false,
-			rootConversationId: storyTaskFor(growthDesk).id,
+			rootConversationId: storyThreadFor(growthDesk).id,
 		},
 		{
 			kind: "mention",
@@ -105,8 +105,8 @@ const feed: InboxFeed = {
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Priya Kaur" }),
 			preview: "Thanks @rowan-ellis, that fixed it.",
 			at: minutesAgo(26 * 60),
-			channelId: null,
-			rootConversationId: storyTaskFor(growthDesk).id,
+			projectId: null,
+			rootConversationId: storyThreadFor(growthDesk).id,
 		},
 	],
 };
@@ -126,7 +126,7 @@ const meta = preview.meta({
 
 /**
  * What is unread, newest first: mentions, messages, automation runs and
- * collaborations together, each with its channel and when; the sidebar's Inbox
+ * collaborations together, each with its project and when; the sidebar's Inbox
  * counts what is unread.
  */
 export const Default = meta.story({
@@ -223,7 +223,7 @@ const longChat: Message[] = Array.from({ length: 30 }, (_, index) => {
 			: `Update ${index + 1} on the Northwind accounts.`;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(index).padStart(2, "0")}`,
-		conversationId: storyTaskFor(growthDesk).id,
+		conversationId: storyThreadFor(growthDesk).id,
 		author:
 			index === 4
 				? testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" })
@@ -266,11 +266,11 @@ export const Opened = meta.story({
 	},
 	render: () => (
 		<StoryApp
-			path={`/${storyWorkspace.slug}/inbox/${revenue.slug}/${storyTaskFor(growthDesk).id}?message=${mentionInLongChat}`}
+			path={`/${storyWorkspace.slug}/inbox/${revenue.slug}/${storyThreadFor(growthDesk).id}?message=${mentionInLongChat}`}
 		/>
 	),
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: "Open task" })).toBeVisible();
+		await expect(await canvas.findByRole("link", { name: "Open thread" })).toBeVisible();
 		const inbox = canvas.getByRole("region", { name: "Inbox" });
 		await expect(
 			await within(inbox).findByRole("link", { name: /Jay Yu mentioned you/ }),

@@ -1,5 +1,4 @@
 import {
-	type Bot,
 	type Connection,
 	type ConnectionPreset,
 	connectionCatalog,
@@ -7,12 +6,18 @@ import {
 	connectionPresetFor,
 	type UnsavedConnection,
 } from "@sugabots/contracts";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowUpRight, ChevronRight, Code, Globe, Search } from "lucide-react";
-import { type FormEvent, useDeferredValue, useState } from "react";
+import { cn } from "cn";
+import { ArrowUpRight, ChevronRight, Code, Globe } from "lucide-react";
+import { type FormEvent, useState } from "react";
 import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { connectionSettingsLink } from "@/lib/links.ts";
+import {
+	OwnerLink,
+	ownerName,
+	type ResourceOwner,
+	resourceProjectId,
+	useNavigateToOwnerPage,
+} from "@/lib/resource-owner.tsx";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { Alert, Success } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -25,6 +30,7 @@ import {
 	DialogFormHeader,
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
+import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	SettingsFieldRow,
@@ -36,7 +42,8 @@ import { GitHubConnectStep } from "./GitHubConnect.tsx";
 import { accessSummaryText } from "./tool-access.tsx";
 
 /*
- * The apps a bot can reach, as one group on the bot's Connections page: each with
+ * The services a project's bots can reach, as one group on its Connections
+ * page, a bot's being its default project's: each with
  * what its tools are set to, Allow, Ask or Off for all of them at once, and
  * whatever it needs (a sign-in, a reconnect) on its line. A row opens the
  * connection's own page: its address, each of its tools, and removing it.
@@ -45,13 +52,14 @@ import { accessSummaryText } from "./tool-access.tsx";
  */
 
 export function ConnectionsSettings({
-	bot,
+	owner,
 	canManage,
 	signInError,
 	adding,
 	onAddingChange,
 }: {
-	bot: Bot;
+	/** The bot or project whose connections these are. */
+	owner: ResourceOwner;
 	canManage: boolean;
 	/** Why the OAuth sign-in that just returned here did not finish, in our own words. */
 	signInError?: string;
@@ -59,33 +67,33 @@ export function ConnectionsSettings({
 	adding: boolean;
 	onAddingChange: (adding: boolean) => void;
 }) {
-	const connections = useConnections(bot.id);
+	const projectId = resourceProjectId(owner);
+	const connections = useConnections(projectId);
 	if (connections.isPending) return null;
 	if (connections.isError) return <Alert>{failureMessage(connections.error)}</Alert>;
 	const listed = connections.data;
 	const taken = new Set(listed.map((one) => connectionPresetFor(one.url)?.id));
-	const setAdding = onAddingChange;
 
 	return (
 		<>
 			{signInError && <Alert>Signing in did not finish: {signInError}</Alert>}
 			<SettingsGroup note="Bots act as whoever connected each one. Open one to choose for each tool.">
 				{listed.map((one) => (
-					<ConnectionRow key={one.id} connection={one} bot={bot} canManage={canManage} />
+					<ConnectionRow key={one.id} connection={one} owner={owner} canManage={canManage} />
 				))}
 				{listed.length === 0 && (
 					<SettingsRow label={<span className="text-muted-foreground">No connections yet</span>} />
 				)}
 			</SettingsGroup>
 			{canManage && (
-				<Dialog open={adding} onOpenChange={setAdding}>
+				<Dialog open={adding} onOpenChange={onAddingChange}>
 					{adding && (
 						<AddConnectionDialog
-							botId={bot.id}
-							botName={bot.name}
+							projectId={projectId}
+							addingTo={ownerName(owner)}
 							available={connectionCatalog.filter((preset) => !taken.has(preset.id))}
 							offersGitHub={!listed.some((one) => one.kind === "github")}
-							done={() => setAdding(false)}
+							done={() => onAddingChange(false)}
 						/>
 					)}
 				</Dialog>
@@ -105,17 +113,17 @@ function lineFor(connection: Connection): string {
 
 function ConnectionRow({
 	connection,
-	bot,
+	owner,
 	canManage,
 }: {
 	connection: Connection;
-	bot: Bot;
+	owner: ResourceOwner;
 	canManage: boolean;
 }) {
-	const actions = useConnectionActions(bot.id);
-	const navigate = useNavigate();
+	const actions = useConnectionActions(resourceProjectId(owner));
+	const navigateToOwnerPage = useNavigateToOwnerPage();
 	const backToList = useBackToHere("Connections");
-	const page = { ...connectionSettingsLink(bot, connection), state: backToList };
+	const page = { page: "connection", connectionId: connection.id } as const;
 	const needsSignIn = !connection.signedIn;
 	const failing =
 		connection.signInExpired || (connection.signedIn && connection.status === "error");
@@ -125,7 +133,7 @@ function ConnectionRow({
 	const reconnect = () =>
 		connection.auth === "oauth"
 			? actions.signIn.mutate({ connectionId: connection.id })
-			: void navigate(page);
+			: void navigateToOwnerPage(owner, page, { state: backToList });
 	const line = error ? failureMessage(error) : lineFor(connection);
 
 	return (
@@ -134,8 +142,10 @@ function ConnectionRow({
 			className="relative flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover active:bg-row-selected"
 		>
 			{/* Its link covers the whole row; the controls sit above it. */}
-			<Link
-				{...page}
+			<OwnerLink
+				owner={owner}
+				to={page}
+				state={backToList}
 				aria-label={`${connection.name}, ${line}. Open tools`}
 				className="focus-ring flex min-w-0 flex-1 items-center gap-3.5 rounded-lg text-left after:absolute after:inset-0"
 			>
@@ -147,12 +157,15 @@ function ConnectionRow({
 				<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
 					<span className="truncate text-sm text-foreground">{connection.name}</span>
 					<span
-						className={`text-pretty text-xs ${failing || error ? "line-clamp-2 text-destructive-text" : "text-subtle-foreground"}`}
+						className={cn(
+							"text-pretty text-xs",
+							failing || error ? "line-clamp-2 text-destructive-text" : "text-subtle-foreground",
+						)}
 					>
 						{line}
 					</span>
 				</span>
-			</Link>
+			</OwnerLink>
 			<span className="relative ml-auto flex shrink-0 items-center gap-2">
 				{canManage && (needsSignIn || failing) && (
 					<Button size="sm" variant="secondary" disabled={pending} onClick={reconnect}>
@@ -186,16 +199,17 @@ type Choice = ConnectionPreset | "custom" | "http" | "github";
 
 /** Adding a connection: which app, then its sign-in, or any other server by its address. */
 function AddConnectionDialog({
-	botId,
-	botName,
+	projectId,
+	addingTo,
 	available,
 	offersGitHub,
 	done,
 }: {
-	botId: string;
-	botName: string;
+	projectId: string;
+	/** Who the connection is added to: the bot or project, by name. */
+	addingTo: string;
 	available: readonly ConnectionPreset[];
-	/** Whether the bot may connect to GitHub, which it may only once. */
+	/** Whether it may connect to GitHub, which a project, so a bot, may only once. */
 	offersGitHub: boolean;
 	done: () => void;
 }) {
@@ -203,19 +217,19 @@ function AddConnectionDialog({
 	return (
 		<DialogFormFrame>
 			{choice === "github" ? (
-				<GitHubConnectStep botId={botId} onBack={() => setChoice(undefined)} done={done} />
+				<GitHubConnectStep projectId={projectId} onBack={() => setChoice(undefined)} done={done} />
 			) : choice === "custom" || choice === "http" ? (
 				<ByUrlStep
-					botId={botId}
+					projectId={projectId}
 					kind={choice === "http" ? "http" : "mcp"}
 					onBack={() => setChoice(undefined)}
 					done={done}
 				/>
 			) : choice ? (
-				<AppStep botId={botId} preset={choice} onBack={() => setChoice(undefined)} />
+				<AppStep projectId={projectId} preset={choice} onBack={() => setChoice(undefined)} />
 			) : (
 				<AppList
-					botName={botName}
+					addingTo={addingTo}
 					available={available}
 					offersGitHub={offersGitHub}
 					onChoose={setChoice}
@@ -226,73 +240,57 @@ function AddConnectionDialog({
 	);
 }
 
-/** GitHub as the app list shows it, beside the catalog's MCP apps; it connects through an app of the bot's own. */
-const GITHUB_CHOICE = {
+/** GitHub as the app list shows it, beside the catalog's MCP apps; it connects through an app of the project's own. */
+const GITHUB_APP = {
+	choice: "github",
+	id: "github",
 	name: "GitHub",
 	description: "Repositories, issues and pull requests",
-};
+} as const;
 
 function AppList({
-	botName,
+	addingTo,
 	available,
 	offersGitHub,
 	onChoose,
 	done,
 }: {
-	botName: string;
+	/** Who the connection is added to: the bot or project, by name. */
+	addingTo: string;
 	available: readonly ConnectionPreset[];
 	offersGitHub: boolean;
 	onChoose: (choice: Choice) => void;
 	done: () => void;
 }) {
-	const [query, setQuery] = useState("");
-	const needle = useDeferredValue(query.trim().toLowerCase());
-	const matches = (app: { name: string; description: string }) =>
-		needle === "" ||
-		app.name.toLowerCase().includes(needle) ||
-		app.description.toLowerCase().includes(needle);
-	const shown = available.filter(matches);
-	const gitHubShown = offersGitHub && matches(GITHUB_CHOICE);
+	const apps = [
+		...(offersGitHub ? [GITHUB_APP] : []),
+		...available.map((preset) => ({ ...preset, choice: preset })),
+	];
+	const { query, setQuery, searching, matches } = useSearchFilter(apps, (app) => [
+		app.name,
+		app.description,
+	]);
 	return (
 		<DialogFormStep onSubmit={(event) => event.preventDefault()}>
-			<DialogFormHeader title={`Add to ${botName}`} />
+			<DialogFormHeader title={`Add to ${addingTo}`} />
 			<DialogFormBody>
-				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-					<input
-						type="search"
-						value={query}
-						onChange={(event) => setQuery(event.target.value)}
-						placeholder="Search apps"
-						aria-label="Search apps"
-						className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-					/>
-				</label>
+				<SearchField label="Search apps" value={query} onChange={setQuery} />
 				<div className="-mx-1 flex max-h-picker flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
-					{(gitHubShown || shown.length > 0) && (
+					{matches.length > 0 && (
 						<SettingsGroup>
-							{gitHubShown && (
+							{matches.map((app) => (
 								<SettingsRow
-									icon={<ConnectionMark presetId="github" name={GITHUB_CHOICE.name} size="tile" />}
-									label={GITHUB_CHOICE.name}
-									sub={GITHUB_CHOICE.description}
+									key={app.id}
+									icon={<ConnectionMark presetId={app.id} name={app.name} size="tile" />}
+									label={app.name}
+									sub={app.description}
 									chevron
-									onClick={() => onChoose("github")}
-								/>
-							)}
-							{shown.map((preset) => (
-								<SettingsRow
-									key={preset.id}
-									icon={<ConnectionMark presetId={preset.id} name={preset.name} size="tile" />}
-									label={preset.name}
-									sub={preset.description}
-									chevron
-									onClick={() => onChoose(preset)}
+									onClick={() => onChoose(app.choice)}
 								/>
 							))}
 						</SettingsGroup>
 					)}
-					{!gitHubShown && shown.length === 0 && needle !== "" && (
+					{matches.length === 0 && searching && (
 						<p className="m-0 px-1 text-muted-foreground text-xs">
 							No app matches “{query.trim()}”.
 						</p>
@@ -330,18 +328,18 @@ function AppList({
 
 /**
  * A catalog app: what it is. Connecting makes it and leaves for its sign-in,
- * which brings the browser back to this bot.
+ * which brings the browser back to these connections.
  */
 function AppStep({
-	botId,
+	projectId,
 	preset,
 	onBack,
 }: {
-	botId: string;
+	projectId: string;
 	preset: ConnectionPreset;
 	onBack: () => void;
 }) {
-	const actions = useConnectionActions(botId);
+	const actions = useConnectionActions(projectId);
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
@@ -397,18 +395,18 @@ const signInMethodOptions: { value: SignInMethod; label: string }[] = [
  * test before it is added: its check sends no request.
  */
 function ByUrlStep({
-	botId,
+	projectId,
 	kind,
 	onBack,
 	done,
 }: {
-	botId: string;
+	projectId: string;
 	kind: "mcp" | "http";
 	onBack: () => void;
 	done: () => void;
 }) {
 	const isEndpoint = kind === "http";
-	const actions = useConnectionActions(botId);
+	const actions = useConnectionActions(projectId);
 	const [name, setName] = useState("");
 	const [url, setUrl] = useState("");
 	const [method, setMethod] = useState<SignInMethod>("token");

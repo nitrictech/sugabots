@@ -2,7 +2,7 @@ import type { WorkspacePermissions } from "@sugabots/contracts";
 
 /**
  * The workspace's own settings sections, as the navigation lists them under
- * Workspace. Channels and bots are listed beneath them, each with its own
+ * Workspace. Projects and bots are listed beneath them, each with its own
  * pages, and your own settings above them all.
  *
  * `needs` names a workspace permission the API resolves, so a section
@@ -25,17 +25,17 @@ export const yourSettingSections = [
 ] as const satisfies ReadonlyArray<SectionShape>;
 
 /**
- * The channels, which the navigation lists one by one rather than as a
+ * The projects, which the navigation lists one by one rather than as a
  * section. Its own address opens the first, which is where deleting or
- * leaving a channel lands.
+ * leaving a project lands.
  */
-const channelsSection = {
-	id: "channels",
-	label: "Channels",
-	path: "/settings/channels",
+const projectsSection = {
+	id: "projects",
+	label: "Projects",
+	path: "/settings/projects",
 } as const satisfies SectionShape;
 
-/** The bots, listed one by one like the channels. Its own address opens the first. */
+/** The bots, listed one by one like the projects. Its own address opens the first. */
 const botsSection = {
 	id: "bots",
 	label: "Bots",
@@ -53,13 +53,13 @@ interface SectionShape {
 export type SettingSection =
 	| (typeof workspaceSettingSections)[number]
 	| (typeof yourSettingSections)[number]
-	| typeof channelsSection
+	| typeof projectsSection
 	| typeof botsSection;
 
 const allSettingSections: readonly SettingSection[] = [
 	...workspaceSettingSections,
 	...yourSettingSections,
-	channelsSection,
+	projectsSection,
 	botsSection,
 ];
 
@@ -69,18 +69,24 @@ export function workspaceSettingSection(section: string): SettingSection | undef
 	return allSettingSections.find((candidate) => candidate.id === section);
 }
 
-/** The pages of a channel's settings, as the navigation lists them under it. */
-export const channelSettingsPages = [
+/**
+ * The pages of a project's settings, as the navigation lists them under it:
+ * its own, its people and bots, and, as a bot's have, the services it is
+ * connected to and its computer.
+ */
+export const projectSettingsPages = [
 	{ id: "general", label: "General" },
 	{ id: "people", label: "People" },
 	{ id: "bots", label: "Bots" },
+	{ id: "connections", label: "Connections" },
+	{ id: "computer", label: "Computer" },
 ] as const;
 
-export type ChannelSettingsPage = (typeof channelSettingsPages)[number]["id"];
+export type ProjectSettingsPage = (typeof projectSettingsPages)[number]["id"];
 
-/** The page of a channel's settings an address names after the channel, if it names one. */
-export function channelSettingsPage(segment: string): ChannelSettingsPage | undefined {
-	return channelSettingsPages.find((page) => page.id === segment)?.id;
+/** The page of a project's settings an address names after the project, if it names one. */
+export function projectSettingsPage(segment: string): ProjectSettingsPage | undefined {
+	return projectSettingsPages.find((page) => page.id === segment)?.id;
 }
 
 /**

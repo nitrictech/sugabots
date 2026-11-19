@@ -56,8 +56,9 @@ const instructions = Schema.Trim.check(
 });
 
 /**
- * The automation tools: a bot lists, sets up and changes its own automations, for
- * the person whose message it is answering. Schedules are cron expressions in
+ * The automation tools: a bot lists, sets up and changes the automations of the
+ * project it is working in, its own in its own threads, for the person whose
+ * message it is answering. Routines are cron expressions in
  * `timeZone`, the workspace's, which their descriptions name as people say it.
  */
 export function automationTools({
@@ -72,11 +73,11 @@ export function automationTools({
 	run: RunEffect;
 }): Record<(typeof AUTOMATION_TOOLS)[number], Tool> {
 	const zone = `${spokenTimeZone(timeZone)} (${timeZone})`;
-	const schedule = Schema.Trim.check(
+	const routineExpression = Schema.Trim.check(
 		Schema.isMinLength(1),
 		Schema.isMaxLength(MAX_CRON_EXPRESSION_CHARACTERS),
 	).annotate({
-		description: `A five-field cron expression in ${zone}: "0 9 * * 1-5" is 9:00 on weekdays.`,
+		description: `When it runs, as a five-field cron expression in ${zone}: "0 9 * * 1-5" is 9:00 on weekdays.`,
 	});
 
 	/** Runs `work`, handing a refusal back to the model as words it can pass on. */
@@ -92,14 +93,14 @@ export function automationTools({
 	return {
 		[LIST_AUTOMATIONS_TOOL]: tool({
 			description:
-				"List your automations: the jobs you do without being asked, with what starts each (its schedules, webhooks or repository events), and whether it is paused. Check here before setting up an automation, so you change one that exists rather than make a second.",
+				"List the automations of the project this conversation is in (in your own threads, your own): the jobs its lead bot does without being asked, with what starts each (its routines, webhooks or repository events), and whether it is paused. Check here before setting up an automation, so you change one that exists rather than make a second.",
 			inputSchema: noInputSchema,
 			execute: () =>
 				answer(Effect.map(automations.list(bot), (listed) => ({ automations: listed }))),
 		}),
 		[CREATE_AUTOMATION_TOOL]: tool({
-			description: `Set up an automation: a job you do on a schedule without being asked, such as a 9am standup or a weekly report. Only when the person asks for one, or agrees to one you suggest. Schedules run in ${zone}. When it is set up, tell them when it runs and link its name to the settingsUrl you get back, where they can change or remove it.`,
-			inputSchema: Schema.Struct({ name, instructions, schedule }).pipe(
+			description: `Set up an automation in the project this conversation is in, which its lead bot (in your own threads, you) runs: a job done on a timetable without being asked, such as a 9am standup or a weekly report. Only when the person asks for one, or agrees to one you suggest. Routines run in ${zone}. When it is set up, tell them when it runs and link its name to the settingsUrl you get back, where they can change or remove it.`,
+			inputSchema: Schema.Struct({ name, instructions, routineExpression }).pipe(
 				Schema.toStandardSchemaV1,
 				Schema.toStandardJSONSchemaV1,
 			),
@@ -107,14 +108,14 @@ export function automationTools({
 				answer(Effect.map(automations.create(bot, input), (automation) => ({ automation }))),
 		}),
 		[UPDATE_AUTOMATION_TOOL]: tool({
-			description: `Change one of your automations, by the id list_automations gives: its name, instructions, schedule, or whether it is paused. Give only what changes. Schedules run in ${zone}. Its schedule can be changed here only while that schedule is all that starts it; other triggers are changed in its settings.`,
+			description: `Change one of the project's automations, by the id list_automations gives: its name, instructions, routine, or whether it is paused. Give only what changes. Routines run in ${zone}. Its routine can be changed here only while one routine is all that starts it; other routines and triggers are changed in its settings.`,
 			inputSchema: Schema.Struct({
 				automationId: Schema.String.check(Schema.isUUID()).annotate({
 					description: "The automation's id, from list_automations.",
 				}),
 				name: Schema.optional(name),
 				instructions: Schema.optional(instructions),
-				schedule: Schema.optional(schedule),
+				routineExpression: Schema.optional(routineExpression),
 				paused: Schema.optional(
 					Schema.Boolean.annotate({ description: "true pauses it; false sets it running again." }),
 				),

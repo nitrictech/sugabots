@@ -8,7 +8,7 @@ import {
 	useConversationSearchProps,
 } from "./conversation.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
-import { type ConversationSearch, validateConversationSearch } from "./search.ts";
+import { validateConversationSearch } from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
 const InboxPane = lazyNamed(
@@ -16,7 +16,7 @@ const InboxPane = lazyNamed(
 	"InboxPane",
 );
 
-/** Inbox: what is new across the workspace, and the chat, run or collaboration of each, opened in its place. */
+/** Inbox: what is new across the workspace, and the conversation, run or collaboration of each, opened in its place. */
 export const inboxRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/inbox",
@@ -36,13 +36,10 @@ export const inboxIndexRoute = createRoute({
 	component: InboxOverview,
 });
 
-type InboxConversationSearch = ConversationSearch;
-
 export const inboxConversationRoute = createRoute({
 	getParentRoute: () => inboxRoute,
 	path: "/$conversation",
-	validateSearch: (search: Record<string, unknown>): InboxConversationSearch =>
-		validateConversationSearch(search),
+	validateSearch: validateConversationSearch,
 	preloadStaleTime: 0,
 	loader: ({ context, params }) => {
 		prefetchConversation(context.queries, params.conversation);
@@ -57,8 +54,7 @@ export const inboxConversationRoute = createRoute({
 			<ConversationScreen place={useAnyConversationPlace(conversation)}>
 				{(found, user) => (
 					<InboxPane
-						channel={found.channel}
-						conversation={found.conversation}
+						conversationPlace={found}
 						conversationId={conversation}
 						user={user}
 						itemPageId={search.itemPage}

@@ -20,22 +20,25 @@ describe("chat contracts", () => {
 		).toBe("Failure");
 	});
 
-	it.each(["chat", "system"])("keeps %s conversations out of customer-facing history", (kind) => {
-		const internalEntry = {
-			conversationId: ID,
-			parentConversationId: null,
-			kind,
-			title: "Summary",
-			participants: [],
-			status: "completed",
-			latestActivityAt: "2026-09-18T00:00:00.000Z",
-		};
-		expect(
-			Schema.decodeUnknownResult(chatHistoryPageSchema)({
-				items: [internalEntry],
-				nextCursor: null,
-			})._tag,
-		).toBe("Failure");
+	const historyEntry = {
+		conversationId: ID,
+		parentConversationId: null,
+		kind: "collaboration",
+		title: "Summary",
+		participants: [],
+		status: "completed",
+		automationRun: null,
+		latestActivityAt: "2026-09-18T00:00:00.000Z",
+	};
+	const decodeHistory = (entry: object) =>
+		Schema.decodeUnknownResult(chatHistoryPageSchema)({ items: [entry], nextCursor: null })._tag;
+
+	it("accepts a collaboration in the history", () => {
+		expect(decodeHistory(historyEntry)).toBe("Success");
+	});
+
+	it.each(["project_thread", "system"])("keeps %s conversations out of the history", (kind) => {
+		expect(decodeHistory({ ...historyEntry, kind })).toBe("Failure");
 	});
 
 	it.each(["collaboration", "run"])("accepts item conversation kind %s", (type) => {

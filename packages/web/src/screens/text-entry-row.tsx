@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
-import { savedKeyMask } from "./connection-row.tsx";
+import { Button } from "@/ui/button.tsx";
+import { savedKeyMask } from "./provider-field-row.tsx";
 
 /**
  * A row that takes a value typed in place: a server's address, or a key. It
@@ -60,23 +61,13 @@ export function TextEntryRow({
 					<span id={id} className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
 						{savedKeyMask}
 					</span>
-					<button
-						type="button"
-						onClick={() => setReplacing(true)}
-						disabled={disabled}
-						className="focus-ring shrink-0 rounded-md font-medium text-link text-xs"
-					>
+					<Button variant="link" size="text" onClick={() => setReplacing(true)} disabled={disabled}>
 						Replace
-					</button>
+					</Button>
 					{onRemove && (
-						<button
-							type="button"
-							onClick={onRemove}
-							disabled={disabled}
-							className="focus-ring shrink-0 rounded-md font-medium text-destructive-text text-xs"
-						>
+						<Button variant="destructive" size="text" onClick={onRemove} disabled={disabled}>
 							Remove
-						</button>
+						</Button>
 					)}
 				</>
 			) : (

@@ -4,7 +4,7 @@ import { Schema } from "effect";
 /**
  * The API's failures, one class per status.
  *
- * An endpoint lists the ones it can answer with, so a client's error channel
+ * An endpoint lists the ones it can answer with, so a client's error type
  * names exactly those and a handler failing with one it did not declare does
  * not compile. Each is a tagged error on the wire, `{ "_tag": "NotFound",
  * "message": "…" }`, which is what the generated client decodes back into the
@@ -77,11 +77,15 @@ export class InternalServerError extends Schema.TaggedError<InternalServerError>
 	{ httpApiStatus: 500 },
 ) {}
 
-export type ApiFailure =
-	| BadRequest
-	| Unauthorized
-	| Forbidden
-	| NotFound
-	| Conflict
-	| PayloadTooLarge
-	| InternalServerError;
+/** Every failure the API answers with, decoded from its body by its `_tag`. */
+export const apiFailureSchema = Schema.Union([
+	BadRequest,
+	Unauthorized,
+	Forbidden,
+	NotFound,
+	Conflict,
+	PayloadTooLarge,
+	InternalServerError,
+]);
+
+export type ApiFailure = typeof apiFailureSchema.Type;

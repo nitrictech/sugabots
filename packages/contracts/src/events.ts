@@ -129,7 +129,7 @@ export const eventPayloadSchemas = {
 		collaboration: collaborationPartSchema,
 	}),
 	"bot.updated": nothing,
-	"channel.updated": nothing,
+	"project.updated": nothing,
 	/**
 	 * The one control event. Sent when the server cannot give the client a
 	 * continuous history: the resume point was pruned, the replay is too long
@@ -168,7 +168,7 @@ export const durableEventTypeSchema = Schema.Literals([
 	"conversation.item_changed",
 	"collaboration.updated",
 	"bot.updated",
-	"channel.updated",
+	"project.updated",
 ] satisfies KnownEventType[]);
 
 export type DurableEventType = typeof durableEventTypeSchema.Type;

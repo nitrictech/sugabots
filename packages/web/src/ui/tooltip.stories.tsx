@@ -10,7 +10,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: { label: "Details", children: <span /> },
 	render: (args) => (
-		<div style={{ padding: 48 }}>
+		<div className="p-12">
 			<Tooltip {...args}>
 				<IconButton label="Details">
 					<Info />

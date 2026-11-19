@@ -1,4 +1,4 @@
-import type { AutomationSchedule } from "@sugabots/contracts";
+import type { RoutineSchedule } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { CronExpressionParser } from "cron-parser";
 import { Data, Effect } from "effect";
@@ -6,8 +6,8 @@ import type { UserFacing } from "../../user-message.ts";
 import { calendarLatestAtOrBefore, calendarOccurrencesAfter } from "./calendar.ts";
 
 /** A schedule that cannot run. People are told what to fix in our words, not the cron parser's. */
-export class InvalidAutomationSchedule
-	extends Data.TaggedError("InvalidAutomationSchedule")<{
+export class InvalidRoutineSchedule
+	extends Data.TaggedError("InvalidRoutineSchedule")<{
 		readonly reason: ScheduleProblem;
 		/** What the cron parser threw, when it refused the expression. */
 		readonly cause?: unknown;
@@ -33,28 +33,28 @@ const SCHEDULE_PROBLEM_USER_MESSAGES: Record<ScheduleProblem, UserText> = {
 
 function requireTimeZone(timezone: string) {
 	if (!Intl.supportedValuesOf("timeZone").includes(timezone) && timezone !== "UTC") {
-		throw new InvalidAutomationSchedule({ reason: "unknownTimeZone" });
+		throw new InvalidRoutineSchedule({ reason: "unknownTimeZone" });
 	}
 }
 
 function requireFiveFields(expression: string) {
 	if (expression.trim().split(/\s+/).length !== 5) {
-		throw new InvalidAutomationSchedule({ reason: "notFiveFields" });
+		throw new InvalidRoutineSchedule({ reason: "notFiveFields" });
 	}
 }
 
 const unparseable = (cause: unknown) =>
-	cause instanceof InvalidAutomationSchedule
+	cause instanceof InvalidRoutineSchedule
 		? cause
-		: new InvalidAutomationSchedule({ reason: "unparseable", cause });
+		: new InvalidRoutineSchedule({ reason: "unparseable", cause });
 
 /** The schedule's next `count` runs after `from`, in `timezone`. */
 export function upcomingOccurrences(
-	schedule: AutomationSchedule,
+	schedule: RoutineSchedule,
 	timezone: string,
 	from: Date,
 	count = 5,
-): Effect.Effect<Date[], InvalidAutomationSchedule> {
+): Effect.Effect<Date[], InvalidRoutineSchedule> {
 	return Effect.try({
 		try: () => {
 			requireTimeZone(timezone);
@@ -73,11 +73,9 @@ export function upcomingOccurrences(
 }
 
 /** The schedule's next run after `from`. A schedule that never runs again is refused. */
-export const nextOccurrence = (schedule: AutomationSchedule, timezone: string, from: Date) =>
+export const nextOccurrence = (schedule: RoutineSchedule, timezone: string, from: Date) =>
 	Effect.flatMap(upcomingOccurrences(schedule, timezone, from, 1), ([next]) =>
-		next
-			? Effect.succeed(next)
-			: Effect.fail(new InvalidAutomationSchedule({ reason: "neverRuns" })),
+		next ? Effect.succeed(next) : Effect.fail(new InvalidRoutineSchedule({ reason: "neverRuns" })),
 	);
 
 /**
@@ -86,10 +84,10 @@ export const nextOccurrence = (schedule: AutomationSchedule, timezone: string, f
  * no run lately, as after it was changed, the latest is `now`.
  */
 export function latestMissedAndNextOccurrence(
-	schedule: AutomationSchedule,
+	schedule: RoutineSchedule,
 	timezone: string,
 	now: Date,
-): Effect.Effect<{ latest: Date; next: Date }, InvalidAutomationSchedule> {
+): Effect.Effect<{ latest: Date; next: Date }, InvalidRoutineSchedule> {
 	if (schedule.repeat !== "cron") {
 		return Effect.map(nextOccurrence(schedule, timezone, now), (next) => ({
 			latest: calendarLatestAtOrBefore(schedule, timezone, now) ?? now,

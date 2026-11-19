@@ -3,8 +3,8 @@ import type {
 	BotColor,
 	BotFace,
 	BotShape,
-	ChannelColor,
 	NewAutomation,
+	ProjectColor,
 	ProviderPresetId,
 } from "@sugabots/contracts";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
@@ -18,9 +18,9 @@ import { layer as databaseLayer, query } from "@sugabots/core/database/database"
 import {
 	automationTrigger,
 	bot as botTable,
-	channel,
 	modelProvider,
 	modelRequest,
+	project,
 	providerModel,
 	user,
 	workspace,
@@ -35,9 +35,10 @@ import { Egress } from "@sugabots/core/providers/network/egress";
 import { unimplemented } from "@sugabots/core/testing";
 import { BotRepository } from "@sugabots/core/workspaces/bots/bot-repository";
 import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
-import { ChannelRepository } from "@sugabots/core/workspaces/channels/channel-repository";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
+import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
+import { ProjectRepository } from "@sugabots/core/workspaces/projects/project-repository";
 import { userText } from "@sugabots/errors";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
@@ -49,12 +50,13 @@ import {
 	ensureConnections,
 	ensureConversations,
 	type SeedConnection,
-	type TaskScene,
+	SUPPORT_HANDOVER_THREAD,
+	type ThreadScene,
 } from "./conversations.ts";
 import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
 
 /**
- * Showcase seed: Fieldnote, a small company with the people, channels and
+ * Showcase seed: Fieldnote, a small company with the people, projects and
  * bots the website's screenshots and demo video show. Run it with
  * `bun run db:seed:showcase`, against a migrated database.
  *
@@ -62,13 +64,13 @@ import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
  * Anita owns the workspace; sign in as her.
  *
  * Anita made every bot. The team's bots are public, each added to the
- * channel whose work it does and pinned for that channel's people; her own
+ * project whose work it does and pinned for that project's people; her own
  * two are private. The conversations come already written (see
- * `conversations.ts`): people talking in the channels' main chats and the
- * bots they mention answering there, tasks people started with a bot, a
- * collaboration, a file, and automation runs. Support's chat holds only the
+ * `conversations.ts`): people talking in the projects' threads and the
+ * bots they mention answering there, threads people started with a bot, a
+ * collaboration, a file, and automation runs. Support's thread holds only the
  * morning's handover, where the demo's story starts (see `stage.ts`). Each
- * channel's bots get its connections too, signed out.
+ * project's bots get its connections too, signed out.
  *
  * Each bot goes on the first model the workspace offers that it prefers,
  * else the workspace's default. A new workspace offers none, so connect
@@ -89,7 +91,7 @@ const WORKSPACE = { name: "Fieldnote", slug: "fieldnote" };
 
 type PersonKey = "anita" | "gary" | "lorraine" | "doreen" | "rob";
 
-/** Anita owns the workspace, which puts her in every channel. */
+/** Anita owns the workspace, which puts her in every project. */
 const OWNER: PersonKey = "anita";
 
 /**
@@ -132,11 +134,11 @@ const PEOPLE: Record<PersonKey, { name: string; email: string; image: string }> 
 	},
 };
 
-type ChannelKey = "growth" | "support" | "engineering";
+type ProjectKey = "growth" | "support" | "engineering";
 
-const CHANNELS: Record<
-	ChannelKey,
-	{ name: string; color: ChannelColor; members: readonly PersonKey[] }
+const PROJECTS: Record<
+	ProjectKey,
+	{ name: string; color: ProjectColor; members: readonly PersonKey[] }
 > = {
 	growth: { name: "Growth", color: "green", members: ["gary", "lorraine"] },
 	support: { name: "Support", color: "blue", members: ["lorraine", "doreen"] },
@@ -202,8 +204,8 @@ const OPENROUTER_CLAUDE: ModelChoice = {
 
 interface SeedBot {
 	name: string;
-	/** The channel a public bot is in; a private bot, only Anita's, is in none. */
-	channel: ChannelKey | "private";
+	/** The project a public bot is in; a private bot, only Anita's, is in none. */
+	project: ProjectKey | "private";
 	color: BotColor;
 	face: BotFace;
 	shape: BotShape;
@@ -219,7 +221,7 @@ interface SeedBot {
 const BOTS: readonly SeedBot[] = [
 	{
 		name: "Growth Desk",
-		channel: "growth",
+		project: "growth",
 		color: "green",
 		face: "pill",
 		shape: "leaf",
@@ -231,7 +233,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Pricing Analyst",
-		channel: "growth",
+		project: "growth",
 		color: "sky",
 		face: "square",
 		shape: "hexagon",
@@ -243,7 +245,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Copywriter",
-		channel: "growth",
+		project: "growth",
 		color: "orange",
 		face: "arc",
 		shape: "blob",
@@ -255,19 +257,19 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Ticket Desk",
-		channel: "support",
+		project: "support",
 		color: "purple",
 		face: "dot",
 		shape: "circle",
 		description: "Works the support queue and handles refunds.",
 		prompt:
-			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right person in the channel. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason. When a billing problem needs explaining, ask Billing Engineer why it happened.",
+			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right person in the project. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason. When a billing problem needs explaining, ask Billing Engineer why it happened.",
 		models: [CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 41,
 	},
 	{
 		name: "Inbox Sorter",
-		channel: "support",
+		project: "support",
 		color: "yellow",
 		face: "pill",
 		shape: "squircle",
@@ -279,7 +281,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Billing Engineer",
-		channel: "support",
+		project: "support",
 		color: "red",
 		face: "square",
 		shape: "antenna",
@@ -292,7 +294,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Code Reviewer",
-		channel: "engineering",
+		project: "engineering",
 		color: "rose",
 		face: "wink",
 		shape: "octagon",
@@ -305,7 +307,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Researcher",
-		channel: "engineering",
+		project: "engineering",
 		color: "ice",
 		face: "arc",
 		shape: "drop",
@@ -318,7 +320,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Journal",
-		channel: "private",
+		project: "private",
 		color: "teal",
 		face: "dot",
 		shape: "pebble",
@@ -330,7 +332,7 @@ const BOTS: readonly SeedBot[] = [
 	},
 	{
 		name: "Trip Planner",
-		channel: "private",
+		project: "private",
 		color: "sky",
 		face: "pill",
 		shape: "dome",
@@ -410,14 +412,15 @@ const AUTOMATIONS: readonly { bot: string; automation: NewAutomation }[] = [
 ];
 
 /**
- * What the channels' people said in their main chats, and what the bots they
+ * What the projects' people said in their threads, and what the bots they
  * mentioned answered there. Times are on the morning of the day they happen
- * (see `conversations.ts`). Support's chat has only the morning's handover,
+ * (see `conversations.ts`). Support's thread has only the morning's handover,
  * where the demo's story starts.
  */
 const CHATS: readonly ChatScene<PersonKey>[] = [
 	{
-		channel: "growth",
+		project: "growth",
+		thread: "Pipeline",
 		messages: [
 			{
 				at: { time: "9:02" },
@@ -453,7 +456,8 @@ const CHATS: readonly ChatScene<PersonKey>[] = [
 		],
 	},
 	{
-		channel: "engineering",
+		project: "engineering",
+		thread: "Export queue",
 		messages: [
 			{
 				at: { time: "9:40" },
@@ -488,7 +492,8 @@ const CHATS: readonly ChatScene<PersonKey>[] = [
 		],
 	},
 	{
-		channel: "support",
+		project: "support",
+		thread: SUPPORT_HANDOVER_THREAD,
 		messages: [
 			{
 				at: { time: "8:41" },
@@ -513,10 +518,10 @@ const CHATS: readonly ChatScene<PersonKey>[] = [
 ];
 
 /**
- * Tasks people started with a bot. Anyone who can see the bot can read them
+ * Threads people started with a bot. Anyone who can see the bot can read them
  * and join in, as Lorraine does in Gary's.
  */
-const TASKS: readonly TaskScene<PersonKey>[] = [
+const THREADS: readonly ThreadScene<PersonKey>[] = [
 	{
 		bot: "Growth Desk",
 		messages: [
@@ -1033,7 +1038,7 @@ const AUTOMATION_RUNS: readonly AutomationRun[] = [
 	},
 ];
 
-/** The channels' MCP servers, signed out: sign in to one in Settings to use it for real. */
+/** The projects' MCP servers, signed out: sign in to one in Settings to use it for real. */
 /** Linear's own MCP tools, so its connection's permissions look as they do when signed in for real. */
 const LINEAR_READING = [
 	"list_issues",
@@ -1101,7 +1106,7 @@ function connectionTool(name: string, { readOnly }: { readOnly: boolean }) {
 
 const CONNECTIONS: readonly SeedConnection[] = [
 	{
-		channel: "growth",
+		project: "growth",
 		name: "HubSpot",
 		handle: "hubspot",
 		url: "https://mcp.hubspot.com",
@@ -1114,7 +1119,7 @@ const CONNECTIONS: readonly SeedConnection[] = [
 		toolAccess: { create_note: "ask" },
 	},
 	{
-		channel: "support",
+		project: "support",
 		name: "Stripe",
 		handle: "stripe",
 		url: "https://mcp.stripe.com",
@@ -1148,7 +1153,7 @@ const CONNECTIONS: readonly SeedConnection[] = [
 		toolAccess: { create_refund: "ask", create_invoice: "ask" },
 	},
 	{
-		channel: "engineering",
+		project: "engineering",
 		name: "Linear",
 		handle: "linear",
 		url: "https://mcp.linear.app/mcp",
@@ -1167,7 +1172,7 @@ const CONNECTIONS: readonly SeedConnection[] = [
 		},
 	},
 	{
-		channel: "engineering",
+		project: "engineering",
 		name: "Notion",
 		handle: "notion",
 		url: "https://mcp.notion.com/mcp",
@@ -1215,7 +1220,6 @@ const seed = Effect.gen(function* () {
 		{ discard: true },
 	);
 
-	const channelIds = yield* ensureChannels(workspaceId, people);
 	yield* ensureProviders(workspaceId, people[OWNER]);
 	const offered = yield* offeredModels(workspaceId);
 	const botIds = yield* Effect.forEach(BOTS, (bot) =>
@@ -1229,7 +1233,8 @@ const seed = Effect.gen(function* () {
 			(id) => [bot.name, id] as const,
 		),
 	).pipe(Effect.map((entries) => new Map(entries)));
-	yield* placeBots({ workspaceId, people, channelIds, botIds });
+	const projectIds = yield* ensureProjects(workspaceId, people, botIds);
+	yield* placeBots({ workspaceId, people, projectIds, botIds });
 
 	yield* Effect.forEach(
 		AUTOMATIONS,
@@ -1245,7 +1250,7 @@ const seed = Effect.gen(function* () {
 
 	yield* ensureConnections({
 		workspaceId,
-		channelIds,
+		projectIds,
 		createdById: people[OWNER],
 		connections: CONNECTIONS,
 	});
@@ -1253,11 +1258,11 @@ const seed = Effect.gen(function* () {
 		{
 			workspaceId,
 			people,
-			channelIds,
+			projectIds,
 			botIds,
 			botModels: new Map(BOTS.map((bot) => [bot.name, chooseModel(bot, offered)])),
 		},
-		{ chats: CHATS, tasks: TASKS, runs: AUTOMATION_RUNS },
+		{ chats: CHATS, threads: THREADS, runs: AUTOMATION_RUNS },
 	);
 
 	const ledgerRows = yield* fillLedger({ workspaceId, botIds });
@@ -1276,7 +1281,7 @@ const seed = Effect.gen(function* () {
 	console.log(
 		conversations === 0
 			? "conversations already there"
-			: `conversations: ${conversations} chats, tasks and automation runs written`,
+			: `conversations: ${conversations} projects' threads, bots' threads and automation runs written`,
 	);
 	console.log(
 		ledgerRows === 0
@@ -1345,67 +1350,77 @@ const joinWorkspace = (input: {
 	});
 
 /**
- * The channels with their members, by key, and the owner's Personal
- * Assistant, which a workspace made before assistants existed lacks.
+ * The projects with their members, by key, each led by the first of its bots,
+ * and the owner's Personal Assistant, which a workspace made before
+ * assistants existed lacks.
  */
-const ensureChannels = (workspaceId: string, people: Record<PersonKey, string>) =>
+const ensureProjects = (
+	workspaceId: string,
+	people: Record<PersonKey, string>,
+	botIds: ReadonlyMap<string, string>,
+) =>
 	Effect.gen(function* () {
-		const channelRepository = yield* ChannelRepository.Service;
+		const projectRepository = yield* ProjectRepository.Service;
 		const personalAssistants = yield* PersonalAssistants.Service;
 		yield* personalAssistants.provision({ workspaceId, userId: people[OWNER] });
-		const channels = yield* Effect.forEach(
-			Object.entries(CHANNELS) as [ChannelKey, (typeof CHANNELS)[ChannelKey]][],
+		const projects = yield* Effect.forEach(
+			Object.entries(PROJECTS) as [ProjectKey, (typeof PROJECTS)[ProjectKey]][],
 			([key, { name, color, members }]) =>
 				Effect.gen(function* () {
-					const channelId = yield* channelRepository
-						.create(workspaceId, { creatorId: people[OWNER], name, slug: key, color })
+					const lead = BOTS.find((bot) => bot.project === key);
+					const leadBotId = lead && botIds.get(lead.name);
+					if (!leadBotId)
+						return yield* Effect.die(new Error(`Project ${key} has no bot to lead it`));
+					const projectId = yield* projectRepository
+						.create(workspaceId, { creatorId: people[OWNER], name, slug: key, color, leadBotId })
 						.pipe(
 							Effect.map((created) => created.id),
-							Effect.catchTag("ChannelSlugTaken", () => channelIdBySlug(workspaceId, key)),
+							Effect.catchTag("ProjectSlugTaken", () => projectIdBySlug(workspaceId, key)),
+							Effect.catchTag("BotNotPublic", Effect.die),
 						);
 					yield* Effect.forEach(
 						members,
-						(member) => channelRepository.addMember(workspaceId, channelId, people[member]),
+						(member) => projectRepository.addMember(workspaceId, projectId, people[member]),
 						{ discard: true },
 					);
-					return [key, channelId] as const;
+					return [key, projectId] as const;
 				}),
 		);
-		return Object.fromEntries(channels) as Record<ChannelKey, string>;
+		return Object.fromEntries(projects) as Record<ProjectKey, string>;
 	});
 
-const channelIdBySlug = (workspaceId: string, slug: string) =>
+const projectIdBySlug = (workspaceId: string, slug: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
-				.select({ id: channel.id })
-				.from(channel)
-				.where(and(eq(channel.workspaceId, workspaceId), eq(channel.slug, slug))),
+				.select({ id: project.id })
+				.from(project)
+				.where(and(eq(project.workspaceId, workspaceId), eq(project.slug, slug))),
 		),
-		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error(`Channel ${slug} is missing`))),
+		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error(`Project ${slug} is missing`))),
 	);
 
 /**
- * Adds each public bot to its channel, and pins it for the channel's people.
+ * Adds each public bot to its project, and pins it for the project's people.
  * Anita made them all, so they are already pinned for her.
  */
 const placeBots = (input: {
 	workspaceId: string;
 	people: Record<PersonKey, string>;
-	channelIds: Record<ChannelKey, string>;
+	projectIds: Record<ProjectKey, string>;
 	botIds: ReadonlyMap<string, string>;
 }) =>
 	Effect.gen(function* () {
-		const channels = yield* ChannelRepository.Service;
+		const projects = yield* ProjectRepository.Service;
 		const bots = yield* BotRepository.Service;
 		for (const bot of BOTS) {
 			const botId = input.botIds.get(bot.name);
-			if (bot.channel === "private" || !botId) continue;
-			yield* channels
-				.addBot(input.workspaceId, input.channelIds[bot.channel], botId)
+			if (bot.project === "private" || !botId) continue;
+			yield* projects
+				.addBot(input.workspaceId, input.projectIds[bot.project], botId)
 				.pipe(Effect.orDie);
 			yield* Effect.forEach(
-				CHANNELS[bot.channel].members,
+				PROJECTS[bot.project].members,
 				(member) =>
 					bots.setPinned({
 						workspaceId: input.workspaceId,
@@ -1501,7 +1516,7 @@ const ensureBot = (input: {
 				createdById: input.createdById,
 				bot: {
 					name: bot.name,
-					visibility: bot.channel === "private" ? "private" : "public",
+					visibility: bot.project === "private" ? "private" : "public",
 					color: bot.color,
 					face: bot.face,
 					shape: bot.shape,
@@ -1533,7 +1548,8 @@ const ensureBot = (input: {
 const ensureAutomation = (input: { botId: string; automation: NewAutomation }) =>
 	Effect.gen(function* () {
 		const automations = yield* Automations.Service;
-		yield* automations.create({ botId: input.botId }, input.automation).pipe(
+		const projectId = yield* defaultProjectOf(input.botId);
+		yield* automations.create({ projectId }, input.automation).pipe(
 			Effect.asVoid,
 			Effect.catchTag("AutomationNameTaken", () => Effect.void),
 			Effect.orDie,
@@ -1544,10 +1560,10 @@ const ensureAutomation = (input: { botId: string; automation: NewAutomation }) =
 const AUTOMATION_HOLD_DAYS = 365;
 
 /**
- * Puts every scheduled trigger's next run a year out, so the automations show as
- * on, with their schedules, but never come due while the showcase is in use.
- * Due, they would run, and fail where the workspace offers no model. A paused
- * automation's schedule has no next run, and keeps none.
+ * Puts every routine's next run a year out, so the automations show as on,
+ * with their routines, but never come due while the showcase is in use. Due,
+ * they would run, and fail where the workspace offers no model. A paused
+ * automation's routine has no next run, and keeps none.
  */
 const holdScheduledAutomations = (workspaceId: string) =>
 	query((db) =>
@@ -1557,28 +1573,28 @@ const holdScheduledAutomations = (workspaceId: string) =>
 			.where(
 				and(
 					eq(automationTrigger.workspaceId, workspaceId),
-					eq(automationTrigger.kind, "schedule"),
+					eq(automationTrigger.kind, "routine"),
 					isNotNull(automationTrigger.nextScheduledAt),
 				),
 			),
 	);
 
-type ScheduledTrigger = Extract<NewAutomation["triggers"][number], { kind: "schedule" }>;
+type RoutineTrigger = Extract<NewAutomation["triggers"][number], { kind: "routine" }>;
 
 function weekly(
 	days: readonly ("mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun")[],
 	times: readonly number[],
-): ScheduledTrigger {
+): RoutineTrigger {
 	return {
-		kind: "schedule",
+		kind: "routine",
 		schedule: { repeat: "weekly", every: 1, days, times, startsOn: today() },
 		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 	};
 }
 
-function daily(times: readonly number[]): ScheduledTrigger {
+function daily(times: readonly number[]): RoutineTrigger {
 	return {
-		kind: "schedule",
+		kind: "routine",
 		schedule: { repeat: "daily", every: 1, times, startsOn: today() },
 		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 	};
@@ -1706,7 +1722,7 @@ seed.pipe(
 			Authentication.layer,
 			Membership.layer,
 			PersonalAssistants.layer,
-			ChannelRepository.layer,
+			ProjectRepository.layer,
 			BotRepository.layer,
 			ModelProviderRepository.layer,
 			Files.authoringLayer,

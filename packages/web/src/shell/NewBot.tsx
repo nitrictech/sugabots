@@ -85,7 +85,7 @@ export type Part = "shape" | "eyes";
  * for its colour, head and eyes, which open at the right in place of the
  * models. At the right the models it can think with, the suggested first,
  * then each provider's. It is public unless made private, and starts by
- * asking its creator what it's for in its first task.
+ * asking its creator what it's for in its first thread.
  */
 export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<void> }) {
 	const [name, setName] = useState("");
@@ -444,8 +444,7 @@ function ModelPicker({
 	const { bots } = useBots();
 	const list = useRef<HTMLDivElement>(null);
 	const words = search.trim().toLowerCase();
-	const usersOf = (modelId: string) =>
-		bots?.filter((bot) => bot.model === modelId && bot.systemBotKey === null).length ?? 0;
+	const usersOf = (modelId: string) => bots?.filter((bot) => bot.model === modelId).length ?? 0;
 	const found = models.filter((model) =>
 		[model.displayName ?? "", model.modelId, model.providerName].some((text) =>
 			text.toLowerCase().includes(words),
@@ -922,7 +921,7 @@ function VisibilityChoice({
 /**
  * What starts a bot, absent where the viewer may not make one, and the dialog
  * that makes it, which must be rendered for it to open. It opens the bot once
- * it is made, on the task in which it interviews its maker when it has one.
+ * it is made, on the thread in which it interviews its maker when it has one.
  */
 export function useNewBot(): { start?: () => void; dialog: ReactNode } {
 	const [creating, setCreating] = useState(false);
@@ -936,8 +935,8 @@ export function useNewBot(): { start?: () => void; dialog: ReactNode } {
 				<NewBotDialog
 					onCreated={async (bot) => {
 						setCreating(false);
-						const task = await interview.mutateAsync(bot.id).catch(() => null);
-						if (task) await navigate(conversationLink({ bot, conversationId: task.id }));
+						const thread = await interview.mutateAsync(bot.id).catch(() => null);
+						if (thread) await navigate(conversationLink({ bot, conversationId: thread.id }));
 						else await navigate(botLink(bot));
 					}}
 				/>

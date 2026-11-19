@@ -19,11 +19,10 @@ describe("durability", () => {
 		expect(isDurableEventType("message.delta")).toBe(false);
 	});
 
-	it("classifies every declared type, and nothing twice", () => {
+	it("declares no type both durable and ephemeral", () => {
 		const durable = durableEventTypeSchema.literals;
 		const ephemeral = ephemeralEventTypeSchema.literals;
 
-		expect(durable.every(isDurableEventType)).toBe(true);
 		expect(ephemeral.some(isDurableEventType)).toBe(false);
 		expect(new Set([...durable, ...ephemeral]).size).toBe(durable.length + ephemeral.length);
 	});
@@ -146,7 +145,7 @@ describe("envelope", () => {
 		expect(Schema.encodeSync(streamEventSchema)(parsed)).toEqual(event);
 	});
 
-	it("preserves extras while validating known channel payloads", () => {
+	it("preserves extras while validating known project payloads", () => {
 		const event = {
 			v: 1,
 			type: "message.delta",

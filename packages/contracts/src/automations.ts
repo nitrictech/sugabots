@@ -10,7 +10,7 @@ export const MAX_AUTOMATION_NAME_CHARACTERS = 80;
 export const MAX_AUTOMATION_INSTRUCTIONS_CHARACTERS = 20_000;
 export const MAX_CRON_EXPRESSION_CHARACTERS = 200;
 export const MAX_IDEMPOTENCY_KEY_CHARACTERS = 200;
-export const MAX_AUTOMATION_SCHEDULE_TIMES = 8;
+export const MAX_ROUTINE_TIMES = 8;
 export const MAX_EVERY_DAYS = 30;
 export const MAX_EVERY_WEEKS = 12;
 export const MAX_EVERY_MONTHS = 12;
@@ -48,7 +48,7 @@ const timezoneSchema = Schema.Trim.check(
 export const automationStateSchema = Schema.Literals(["enabled", "paused"]);
 export type AutomationState = typeof automationStateSchema.Type;
 
-const automationTriggerKindSchema = Schema.Literals(["schedule", "webhook", "github"]);
+const automationTriggerKindSchema = Schema.Literals(["routine", "webhook", "github"]);
 export type AutomationTriggerKind = typeof automationTriggerKindSchema.Type;
 
 const webhookHeaderSchema = Schema.Trim.check(
@@ -177,7 +177,7 @@ const minutesPastMidnightSchema = Schema.Int.check(
 /** The times of day a schedule runs at, as minutes past midnight, each once. */
 const scheduleTimesSchema = Schema.Array(minutesPastMidnightSchema).check(
 	Schema.isMinLength(1),
-	Schema.isMaxLength(MAX_AUTOMATION_SCHEDULE_TIMES),
+	Schema.isMaxLength(MAX_ROUTINE_TIMES),
 	Schema.makeFilter((times: readonly number[]) => new Set(times).size === times.length, {
 		expected: "each time once",
 	}),
@@ -198,13 +198,13 @@ const everySchema = (maximum: number) =>
 	Schema.Int.check(Schema.isBetween({ minimum: 1, maximum }));
 
 /**
- * When a scheduled automation runs, in its time zone: every `every` days, weeks
+ * When a routine runs, in its time zone: every `every` days, weeks
  * or months counted from `startsOn`, at each of `times`; on `days` of those
  * weeks, or on `dayOfMonth` of those months. A `cron` schedule is a cron
  * expression kept as it was written, for automations made before schedules were
  * picked this way.
  */
-const automationScheduleSchema = Schema.Union([
+const routineScheduleSchema = Schema.Union([
 	Schema.Struct({
 		repeat: Schema.Literal("daily"),
 		every: everySchema(MAX_EVERY_DAYS),
@@ -236,14 +236,14 @@ const automationScheduleSchema = Schema.Union([
 	}),
 	Schema.Struct({ repeat: Schema.Literal("cron"), expression: cronExpressionSchema }),
 ]);
-export type AutomationSchedule = typeof automationScheduleSchema.Type;
+export type RoutineSchedule = typeof routineScheduleSchema.Type;
 
 /** A schedule picked by its parts rather than written as cron. */
-export type CalendarSchedule = Exclude<AutomationSchedule, { repeat: "cron" }>;
+export type CalendarSchedule = Exclude<RoutineSchedule, { repeat: "cron" }>;
 
 /**
- * A GitHub trigger's connection, its bot's GitHub connection, the
- * repository there it watches, and the events there that start a run.
+ * A GitHub trigger's connection, the GitHub app of the automation's project,
+ * the repository there it watches, and the events there that start a run.
  */
 const gitHubTriggerFields = {
 	connectionId: uuidSchema,
@@ -251,12 +251,12 @@ const gitHubTriggerFields = {
 	events: Schema.Array(repositoryEventSchema).check(Schema.isMinLength(1)),
 };
 
-/** One of the things that start an automation; an automation may have several, of any kinds. */
+/** One of the routines and triggers that start an automation; an automation may have several, of any kinds. */
 const automationTriggerSchema = Schema.Union([
 	Schema.Struct({
 		id: uuidSchema,
-		kind: Schema.Literal("schedule"),
-		schedule: automationScheduleSchema,
+		kind: Schema.Literal("routine"),
+		schedule: routineScheduleSchema,
 		timezone: timezoneSchema,
 		/** Null while the automation is paused. */
 		nextScheduledAt: Schema.NullOr(isoTimestampSchema),
@@ -280,14 +280,15 @@ export type GitHubTrigger = Omit<Extract<AutomationTrigger, { kind: "github" }>,
 export const automationSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	botId: uuidSchema,
+	/** The project it belongs to, whose lead bot runs it: for a bot's own, its default project. */
+	projectId: uuidSchema,
 	name: automationNameSchema,
 	instructions: automationInstructionsSchema,
 	/** What starts it, in the order they were added; with none, it runs only when someone runs it. */
 	triggers: Schema.Array(automationTriggerSchema),
 	state: automationStateSchema,
 	createdById: Schema.NullOr(uuidSchema),
-	/** The automation's own bot, when it made the automation at `createdById`'s request. */
+	/** The bot that made the automation, working in its project, at `createdById`'s request. */
 	createdByBotId: Schema.NullOr(uuidSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
@@ -295,15 +296,18 @@ export const automationSchema = Schema.Struct({
 
 export type Automation = typeof automationSchema.Type;
 
-/** An automation in the workspace list, with the bot it belongs to. */
+/**
+ * An automation in the workspace list, with the bot whose default project it
+ * is in: a bot's own automation. Null for one in a project people made.
+ */
 const workspaceAutomationSchema = Schema.Struct({
 	automation: automationSchema,
-	bot: botSchema,
+	bot: Schema.NullOr(botSchema),
 });
 
 export type WorkspaceAutomation = typeof workspaceAutomationSchema.Type;
 
-/** Every automation on a bot the person can reach, by name. */
+/** Every automation of a project the person can reach, by name. */
 export const workspaceAutomationListSchema = Schema.Struct({
 	items: Schema.mutable(Schema.Array(workspaceAutomationSchema)),
 });
@@ -328,9 +332,9 @@ const webhookTriggerInputSchema = Schema.Struct({
 	timezone: Schema.optional(Schema.Never),
 });
 
-const scheduledTriggerInputSchema = Schema.Struct({
-	kind: Schema.Literal("schedule"),
-	schedule: automationScheduleSchema,
+const routineInputSchema = Schema.Struct({
+	kind: Schema.Literal("routine"),
+	schedule: routineScheduleSchema,
 	timezone: timezoneSchema,
 });
 
@@ -339,16 +343,16 @@ const gitHubTriggerInputSchema = Schema.Struct({
 	...gitHubTriggerFields,
 });
 
-/** A trigger as written, to add to an automation or to replace one of its own of the same kind. */
+/** A routine or trigger as written, to add to an automation or to replace one of its own of the same kind. */
 export const automationTriggerInputSchema = Schema.Union([
-	scheduledTriggerInputSchema,
+	routineInputSchema,
 	webhookTriggerInputSchema,
 	gitHubTriggerInputSchema,
 ]);
 
 export type AutomationTriggerInput = typeof automationTriggerInputSchema.Type;
 
-/** At most this many triggers start one automation. */
+/** At most this many routines and triggers start one automation. */
 export const MAX_AUTOMATION_TRIGGERS = 20;
 
 export const newAutomationSchema = Schema.Struct({
@@ -381,7 +385,7 @@ export const runStateSchema = Schema.Literals([
 
 export type RunState = typeof runStateSchema.Type;
 
-export const runTriggerKindSchema = Schema.Literals(["schedule", "webhook", "github", "manual"]);
+export const runTriggerKindSchema = Schema.Literals(["routine", "webhook", "github", "manual"]);
 export type RunTriggerKind = typeof runTriggerKindSchema.Type;
 
 const jsonValueSchema = Schema.Unknown.check(
@@ -390,7 +394,7 @@ const jsonValueSchema = Schema.Unknown.check(
 
 export const runTriggerSchema = Schema.Union([
 	Schema.Struct({
-		kind: Schema.Literal("schedule"),
+		kind: Schema.Literal("routine"),
 		scheduledAt: isoTimestampSchema,
 		acceptedAt: isoTimestampSchema,
 	}),
@@ -451,6 +455,7 @@ export const runSchema = Schema.Struct({
 	id: uuidSchema,
 	automationId: uuidSchema,
 	workspaceId: uuidSchema,
+	/** The bot that did the run: its project's lead bot when it started. */
 	botId: uuidSchema,
 	/** The run's own conversation. */
 	conversationId: uuidSchema,
@@ -507,7 +512,7 @@ export const automationTriggerAuthorSchema = Schema.Struct({
 export type AutomationTriggerAuthor = typeof automationTriggerAuthorSchema.Type;
 
 /**
- * The run whose result a message is, in the automation's feed or a channel's conversation:
+ * The run whose result a message is, in the automation's feed or a project's thread:
  * the automation, and the conversation the run's work is in.
  */
 export const automationResultOfSchema = Schema.Struct({
@@ -572,9 +577,9 @@ export const automationWriteResultSchema = Schema.Struct({
 }).annotate({ identifier: "AutomationWriteResult" });
 export type AutomationWriteResult = typeof automationWriteResultSchema.Type;
 
-export const automationSchedulePreviewSchema = Schema.Struct({
-	schedule: automationScheduleSchema,
+export const routineSchedulePreviewSchema = Schema.Struct({
+	schedule: routineScheduleSchema,
 	timezone: timezoneSchema,
 });
 
-export const automationScheduleOccurrencesSchema = Schema.Array(isoTimestampSchema);
+export const routineScheduleOccurrencesSchema = Schema.Array(isoTimestampSchema);

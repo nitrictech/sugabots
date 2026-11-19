@@ -8,6 +8,10 @@ import { type ComponentType, lazy, useState } from "react";
  * Once the module is here, the screen renders without suspending: `lazy` alone
  * would suspend once even then, and hold the screen behind React's 300ms reveal throttle.
  *
+ * `load` resolves to a module holding only `name`: a screen that is one of
+ * several exports is picked out with `.then(({ Screen }) => ({ Screen }))`, or
+ * the module's other exports would decide `Props`.
+ *
  * TanStack Router's `lazyRouteComponent` is not used because it calls `use()`
  * only while the module is still loading, and React 19.3 reports a render that
  * suspends on `use()` and then finishes without calling it as an error.

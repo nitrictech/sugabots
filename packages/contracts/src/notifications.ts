@@ -47,17 +47,17 @@ const otherNotificationsFields = {
 	automationRuns: automationRunNotificationsSchema,
 };
 
-/** Where a person chooses in place of the level above: a channel, or one of its bots. */
-export const notificationPlaceKindSchema = Schema.Literals(["channel", "bot"]);
+/** Where a person chooses in place of the level above: a project, or a bot. */
+export const notificationPlaceKindSchema = Schema.Literals(["project", "bot"]);
 
 export type NotificationPlaceKind = typeof notificationPlaceKindSchema.Type;
 
-/** The level chosen for a channel or bot, or null to follow the one above it, which also ends a mute. */
+/** The level chosen for a project or bot, or null to follow the one above it, which also ends a mute. */
 export const notificationLevelChoiceSchema = Schema.Struct({
 	level: Schema.NullOr(notificationLevelSchema),
 });
 
-/** Mutes a channel or bot until `until`, whatever its level, or with null, or a time passed, ends its mute. */
+/** Mutes a project or bot until `until`, whatever its level, or with null, or a time passed, ends its mute. */
 export const notificationMuteSchema = Schema.Struct({ until: Schema.NullOr(isoTimestampSchema) });
 
 /** What the person is notified about, and when not. */
@@ -67,16 +67,16 @@ export const notificationSettingsSchema = Schema.Struct({
 	pausedUntil: Schema.NullOr(isoTimestampSchema),
 	quietHours: Schema.NullOr(quietHoursSchema),
 	...otherNotificationsFields,
-	/** Levels chosen for channels, by channel id. */
-	channels: Schema.Record(uuidSchema, notificationLevelSchema),
-	/** Levels chosen for bots, by bot id, which win over their channel's. */
+	/** Levels chosen for projects, by project id. */
+	projects: Schema.Record(uuidSchema, notificationLevelSchema),
+	/** Levels chosen for bots, by bot id, which win over their project's. */
 	bots: Schema.Record(uuidSchema, notificationLevelSchema),
 	/**
-	 * Channels and bots muted for a while, by id, with when each mute ends. While
+	 * Projects and bots muted for a while, by id, with when each mute ends. While
 	 * it lasts, a place is at `nothing` whatever level it has.
 	 */
 	mutedUntil: Schema.Struct({
-		channels: Schema.Record(uuidSchema, isoTimestampSchema),
+		projects: Schema.Record(uuidSchema, isoTimestampSchema),
 		bots: Schema.Record(uuidSchema, isoTimestampSchema),
 	}),
 });

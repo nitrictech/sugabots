@@ -8,7 +8,11 @@ import {
 import { isApiFailure } from "@sugabots/sdk";
 import { Option, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
-import { removeChatFile, UploadInterrupted, uploadChatFile } from "@/lib/chat-files.ts";
+import {
+	removeConversationFile,
+	UploadInterrupted,
+	uploadConversationFile,
+} from "@/lib/conversation-files.ts";
 
 /** Where a file attached in the composer has got to. */
 export type AttachmentUpload =
@@ -118,7 +122,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 		inFlight.current.set(key, controller);
 		setUpload(key, { state: "uploading", progress: 0 });
 		const stillWanted = () => inFlight.current.get(key) === controller;
-		uploadChatFile({
+		uploadConversationFile({
 			conversationId,
 			file,
 			signal: controller.signal,
@@ -129,7 +133,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 			(uploaded) => {
 				// Removed while it was finishing: it has to go from the API too.
 				if (!stillWanted()) {
-					removeChatFile(conversationId, uploaded.id);
+					removeConversationFile(conversationId, uploaded.id);
 					return;
 				}
 				inFlight.current.delete(key);
@@ -165,7 +169,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 		inFlight.current.get(key)?.abort();
 		inFlight.current.delete(key);
 		if (conversationId && item.upload.state === "uploaded") {
-			removeChatFile(conversationId, item.upload.attachment.id);
+			removeConversationFile(conversationId, item.upload.attachment.id);
 		}
 		setLeftOut(0);
 		commit((items) => items.filter((candidate) => candidate.key !== key));
@@ -193,7 +197,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 				if (returned) return;
 				returned = true;
 				if (openChatId.current !== takenFrom) {
-					for (const fileId of fileIds) removeChatFile(takenFrom, fileId);
+					for (const fileId of fileIds) removeConversationFile(takenFrom, fileId);
 					return;
 				}
 				if (!isFileGoneRefusal(sendFailure)) {
@@ -203,7 +207,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 				// The API attaches all of a message's files or none, without saying
 				// which was missing, so each uploads again. The ones still there go,
 				// so they stop counting toward the files a person can have waiting.
-				for (const fileId of fileIds) removeChatFile(takenFrom, fileId);
+				for (const fileId of fileIds) removeConversationFile(takenFrom, fileId);
 				commit((items) => [
 					...taken.map((item): ComposerAttachment => ({ ...item, upload: FILE_GONE })),
 					...items,
@@ -221,7 +225,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 			uploads.clear();
 			if (conversationId) {
 				for (const fileId of uploadedFileIds(current.current))
-					removeChatFile(conversationId, fileId);
+					removeConversationFile(conversationId, fileId);
 			}
 			current.current = [];
 			setItems([]);

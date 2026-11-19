@@ -39,10 +39,17 @@ describe("localStorageTokenStore", () => {
 	});
 });
 
-it("keeps the default browser token store in memory", () => {
-	vi.stubGlobal("window", {});
-	const tokens = defaultTokenStore();
-	tokens.set("renderer-token");
+it("keeps the default token store's token out of browser storage", () => {
+	const stored = new Map<string, string>();
+	const setItem = vi.fn((key: string, value: string) => stored.set(key, value));
+	vi.stubGlobal("localStorage", {
+		getItem: (key: string) => stored.get(key) ?? null,
+		setItem,
+		removeItem: (key: string) => stored.delete(key),
+	});
 
-	expect(tokens.get()).toBe("renderer-token");
+	defaultTokenStore().set("renderer-token");
+
+	expect(defaultTokenStore().get()).toBeUndefined();
+	expect(setItem).not.toHaveBeenCalled();
 });

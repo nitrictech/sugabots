@@ -27,7 +27,7 @@ import { AutomationRuns } from "./runs.ts";
 
 /**
  * The only writer of `automation`, `automation_trigger` and `run`:
- * what a bot does, what starts it, and each run of it.
+ * what a project's lead bot does on its own, what starts it, and each run of it.
  *
  * A removed automation keeps its row, so its runs keep their history, and is
  * invisible to every command. A run is `queued` until its workflow starts
@@ -38,7 +38,7 @@ import { AutomationRuns } from "./runs.ts";
 export interface Interface {
 	readonly create: (
 		definition: Definition &
-			Pick<schema.AutomationRow, "workspaceId" | "botId" | "createdById" | "createdByBotId">,
+			Pick<schema.AutomationRow, "workspaceId" | "projectId" | "createdById" | "createdByBotId">,
 	) => Effect.Effect<schema.AutomationRow, AutomationNameTaken>;
 	/**
 	 * Changes an automation's definition, and clears that it paused itself when
@@ -78,7 +78,7 @@ export interface Interface {
 		sealed: string | null,
 	) => Effect.Effect<boolean>;
 	/**
-	 * The schedule due soonest at `now`, of an enabled automation, with its
+	 * The routine due soonest at `now`, of an enabled automation, with its
 	 * automation, locked until the transaction ends. One another transaction
 	 * holds is skipped.
 	 */
@@ -87,7 +87,7 @@ export interface Interface {
 	) => Effect.Effect<
 		{ trigger: schema.AutomationTriggerRow; automation: schema.AutomationRow } | undefined
 	>;
-	/** Sets when each schedule next runs its automation; null while the automation is paused. */
+	/** Sets when each routine next runs its automation; null while the automation is paused. */
 	readonly scheduleNext: (
 		next: ReadonlyArray<{ triggerId: string; at: Date | null }>,
 	) => Effect.Effect<void>;
@@ -136,7 +136,7 @@ export interface Interface {
 	readonly fail: (runId: string, userMessage: UserText) => Effect.Effect<void>;
 	/**
 	 * Turns on again the automation `automationId` when it paused itself after
-	 * failing. `true` when it did, so its schedules are due to be set again.
+	 * failing. `true` when it did, so when its routines next run is due to be set again.
 	 */
 	readonly resumeAfterFailures: (automationId: string) => Effect.Effect<boolean>;
 }
@@ -169,7 +169,7 @@ export const make = Effect.gen(function* () {
 	/**
 	 * Pauses the automation `automationId` when its last `FAILURES_THAT_PAUSE`
 	 * finished runs all failed and it is still on, recording that it paused
-	 * itself, and clears when its schedules next run.
+	 * itself, and clears when its routines next run.
 	 */
 	const pauseAfterFailures = (automationId: string) =>
 		Effect.gen(function* () {
@@ -197,7 +197,7 @@ export const make = Effect.gen(function* () {
 					.returning({ id: automation.id }),
 			);
 			if (paused.length === 0) return;
-			// A paused automation's schedules have no next time.
+			// A paused automation's routines have no next time.
 			yield* query((db) =>
 				db
 					.update(automationTrigger)
@@ -542,7 +542,7 @@ export const layer = Layer.effect(Service, make);
 /** What an automation is: its name, what it tells the bot, where its result goes, and whether it runs. */
 export type Definition = Pick<schema.AutomationRow, "name" | "instructions" | "state">;
 
-/** What one of an automation's triggers is, and what it keeps beside that: a webhook's secret, a schedule's next time. */
+/** What one of an automation's triggers is, and what it keeps beside that: a webhook's secret, a routine's next time. */
 export type TriggerValues = Pick<
 	schema.AutomationTriggerRow,
 	"settings" | "secretEncrypted" | "secretDigest" | "nextScheduledAt"

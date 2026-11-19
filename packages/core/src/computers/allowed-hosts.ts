@@ -1,7 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Database, query } from "../database/database.ts";
-import { allowedHost, blockedHost, botAllowedHost } from "../database/schema.ts";
+import { allowedHost, blockedHost, projectAllowedHost } from "../database/schema.ts";
 import type { Computers } from "./computers.ts";
 
 /**
@@ -47,16 +47,19 @@ export const addedHostsOf = (workspaceId: string) =>
 			.orderBy(asc(allowedHost.createdAt), asc(allowedHost.host)),
 	);
 
-/** The hosts added for the bot's own computer, oldest first. */
-export const botAddedHostsOf = (bot: { workspaceId: string; botId: string }) =>
+/** The hosts added for the project's own computer, oldest first. */
+export const projectAddedHostsOf = (project: { workspaceId: string; projectId: string }) =>
 	query((db) =>
 		db
 			.select()
-			.from(botAllowedHost)
+			.from(projectAllowedHost)
 			.where(
-				and(eq(botAllowedHost.workspaceId, bot.workspaceId), eq(botAllowedHost.botId, bot.botId)),
+				and(
+					eq(projectAllowedHost.workspaceId, project.workspaceId),
+					eq(projectAllowedHost.projectId, project.projectId),
+				),
 			)
-			.orderBy(asc(botAllowedHost.createdAt), asc(botAllowedHost.host)),
+			.orderBy(asc(projectAllowedHost.createdAt), asc(projectAllowedHost.host)),
 	);
 
 /** The hosts the workspace blocked, oldest first. */
@@ -70,42 +73,42 @@ export const blockedHostsOf = (workspaceId: string) =>
 	);
 
 /**
- * Every host the bot's computer may reach: {@link TRUSTED_HOSTS}, the
- * workspace's hosts and the bot's own, less what the workspace blocked.
+ * Every host the project's computer may reach: {@link TRUSTED_HOSTS}, the
+ * workspace's hosts and the project's own, less what the workspace blocked.
  */
-export const allowedHostsOf = (bot: { workspaceId: string; botId: string }) =>
+export const allowedHostsOf = (project: { workspaceId: string; projectId: string }) =>
 	Effect.map(
 		Effect.all([
-			addedHostsOf(bot.workspaceId),
-			botAddedHostsOf(bot),
-			blockedHostsOf(bot.workspaceId),
+			addedHostsOf(project.workspaceId),
+			projectAddedHostsOf(project),
+			blockedHostsOf(project.workspaceId),
 		]),
-		([workspaceAdded, botAdded, blocked]) => {
+		([workspaceAdded, projectAdded, blocked]) => {
 			const blocks = blocked.map((row) => row.host);
 			return [
 				...new Set([
 					...TRUSTED_HOSTS,
 					...workspaceAdded.map((row) => row.host),
-					...botAdded.map((row) => row.host),
+					...projectAdded.map((row) => row.host),
 				]),
 			].filter((host) => blockOn(host, blocks) === undefined);
 		},
 	);
 
 /**
- * What the bot's computer may reach at `provider`, by its network mode: on the
+ * What the project's computer may reach at `provider`, by its network mode: on the
  * allowlist, {@link allowedHostsOf}; open, everything but what the workspace
  * blocked, if the provider can block hosts, and everything if not.
  */
 export const reachOf = (
-	bot: { workspaceId: string; botId: string },
+	project: { workspaceId: string; projectId: string },
 	provider: Pick<Computers.Provider, "networkMode" | "capabilities">,
 ): Effect.Effect<Computers.Reach, never, Database> => {
 	if (provider.networkMode === "allowlist") {
-		return Effect.map(allowedHostsOf(bot), (hosts) => ({ kind: "allowlist", hosts }));
+		return Effect.map(allowedHostsOf(project), (hosts) => ({ kind: "allowlist", hosts }));
 	}
 	if (!provider.capabilities.blocksHosts) return Effect.succeed({ kind: "open", blockedHosts: [] });
-	return Effect.map(blockedHostsOf(bot.workspaceId), (blocked) => ({
+	return Effect.map(blockedHostsOf(project.workspaceId), (blocked) => ({
 		kind: "open",
 		blockedHosts: blocked.flatMap((row) => namesBlockedBy(row.host)),
 	}));

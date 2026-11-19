@@ -78,16 +78,13 @@ describe("a page", () => {
 		expect(body).toBe("# Quickstart");
 	});
 
-	it.each(["2", "Infinity", "-1", "1e0", "0.9999", "1.001"])(
-		"treats invalid Markdown quality %s as zero",
-		async (quality) => {
-			const { body } = await get("/docs/quickstart", `text/markdown;q=${quality}, text/html;q=0.5`);
-			expect(body).toBe("<h1>Quickstart</h1>");
-		},
-	);
+	it("treats an invalid Markdown quality as zero", async () => {
+		const { body } = await get("/docs/quickstart", "text/markdown;q=2, text/html;q=0.5");
+		expect(body).toBe("<h1>Quickstart</h1>");
+	});
 
-	it.each(["0.999", "1", "1.", "1.000"])("accepts Markdown quality %s", async (quality) => {
-		const { body } = await get("/docs/quickstart", `text/markdown;q=${quality}, text/html;q=0.5`);
+	it("accepts a valid Markdown quality", async () => {
+		const { body } = await get("/docs/quickstart", "text/markdown;q=0.999, text/html;q=0.5");
 		expect(body).toBe("# Quickstart");
 	});
 

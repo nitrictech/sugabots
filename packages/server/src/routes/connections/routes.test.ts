@@ -19,9 +19,11 @@ const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000001";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000002";
 const CONNECTION_ID = "0199a3a0-0000-7000-8000-000000000003";
 const BOT_ID = "0199a3a0-0000-7000-8000-000000000004";
-const root = `/bots/${BOT_ID}/connections`;
+/** The bot's default project, which holds its connections. */
+const PROJECT_ID = "0199a3a0-0000-7000-8000-000000000005";
+const root = `/projects/${PROJECT_ID}/connections`;
 const headers = { authorization: "Bearer good-token", "content-type": "application/json" };
-const ofBot = { workspaceId: WORKSPACE_ID, botId: BOT_ID };
+const ofBot = { workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, botId: BOT_ID };
 
 const resolveUser: UserResolver = async (requestHeaders) =>
 	requestHeaders.get("authorization") === "Bearer good-token"
@@ -37,7 +39,7 @@ const asked = <Input>(calls: Array<{ input: Input; userId: string }>, input: Inp
 const wiki: Connection = {
 	id: CONNECTION_ID,
 	workspaceId: WORKSPACE_ID,
-	botId: BOT_ID,
+	projectId: PROJECT_ID,
 	name: "Wiki",
 	handle: "wiki",
 	url: "https://wiki.example.com/mcp",
@@ -76,7 +78,7 @@ describe("a bot's connections", () => {
 		expect(calls).toEqual([
 			{
 				input: {
-					botId: BOT_ID,
+					projectId: PROJECT_ID,
 					connection: { name: "Wiki", url: "https://wiki.example.com/mcp" },
 				},
 				userId: USER_ID,
@@ -96,7 +98,9 @@ describe("a bot's connections", () => {
 		}).request(root, { method: "POST", headers, body: JSON.stringify(endpoint) });
 
 		expect(response.status).toBe(201);
-		expect(calls).toEqual([{ input: { botId: BOT_ID, connection: endpoint }, userId: USER_ID }]);
+		expect(calls).toEqual([
+			{ input: { projectId: PROJECT_ID, connection: endpoint }, userId: USER_ID },
+		]);
 	});
 
 	it("answers a change the caller may not make as forbidden", async () => {
@@ -154,12 +158,12 @@ describe("signing a connection in", () => {
 	it("finishes at the callback and sends the browser back to the bot", async () => {
 		const calls: Array<{ input: unknown; userId: string }> = [];
 		const back = await app({
-			completeOAuth: (input) => Effect.as(asked(calls, input), { bot: ofBot }),
+			completeOAuth: (input) => Effect.as(asked(calls, input), { at: ofBot }),
 		}).request("/connections/oauth/callback?code=the-code&state=s-1", { headers });
 
 		expect(back.status).toBe(302);
 		expect(back.headers.get("location")).toBe(
-			`http://localhost:5173/connections/oauth/return?workspace=${WORKSPACE_ID}&bot=${BOT_ID}`,
+			`http://localhost:5173/connections/oauth/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}&bot=${BOT_ID}`,
 		);
 		expect(calls).toEqual([
 			{ input: { callback: { code: "the-code", state: "s-1" } }, userId: USER_ID },
@@ -168,7 +172,7 @@ describe("signing a connection in", () => {
 
 	it("sends a failed sign-in back with a code, and nothing the authorization server wrote", async () => {
 		const back = await app({
-			completeOAuth: () => Effect.succeed({ failure: "refused", bot: ofBot }),
+			completeOAuth: () => Effect.succeed({ failure: "refused", at: ofBot }),
 		}).request(
 			"/connections/oauth/callback?error=access_denied&error_description=Visit+evil.example&state=s-1",
 			{ headers },

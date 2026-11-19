@@ -6,21 +6,21 @@ import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { Dialog } from "@/ui/dialog.tsx";
 import { NewBotDialog } from "./NewBot.tsx";
-import { channelsWithBots, growthDesk, revenue } from "./story-fixtures.ts";
+import { growthDesk, projectsWithBots, revenue } from "./story-fixtures.ts";
 
 const WORKSPACE = revenue.workspaceId;
 const API = import.meta.env.VITE_API_URL;
 
 /** The bodies of the create requests a story sends, to check what the bot was made with. */
 let created: Record<string, unknown>[] = [];
-const createBot = http.post(`${API}/channels/:channelId/bots`, async ({ request }) => {
+const createBot = http.post(`${API}/projects/:projectId/bots`, async ({ request }) => {
 	const body = (await request.json()) as Record<string, unknown>;
 	created.push(body);
 	return HttpResponse.json({ ...growthDesk, ...body }, { status: 201 });
 });
 /** The roster, which creating a bot fetches again. */
 const listBots = http.get(`${API}/workspaces/:workspace/bots`, () =>
-	HttpResponse.json(channelsWithBots.flatMap(({ bots }) => bots)),
+	HttpResponse.json(projectsWithBots.flatMap(({ bots }) => bots)),
 );
 
 function Preview({ models, children }: { models: boolean; children: ReactNode }) {
@@ -31,7 +31,7 @@ function Preview({ models, children }: { models: boolean; children: ReactNode })
 		client.setQueryData(["workspaces"], [{ id: WORKSPACE, name: "Nitric", slug: "nitric" }]);
 		client.setQueryData(
 			["bots", WORKSPACE],
-			channelsWithBots.flatMap(({ bots }) => bots),
+			projectsWithBots.flatMap(({ bots }) => bots),
 		);
 		client.setQueryData(["models", WORKSPACE], {
 			models: models
@@ -97,10 +97,10 @@ const meta = preview.meta({
 });
 
 /**
- * Opened from a channel: a row of looks drawn at random and a model, beside the
+ * Opened from a project: a row of looks drawn at random and a model, beside the
  * bot as it will be, named over it.
  */
-export const InAChannel = meta.story({
+export const InAProject = meta.story({
 	play: async ({ userEvent }) => {
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();

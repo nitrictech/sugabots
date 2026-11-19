@@ -11,16 +11,17 @@ import type {
 import { Pause } from "lucide-react";
 import { Fragment } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
-import { chatFileUrl } from "@/lib/chat-files.ts";
+import { conversationFileUrl } from "@/lib/conversation-files.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { useReactions } from "@/lib/reactions.ts";
+import { workStateOf } from "@/lib/work-state.ts";
 import { NextRunDivider, RunDivider, RunMessage } from "./AutomationRun.tsx";
-import { BotStartedTaskLine, tasksStartedBy } from "./BotStartedTaskLine.tsx";
-import { activityStateOf, ChatActivityRow } from "./ChatActivityRow.tsx";
-import { ConversationMessages, DaySeparator, type MessageLook } from "./ConversationMessages.tsx";
+import { BotStartedThreadLine, threadsStartedBy } from "./BotStartedThreadLine.tsx";
+import { ConversationMessages, DaySeparator } from "./ConversationMessages.tsx";
 import { chatGroupsOf, latestRunId, messagesIn } from "./chat-items.ts";
 import { findAnsweringFace } from "./conversation-layout.ts";
 import { queuedBehindReply } from "./queued-messages.ts";
+import { RunRow } from "./RunRow.tsx";
 
 /**
  * A chat's items in order: its messages, a run of them at a time, between
@@ -34,7 +35,6 @@ export function ChatTimeline({
 	bot,
 	conversationId,
 	user,
-	look,
 	mentionable,
 	entries,
 	sending,
@@ -49,15 +49,13 @@ export function ChatTimeline({
 }: {
 	items: readonly ChatMessageItem[];
 	details: ConversationDetails;
-	/** The bot the task is with; none in a channel or a direct message. */
+	/** The bot whose thread it is, as the conversation lists it; none in a project's thread or a direct message. */
 	host: BotParticipant | undefined;
-	/** The chat's own bot; null in a channel or a direct message. */
+	/** The bot whose thread it is; null in a project's thread or a direct message. */
 	bot: Bot | null;
 	conversationId: string;
 	user: SessionUser;
-	/** How the messages are drawn: rows, as channels and direct messages have them, or as a bot's task. */
-	look: MessageLook;
-	/** Everyone here and the channel's bots and people. */
+	/** Everyone here and the project's bots and people. */
 	mentionable: Participant[];
 	/** The runs and collaborations opened beside the chat. */
 	entries: readonly ChatHistoryEntry[];
@@ -75,7 +73,9 @@ export function ChatTimeline({
 	onReply: (message: Message) => void;
 	onJumpToMessage: (messageId: string) => void;
 }) {
-	const authorLinkOf = useAuthorLinks();
+	const authorLinkOf = useAuthorLinks(
+		details.conversation.kind === "direct_message" ? "Direct message" : "Thread",
+	);
 	const reactions = useReactions(user);
 	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
 	const automationFeed = details.conversation.kind === "automation_feed";
@@ -84,9 +84,6 @@ export function ChatTimeline({
 	// Found across all the messages, not in each part they're shown in, or each part would bring a face of its own alive.
 	const answeringFace = findAnsweringFace(shownMessages, false);
 	const queued = queuedBehindReply(shownMessages, details.queuedSince);
-	const itemActivityAt = new Map(
-		entries.map((entry) => [entry.conversationId, entry.latestActivityAt]),
-	);
 	return (
 		<>
 			{groups.map((group) => (
@@ -101,11 +98,12 @@ export function ChatTimeline({
 							participants={mentionable}
 							members={details.members}
 							conversationKind={details.conversation.kind}
+							projectId={details.conversation.projectId}
 							dividers={false}
 							onOpenItem={onOpenItem}
 							onOpenFile={onOpenFile}
 							onOpenDesktop={onOpenDesktop}
-							fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
+							fileUrlOf={(fileId) => conversationFileUrl(conversationId, fileId)}
 							previews={previews}
 							approvalCapabilities={details.capabilities}
 							queued={queued}
@@ -114,20 +112,19 @@ export function ChatTimeline({
 							answeringFace={answeringFace}
 							viewerWriting={viewerWriting}
 							viewerId={user.id}
-							look={look}
+							namedBotId={host?.id}
 							nameColorsFor={conversationId}
 							highlightedMessageId={pointedOut}
-							itemActivityAt={itemActivityAt}
 							authorLinkOf={authorLinkOf}
 							onReply={onReply}
 							inAutomationFeed={automationFeed}
 							sideLinesOf={(message) =>
-								tasksStartedBy(message).map((started) => (
-									<BotStartedTaskLine
+								threadsStartedBy(message).map((started) => (
+									<BotStartedThreadLine
 										key={started.id}
 										started={started}
 										startedBy={message.author}
-										channelBots={details.channelBots}
+										projectBots={details.projectBots}
 										bot={bot}
 									/>
 								))
@@ -168,11 +165,10 @@ function RunLine({
 	onOpenItem: (itemConversationId: string) => void;
 }) {
 	return (
-		<ChatActivityRow
-			type="run"
+		<RunRow
 			automationName={item.automationName}
 			triggerKind={item.triggerKind}
-			state={activityStateOf(entries.find((entry) => entry.conversationId === item.conversationId))}
+			state={workStateOf(entries.find((entry) => entry.conversationId === item.conversationId))}
 			at={item.createdAt}
 			onOpen={() => onOpenItem(item.conversationId)}
 		/>

@@ -3,7 +3,6 @@ export * as ConversationRepository from "./repository.ts";
 import {
 	type AutomationTriggerAuthor,
 	type ConversationKind,
-	FIRST_CHAT_NAME,
 	MAX_REACTION_EMOJI_PER_MESSAGE,
 	type Message,
 	type MessageReaction,
@@ -20,7 +19,6 @@ import {
 	automationFeed,
 	automationRun,
 	bot,
-	channelConversation,
 	collaboration,
 	conversation,
 	conversationParticipant,
@@ -30,8 +28,8 @@ import {
 	message,
 	messageReaction,
 	placedConversation,
+	projectThread,
 	systemConversation,
-	task,
 } from "../../database/schema.ts";
 import { ConversationFiles } from "../../files/conversation-files.ts";
 import type { UserFacing } from "../../user-message.ts";
@@ -66,7 +64,7 @@ import type { BotConversationId } from "./rooms.ts";
  */
 export interface Interface {
 	/**
-	 * The direct message between `memberIds` in the workspace, in no channel,
+	 * The direct message between `memberIds` in the workspace, in no project,
 	 * created on first use with them as its members: one for each set of
 	 * people, whichever of them opens it, however their ids are written.
 	 */
@@ -75,61 +73,46 @@ export interface Interface {
 		memberIds: readonly string[];
 		startedById: string;
 	}) => Effect.Effect<schema.PlacedConversationRow>;
-	/** Starts a task with the bot `botId` for `startedById`, who is in it with the bot. */
-	readonly startTask: (input: {
-		workspaceId: string;
-		botId: string;
-		startedById: string;
-		title: string;
-	}) => Effect.Effect<schema.PlacedConversationRow>;
 	/**
-	 * Starts a task with the bot `botId`, for the person `startedById`, both
-	 * in it. Its first message is `brief`, written by the bot `briefingBotId`,
-	 * which may be the task's own bot; announced so that bot takes its turn on
-	 * the brief.
+	 * Starts a thread in the project, called `title`, with `startedById` in it,
+	 * and in a bot's default project the bot too, and announces it.
 	 */
-	readonly startBriefedTask: (input: {
-		workspaceId: string;
-		botId: string;
-		startedById: string;
-		briefingBotId: string;
-		title: string;
-		brief: string;
-	}) => Effect.Effect<schema.PlacedConversationRow>;
+	readonly startThread: (placement: NewThread) => Effect.Effect<schema.PlacedConversationRow>;
 	/**
-	 * Marks the task `task` done, or reopens it, and announces it when that
-	 * changed it. Only a task is ever done, so any other conversation is left
-	 * as it is.
+	 * Starts a thread in the bot's default project `projectId` for the person
+	 * `startedById`, with them and the bot in it. Its first message is `brief`,
+	 * written by the bot `briefingBotId`, which may be the thread's own bot;
+	 * announced so the thread's bot takes its turn on the brief. Dies on a
+	 * project people made, which has no bot of its own to brief.
+	 */
+	readonly startBriefedThread: (
+		input: NewThread & { briefingBotId: string; brief: string },
+	) => Effect.Effect<schema.PlacedConversationRow>;
+	/**
+	 * Marks the project's thread `thread` done, or reopens it, and announces it
+	 * when that changed it. Only a project's thread is ever done, so any other
+	 * conversation is left as it is.
 	 */
 	readonly setDone: (
-		task: Pick<schema.PlacedConversationRow, "id" | "workspaceId">,
+		thread: Pick<schema.PlacedConversationRow, "id" | "workspaceId">,
 		done: boolean,
 	) => Effect.Effect<void>;
-	/** The channel's main chat, created on first use, as opened by `startedById`. */
-	readonly openMainChat: (placement: {
-		workspaceId: string;
-		channelId: string;
-		startedById: string | null;
-	}) => Effect.Effect<schema.PlacedConversationRow>;
-	/** Starts a thread in the channel, called `title`, with `startedById` in it, and announces it. */
-	readonly startChat: (placement: {
-		workspaceId: string;
-		channelId: string;
-		startedById: string;
-		title: string;
-	}) => Effect.Effect<schema.PlacedConversationRow>;
 	/**
-	 * Renames the channel's conversation `chat`, or archives it when `change` says so, and
-	 * announces it. An archived chat, and archiving the channel's main chat, are left
-	 * as they are: the caller refuses those.
+	 * Renames the project's thread `chat`, or archives it when `change` says so, and
+	 * announces it. An archived thread is left as it is: the caller refuses
+	 * changing one.
 	 */
 	readonly changeChat: (
 		chat: Pick<schema.PlacedConversationRow, "id" | "workspaceId">,
 		change: { title: string } | { archived: true },
 	) => Effect.Effect<void>;
-	/** The automation's feed, where each of its runs posts, with its bot in it, created on first use. */
+	/**
+	 * The automation's feed, where each of its runs posts, created on first use
+	 * with its project's lead bot in it, if the project has one.
+	 */
 	readonly openAutomationFeed: (
-		owned: Pick<schema.AutomationRow, "id" | "workspaceId" | "botId" | "name">,
+		owned: Pick<schema.AutomationRow, "id" | "workspaceId" | "name">,
+		leadBotId: string | null,
 	) => Effect.Effect<schema.PlacedConversationRow>;
 	/**
 	 * Posts a person's message with the files they attach, making them a
@@ -205,7 +188,7 @@ export interface Interface {
 		title: string;
 	}) => Effect.Effect<string>;
 	/**
-	 * Calls the bot's conversation `title`. Never a channel's, which goes by
+	 * Calls the bot's conversation `title`. Never a project's, which goes by
 	 * the name people gave it. True when the conversation was still there to
 	 * take it.
 	 */
@@ -299,6 +282,14 @@ export interface Reaction {
 	readonly emoji: string;
 }
 
+/** A new thread in the project `projectId`. */
+export interface NewThread {
+	workspaceId: string;
+	projectId: string;
+	startedById: string;
+	title: string;
+}
+
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ConversationRepository",
 ) {}
@@ -320,7 +311,7 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Takes back a conversation whose kind row lost a race to one already
-	 * there, such as a second main chat for one channel, so it is never left
+	 * there, such as a second feed for one automation, so it is never left
 	 * without one.
 	 */
 	const discardConversation = (id: string) =>
@@ -452,47 +443,37 @@ export const make = Effect.gen(function* () {
 		]);
 	});
 
-	/** Starts a task, with the person who started it and its bot in it. */
-	const insertTask = (input: {
-		workspaceId: string;
-		botId: string;
-		startedById: string;
-		title: string;
-	}) =>
+	/**
+	 * Starts a project's thread, with the person who started it in it, and in a
+	 * bot's default project the bot, whose thread it is.
+	 */
+	const insertThread = (input: NewThread) =>
 		Effect.gen(function* () {
 			const created = yield* insertConversation({
 				workspaceId: input.workspaceId,
-				kind: "task",
+				kind: "project_thread",
 				title: input.title,
 			});
 			yield* query((db) =>
-				db.insert(task).values({
+				db.insert(projectThread).values({
 					conversationId: created.id,
 					workspaceId: input.workspaceId,
-					botId: input.botId,
+					projectId: input.projectId,
 					startedById: input.startedById,
 				}),
 			);
+			const placed = yield* placedById(created.id);
+			const { botId } = placed;
 			yield* query((db) =>
-				db.insert(conversationParticipant).values([
-					{ conversationId: created.id, userId: input.startedById },
-					{ conversationId: created.id, botId: input.botId },
-				]),
+				db
+					.insert(conversationParticipant)
+					.values([
+						{ conversationId: created.id, userId: input.startedById },
+						...(botId ? [{ conversationId: created.id, botId }] : []),
+					]),
 			);
-			return yield* placedById(created.id);
+			return placed;
 		});
-
-	/** The main chat of the channel `channelId`, if it has been opened. */
-	const mainChatOf = (channelId: string) =>
-		query((db) =>
-			db
-				.select({ conversationId: channelConversation.conversationId })
-				.from(channelConversation)
-				.where(
-					and(eq(channelConversation.main, true), eq(channelConversation.channelId, channelId)),
-				)
-				.limit(1),
-		).pipe(Effect.map(([found]) => found?.conversationId));
 
 	/** The feed of the automation `automationId`, if it has been opened. */
 	const feedOf = (automationId: string) =>
@@ -577,14 +558,14 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		startTask: (input) =>
+		startThread: (input) =>
 			operation(
-				"startTask",
+				"startThread",
 				transaction(
 					Effect.gen(function* () {
-						const created = yield* insertTask(input);
+						const created = yield* insertThread(input);
 						yield* emit([
-							ConversationEvent.TaskStarted({
+							ConversationEvent.ThreadStarted({
 								workspaceId: created.workspaceId,
 								conversationId: created.id,
 							}),
@@ -594,13 +575,19 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		startBriefedTask: (input) =>
+		startBriefedThread: (input) =>
 			operation(
-				"startBriefedTask",
+				"startBriefedThread",
 				transaction(
 					Effect.gen(function* () {
-						// One bot per task: the briefing bot writes the first message without joining.
-						const created = yield* insertTask(input);
+						// One bot per thread: the briefing bot writes the first message without joining.
+						const created = yield* insertThread(input);
+						const hostBotId = created.botId;
+						if (!hostBotId) {
+							return yield* Effect.die(
+								new Error(`Project ${input.projectId} is not a bot's default project`),
+							);
+						}
 						const brief = yield* query((db) =>
 							db
 								.insert(message)
@@ -615,10 +602,10 @@ export const make = Effect.gen(function* () {
 								.returning(),
 						).pipe(Effect.flatMap(writtenRow("message")));
 						yield* emit([
-							ConversationEvent.BriefedTaskStarted({
+							ConversationEvent.BriefedThreadStarted({
 								workspaceId: created.workspaceId,
 								conversationId: created.id,
-								hostBotId: input.botId,
+								hostBotId,
 								briefMessageId: brief.id,
 							}),
 						]);
@@ -634,15 +621,15 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const changed = yield* query((db) =>
 							db
-								.update(task)
+								.update(projectThread)
 								.set({ doneAt: done ? sql`now()` : null })
 								.where(
 									and(
-										eq(task.conversationId, marked.id),
-										done ? isNull(task.doneAt) : sql`${task.doneAt} is not null`,
+										eq(projectThread.conversationId, marked.id),
+										done ? isNull(projectThread.doneAt) : sql`${projectThread.doneAt} is not null`,
 									),
 								)
-								.returning({ id: task.conversationId }),
+								.returning({ id: projectThread.conversationId }),
 						);
 						if (changed.length === 0) return;
 						yield* emit([
@@ -655,86 +642,14 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		openMainChat: (placement) =>
-			operation(
-				"openMainChat",
-				transaction(
-					Effect.gen(function* () {
-						const existing = yield* mainChatOf(placement.channelId);
-						if (existing) return yield* placedById(existing);
-						const created = yield* insertConversation({
-							workspaceId: placement.workspaceId,
-							kind: "channel_conversation",
-							title: FIRST_CHAT_NAME,
-						});
-						const [opened] = yield* query((db) =>
-							db
-								.insert(channelConversation)
-								.values({
-									conversationId: created.id,
-									workspaceId: placement.workspaceId,
-									channelId: placement.channelId,
-									main: true,
-									startedById: placement.startedById,
-								})
-								.onConflictDoNothing({
-									target: channelConversation.channelId,
-									where: sql`${channelConversation.main}`,
-								})
-								.returning({ conversationId: channelConversation.conversationId }),
-						);
-						if (opened) return yield* placedById(opened.conversationId);
-						yield* discardConversation(created.id);
-						const raced = yield* mainChatOf(placement.channelId);
-						if (!raced)
-							return yield* Effect.die(new Error("The channel's main chat was not opened"));
-						return yield* placedById(raced);
-					}),
-				),
-			),
-
-		startChat: (placement) =>
-			operation(
-				"startChat",
-				transaction(
-					Effect.gen(function* () {
-						const created = yield* insertConversation({
-							workspaceId: placement.workspaceId,
-							kind: "channel_conversation",
-							title: placement.title,
-						});
-						yield* query((db) =>
-							db.insert(channelConversation).values({
-								conversationId: created.id,
-								workspaceId: placement.workspaceId,
-								channelId: placement.channelId,
-								startedById: placement.startedById,
-							}),
-						);
-						yield* query((db) =>
-							db
-								.insert(conversationParticipant)
-								.values({ conversationId: created.id, userId: placement.startedById }),
-						);
-						yield* emit([
-							ConversationEvent.ChannelConversationChanged({
-								workspaceId: created.workspaceId,
-								conversationId: created.id,
-							}),
-						]);
-						return yield* placedById(created.id);
-					}),
-				),
-			),
-
 		changeChat: (chat, change) =>
 			operation(
 				"changeChat",
 				transaction(
 					Effect.gen(function* () {
 						const listed = and(
-							eq(channelConversation.conversationId, chat.id),
-							isNull(channelConversation.archivedAt),
+							eq(projectThread.conversationId, chat.id),
+							isNull(projectThread.archivedAt),
 						);
 						const changed =
 							"title" in change
@@ -745,21 +660,21 @@ export const make = Effect.gen(function* () {
 											.where(
 												and(
 													eq(conversation.id, chat.id),
-													sql`exists (${db.select({ one: sql`1` }).from(channelConversation).where(listed)})`,
+													sql`exists (${db.select({ one: sql`1` }).from(projectThread).where(listed)})`,
 												),
 											)
 											.returning({ id: conversation.id }),
 									)
 								: yield* query((db) =>
 										db
-											.update(channelConversation)
+											.update(projectThread)
 											.set({ archivedAt: sql`now()` })
-											.where(and(listed, eq(channelConversation.main, false)))
-											.returning({ id: channelConversation.conversationId }),
+											.where(listed)
+											.returning({ id: projectThread.conversationId }),
 									);
 						if (changed.length === 0) return;
 						yield* emit([
-							ConversationEvent.ChannelConversationChanged({
+							ConversationEvent.ProjectThreadChanged({
 								workspaceId: chat.workspaceId,
 								conversationId: chat.id,
 							}),
@@ -951,7 +866,7 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.flatMap(writtenRow("message"))),
 			),
 
-		openAutomationFeed: (owned) =>
+		openAutomationFeed: (owned, leadBotId) =>
 			operation(
 				"openAutomationFeed",
 				transaction(
@@ -975,11 +890,13 @@ export const make = Effect.gen(function* () {
 								.returning({ conversationId: automationFeed.conversationId }),
 						);
 						if (opened) {
-							yield* query((db) =>
-								db
-									.insert(conversationParticipant)
-									.values({ conversationId: created.id, botId: owned.botId }),
-							);
+							if (leadBotId !== null) {
+								yield* query((db) =>
+									db
+										.insert(conversationParticipant)
+										.values({ conversationId: created.id, botId: leadBotId }),
+								);
+							}
 							return yield* placedById(created.id);
 						}
 						yield* discardConversation(created.id);

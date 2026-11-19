@@ -1,3 +1,4 @@
+import { projectLinks } from "@sugabots/contracts/project-links";
 import { type UserText, userText } from "@sugabots/errors";
 import { type EgressHttpClient, EgressRefused } from "../../../providers/network/egress.ts";
 import { readablePage } from "./readable.ts";
@@ -25,7 +26,7 @@ export const MAX_REDIRECTS = 5;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_MAX_CHARACTERS = 40_000;
-const USER_AGENT = "Sugabots/1 (+https://github.com/nitrictech/agents)";
+const USER_AGENT = `Sugabots/1 (+${projectLinks.repository})`;
 
 interface FetchedPage {
 	/** As asked for. */

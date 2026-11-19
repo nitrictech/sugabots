@@ -1,4 +1,4 @@
-import { CHAT_NAME_MAX_LENGTH } from "@sugabots/contracts";
+import { THREAD_NAME_MAX_LENGTH } from "@sugabots/contracts";
 import { type FormEvent, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -11,7 +11,7 @@ import {
 import { SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 
 /**
- * Naming a chat in a channel: a new one, under `title` "New channel", or one being
+ * Naming a thread in a project: a new one, under `title` "New thread", or one being
  * renamed, starting from its `name`. `onSave` is given the name as written.
  */
 export function ChatNameDialog({
@@ -54,16 +54,16 @@ export function ChatNameDialog({
 						value={name}
 						onChange={setName}
 						placeholder="e.g. Pricing"
-						maxLength={CHAT_NAME_MAX_LENGTH}
+						maxLength={THREAD_NAME_MAX_LENGTH}
 					/>
 				</SettingsGroup>
 				<p className="m-0 px-1 text-xs text-subtle-foreground leading-normal">
-					Everyone in the channel can read and write in it.
+					Everyone in the project can read and write in it.
 				</p>
 				{failure !== undefined && (
 					<Alert>
 						{failureMessage(failure, {
-							Forbidden: "Only someone who runs this channel can do that.",
+							Forbidden: "Only someone who runs this project can do that.",
 						})}
 					</Alert>
 				)}

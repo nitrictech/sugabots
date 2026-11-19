@@ -112,13 +112,13 @@ const meta = preview.meta({
 });
 
 /**
- * A channel's files, newest first under when each was last updated. One a bot
+ * A project's files, newest first under when each was last updated. One a bot
  * wrote shows its kind, version and who made it, and opens beside the list;
  * one sent on a message shows its size and who sent it, and opens on its own.
  */
 export const List = meta.story({
 	render: () => (
-		<FileListView owner={{ channel: revenue }} files={[plan, brief, dashboard]} now={now} />
+		<FileListView owner={{ project: revenue }} files={[plan, brief, dashboard]} now={now} />
 	),
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: /Q4 outreach plan/ })).toHaveAttribute(
@@ -144,13 +144,13 @@ export const List = meta.story({
 export const ListWithOneOpen = meta.story({
 	render: () => (
 		<FileListView
-			owner={{ channel: revenue }}
+			owner={{ project: revenue }}
 			files={[plan, dashboard]}
 			selectedId={plan.id}
 			now={now}
 		>
 			<FileStageView
-				owner={{ channel: revenue }}
+				owner={{ project: revenue }}
 				file={atVersion(plan, 3, planContent)}
 				versions={versions}
 				now={now}
@@ -170,7 +170,7 @@ export const ListWithOneOpen = meta.story({
 
 /** Before any bot has made one, the page says how one gets here. */
 export const Empty = meta.story({
-	render: () => <FileListView owner={{ channel: revenue }} files={[]} now={now} />,
+	render: () => <FileListView owner={{ project: revenue }} files={[]} now={now} />,
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText(`No files in ${revenue.name} yet`)).toBeVisible();
 	},
@@ -180,7 +180,7 @@ export const Empty = meta.story({
 export const Document = meta.story({
 	render: () => (
 		<FileStageView
-			owner={{ channel: revenue }}
+			owner={{ project: revenue }}
 			file={atVersion(plan, 3, planContent)}
 			versions={versions}
 			now={now}
@@ -208,12 +208,12 @@ export const Document = meta.story({
 	},
 });
 
-/** Those who manage the channel can delete a file from its menu, once they confirm it. */
+/** Those who manage the project can delete a file from its menu, once they confirm it. */
 export const Delete = meta.story({
 	args: { onDelete: fn() },
 	render: ({ onDelete }) => (
 		<FileStageView
-			owner={{ channel: revenue }}
+			owner={{ project: revenue }}
 			file={atVersion(plan, 3, planContent)}
 			versions={versions}
 			now={now}
@@ -236,7 +236,7 @@ export const EarlierVersion = meta.story({
 	args: { onVersionChange: fn() },
 	render: ({ onVersionChange }) => (
 		<FileStageView
-			owner={{ channel: revenue }}
+			owner={{ project: revenue }}
 			file={atVersion(plan, 1, "# Q4 outreach plan\n\n## Goals\n\nTo be decided.\n")}
 			versions={versions}
 			now={now}
@@ -262,7 +262,7 @@ export const HtmlPage = meta.story({
 	args: { onClose: fn() },
 	render: ({ onClose }) => (
 		<FileStageView
-			owner={{ channel: revenue }}
+			owner={{ project: revenue }}
 			file={atVersion(dashboard, 1, pageContent)}
 			versions={[{ number: 1, author: null, createdAt: dashboard.createdAt }]}
 			now={now}

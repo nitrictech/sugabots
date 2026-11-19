@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, connectionHandlers, StoryApp, storyChannels } from "../story-app.tsx";
+import { appHandlers, connectionHandlers, StoryApp, storyProjects } from "../story-app.tsx";
 
 /*
  * A bot's connections, as its settings page shows them: each app its bots
@@ -14,7 +14,7 @@ import { appHandlers, connectionHandlers, StoryApp, storyChannels } from "../sto
  */
 
 const API = import.meta.env.VITE_API_URL as string;
-const channelPath = `/nitric/settings/channels/${revenue.slug}/connections`;
+const projectPath = `/nitric/settings/projects/${revenue.slug}/connections`;
 
 /** A connection whose tools are all at `access`. */
 function connection(
@@ -35,7 +35,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000008${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		botId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: "0199a3a0-0000-7000-8000-00000000b071",
 		kind: "mcp",
 		auth: "header",
 		signedIn: true,
@@ -152,7 +152,7 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		msw.use(...connectionHandlers(connections), ...appHandlers());
 	},
-	render: () => <StoryApp path={channelPath} />,
+	render: () => <StoryApp path={projectPath} />,
 });
 
 /**
@@ -218,7 +218,7 @@ export const AddingAnApp = meta.story({
 	},
 });
 
-/** GitHub chosen: the bot gets an app of its own, made on GitHub for the organization named or the person. */
+/** GitHub chosen: the project gets an app of its own, made on GitHub for the organization named or the person. */
 export const AddingGitHub = meta.story({
 	play: async ({ canvas }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Add connection" }));
@@ -275,7 +275,7 @@ async function openConnectByUrl(canvas: ReturnType<typeof within>) {
 /** None yet: the group holds only Add connection. */
 export const Empty = meta.story({
 	beforeEach({ msw }) {
-		msw.use(http.get(`${API}/bots/:botId/connections`, () => HttpResponse.json([])));
+		msw.use(http.get(`${API}/projects/:projectId/connections`, () => HttpResponse.json([])));
 	},
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("button", { name: "Add connection" })).toBeInTheDocument();
@@ -291,10 +291,10 @@ export const Member = meta.story({
 			...connectionHandlers(connections),
 			...appHandlers({
 				role: "member",
-				channels: storyChannels.map((channel) => ({
-					...channel,
+				projects: storyProjects.map((project) => ({
+					...project,
 					permissions: {
-						...channel.permissions,
+						...project.permissions,
 						manageConnections: false,
 						manageComputer: false,
 						rename: false,

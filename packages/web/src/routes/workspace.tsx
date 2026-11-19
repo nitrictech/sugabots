@@ -1,5 +1,5 @@
 import type { Workspace, WorkspacePermissions } from "@sugabots/contracts";
-import { createRoute, Navigate, redirect } from "@tanstack/react-router";
+import { createRoute, Navigate } from "@tanstack/react-router";
 import { useAssistant, useBots, useEnsuredAssistant } from "@/lib/bots.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { loadFailure } from "@/lib/query.ts";
@@ -13,22 +13,13 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import { API_DID_NOT_ANSWER, preloadChatScreenForWideLayout } from "./conversation.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { requireUser, rootRoute } from "./root.tsx";
-import { validateInviteSearch } from "./search.ts";
 
-const NewTask = lazyNamed(() => import("@/screens/NewTask.tsx"), "NewTask");
+const NewThreadPage = lazyNamed(() => import("@/screens/NewThreadPage.tsx"), "NewThreadPage");
 
 export const indexRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/",
-	validateSearch: validateInviteSearch,
-	beforeLoad: (options) => {
-		// Invitation links already in inboxes and docker logs point at `/?invite=`.
-		// They keep working: the route is the new shape, this is the old one.
-		if (options.search.invite !== undefined) {
-			throw redirect({ to: "/invite/$id", params: { id: options.search.invite } });
-		}
-		requireUser(options);
-	},
+	beforeLoad: requireUser,
 	loader: preloadChatScreenForWideLayout,
 	component: LandingRoute,
 });
@@ -86,7 +77,7 @@ function AssistantRoute() {
 	if (assistant && user) {
 		return (
 			<Panes>
-				<NewTask key={assistant.id} bot={assistant} userId={user.id} />
+				<NewThreadPage key={assistant.id} owner={{ bot: assistant }} userId={user.id} />
 			</Panes>
 		);
 	}
@@ -175,7 +166,7 @@ export const youRoute = createRoute({
 	},
 });
 
-/** On a phone, Home: the Personal Assistant, the channels and the pinned bots. */
+/** On a phone, Home: the Personal Assistant, the projects and the pinned bots. */
 export const homeRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/home",

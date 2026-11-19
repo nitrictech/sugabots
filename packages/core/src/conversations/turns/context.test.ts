@@ -1,4 +1,4 @@
-import { START_TASK_TOOL } from "@sugabots/contracts";
+import { START_THREAD_TOOL } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { describeToolCall } from "../repository/message-text.ts";
@@ -77,7 +77,7 @@ describe("modelPrompt", () => {
 		expect(modelPrompt(collaboration, environment()).system).toContain(
 			"Another bot opened this conversation",
 		);
-		// A task somebody started from a channel's conversation hangs off the chat, but no bot asked for it.
+		// A bot's thread somebody started from a project's thread hangs off it, but no bot asked for it.
 		const fromChat = context();
 		fromChat.conversation.parentConversationId = "0199a3a0-0000-7000-8000-000000000010";
 		expect(modelPrompt(fromChat, environment()).system).not.toContain(
@@ -85,18 +85,18 @@ describe("modelPrompt", () => {
 		);
 	});
 
-	it("tells the bot whether it is in one of its tasks or a channel, and how to take on a task from a channel", () => {
+	it("tells the bot whether it is in one of its threads or a project's thread, and how to take work from a project into a thread of its own", () => {
 		expect(modelPrompt(context(), environment()).messages.at(-1)?.content).toContain(
-			"You are in one of your tasks",
+			"You are in one of your threads",
 		);
-		const inChannel = context();
-		inChannel.conversation.kind = "channel_conversation";
-		inChannel.conversation.botId = null;
-		inChannel.channel = { name: "Release", slug: "release" };
-		const instruction = modelPrompt(inChannel, environment()).messages.at(-1)?.content ?? "";
-		expect(instruction).toContain('You are in "Check the release" in the channel Release');
-		expect(instruction).toContain(`call ${START_TASK_TOOL}`);
-		expect(instruction).not.toContain("You are in one of your tasks");
+		const inProject = context();
+		inProject.conversation.kind = "project_thread";
+		inProject.conversation.botId = null;
+		inProject.project = { name: "Release" };
+		const instruction = modelPrompt(inProject, environment()).messages.at(-1)?.content ?? "";
+		expect(instruction).toContain('You are in "Check the release" in the project Release');
+		expect(instruction).toContain(`call ${START_THREAD_TOOL}`);
+		expect(instruction).not.toContain("You are in one of your threads");
 	});
 
 	it("tells the bot who can reach it: everyone, its creator, or its person", () => {
@@ -166,7 +166,7 @@ describe("modelPrompt", () => {
 			'naming the zone once when you confirm a schedule ("8am Sydney time")',
 		);
 		expect(instruction([])).toContain("Don't ask the person for their timezone");
-		expect(instruction(["automations"])).not.toContain("Automations you set up");
+		expect(instruction(["automations"])).not.toContain("Routines you set up");
 	});
 
 	it("writes the bot's own tool calls into its history as one line each, not the whole output", () => {
@@ -549,7 +549,7 @@ function context(): TurnContext {
 			id: "0199a3a0-0000-7000-8000-000000000001",
 			workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 			title: "Check the release",
-			kind: "task",
+			kind: "project_thread",
 			botId: "0199a3a0-0000-7000-8000-000000000003",
 			parentConversationId: null,
 		},
@@ -566,12 +566,14 @@ function context(): TurnContext {
 			visibility: "public",
 			color: "orange",
 			acceptsImages: false,
+			defaultProjectId: "0199a3a0-0000-7000-8000-000000000004",
 		},
+		projectId: "0199a3a0-0000-7000-8000-000000000004",
 		reason: "default",
 		windowTokens: 256_000,
 		compaction: undefined,
 		automationInstructions: new Map(),
-		channel: null,
+		project: null,
 		workspaceName: "Suga",
 		workspaceSlug: "suga",
 		workspaceTimeZone: "UTC",

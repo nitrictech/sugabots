@@ -91,7 +91,6 @@ ALTER INDEX "direct_member_user_idx" RENAME TO "direct_message_member_user_idx";
 ALTER INDEX "message_thread_created_at_idx" RENAME TO "message_conversation_created_at_idx";--> statement-breakpoint
 ALTER INDEX "turn_thread_started_at_idx" RENAME TO "turn_conversation_started_at_idx";--> statement-breakpoint
 ALTER INDEX "file_thread_updated_at_idx" RENAME TO "file_conversation_updated_at_idx";--> statement-breakpoint
--- The kinds by their new names.
 UPDATE "conversation" SET "kind" = CASE "kind"
 	WHEN 'conversation' THEN 'task'
 	WHEN 'pod_chat' THEN 'channel_conversation'

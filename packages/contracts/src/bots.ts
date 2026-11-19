@@ -7,7 +7,7 @@ import { uuidSchema } from "./uuid.ts";
  *
  * A bot belongs to its workspace. It is public, for everyone in the
  * workspace, or private, for the person who made it; a Personal Assistant is
- * its person's alone. Public bots can be added to channels.
+ * its person's alone. Public bots can be added to projects.
  */
 
 /**
@@ -149,7 +149,7 @@ export const botPermissionsSchema = Schema.Struct({
 	/** Add, change and remove its automations, and rotate their webhook secrets. */
 	manageAutomations: Schema.Boolean,
 	runAutomations: Schema.Boolean,
-	/** Read and write in its tasks. False for a private bot an admin only sees listed. */
+	/** Read and write in its threads. False for a private bot an admin only sees listed. */
 	talk: Schema.Boolean,
 });
 
@@ -160,14 +160,6 @@ export const botSchema = Schema.Struct({
 	workspaceId: uuidSchema,
 	name: Schema.String,
 	handle: handleSchema,
-	/**
-	 * Which system role this bot performs, or null for a bot people talk to.
-	 *
-	 * Always null in practice: this is the shape of a bot people talk to, and a
-	 * system bot belongs to the workspace instead (`systemBotSchema`). The
-	 * field stays because a client still sorts and filters on it.
-	 */
-	systemBotKey: Schema.NullOr(systemBotKeySchema),
 	description: Schema.NullOr(Schema.String),
 	color: botColorSchema,
 	face: botFaceSchema,
@@ -208,6 +200,11 @@ export const botSchema = Schema.Struct({
 	assistant: Schema.Boolean,
 	/** Whether the person asking pinned it to their sidebar. */
 	pinned: Schema.Boolean,
+	/**
+	 * Its hidden default project, which holds its own threads, files,
+	 * computer, connections and automations: their routes are the project's.
+	 */
+	defaultProjectId: uuidSchema,
 	permissions: botPermissionsSchema,
 	createdAt: isoTimestampSchema,
 });

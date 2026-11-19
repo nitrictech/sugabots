@@ -1,15 +1,12 @@
 import type { Bot } from "@sugabots/contracts";
 import { createRoute, Link, Navigate, Outlet, useMatch, useSearch } from "@tanstack/react-router";
 import { useBotWithHandle } from "@/lib/bots.ts";
-import {
-	prefetchConversation,
-	useAnyConversationPlace,
-	useBotConversationPlace,
-} from "@/lib/chats.ts";
-import { automationsLink, botSettingsLink, conversationLink } from "@/lib/links.ts";
+import { prefetchConversation, useAnyConversationPlace, useBotThreadPlace } from "@/lib/chats.ts";
+import { botAutomationsLink, botSettingsLink, conversationLink } from "@/lib/links.ts";
 import { useSession } from "@/lib/session.ts";
 import { FilesPage } from "@/screens/Files.tsx";
 import { BotsDirectory } from "@/shell/BotsDirectory.tsx";
+import { OwnerNotFound } from "@/shell/OwnerNotFound.tsx";
 import { Panes } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import {
@@ -27,7 +24,7 @@ import {
 } from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
-const NewTask = lazyNamed(() => import("@/screens/NewTask.tsx"), "NewTask");
+const NewThreadPage = lazyNamed(() => import("@/screens/NewThreadPage.tsx"), "NewThreadPage");
 
 /** Every bot the person reaches, pinning them to the sidebar, and making another. */
 export const botsRoute = createRoute({
@@ -54,32 +51,22 @@ function BotRoute() {
 	const onAutomations =
 		useMatch({ from: "/$workspace/bots/$bot/automations", shouldThrow: false }) !== undefined;
 	if (isPending) return <Panes>{null}</Panes>;
-	if (!bot) {
-		return (
-			<Panes>
-				<EmptyState title={error ? "Could not load this bot" : "No such bot here"}>
-					{error
-						? "The API did not answer. Reload, or check that it is running."
-						: "It may have been removed or renamed, or it is someone else's private bot."}
-				</EmptyState>
-			</Panes>
-		);
-	}
+	if (!bot) return <OwnerNotFound kind="bot" error={error} />;
 	// Someone else's private bot, which an administrator sees listed: it exists, and its settings
-	// and automations are theirs to manage, though its tasks and what its automations posted are not.
+	// and automations are theirs to manage, though its threads and what its automations posted are not.
 	if (!bot.permissions.talk && !(bot.permissions.manageAutomations && onAutomations)) {
 		return (
 			<Panes>
 				<EmptyState title={bot.name}>
 					<span className="flex flex-col items-center gap-3">
-						<span>This is someone else's private bot, so its tasks are theirs alone.</span>
+						<span>This is someone else's private bot, so its threads are theirs alone.</span>
 						{bot.permissions.update && (
 							<Link {...botSettingsLink(bot)} className="text-link underline">
 								Open its settings
 							</Link>
 						)}
 						{bot.permissions.manageAutomations && (
-							<Link {...automationsLink(bot)} className="text-link underline">
+							<Link {...botAutomationsLink(bot)} className="text-link underline">
 								Open its automations
 							</Link>
 						)}
@@ -96,8 +83,9 @@ function BotRoute() {
 }
 
 /**
- * A bot opened without a task chosen: its own page, where something new is
- * asked of it. Its tasks are in its sidebar.
+ * A bot opened without a thread chosen: its own page, where a thread with it
+ * starts from its first message, whether or not it has threads; they are in
+ * its sidebar. A project's index opens its newest thread instead.
  */
 export const botIndexRoute = createRoute({
 	getParentRoute: () => botRoute,
@@ -105,24 +93,17 @@ export const botIndexRoute = createRoute({
 	component: () => <BotPage handle={botIndexRoute.useParams().bot} />,
 });
 
-/** The bot at `handle`'s own page, starting a task with it from its first message. */
+/** The bot at `handle`'s own page, starting a thread with it from its first message. */
 function BotPage({ handle }: { handle: string }) {
 	const { bot } = useBotWithHandle(handle);
 	const { user } = useSession();
-	return bot && user ? <NewTask key={bot.id} bot={bot} userId={user.id} /> : null;
+	return bot && user ? <NewThreadPage key={bot.id} owner={{ bot }} userId={user.id} /> : null;
 }
 
-/** Starting a task with the bot, from its first message. */
-export const newTaskRoute = createRoute({
+/** One of the bot's threads, or one of its automations' feeds. */
+export const threadRoute = createRoute({
 	getParentRoute: () => botRoute,
-	path: "/new",
-	component: () => <BotPage handle={newTaskRoute.useParams().bot} />,
-});
-
-/** One of the bot's tasks, or one of its automations' feeds. */
-export const taskRoute = createRoute({
-	getParentRoute: () => botRoute,
-	path: "/tasks/$conversation",
+	path: "/threads/$conversation",
 	validateSearch: (search: Record<string, unknown>) => validateConversationSearch(search),
 	preloadStaleTime: 0,
 	loader: ({ context, params }) => {
@@ -130,9 +111,9 @@ export const taskRoute = createRoute({
 		return ConversationPage.preload();
 	},
 	component: () => {
-		const { bot: handle, conversation } = taskRoute.useParams();
-		const navigate = taskRoute.useNavigate();
-		const search = taskRoute.useSearch();
+		const { bot: handle, conversation } = threadRoute.useParams();
+		const navigate = threadRoute.useNavigate();
+		const search = threadRoute.useSearch();
 		const { bot } = useBotWithHandle(handle);
 		return bot ? (
 			<BotConversation
@@ -145,7 +126,7 @@ export const taskRoute = createRoute({
 	},
 });
 
-/** One of the bot `bot`'s tasks or automations' feeds at its own address; see `RoutedConversation`. */
+/** One of the bot `bot`'s threads or automations' feeds at its own address; see `RoutedConversation`. */
 export function BotConversation({
 	bot,
 	conversationId,
@@ -158,7 +139,7 @@ export function BotConversation({
 	navigate: (change: SearchChange) => void;
 }) {
 	return (
-		<ConversationScreen place={useBotConversationPlace(bot, conversationId)}>
+		<ConversationScreen place={useBotThreadPlace(bot, conversationId)}>
 			{(found, user) => (
 				<RoutedConversation
 					found={found}
@@ -193,20 +174,20 @@ export const botFileRoute = createRoute({
 	},
 });
 
-/** A task by its id alone, as a notification names it, which goes on to its bot's address. */
-export const taskByIdRoute = createRoute({
+/** A thread by its id alone, as a notification names it, which goes on to its bot's address. */
+export const threadByIdRoute = createRoute({
 	getParentRoute: () => shellRoute,
-	path: "/tasks/$conversation",
+	path: "/threads/$conversation",
 	component: () => {
-		const { conversation } = taskByIdRoute.useParams();
+		const { conversation } = threadByIdRoute.useParams();
 		const search = useSearch({ strict: false });
 		const { found, isPending, error } = useAnyConversationPlace(conversation);
 		if (isPending) return <Panes>{null}</Panes>;
-		const bot = found?.conversation.kind === "botConversation" ? found.conversation.bot : undefined;
+		const bot = found?.conversation.kind === "botThread" ? found.conversation.bot : undefined;
 		if (!bot) {
 			return (
 				<Panes>
-					<EmptyState title={error ? "Could not load this task" : "Task not found"} />
+					<EmptyState title={error ? "Could not load this thread" : "Thread not found"} />
 				</Panes>
 			);
 		}

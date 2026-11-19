@@ -1,6 +1,4 @@
 import type {
-	Bot,
-	Channel,
 	ChatHistoryEntry,
 	ConversationDetails,
 	FilePart,
@@ -8,35 +6,30 @@ import type {
 	SessionUser,
 } from "@sugabots/contracts";
 import { useLocation } from "@tanstack/react-router";
-import { chatFileUrl } from "@/lib/chat-files.ts";
-import type { ConversationPlaceKind } from "@/lib/chats.ts";
+import { useBot } from "@/lib/bots.ts";
+import { placeBot } from "@/lib/chats.ts";
+import { conversationFileUrl } from "@/lib/conversation-files.ts";
+import { resourcePermissions } from "@/lib/resource-owner.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { AutomationPanel } from "./AutomationPanel.tsx";
 import { AutomationsStage, type AutomationsView } from "./AutomationsStage.tsx";
 import type { ChatPlace } from "./ChatHeader.tsx";
-import type { ChannelConversationToChange } from "./ChatMenu.tsx";
+import { type AnyConversationPlace, conversationOwner } from "./conversation-place.ts";
 import { DesktopStage } from "./DesktopViewer.tsx";
-import {
-	ChannelDetails,
-	type ConversationContents,
-	DetailsSidebar,
-	PeopleDetails,
-} from "./DetailsSidebar.tsx";
+import { type ConversationContents, DetailsSidebar, ProjectDetails } from "./DetailsSidebar.tsx";
 import { FileStage } from "./Files.tsx";
 import { ItemPanel } from "./ItemPanel.tsx";
+import { opensBeside } from "./item-opening.ts";
+import type { ProjectThreadToChange } from "./ProjectThreadMenu.tsx";
 import type { Staged, StagedChange } from "./staged.ts";
-import { TasksStage } from "./TasksStage.tsx";
 
 /**
  * What is open beside a chat, one at a time: what is staged large, else the
- * collaboration or automation run open, else, on the chat's own page, its
- * Details while they are open. Nothing opens beside a direct message but a
- * file.
+ * collaboration open, else, on the chat's own page, its Details while they
+ * are open. Nothing opens beside a direct message.
  */
 export function ChatBeside({
-	conversation,
-	channel,
-	bot,
+	conversationPlace,
 	details,
 	conversationId,
 	user,
@@ -50,22 +43,19 @@ export function ChatBeside({
 	onOpenFile,
 	onOpenAutomations,
 	shownMessages,
-	channelConversationName,
-	channelConversationToChange,
+	projectThreadName,
+	projectThreadToChange,
 }: {
-	conversation: ConversationPlaceKind;
-	channel: Channel | null;
-	/** The chat's own bot; null in a channel or a direct message. */
-	bot: Bot | null;
+	conversationPlace: AnyConversationPlace;
 	details: ConversationDetails;
 	conversationId: string;
 	user: SessionUser;
 	place: ChatPlace;
 	staged: Staged | undefined;
 	onStagedChange: StagedChange;
-	/** The collaboration or automation run open beside the chat, if any. */
+	/** The collaboration or automation's run the chat's address names, if any. */
 	itemConversationId: string | undefined;
-	/** The collaborations and automation runs the chat has opened. */
+	/** The collaborations and automations' runs the chat has opened. */
 	entries: ChatHistoryEntry[];
 	onItemChange: (itemConversationId: string | undefined) => void;
 	onOpenItem: (itemConversationId: string) => void;
@@ -73,22 +63,24 @@ export function ChatBeside({
 	onOpenAutomations: (view?: AutomationsView) => void;
 	/** The messages loaded so far, whose files Details lists. */
 	shownMessages: readonly Message[];
-	/** What a channel's conversation is called, as its channel lists it. */
-	channelConversationName: string;
-	/** Renaming and archiving a channel's conversation, for whoever may change the channel. */
-	channelConversationToChange: ChannelConversationToChange | undefined;
+	/** What a project's thread is called, as its project lists it. */
+	projectThreadName: string;
+	/** Renaming and archiving a project's thread, for whoever may change the project. */
+	projectThreadToChange: ProjectThreadToChange | undefined;
 }) {
 	const { leaveFor } = useLeave();
 	const { pathname } = useLocation();
-	const selectedEntry = itemConversationId
-		? entries.find((entry) => entry.conversationId === itemConversationId)
-		: undefined;
+	const owner = conversationOwner(conversationPlace);
+	const bot = placeBot(conversationPlace);
+	// A project's lead bot, which works on the project's computer in its threads.
+	const lead = useBot(conversationPlace.project?.leadBotId);
 	const closeStage = () => onStagedChange(undefined);
 
-	if (staged?.kind === "file" && (channel || bot)) {
+	if (!owner) return null;
+	if (staged?.kind === "file") {
 		return (
 			<FileStage
-				owner={channel ? { channel } : { bot: bot as Bot }}
+				owner={owner}
 				fileId={staged.fileId}
 				version={staged.version}
 				onVersionChange={(version) => onStagedChange({ ...staged, version })}
@@ -104,22 +96,14 @@ export function ChatBeside({
 			/>
 		);
 	}
-	if (staged?.kind === "desktop" && bot) {
+	const worker = bot ?? lead;
+	if (staged?.kind === "desktop" && worker) {
 		return (
 			<DesktopStage
 				conversationId={details.conversation.id}
-				bot={bot}
-				mayUse={bot.permissions.useDesktop}
-				onClose={closeStage}
-			/>
-		);
-	}
-	if (staged?.kind === "tasks" && bot) {
-		return (
-			<TasksStage
-				bot={bot}
-				tab={staged.tab}
-				onTabChange={(tab) => onStagedChange({ kind: "tasks", tab }, { replace: true })}
+				owner={owner}
+				bot={worker}
+				mayUse={resourcePermissions(owner).useDesktop}
 				onClose={closeStage}
 			/>
 		);
@@ -136,17 +120,13 @@ export function ChatBeside({
 			/>
 		);
 	}
-	if (
-		itemConversationId &&
-		conversation.kind !== "directMessage" &&
-		selectedEntry?.kind !== "run"
-	) {
+	if (itemConversationId && opensBeside(itemConversationId, entries)) {
 		return (
 			<ItemPanel
 				conversationId={conversationId}
 				chatBotId={bot?.id}
 				itemConversationId={itemConversationId}
-				entry={selectedEntry}
+				entry={entries.find((entry) => entry.conversationId === itemConversationId)}
 				history={entries}
 				frame={{ kind: "sidebar", onClose: () => onItemChange(undefined) }}
 				onOpenItem={onOpenItem}
@@ -154,53 +134,57 @@ export function ChatBeside({
 			/>
 		);
 	}
-	if (place.kind !== "own" || !place.detailsOpen || conversation.kind === "directMessage") {
-		return null;
-	}
+	if (place.kind !== "own" || !place.detailsOpen) return null;
 	const closeDetails = () => place.onDetailsChange(false);
 	const contents: ConversationContents = {
 		participants: details.participants,
 		files: shownMessages.flatMap((message) =>
 			message.parts.filter((part): part is FilePart => part.type === "file"),
 		),
-		fileUrlOf: (fileId) => chatFileUrl(conversationId, fileId),
+		fileUrlOf: (fileId) => conversationFileUrl(conversationId, fileId),
 	};
-	if (conversation.kind === "channelConversation") {
-		return (
-			<ChannelDetails
-				name={channelConversationName}
-				people={details.members.length}
-				bots={details.channelBots.filter((member) => member.kind === "bot").length}
-				toChange={channelConversationToChange}
-				user={user}
-				contents={contents}
-				onClose={closeDetails}
-			/>
-		);
-	}
-	if (details.automation && bot) {
+	// A project's automation's feed is set up beside it, as a bot's is.
+	if (details.automation) {
 		return (
 			<AutomationPanel
-				bot={bot}
+				owner={owner}
 				conversationId={conversationId}
 				standing={details.automation}
 				onClose={closeDetails}
 			/>
 		);
 	}
-	if (bot) {
+	if ("project" in owner) {
 		return (
-			<DetailsSidebar
-				bot={bot}
-				conversationId={details.conversation.id}
+			<ProjectDetails
+				project={owner.project}
+				name={projectThreadName}
+				people={details.members.length}
+				bots={details.projectBots.filter((member) => member.kind === "bot").length}
+				toChange={projectThreadToChange}
+				user={user}
 				contents={contents}
-				onOpenDesktop={() => onStagedChange({ kind: "desktop" })}
-				onOpenAutomations={(automationId) =>
-					onOpenAutomations(automationId ? { kind: "automation", automationId } : undefined)
+				computer={
+					lead && {
+						bot: lead,
+						conversationId: details.conversation.id,
+						onOpen: () => onStagedChange({ kind: "desktop" }),
+					}
 				}
 				onClose={closeDetails}
 			/>
 		);
 	}
-	return <PeopleDetails user={user} contents={contents} onClose={closeDetails} />;
+	return (
+		<DetailsSidebar
+			bot={owner.bot}
+			conversationId={details.conversation.id}
+			contents={contents}
+			onOpenDesktop={() => onStagedChange({ kind: "desktop" })}
+			onOpenAutomations={(automationId) =>
+				onOpenAutomations(automationId ? { kind: "automation", automationId } : undefined)
+			}
+			onClose={closeDetails}
+		/>
+	);
 }

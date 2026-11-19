@@ -9,7 +9,7 @@ import {
 	useConversationSearchProps,
 } from "./conversation.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
-import { type ConversationSearch, idParam, validateConversationSearch } from "./search.ts";
+import { validateConversationSearch } from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
 // Lazy as the conversation is: it shows the one there already is with the people chosen.
@@ -19,7 +19,7 @@ const NewDirectMessagePage = lazyNamed(
 );
 
 /**
- * Your direct messages with other people. The address names no channel, as a
+ * Your direct messages with other people. The address names no project, as a
  * direct message between people is in none. On a phone the list is the page
  * until one is open.
  */
@@ -56,18 +56,10 @@ export const newDirectMessageRoute = createRoute({
 	component: () => <NewDirectMessagePage />,
 });
 
-interface DirectMessageSearch extends ConversationSearch {
-	/** A message to jump to, such as the one a notification is about. */
-	message?: string;
-}
-
 export const directMessageRoute = createRoute({
 	getParentRoute: () => directMessagesRoute,
 	path: "/$conversation",
-	validateSearch: (search: Record<string, unknown>): DirectMessageSearch => ({
-		...validateConversationSearch(search),
-		...idParam(search, "message"),
-	}),
+	validateSearch: validateConversationSearch,
 	preloadStaleTime: 0,
 	loader: ({ context, params }) => {
 		prefetchConversation(context.queries, params.conversation);
@@ -82,8 +74,7 @@ export const directMessageRoute = createRoute({
 			<ConversationScreen place={useDirectMessage(conversation)}>
 				{(found, user) => (
 					<ConversationPage
-						conversation={found.conversation}
-						channel={found.channel}
+						conversationPlace={found}
 						conversationId={conversation}
 						user={user}
 						{...searchProps}

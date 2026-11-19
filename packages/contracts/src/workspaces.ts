@@ -7,10 +7,10 @@ import { Schema } from "effect";
  *   also decides who else administers it, and who alone can hand it on.
  *   Every workspace has exactly one, from the moment its creator makes it.
  * - `admin` administers the workspace, its people, its providers, every
- *   channel and every bot.
- * - `member` makes bots and channels, and uses the public bots and the
- *   channels they are in.
- * - `viewer` reads and takes part in the channels they are in and with the
+ *   project and every bot.
+ * - `member` makes bots and projects, and uses the public bots and the
+ *   projects they are in.
+ * - `viewer` reads and takes part in the projects they are in and with the
  *   public bots, and configures nothing.
  *
  * Everybody has their own Personal Assistant whatever their role.
@@ -35,7 +35,7 @@ export const assignableWorkspaceRoleSchema = Schema.Literals(ASSIGNABLE_WORKSPAC
 export type AssignableWorkspaceRole = typeof assignableWorkspaceRoleSchema.Type;
 
 /**
- * The roles that administer the workspace. Each is in every channel, put
+ * The roles that administer the workspace. Each is in every project, put
  * there by database triggers, and can neither leave one nor be taken out.
  */
 export const ADMINISTERING_WORKSPACE_ROLES = [
@@ -80,9 +80,9 @@ const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
  */
 const WORKSPACE_ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
 	owner: "Administers the workspace, decides who else does, and can hand it on.",
-	admin: "Administers the workspace, its providers, every channel and every bot.",
-	member: "Makes bots and channels, and works with the public bots.",
-	viewer: "Reads and takes part in channels and with public bots.",
+	admin: "Administers the workspace, its providers, every project and every bot.",
+	member: "Makes bots and projects, and works with the public bots.",
+	viewer: "Reads and takes part in projects and with public bots.",
 };
 
 /**
@@ -101,13 +101,13 @@ export function workspaceRoleDescription(role: WorkspaceRole): string {
 /**
  * What the caller may do in the workspace itself, already decided by the API.
  *
- * Answers about one channel travel with it (`channelPermissionsSchema`), and
+ * Answers about one project travel with it (`projectPermissionsSchema`), and
  * about one bot with it (`botPermissionsSchema`); these are the ones that
  * belong to neither. As there, the client draws from these and
  * the API still decides.
  */
 export const workspacePermissionsSchema = Schema.Struct({
-	createChannels: Schema.Boolean,
+	createProjects: Schema.Boolean,
 	createBots: Schema.Boolean,
 	/** Rename the workspace, change its address, and move it to another time zone. */
 	updateWorkspace: Schema.Boolean,

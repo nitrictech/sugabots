@@ -1,7 +1,7 @@
 import type { ApprovalRequest } from "@sugabots/contracts";
-import { useChannels } from "@/lib/channels.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
 import { formatListTime } from "@/lib/list-time.ts";
+import { useProjects } from "@/lib/projects.ts";
 import { connectionLabel, splitToolKey, stepLabel } from "@/lib/tool-names.ts";
 
 /**
@@ -10,7 +10,7 @@ import { connectionLabel, splitToolKey, stepLabel } from "@/lib/tool-names.ts";
  * that is not a connection's tool is named by its action.
  */
 export function useApprovalApp(request: ApprovalRequest) {
-	const looks = useConnectionLooks([request.bot.id]);
+	const looks = useConnectionLooks([request.bot.id], request.projectId);
 	const { handle, name } = splitToolKey(request.call.tool);
 	const look = looks.get(handle);
 	const action = stepLabel(request.call.tool, name);
@@ -18,18 +18,18 @@ export function useApprovalApp(request: ApprovalRequest) {
 }
 
 /**
- * The channel an approval request was asked in, once the channels are loaded,
+ * The project an approval request was asked in, once the projects are loaded,
  * and where and when it was asked, as its row and its page say it: "in Launch
- * at 9:14", or "at 9:14" outside a channel.
+ * at 9:14", or "at 9:14" outside a project.
  */
 export function useAskedIn(request: ApprovalRequest) {
-	const { data: channels } = useChannels();
-	const channel = channels?.find((candidate) => candidate.id === request.channelId);
+	const { data: projects } = useProjects();
+	const project = projects?.find((candidate) => candidate.id === request.projectId);
 	const askedIn = [
-		channel && `in ${channel.name}`,
+		project && `in ${project.name}`,
 		`at ${formatListTime(new Date(request.call.startedAt), new Date())}`,
 	]
 		.filter(Boolean)
 		.join(" ");
-	return { channel, askedIn };
+	return { project, askedIn };
 }

@@ -1,4 +1,4 @@
-import type { Automation, BotTaskList, Run } from "@sugabots/contracts";
+import type { Automation, BotThreadList, Run } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, waitFor, within } from "storybook/test";
@@ -8,8 +8,8 @@ import {
 	appHandlers,
 	chatPath,
 	StoryApp,
-	storyChannels,
 	storyChatDetails,
+	storyProjects,
 	storyUser,
 	storyWorkspace,
 } from "@/story-app.tsx";
@@ -66,7 +66,7 @@ function posted(id: string, author: "bot" | "you", text: string, at: string, res
 
 function automation(
 	id: string,
-	botId: string,
+	projectId: string,
 	name: string,
 	instructions: string,
 	state: Automation["state"],
@@ -74,13 +74,13 @@ function automation(
 	return {
 		id,
 		workspaceId: storyWorkspace.id,
-		botId,
+		projectId,
 		name,
 		instructions,
 		triggers: [
 			{
 				id: `${id.slice(0, -2)}c1`,
-				kind: "schedule",
+				kind: "routine",
 				schedule: { repeat: "cron", expression: "0 6 * * *" },
 				timezone: "Australia/Sydney",
 				nextScheduledAt: null,
@@ -98,14 +98,14 @@ function automation(
 
 const outboundAutomation = automation(
 	outbound.id,
-	growthDesk.id,
+	growthDesk.defaultProjectId,
 	"Overnight outbound",
 	"Queue the overnight leads and draft replies to anyone who answered. Flag anyone asking about pricing so the account manager can follow up first thing.",
 	"enabled",
 );
 const renewalsAutomation = automation(
 	renewals.id,
-	accountManager.id,
+	accountManager.defaultProjectId,
 	"Renewal reminders",
 	"Remind the account owners of renewals due in the next 30 days.",
 	"paused",
@@ -121,7 +121,7 @@ const outboundFailure: Run = {
 	automationName: "Overnight outbound",
 	instructions: outboundAutomation.instructions,
 	trigger: {
-		kind: "schedule",
+		kind: "routine",
 		scheduledAt: "2026-09-18T06:00:00.000Z",
 		acceptedAt: "2026-09-18T06:00:00.000Z",
 	},
@@ -133,9 +133,10 @@ const outboundFailure: Run = {
 	posted: false,
 };
 
-const chatList: BotTaskList = {
+const chatList: BotThreadList = {
+	bot: growthDesk,
 	summary: null,
-	tasks: [],
+	threads: [],
 	automations: [
 		{
 			automation: {
@@ -145,7 +146,6 @@ const chatList: BotTaskList = {
 				failed: true,
 				pausedAfterFailures: false,
 			},
-			bot: growthDesk,
 			conversation: {
 				kind: "automation_feed",
 				id: outbound.feed,
@@ -153,6 +153,7 @@ const chatList: BotTaskList = {
 				title: "Overnight outbound",
 				createdAt: "2026-09-01T00:00:00.000Z",
 				updatedAt: "2026-09-18T06:00:00.000Z",
+				projectId: growthDesk.defaultProjectId,
 				botId: growthDesk.id,
 				automationId: outbound.id,
 			},
@@ -166,7 +167,6 @@ const chatList: BotTaskList = {
 				failed: false,
 				pausedAfterFailures: false,
 			},
-			bot: accountManager,
 			conversation: null,
 			mentionsYou: false,
 		},
@@ -185,36 +185,38 @@ function automationHandlers() {
 		},
 		automation: {
 			id: outbound.id,
-			botId: growthDesk.id,
+			projectId: growthDesk.defaultProjectId,
 			state: "enabled" as const,
 			failed: true,
 			pausedAfterFailures: false,
 		},
 	};
 	return [
-		http.get(`${API}/bots/:botId/tasks`, () => HttpResponse.json(chatList)),
+		http.get(`${API}/bots/:botId/threads`, () => HttpResponse.json(chatList)),
 		http.get(`${API}/workspaces/:workspace/automations`, () =>
 			HttpResponse.json({
 				items: [
 					{
 						automation: outboundAutomation,
 						bot: growthDesk,
-						channel: { id: revenue.id, slug: revenue.slug },
+						project: { id: revenue.id, slug: revenue.slug },
 					},
 					{
 						automation: renewalsAutomation,
 						bot: accountManager,
-						channel: { id: revenue.id, slug: revenue.slug },
+						project: { id: revenue.id, slug: revenue.slug },
 					},
 				],
 			}),
 		),
-		http.get(`${API}/bots/:botId/automations`, ({ params }) =>
+		http.get(`${API}/projects/:projectId/automations`, ({ params }) =>
 			HttpResponse.json(
-				[outboundAutomation, renewalsAutomation].filter((one) => one.botId === params.botId),
+				[outboundAutomation, renewalsAutomation].filter(
+					(one) => one.projectId === params.projectId,
+				),
 			),
 		),
-		http.get(`${API}/bots/:botId/automations/:automationId/runs`, ({ params }) =>
+		http.get(`${API}/projects/:projectId/automations/:automationId/runs`, ({ params }) =>
 			HttpResponse.json({
 				items: params.automationId === outbound.id ? [outboundFailure] : [],
 				nextCursor: null,
@@ -229,7 +231,7 @@ function automationHandlers() {
 						id: outbound.quiet,
 						conversationId: outbound.quiet,
 						automationName: "Overnight outbound",
-						triggerKind: "schedule",
+						triggerKind: "routine",
 						state: "completed",
 						error: null,
 						report: null,
@@ -254,7 +256,7 @@ function automationHandlers() {
 						id: outbound.run,
 						conversationId: outbound.run,
 						automationName: "Overnight outbound",
-						triggerKind: "schedule",
+						triggerKind: "routine",
 						state: "failed",
 						error: "Gmail refused the connection: the token has expired.",
 						report: null,
@@ -317,11 +319,12 @@ export const EditingInstructions = meta.story({
 	},
 });
 
-/** Add trigger, under the automation's schedule, starts by choosing the kind. */
+/** Add trigger, in the section under the automation's routines, starts by choosing the kind. */
 export const AddingTrigger = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		const triggers = await canvas.findByRole("region", { name: "Triggers" });
-		await expect(within(triggers).getByRole("button", { name: /^Schedule/ })).toBeVisible();
+		const routines = await canvas.findByRole("region", { name: "Routines" });
+		await expect(within(routines).getByRole("button", { name: /^Routine/ })).toBeVisible();
+		const triggers = canvas.getByRole("region", { name: "Triggers" });
 		await userEvent.click(within(triggers).getByRole("button", { name: "Add trigger" }));
 		const dialog = await within(document.body).findByRole("dialog", { name: "Add a trigger" });
 		await expect(within(dialog).getByRole("button", { name: /^Webhook/ })).toBeVisible();
@@ -351,11 +354,11 @@ export const BotWithNone = meta.story({
 /** Somebody who may not manage the bot's automations is sent to someone who may, as a bot makes them only for them. */
 export const BotWithNoneAsAMember = meta.story({
 	beforeEach({ msw }) {
-		const asMember = storyChannels.map((channel) => ({
-			...channel,
-			permissions: { ...channel.permissions, manageAutomations: false },
+		const asMember = storyProjects.map((project) => ({
+			...project,
+			permissions: { ...project.permissions, manageAutomations: false },
 		}));
-		msw.use(...appHandlers({ role: "member", channels: asMember }));
+		msw.use(...appHandlers({ role: "member", projects: asMember }));
 	},
 	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {

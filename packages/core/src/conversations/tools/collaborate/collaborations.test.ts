@@ -59,8 +59,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	let host: { id: string; name: string };
 	let helper: { id: string; name: string };
 	let checker: { id: string; name: string };
-	let taskId: string;
-	/** The host's reply in the task, which its collaborations hang off. */
+	let threadId: string;
+	/** The host's reply in the thread, which its collaborations hang off. */
 	let reply: Awaited<ReturnType<typeof openReply>>;
 
 	afterAll(async () => {
@@ -126,13 +126,13 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		host = hostRow;
 		helper = helperRow;
 		checker = checkerRow;
-		const started = await chatsAs(memberId).startTask({
+		const started = await chatsAs(memberId).startThread({
 			botId: host.id,
 			messageId: crypto.randomUUID(),
 			content: "Please look into the release",
 		});
-		taskId = started.conversation.id;
-		reply = await openReply(taskId, host.id);
+		threadId = started.conversation.id;
+		reply = await openReply(threadId, host.id);
 	});
 
 	/** Prepares the turn running for a conversation's bot, so a reply message exists. */
@@ -151,7 +151,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	}
 
 	const from = (atOffset = 0) => ({
-		conversationId: taskId,
+		conversationId: threadId,
 		botId: host.id,
 		turnId: reply.turnId,
 		messageId: reply.messageId,
@@ -176,7 +176,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		});
 		const child = await conversationsAs(memberId).get(opened.collaboration.conversationId);
 		expect(child?.conversation).toMatchObject({
-			parentConversationId: taskId,
+			parentConversationId: threadId,
 			botId: helper.id,
 			title: "Check the changelog",
 			status: "running",
@@ -188,13 +188,13 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			},
 		]);
 		expect(child?.participants.map(({ id }) => id)).toEqual([host.id, helper.id]);
-		// The collaboration's task hangs off the asking task rather than being listed beside it.
+		// The collaboration's thread hangs off the asking thread rather than being listed beside it.
 		const visibleIds = (await conversationsAs(memberId).list(workspaceId)).map(({ id }) => id);
-		expect(visibleIds).toEqual([taskId]);
+		expect(visibleIds).toEqual([threadId]);
 		expect(await runOnPostgres(runningTurns(opened.collaboration.conversationId))).toMatchObject([
 			{ request: { botId: helper.id } },
 		]);
-		// The lists showing the collaboration's task are told of it.
+		// The lists showing the collaboration's thread are told of it.
 		const recipientEvents = await onDatabase((db) =>
 			db
 				.select({ payload: event.payload })
@@ -240,7 +240,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			toolCalls: [],
 		});
 
-		const parent = await conversationsAs(memberId).get(taskId);
+		const parent = await conversationsAs(memberId).get(threadId);
 		const replyMessage = parent?.messages.find(({ id }) => id === reply.messageId);
 		expect(replyMessage?.parts).toEqual([
 			{ type: "text", text: "Hello." },
@@ -264,7 +264,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			db
 				.select()
 				.from(placedConversation)
-				.where(eq(placedConversation.parentConversationId, taskId)),
+				.where(eq(placedConversation.parentConversationId, threadId)),
 		);
 		expect(rows).toHaveLength(0);
 	});
@@ -308,11 +308,11 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			answer: "Nothing alarming.",
 		});
 		expect(
-			await runOnPostgres(waitingTurns({ conversationId: taskId, botId: host.id })),
+			await runOnPostgres(waitingTurns({ conversationId: threadId, botId: host.id })),
 		).toHaveLength(0);
 	});
 
-	it("keeps a collaboration in model history when the task has a summary", async () => {
+	it("keeps a collaboration in model history when the thread has a summary", async () => {
 		const opened = await collaborations.open({ from: from(6), to: helper.name, brief: "Look" });
 		await collaborations.answer({
 			conversationId: opened.collaboration.conversationId,
@@ -341,18 +341,18 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		await runOnPostgres(releaseTurn(reply.run));
 		await onDatabase((db) =>
 			db.insert(conversationSummary).values({
-				conversationId: taskId,
+				conversationId: threadId,
 				sourceMessageId: reply.messageId,
 				content: "The release was checked.",
 			}),
 		);
 		await chatsAs(memberId).post({
-			conversationId: taskId,
+			conversationId: threadId,
 			messageId: crypto.randomUUID(),
 			content: "Who did you ask?",
 		});
 
-		const next = await openReply(taskId, host.id);
+		const next = await openReply(threadId, host.id);
 		const covered = next.context.messages.find(({ id }) => id === reply.messageId);
 
 		expect(next.context).not.toHaveProperty("summary");
@@ -400,7 +400,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		});
 
 		expect(
-			await runOnPostgres(waitingTurns({ conversationId: taskId, botId: host.id })),
+			await runOnPostgres(waitingTurns({ conversationId: threadId, botId: host.id })),
 		).toMatchObject([{ botId: host.id, triggerMessageId: reply.messageId }]);
 		const [row] = await onDatabase((db) => db.select().from(turn).where(eq(turn.id, reply.turnId)));
 		expect(row?.status).toBe("running");
@@ -434,7 +434,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			expect(await statusOf(opened.collaboration.id)).toBe("failed");
 			// It told the person it would follow up, so it gets a turn to say what happened.
 			expect(
-				await runOnPostgres(waitingTurns({ conversationId: taskId, botId: host.id })),
+				await runOnPostgres(waitingTurns({ conversationId: threadId, botId: host.id })),
 			).toMatchObject([{ botId: host.id, triggerMessageId: reply.messageId, reason: "resume" }]);
 		});
 
@@ -480,9 +480,9 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		const opened = await collaborations.open({ from: from(), to: helper.name, brief: "Look" });
 		await collaborations.collectAnswer(opened.collaboration.id);
 
-		await collaborations.failUnder([taskId]);
+		await collaborations.failUnder([threadId]);
 
-		expect(await runOnPostgres(waitingTurns({ conversationId: taskId, botId: host.id }))).toEqual(
+		expect(await runOnPostgres(waitingTurns({ conversationId: threadId, botId: host.id }))).toEqual(
 			[],
 		);
 	});
@@ -490,7 +490,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 	it("tells the asking model a collaboration failed while it waited, rather than that an answer is coming", async () => {
 		const tool = collaborateTool({
 			from: {
-				conversationId: taskId,
+				conversationId: threadId,
 				botId: host.id,
 				turnId: reply.turnId,
 				messageId: reply.messageId,
@@ -500,7 +500,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 			run: runOnPostgres,
 			replyLength: () => 0,
 			// The automation run it works for ends as soon as it is opened.
-			noteCollaboration: () => Effect.promise(() => collaborations.failUnder([taskId])),
+			noteCollaboration: () => Effect.promise(() => collaborations.failUnder([threadId])),
 			signal: new AbortController().signal,
 			wait: "50 millis",
 		});
@@ -512,7 +512,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 
 		expect(result).toMatchObject({ status: "failed" });
 		const [made] = await onDatabase((db) =>
-			db.select().from(collaboration).where(eq(collaboration.parentConversationId, taskId)),
+			db.select().from(collaboration).where(eq(collaboration.parentConversationId, threadId)),
 		);
 		expect(made?.status).toBe("failed");
 		if (!made) throw new Error("no collaboration");

@@ -1,7 +1,11 @@
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
-import { botStandingFor, mayDecideToolCall, ResourceHidden } from "../../authorization/access.ts";
+import {
+	computerProjectStandingFor,
+	mayDecideToolCall,
+	ResourceHidden,
+} from "../../authorization/access.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
@@ -93,12 +97,21 @@ export const makeControls = Effect.gen(function* () {
 							.conversationStanding(candidate.conversationId)
 							.pipe(Effect.mapError(() => new ToolApprovalNotFound()));
 						const { userId } = yield* CurrentActor.Service;
-						const asking = yield* query((db) => botStandingFor(db, candidate.botId, userId));
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();
+						const deciders = decidersOf(candidate.call.tool);
+						const computerProject =
+							deciders === "computer-managers"
+								? yield* query((db) =>
+										computerProjectStandingFor(
+											db,
+											candidate.conversationId,
+											candidate.botId,
+											userId,
+										),
+									)
+								: undefined;
 						const forAutomation = yield* admission.forAutomation(candidate.conversationId);
-						if (
-							!mayDecideToolCall(reached, asking, forAutomation, decidersOf(candidate.call.tool))
-						) {
+						if (!mayDecideToolCall(reached, computerProject, forAutomation, deciders)) {
 							return yield* new ToolApprovalForbidden();
 						}
 						const approvalId = candidate.call.approvalId;

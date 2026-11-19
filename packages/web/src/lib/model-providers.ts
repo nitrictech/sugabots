@@ -1,6 +1,7 @@
 import type {
 	ModelProviderUpdate,
 	NewModelProvider,
+	ProviderModel,
 	ProviderModelSwitchOff,
 	ProviderModelUpdate,
 	ProviderSwitchOff,
@@ -8,8 +9,7 @@ import type {
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
-import { NotReadyError } from "@/lib/failure.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
+import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
 export function useModelProviders() {
 	const workspaceId = useWorkspace().workspace?.id;
@@ -36,17 +36,14 @@ export function useProviderActions() {
 		Promise.all([
 			queryClient.invalidateQueries({ queryKey: ["model-providers", workspaceId] }),
 			queryClient.invalidateQueries({ queryKey: ["models", workspaceId] }),
-			queryClient.invalidateQueries({ queryKey: ["built-in-bots", workspaceId] }),
+			queryClient.invalidateQueries({ queryKey: ["system-bots", workspaceId] }),
 		]);
-	function requiredWorkspace() {
-		if (!workspaceId) throw new NotReadyError();
-		return workspaceId;
-	}
+	const requiredWorkspaceId = useRequiredWorkspaceId();
 
 	return {
 		create: useMutation({
 			mutationFn: (json: NewModelProvider) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				const { create } = client.api.modelProviders;
 				return Effect.runPromise(
 					// The generated client splits a union payload into one request type
@@ -60,7 +57,7 @@ export function useProviderActions() {
 		}),
 		update: useMutation({
 			mutationFn: ({ providerId, json }: { providerId: string; json: ModelProviderUpdate }) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.update({
 						params: { workspace: workspaceId, providerId },
@@ -72,7 +69,7 @@ export function useProviderActions() {
 		}),
 		remove: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.remove({ params: { workspace: workspaceId, providerId } }),
 				);
@@ -81,7 +78,7 @@ export function useProviderActions() {
 		}),
 		test: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.test({ params: { workspace: workspaceId, providerId } }),
 				);
@@ -90,7 +87,7 @@ export function useProviderActions() {
 		}),
 		startSignIn: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.startSignIn({
 						params: { workspace: workspaceId, providerId },
@@ -100,7 +97,7 @@ export function useProviderActions() {
 		}),
 		completeSignIn: useMutation({
 			mutationFn: ({ providerId, attempt }: { providerId: string; attempt: string }) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.completeSignIn({
 						params: { workspace: workspaceId, providerId },
@@ -112,7 +109,7 @@ export function useProviderActions() {
 		}),
 		signOut: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.signOut({
 						params: { workspace: workspaceId, providerId },
@@ -123,7 +120,7 @@ export function useProviderActions() {
 		}),
 		fetchModels: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.fetchModels({ params: { workspace: workspaceId, providerId } }),
 				);
@@ -132,7 +129,7 @@ export function useProviderActions() {
 		}),
 		addModel: useMutation({
 			mutationFn: ({ providerId, modelId }: { providerId: string; modelId: string }) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.addModel({
 						params: { workspace: workspaceId, providerId },
@@ -152,7 +149,7 @@ export function useProviderActions() {
 				modelId: string;
 				enabled: boolean;
 			}) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.updateModel({
 						params: { workspace: workspaceId, providerId, modelId },
@@ -168,7 +165,7 @@ export function useProviderActions() {
 				modelId,
 				...payload
 			}: { providerId: string; modelId: string } & ProviderModelSwitchOff) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.switchOffModel({
 						params: { workspace: workspaceId, providerId, modelId },
@@ -184,7 +181,7 @@ export function useProviderActions() {
 		}),
 		switchOff: useMutation({
 			mutationFn: ({ providerId, ...payload }: { providerId: string } & ProviderSwitchOff) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.switchOff({
 						params: { workspace: workspaceId, providerId },
@@ -208,7 +205,7 @@ export function useProviderActions() {
 				modelId: string;
 				json: ProviderModelUpdate;
 			}) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.updateModel({
 						params: { workspace: workspaceId, providerId, modelId },
@@ -228,7 +225,7 @@ export function useProviderActions() {
 				modelIds: string[];
 				enabled: boolean;
 			}) => {
-				const workspaceId = requiredWorkspace();
+				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
 					client.api.modelProviders.setModelsEnabled({
 						params: { workspace: workspaceId, providerId },
@@ -244,17 +241,21 @@ export function useProviderActions() {
 /** Choosing the model the workspace's new bots start on. */
 export function useChooseDefaultModel() {
 	const workspaceId = useWorkspace().workspace?.id;
+	const requiredWorkspaceId = useRequiredWorkspaceId();
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: (model: string) => {
-			if (!workspaceId) throw new NotReadyError();
-			return Effect.runPromise(
+		mutationFn: (model: string) =>
+			Effect.runPromise(
 				client.api.modelProviders.setDefaultModel({
-					params: { workspace: workspaceId },
+					params: { workspace: requiredWorkspaceId() },
 					payload: { model },
 				}),
-			);
-		},
+			),
 		onSuccess: (models) => queryClient.setQueryData(["models", workspaceId], models),
 	});
+}
+
+/** What a model is called: its display name, or its id where the provider gives none. */
+export function modelName(model: Pick<ProviderModel, "displayName" | "modelId">): string {
+	return model.displayName ?? model.modelId;
 }

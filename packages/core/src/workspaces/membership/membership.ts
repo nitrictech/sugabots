@@ -30,8 +30,8 @@ import {
 	type WorkspacePermission,
 	workspacePermissions,
 } from "../../authorization/permissions.ts";
-import { BotComputers } from "../../computers/bot-computers.ts";
 import type { Computers } from "../../computers/computers.ts";
+import { ProjectComputers } from "../../computers/project-computers.ts";
 import {
 	afterCommit,
 	query,
@@ -50,6 +50,7 @@ import { SearchProviderRepository } from "../../providers/search-providers/searc
 import type { UserFacing } from "../../user-message.ts";
 import { BotRepository } from "../bots/bot-repository.ts";
 import { PersonalAssistants } from "../bots/personal-assistants.ts";
+import { defaultProjectOf } from "../projects/project-reads.ts";
 
 /**
  * The workspaces the current actor is in, and who else is. Every operation
@@ -68,7 +69,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Its channels, bots, conversations and providers go with it, and its members
+	 * Its projects, bots, conversations and providers go with it, and its members
 	 * lose it. What its models cost stays on the ledger. The owner's alone.
 	 */
 	readonly delete: (
@@ -97,7 +98,7 @@ export interface Interface {
 		input: InWorkspace & { memberId: string; role: AssignableWorkspaceRole },
 	) => Effect.Effect<void, AuthorizationDenied | OwnerStays, CurrentActor.Service>;
 	/**
-	 * Their Personal Assistant, pins and channel memberships go with them. Only the owner
+	 * Their Personal Assistant, pins and project memberships go with them. Only the owner
 	 * removes an administrator, and nobody removes the owner.
 	 */
 	readonly remove: (
@@ -177,11 +178,11 @@ export const make = Effect.gen(function* () {
 	const sender = yield* Email.transactionalSender;
 	const personalAssistants = yield* PersonalAssistants.Service;
 	const bots = yield* BotRepository.Service;
-	const botComputers = yield* BotComputers.Service;
+	const projectComputers = yield* ProjectComputers.Service;
 
 	/**
 	 * Takes the member out, which cascades to their Personal Assistant, pins
-	 * and channel memberships. Their assistant's computer is destroyed first:
+	 * and project memberships. Their assistant's computer is destroyed first:
 	 * its record is the only way to find the machine, so when the provider
 	 * can't be reached the member stays, to try again.
 	 */
@@ -195,7 +196,10 @@ export const make = Effect.gen(function* () {
 					.limit(1),
 			);
 			if (assistant) {
-				yield* botComputers.destroy({ workspaceId: member.workspaceId, botId: assistant.id });
+				yield* projectComputers.destroy({
+					workspaceId: member.workspaceId,
+					projectId: yield* defaultProjectOf(assistant.id),
+				});
 			}
 			yield* query((db) => db.delete(workspaceMember).where(eq(workspaceMember.id, member.id)));
 		});
@@ -378,8 +382,8 @@ export const make = Effect.gen(function* () {
 						if (target.role === "admin" || input.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
-						// Promoting puts them in every channel, by the
-						// `administrator_channels` trigger; demoting leaves their channels as they are.
+						// Promoting puts them in every project, by the
+						// `administrator_projects` trigger; demoting leaves their projects as they are.
 						yield* query((db) =>
 							db
 								.update(workspaceMember)
@@ -450,8 +454,8 @@ export const make = Effect.gen(function* () {
 						if (target.role === "owner") return;
 						// The owner steps down first: `workspace_member_owner_idx` allows
 						// one owner, and would refuse the new one while the old one stands.
-						// The new owner joins every channel by the
-						// `administrator_channels` trigger, as an admin would.
+						// The new owner joins every project by the
+						// `administrator_projects` trigger, as an admin would.
 						yield* query((db) =>
 							db
 								.update(workspaceMember)
@@ -673,7 +677,7 @@ export const layer = layerNoDeps.pipe(
 		BotRepository.layer,
 		SearchProviderRepository.layer,
 		ModelProviderRepository.layer,
-		BotComputers.layer,
+		ProjectComputers.layer,
 	]),
 );
 

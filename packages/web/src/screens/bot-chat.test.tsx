@@ -4,9 +4,9 @@ import {
 	type ConversationDetails,
 	DEFAULT_CONVERSATION_HISTORY_LIMIT,
 	type Message,
+	type ProjectThread,
 	type Run,
 	streamEvent,
-	type Task,
 } from "@sugabots/contracts";
 import { Forbidden, InternalServerError, NotFound } from "@sugabots/contracts/http";
 import { testPerson } from "@sugabots/contracts/testing";
@@ -22,15 +22,16 @@ import {
 	apiAnswers,
 	bots,
 	builtInBots,
-	channels,
 	controlledEventStream,
+	defaultProjectOf,
 	juno,
 	linear,
+	listedThread,
 	mount,
 	pendingAnswer,
+	projects,
 	sam,
 	TestApp,
-	taskItem,
 	triager,
 	workspace,
 } from "@/test-api.tsx";
@@ -38,18 +39,20 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const chat: Task = {
-	kind: "task",
+const chat: ProjectThread = {
+	kind: "project_thread",
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	workspaceId: linear.workspaceId,
+	projectId: defaultProjectOf(linear),
 	botId: linear.id,
 	title: linear.name,
+	archivedAt: null,
 	doneAt: null,
 	createdAt: "2026-09-18T08:00:00.000Z",
 	updatedAt: "2026-09-18T09:30:00.000Z",
 };
-/** Where the bot's task is, which its address opens. */
-const conversationPage = `/suga/bots/${linear.handle}/tasks/${chat.id}`;
+/** Where the bot's thread is, which its address opens. */
+const conversationPage = `/suga/bots/${linear.handle}/threads/${chat.id}`;
 const collaborationId = "0199a3a0-0000-7000-8000-0000000000e3";
 const automationId = "0199a3a0-0000-7000-8000-0000000000e4";
 const automationCollaborationId = "0199a3a0-0000-7000-8000-0000000000e7";
@@ -76,7 +79,7 @@ const automationRun: Run = {
 	finishedAt: "2026-09-18T08:30:00.000Z",
 };
 const person = testPerson({ id: sam.id, name: sam.name });
-/** In the channel, but has not written in any of its conversations. */
+/** In the project, but has not written in any of its conversations. */
 const podmate = testPerson({ id: "0199a3a0-0000-7000-8000-000000000501", name: "Robin Vale" });
 const host = {
 	kind: "bot" as const,
@@ -221,7 +224,7 @@ const automationCollaborationEntry: ChatHistoryEntry = {
 	latestActivityAt: "2026-09-18T08:20:00.000Z",
 };
 
-/** What the Chat's sidebar shows: a summary, and who has written lately. */
+/** What the thread's Details show: a summary, and who has written lately. */
 const chatActivity: ConversationActivity = {
 	summary: {
 		content: "Chat is complete.",
@@ -241,7 +244,7 @@ function details(
 		conversation: {
 			id,
 			workspaceId: linear.workspaceId,
-			channelId: null,
+			projectId: null,
 			botId: kind === "collaboration" ? triager.id : linear.id,
 			rootConversationId: chat.id,
 			kind,
@@ -255,7 +258,7 @@ function details(
 		},
 		automationRun: kind === "run" ? automationRun : null,
 		participants: kind === "collaboration" ? [host, collaborator] : [person, host],
-		channelBots: [host, collaborator],
+		projectBots: [host, collaborator],
 		members: [person, podmate],
 		messages,
 		olderMessagesCursor: null,
@@ -264,19 +267,21 @@ function details(
 	};
 }
 
-/** Linear Handler's tasks, with this one in them when `listed`. */
+/** Linear Handler's threads, with this one in them when `listed`. */
 function chatList({ listed }: { listed: boolean }) {
 	return Effect.succeed({
-		tasks: listed ? [taskItem(linear, chat)] : [],
+		bot: linear,
+		threads: listed ? [listedThread(chat)] : [],
 		automations: [],
+		summary: null,
 	});
 }
 
 /**
- * Answers the task's own details with `answer`, leaving every other
+ * Answers the thread's own details with `answer`, leaving every other
  * conversation, such as an inline collaboration, to the usual answers.
  */
-function answerTaskWith(answer: () => ReturnType<typeof client.api.conversations.get>) {
+function answerThreadWith(answer: () => ReturnType<typeof client.api.conversations.get>) {
 	const usual = client.api.conversations.get.getMockImplementation();
 	client.api.conversations.get.mockImplementation(
 		(request: { params: { conversationId: string } }) =>
@@ -284,7 +289,7 @@ function answerTaskWith(answer: () => ReturnType<typeof client.api.conversations
 	);
 }
 
-/** The task's messages, with `later` after the usual two. */
+/** The thread's messages, with `later` after the usual two. */
 function answerMessagesWith(later: Message) {
 	client.api.chats.messages.mockReturnValue(
 		Effect.succeed({
@@ -299,7 +304,7 @@ function answerMessagesWith(later: Message) {
 }
 
 function chatAnswers() {
-	client.api.chats.botTasks.mockReturnValue(chatList({ listed: true }));
+	client.api.chats.botThreads.mockReturnValue(chatList({ listed: true }));
 	client.api.chats.messages.mockReturnValue(
 		Effect.succeed({
 			items: [
@@ -366,13 +371,15 @@ function chatAnswers() {
 					});
 				}
 				default:
-					return Effect.succeed(details(chat.id, "Chat", "task", [mainMessage, botMessage]));
+					return Effect.succeed(
+						details(chat.id, "Chat", "project_thread", [mainMessage, botMessage]),
+					);
 			}
 		},
 	);
 }
 
-/** Goes to the Chat's bot's settings, which unmounts the Chat, and back to its composer. */
+/** Goes to the thread's bot's settings, which unmounts the thread, and back to its composer. */
 async function leaveAndReturn(router: ReturnType<typeof mount>): Promise<HTMLElement> {
 	await router.navigate({ to: `/suga/settings/bots/${linear.handle}` });
 	await waitFor(() => expect(screen.queryByLabelText(`Message ${linear.name}`)).toBeNull());
@@ -430,13 +437,13 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-describe("ongoing bot Chat", () => {
-	it("renders main messages and inline collaborations", async () => {
+describe("a bot's thread", () => {
+	it("shows the thread's messages and inline collaborations", async () => {
 		mount(conversationPage);
 
 		expect(await screen.findByText(mainMessage.content)).toBeDefined();
 		expect(screen.getByText(botMessage.content)).toBeDefined();
-		// A bot's task shows a collaboration inline: what the two bots said, and a way to open it.
+		// A bot's thread shows a collaboration inline: what the two bots said, and a way to open it.
 		const collaboration = screen.getByRole("region", {
 			name: `${linear.name} asked ${triager.name} for help`,
 		});
@@ -448,7 +455,7 @@ describe("ongoing bot Chat", () => {
 		).toBeDefined();
 	});
 
-	it("asks for a task page's channels, bots and the bot's tasks at once, each a single time, on its first load", async () => {
+	it("asks for a thread page's projects, bots and the bot's threads at once, each a single time, on its first load", async () => {
 		// Reading the chat refreshes its list; held, so only the page's first load is counted.
 		client.api.chats.markRead.mockReturnValue(pendingAnswer().effect);
 		// As /me leaves the cache when the app starts.
@@ -464,23 +471,23 @@ describe("ongoing bot Chat", () => {
 		);
 
 		await screen.findByText(mainMessage.content);
-		expect(client.api.channels.list).toHaveBeenCalledOnce();
+		expect(client.api.projects.list).toHaveBeenCalledOnce();
 		expect(client.api.bots.list).toHaveBeenCalledOnce();
 		expect(
-			client.api.chats.botTasks.mock.calls.filter(
+			client.api.chats.botThreads.mock.calls.filter(
 				([request]) => request.params.botId === linear.id,
 			),
 		).toHaveLength(1);
 	});
 
-	it("opens a task its bot's list does not have yet", async () => {
-		client.api.chats.botTasks.mockReturnValue(chatList({ listed: false }));
+	it("opens a thread its bot's list does not have yet", async () => {
+		client.api.chats.botThreads.mockReturnValue(chatList({ listed: false }));
 		mount(conversationPage);
 
 		expect(await screen.findByText(mainMessage.content)).toBeDefined();
 	});
 
-	it("shows automation runs in the main Chat log", async () => {
+	it("shows automation runs among the thread's messages", async () => {
 		client.api.chats.messages.mockReturnValue(
 			Effect.succeed({
 				items: [
@@ -505,7 +512,7 @@ describe("ongoing bot Chat", () => {
 		expect(screen.queryByText(`Say hello to ${linear.name}`)).toBeNull();
 	});
 
-	it("sends a main-chat message", async () => {
+	it("sends a message in the thread", async () => {
 		client.api.chats.send.mockReturnValue(
 			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
 		);
@@ -526,8 +533,8 @@ describe("ongoing bot Chat", () => {
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
 	});
 
-	it("with other people in the task, says the bot stays out only of a draft mentioning just people", async () => {
-		const shared = details(chat.id, "Chat", "task", [mainMessage]);
+	it("with other people in the thread, says the bot stays out only of a draft mentioning just people", async () => {
+		const shared = details(chat.id, "Chat", "project_thread", [mainMessage]);
 		client.api.conversations.get.mockReturnValue(
 			Effect.succeed({ ...shared, participants: [...shared.participants, podmate] }),
 		);
@@ -548,7 +555,7 @@ describe("ongoing bot Chat", () => {
 		expect(screen.getByLabelText(`Message ${linear.name}`)).toBeTruthy();
 	});
 
-	it("offers the channel's people and bots to mention, so the chat's bot can bring one in, but not you", async () => {
+	it("offers the project's people and bots to mention, so the chat's bot can bring one in, but not you", async () => {
 		mount(conversationPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
 		writeDraft(composer, "@");
@@ -558,7 +565,7 @@ describe("ongoing bot Chat", () => {
 		expect(list.getByRole("option", { name: new RegExp(podmate.name) })).toBeTruthy();
 		expect(list.getByRole("option", { name: new RegExp(triager.name) })).toBeTruthy();
 		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
-		// After the people and bots come the two groups, which are not people the channel has.
+		// After the people and bots come the two groups, which are not people the project has.
 		expect(list.getByRole("option", { name: /@here/ })).toBeTruthy();
 		expect(list.getByRole("option", { name: /@channel/ })).toBeTruthy();
 		expect(list.getAllByRole("option")).toHaveLength(5);
@@ -566,7 +573,7 @@ describe("ongoing bot Chat", () => {
 
 	it("offers no @here or @channel when nobody else could be notified", async () => {
 		client.api.conversations.get.mockReturnValue(
-			Effect.succeed({ ...details(chat.id, "Chat", "task", [mainMessage]), members: [] }),
+			Effect.succeed({ ...details(chat.id, "Chat", "project_thread", [mainMessage]), members: [] }),
 		);
 		mount(conversationPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
@@ -644,7 +651,7 @@ describe("ongoing bot Chat", () => {
 		expect(composer.textContent).toBe("");
 	});
 
-	it("fetches the Chat again when its workspace's events start over", async () => {
+	it("fetches the thread again when its workspace's events start over", async () => {
 		const updates = controlledEventStream();
 		client.events.workspace.mockReturnValue(updates.stream);
 		mount(conversationPage);
@@ -784,12 +791,12 @@ describe("ongoing bot Chat", () => {
 			parts: [{ type: "text", text: "Checkout timeouts are tracked." }],
 		};
 		const conversationWith = (reply: Message) =>
-			Effect.succeed(details(chat.id, "Chat", "task", [mainMessage, reply]));
-		answerTaskWith(() => conversationWith(writing));
+			Effect.succeed(details(chat.id, "Chat", "project_thread", [mainMessage, reply]));
+		answerThreadWith(() => conversationWith(writing));
 		const router = mount(conversationPage);
 		await screen.findByRole("status", { name: `${linear.name} is typing` });
 
-		answerTaskWith(() => conversationWith(answered));
+		answerThreadWith(() => conversationWith(answered));
 		await leaveAndReturn(router);
 
 		await screen.findByText("Checkout timeouts are tracked.");
@@ -891,11 +898,11 @@ describe("ongoing bot Chat", () => {
 			parts: [{ type: "text", text: "Is the Stripe webhook part of it?" }],
 			createdAt: "2026-09-18T09:21:00.000Z",
 		};
-		/** The task as the server has it, with `queuedSince` when a turn started waiting. */
+		/** The thread as the server has it, with `queuedSince` when a turn started waiting. */
 		const serverHas = (queuedSince: string | null) =>
 			client.api.conversations.get.mockReturnValue(
 				Effect.succeed({
-					...details(chat.id, "Chat", "task", [mainMessage, writing, followUp]),
+					...details(chat.id, "Chat", "project_thread", [mainMessage, writing, followUp]),
 					queuedSince,
 				}),
 			);
@@ -960,7 +967,9 @@ describe("ongoing bot Chat", () => {
 				nextCursor: null,
 			}),
 		);
-		answerTaskWith(() => Effect.succeed(details(chat.id, "Chat", "task", [mainMessage, waiting])));
+		answerThreadWith(() =>
+			Effect.succeed(details(chat.id, "Chat", "project_thread", [mainMessage, waiting])),
+		);
 		mount(conversationPage);
 
 		const leadIn = await screen.findByText("Checking ownership.");
@@ -1043,7 +1052,7 @@ describe("ongoing bot Chat", () => {
 	it("opens with whom the chat is with, when there is nothing older", async () => {
 		client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 		client.api.conversations.get.mockReturnValue(
-			Effect.succeed(details(chat.id, "Chat", "task", [])),
+			Effect.succeed(details(chat.id, "Chat", "project_thread", [])),
 		);
 		mount(conversationPage);
 
@@ -1051,7 +1060,7 @@ describe("ongoing bot Chat", () => {
 		expect(screen.getByText(`With ${linear.name}`)).toBeDefined();
 	});
 
-	it("opens Details from the task's name, and leads back to its bot", async () => {
+	it("opens Details from the thread's name, and leads back to its bot", async () => {
 		mount(conversationPage);
 
 		const name = await screen.findByRole("button", { name: "Chat" });
@@ -1091,31 +1100,31 @@ describe("ongoing bot Chat", () => {
 	});
 
 	/**
-	 * The way back to the Chat a settings page was opened from: the Back above
+	 * The way back to the thread a settings page was opened from: the Back above
 	 * the page on a phone. Wide, the trail and the sidebar go back instead, so
 	 * the bar is hidden there by style, which the test DOM does not apply.
 	 */
-	async function backToChat() {
+	async function backToThread() {
 		const [back] = await within(await screen.findByRole("main")).findAllByRole("link", {
-			name: "Chat",
+			name: "Thread",
 		});
-		if (!back) throw new Error("No way back to the Chat");
+		if (!back) throw new Error("No way back to the thread");
 		return back;
 	}
 
-	it("leads from its bot's settings back to the Chat they were opened from", async () => {
+	it("leads from its bot's settings back to the thread they were opened from", async () => {
 		const router = mount(conversationPage);
 		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 		const details = await screen.findByRole("complementary", { name: "Details" });
 
-		fireEvent.click(within(details).getByRole("link", { name: "Bot settings" }));
+		fireEvent.click(within(details).getByRole("link", { name: "Settings" }));
 		await screen.findByRole("heading", { name: linear.name });
-		fireEvent.click(await backToChat());
+		fireEvent.click(await backToThread());
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
 
-	it("leads from a person's name to their member page, and back to the Chat", async () => {
+	it("leads from a person's name to their member page, and back to the thread", async () => {
 		answerMessagesWith({
 			...mainMessage,
 			id: "0199a3a0-0000-7000-8000-0000000000fa",
@@ -1131,12 +1140,12 @@ describe("ongoing bot Chat", () => {
 				"/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d2",
 			),
 		);
-		fireEvent.click(await backToChat());
+		fireEvent.click(await backToThread());
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
 
-	it("leads from a bot's name to its settings, and back to the Chat", async () => {
+	it("leads from a bot's name to its settings, and back to the thread", async () => {
 		answerMessagesWith({
 			...mainMessage,
 			id: "0199a3a0-0000-7000-8000-0000000000fa",
@@ -1151,19 +1160,19 @@ describe("ongoing bot Chat", () => {
 		);
 		await screen.findByRole("heading", { name: triager.name });
 		expect(router.state.location.pathname).toBe(`/suga/settings/bots/${triager.handle}`);
-		fireEvent.click(await backToChat());
+		fireEvent.click(await backToThread());
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
 
-	it("lists the people in a task with more than one in it from its header, the viewer as you", async () => {
-		const shared = details(chat.id, "Chat", "task", [mainMessage]);
+	it("lists the people in a thread with more than one in it from its header, the viewer as you", async () => {
+		const shared = details(chat.id, "Chat", "project_thread", [mainMessage]);
 		client.api.conversations.get.mockReturnValue(
 			Effect.succeed({ ...shared, participants: [...shared.participants, podmate] }),
 		);
 		mount(conversationPage);
 
-		fireEvent.click(await screen.findByRole("button", { name: "2 people in this task" }));
+		fireEvent.click(await screen.findByRole("button", { name: "2 people in this thread" }));
 
 		const people = await screen.findByRole("menu");
 		const [first, second, ...rest] = within(people).getAllByRole("menuitem");
@@ -1172,7 +1181,7 @@ describe("ongoing bot Chat", () => {
 		expect(rest).toEqual([]);
 	});
 
-	it("closes a direct-linked collaboration without leaving Chat", async () => {
+	it("closes a direct-linked collaboration without leaving the thread", async () => {
 		const router = mount(`${conversationPage}?item=${collaborationId}`);
 		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
 		expect(within(panel).getByRole("heading", { name: "Collaboration" })).toBeDefined();
@@ -1221,14 +1230,14 @@ describe("a message opened from Inbox", () => {
 		);
 	});
 
-	it("jumps to the message a notification names, at the task's own address", async () => {
-		mount(`/suga/tasks/${chat.id}?message=${older.id}`);
+	it("jumps to the message a notification names, at the thread's own address", async () => {
+		mount(`/suga/threads/${chat.id}?message=${older.id}`);
 
 		const row = (await screen.findByText(older.content)).closest("[data-message-id]");
 		await waitFor(() => expect(document.activeElement).toBe(row));
 	});
 
-	it("shows the run a notification names as the page, at the task's own address", async () => {
+	it("shows the run a notification names as the page, at the thread's own address", async () => {
 		mount(`${conversationPage}?itemPage=${automationId}`);
 
 		expect(
@@ -1263,62 +1272,63 @@ describe("a message opened from Inbox", () => {
 		expect(screen.getByRole("link", { name: "Back to Inbox" }).getAttribute("href")).toBe(
 			"/suga/inbox",
 		);
-		expect(screen.getByRole("link", { name: "Open task" }).getAttribute("href")).toBe(
+		expect(screen.getByRole("link", { name: "Open thread" }).getAttribute("href")).toBe(
 			conversationPage,
 		);
 	});
 
-	it("shows a collaboration in a channel's conversation as the page, from Inbox and at the conversation's address, and beside its chat", async () => {
-		const channel = channels[1] as (typeof channels)[number];
-		const channelChat = {
-			kind: "channel_conversation" as const,
+	it("shows a collaboration in a project's thread as the page, from Inbox and at the conversation's address, and beside its chat", async () => {
+		const project = projects[1] as (typeof projects)[number];
+		const projectChat = {
+			kind: "project_thread" as const,
 			id: chat.id,
 			workspaceId: chat.workspaceId,
-			title: channel.name,
+			title: project.name,
 			createdAt: chat.createdAt,
 			updatedAt: chat.updatedAt,
-			channelId: channel.id,
-			main: true,
+			projectId: project.id,
+			botId: null,
 			archivedAt: null,
+			doneAt: null,
 		};
-		client.api.chats.list.mockReturnValue(
-			Effect.succeed({ chats: [{ conversation: channelChat, unreadMessages: 0 }] }),
-		);
+		client.api.chats.list.mockReturnValue(Effect.succeed({ chats: [listedThread(projectChat)] }));
 		const collaboration = details(collaborationId, collaborationEntry.title, "collaboration", [
 			collaborationRequest,
 			collaborationAnswer,
 		]);
-		const inChannel = (one: ConversationDetails): ConversationDetails => ({
+		const inProject = (one: ConversationDetails): ConversationDetails => ({
 			...one,
-			conversation: { ...one.conversation, channelId: channel.id },
+			conversation: { ...one.conversation, projectId: project.id },
 		});
-		const main = details(chat.id, channel.name, "channel_conversation", [mainMessage]);
+		const main = details(chat.id, project.name, "project_thread", [mainMessage]);
 		client.api.conversations.get.mockImplementation(
 			({ params }: { params: { conversationId: string } }) =>
 				Effect.succeed(
 					params.conversationId === collaborationId
-						? inChannel(collaboration)
-						: inChannel({ ...main, conversation: { ...main.conversation, botId: null } }),
+						? inProject(collaboration)
+						: inProject({ ...main, conversation: { ...main.conversation, botId: null } }),
 				),
 		);
-		const channelPage = `/suga/channels/${channel.slug}/${chat.id}`;
+		const projectPage = `/suga/projects/${project.slug}/${chat.id}`;
 
 		mount(`/suga/inbox/${chat.id}?itemPage=${collaborationId}`);
 		expect(await screen.findByRole("heading", { name: "Collaboration" })).toBeDefined();
 		expect(screen.queryByRole("log", { name: "Chat messages" })).toBeNull();
-		expect(screen.getByRole("link", { name: "Open chat" }).getAttribute("href")).toBe(channelPage);
-		cleanup();
-
-		mount(`${channelPage}?itemPage=${collaborationId}`);
-		expect(await screen.findByRole("heading", { name: "Collaboration" })).toBeDefined();
-		expect(screen.queryByRole("log", { name: "Chat messages" })).toBeNull();
-		expect(screen.getByRole("link", { name: "Open conversation" }).getAttribute("href")).toBe(
-			channelPage,
+		expect(screen.getByRole("link", { name: "Open thread" }).getAttribute("href")).toBe(
+			projectPage,
 		);
 		cleanup();
 
-		// Asked to open beside the channel's chat, as Approvals does, it opens there.
-		mount(`${channelPage}?item=${collaborationId}`);
+		mount(`${projectPage}?itemPage=${collaborationId}`);
+		expect(await screen.findByRole("heading", { name: "Collaboration" })).toBeDefined();
+		expect(screen.queryByRole("log", { name: "Chat messages" })).toBeNull();
+		expect(screen.getByRole("link", { name: "Open conversation" }).getAttribute("href")).toBe(
+			projectPage,
+		);
+		cleanup();
+
+		// Asked to open beside the project's chat, as Approvals does, it opens there.
+		mount(`${projectPage}?item=${collaborationId}`);
 		expect(await screen.findByRole("log", { name: "Chat messages" })).toBeDefined();
 		expect(
 			await screen.findByRole("complementary", { name: collaborationEntry.title }),
@@ -1360,11 +1370,11 @@ describe("a message opened from Inbox", () => {
 	});
 });
 
-describe("people typing in the Chat", () => {
-	const junoInTask = testPerson({ id: juno.id, name: juno.name });
+describe("people typing in the thread", () => {
+	const junoInThread = testPerson({ id: juno.id, name: juno.name });
 	const junoTyping = streamEvent("person.typing", {
 		conversationId: chat.id,
-		person: junoInTask,
+		person: junoInThread,
 	});
 
 	async function watchConversation() {
@@ -1391,7 +1401,7 @@ describe("people typing in the Chat", () => {
 				message: {
 					...mainMessage,
 					id: "0199a3a0-0000-7000-8000-0000000000fc",
-					author: junoInTask,
+					author: junoInThread,
 					content: "Also, the deploy",
 					parts: [{ type: "text", text: "Also, the deploy" }],
 					createdAt: "2026-09-18T09:40:00.000Z",
@@ -1437,7 +1447,7 @@ describe("people typing in the Chat", () => {
 		expect(client.api.events.typing).not.toHaveBeenCalled();
 	});
 
-	it("tells the task you are typing, once for a burst of keystrokes", async () => {
+	it("tells the thread you are typing, once for a burst of keystrokes", async () => {
 		mount(conversationPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
 
@@ -1454,7 +1464,7 @@ describe("people typing in the Chat", () => {
 	});
 });
 
-describe("a collaboration open beside the Chat", () => {
+describe("a collaboration open beside the thread", () => {
 	const chatPage = conversationPage;
 	const itemPage = `${chatPage}?item=${collaborationId}`;
 	const collaboration = details(collaborationId, collaborationEntry.title, "collaboration", [
@@ -1470,7 +1480,7 @@ describe("a collaboration open beside the Chat", () => {
 		createdAt: "2026-09-18T09:20:00.000Z",
 	});
 
-	/** Answers for the open collaboration; every other conversation keeps the Chat's own answers. */
+	/** Answers for the open collaboration; every other conversation keeps the thread's own answers. */
 	function answerConversation(
 		answer: (request: {
 			params: { conversationId: string };
@@ -1484,7 +1494,7 @@ describe("a collaboration open beside the Chat", () => {
 		);
 	}
 
-	/** A stream for the open collaboration alone, so what it is sent is not also the Chat's. */
+	/** A stream for the open collaboration alone, so what it is sent is not also the thread's. */
 	function conversationStream() {
 		const updates = controlledEventStream();
 		client.events.conversation.mockImplementation((conversationId: string) =>
@@ -1817,7 +1827,7 @@ describe("a collaboration open beside the Chat", () => {
 	});
 });
 
-describe("the Chat's summary", () => {
+describe("the thread's summary", () => {
 	const chatPage = conversationPage;
 
 	function answerChatActivity(activity: () => ConversationActivity) {
@@ -1861,7 +1871,7 @@ describe("the Chat's summary", () => {
 		expect(within(sidebar).queryByRole("link", { name: "Choose their model" })).toBeNull();
 	});
 
-	it("says nothing about choosing the system bots' model before the built-in bots have loaded", async () => {
+	it("says nothing about choosing the system bots' model before the system bots have loaded", async () => {
 		client.api.systemBots.list.mockReturnValue(Effect.never);
 		answerChatActivity(() => ({ ...chatActivity, summary: null }));
 		mount(chatPage);
@@ -1873,7 +1883,7 @@ describe("the Chat's summary", () => {
 		expect(within(sidebar).queryByRole("link", { name: "Choose their model" })).toBeNull();
 	});
 
-	it("shows a new summary once the task says it changed", async () => {
+	it("shows a new summary once the thread says it changed", async () => {
 		const updates = controlledEventStream();
 		client.events.conversation.mockImplementation((conversationId: string) =>
 			conversationId === chat.id ? updates.stream : controlledEventStream().stream,

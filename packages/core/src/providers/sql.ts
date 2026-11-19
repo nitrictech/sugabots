@@ -23,7 +23,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { bot, user, workspace } from "../workspaces/sql.ts";
+import { project, user, workspace } from "../workspaces/sql.ts";
 
 interface EncryptedProviderHeader {
 	name: string;
@@ -143,14 +143,15 @@ export const searchProvider = pgTable(
 export type SearchProviderRow = typeof searchProvider.$inferSelect;
 
 /**
- * A service a bot is connected to, by `kind`: an MCP server at `url`; the
- * bot's own GitHub App, whose tools are Sugabots' own, on the repositories in
- * its `settings`; or an HTTP endpoint, whose requests stay under `url` and
- * carry the header secret, if any. A bot has at most one GitHub app, since
- * its computer can be signed in to only one account there.
+ * A service a project is connected to, by `kind`: an MCP server at `url`; the
+ * project's own GitHub App, whose tools are Sugabots' own, on the repositories
+ * in its `settings`; or an HTTP endpoint, whose requests stay under `url` and
+ * carry the header secret, if any. A project has at most one GitHub app, since
+ * its computer can be signed in to only one account there. A bot's own
+ * connections are its default project's.
  *
  * `handle` prefixes the tool names for the model, so two connections with a
- * `search` tool do not collide; unique per bot.
+ * `search` tool do not collide; unique per project.
  */
 export const connection = pgTable(
 	"connection",
@@ -159,7 +160,7 @@ export const connection = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		botId: uuid("bot_id").notNull(),
+		projectId: uuid("project_id").notNull(),
 		name: text("name").notNull(),
 		handle: text("handle").notNull(),
 		kind: text("kind").$type<ConnectionKind>().notNull().default("mcp"),
@@ -200,13 +201,15 @@ export const connection = pgTable(
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.botId, table.workspaceId],
-			foreignColumns: [bot.id, bot.workspaceId],
-			name: "connection_bot_workspace_fkey",
+			columns: [table.projectId, table.workspaceId],
+			foreignColumns: [project.id, project.workspaceId],
+			name: "connection_project_workspace_fkey",
 		}).onDelete("cascade"),
-		uniqueIndex("connection_name_idx").on(table.botId, table.name),
-		uniqueIndex("connection_handle_idx").on(table.botId, table.handle),
-		uniqueIndex("connection_github_bot_idx").on(table.botId).where(sql`${table.kind} = 'github'`),
+		uniqueIndex("connection_name_idx").on(table.projectId, table.name),
+		uniqueIndex("connection_handle_idx").on(table.projectId, table.handle),
+		uniqueIndex("connection_github_project_idx")
+			.on(table.projectId)
+			.where(sql`${table.kind} = 'github'`),
 		uniqueIndex("connection_id_workspace_id_idx").on(table.id, table.workspaceId),
 		uniqueIndex("connection_oauth_state_idx").on(table.oauthState),
 		check("connection_kind_check", sql`${table.kind} in ('mcp', 'github', 'http')`),
@@ -250,9 +253,9 @@ export interface GitHubConnectionSettings {
 	/** The login of the organization or user it is installed on. */
 	readonly account: string | null;
 	/**
-	 * The repositories its tools work on: they read them in the bot's
-	 * computer, push branches to them and open pull requests on them, and their
-	 * events may start the bot's automations.
+	 * The repositories its tools work on: bots in its project read them in the
+	 * project's computer, push branches to them and open pull requests on
+	 * them, and their events may start the project's automations.
 	 */
 	readonly repositories: readonly GitHubConnectionRepository[];
 }

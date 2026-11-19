@@ -3,16 +3,16 @@ import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ComputerCredentials } from "@sugabots/core/computers/computer-credentials";
 import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
-import { bot as botTable, channel, workspace } from "@sugabots/core/database/schema";
+import { bot as botTable, type project, workspace } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
 import { Installation } from "@sugabots/core/installation/installation";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { BotRepository } from "@sugabots/core/workspaces/bots/bot-repository";
 import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
-import { ChannelRepository } from "@sugabots/core/workspaces/channels/channel-repository";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
+import { ProjectRepository } from "@sugabots/core/workspaces/projects/project-repository";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, type SQL } from "drizzle-orm";
 import { Effect, Layer } from "effect";
@@ -24,8 +24,8 @@ import { ensureAccount, seedAccountsLayer } from "./accounts.ts";
  *
  * It creates an account you can sign in as, the workspace everything else
  * hangs off, the membership joining them, the person's Personal Assistant,
- * a channel, and the three bots the design's artboards show: two private to
- * the person and one public bot in the channel.
+ * a project, and the three bots the design's artboards show: two private to
+ * the person and one public bot in the project.
  *
  * Every step must be idempotent, because this is run repeatedly against a
  * database that already has data in it, not only against an empty one.
@@ -41,7 +41,7 @@ const seed = Effect.gen(function* () {
 	}
 	const membership = yield* Membership.Service;
 	const personalAssistants = yield* PersonalAssistants.Service;
-	const channels = yield* ChannelRepository.Service;
+	const projects = yield* ProjectRepository.Service;
 	const bots = yield* BotRepository.Service;
 	const personId = yield* ensureAccount({ name: "Development", email: EMAIL, password: PASSWORD });
 
@@ -62,14 +62,6 @@ const seed = Effect.gen(function* () {
 	// Already made with a new workspace; this makes it when a run before
 	// the Personal Assistant existed made the workspace.
 	yield* personalAssistants.provision({ workspaceId, userId: personId });
-	const supportId = yield* channels
-		.create(workspaceId, { creatorId: personId, name: "Support", slug: "support" })
-		.pipe(
-			Effect.map((created) => created.id),
-			Effect.catchTag("ChannelSlugTaken", () =>
-				idOf(channel, and(eq(channel.workspaceId, workspaceId), eq(channel.slug, "support"))),
-			),
-		);
 
 	const model = "claude-sonnet-4-20250514";
 	for (const seedling of [
@@ -80,6 +72,7 @@ const seed = Effect.gen(function* () {
 			shape: "squircle" as const,
 			description: "Reads and writes Linear on the team's behalf.",
 			visibility: "private" as const,
+			leadsSupport: false,
 		},
 		{
 			name: "Issue Triager",
@@ -88,6 +81,7 @@ const seed = Effect.gen(function* () {
 			shape: "hexagon" as const,
 			description: "Sorts incoming issues every weekday morning.",
 			visibility: "private" as const,
+			leadsSupport: false,
 		},
 		{
 			name: "Customer Research",
@@ -96,10 +90,10 @@ const seed = Effect.gen(function* () {
 			shape: "blob" as const,
 			description: "Digs through calls and notes for what customers asked for.",
 			visibility: "public" as const,
-			channelId: supportId,
+			leadsSupport: true,
 		},
 	]) {
-		const { channelId, ...bot } = seedling;
+		const { leadsSupport, ...bot } = seedling;
 		const botId = yield* bots
 			.create(workspaceId, { createdById: personId, bot: { ...bot, model } })
 			.pipe(
@@ -108,15 +102,26 @@ const seed = Effect.gen(function* () {
 					idOf(botTable, and(eq(botTable.workspaceId, workspaceId), eq(botTable.name, bot.name))),
 				),
 			);
-		if (channelId) yield* channels.addBot(workspaceId, channelId, botId);
+		if (!leadsSupport) continue;
+		yield* projects
+			.create(workspaceId, {
+				creatorId: personId,
+				name: "Support",
+				slug: "support",
+				leadBotId: botId,
+			})
+			.pipe(
+				Effect.catchTag("ProjectSlugTaken", () => Effect.void),
+				Effect.catchTag("BotNotPublic", Effect.die),
+			);
 	}
 
 	console.log(`workspace dev, administered by ${EMAIL} (password: ${PASSWORD})`);
-	console.log("channel Support, and three bots: two private, one public in Support");
+	console.log("project Support, and three bots: two private, one public leading Support");
 });
 
 /** The id of the one row of `table` matching `where`, which a previous run made. */
-const idOf = (table: typeof workspace | typeof channel | typeof botTable, where: SQL | undefined) =>
+const idOf = (table: typeof workspace | typeof project | typeof botTable, where: SQL | undefined) =>
 	Effect.flatMap(
 		query((db) => db.select({ id: table.id }).from(table).where(where).limit(1)),
 		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error("A seeded row is missing"))),
@@ -129,7 +134,7 @@ seed.pipe(
 			Authentication.layer,
 			Membership.layer,
 			PersonalAssistants.layer,
-			ChannelRepository.layer,
+			ProjectRepository.layer,
 			BotRepository.layer,
 		).pipe(
 			Layer.provideMerge(

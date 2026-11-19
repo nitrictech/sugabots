@@ -16,13 +16,12 @@ import {
 	growthDesk,
 	linearHandler,
 	oncall,
-	revenue,
 } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	StoryApp,
-	storyChannels,
 	storyChatDetails,
+	storyProjects,
 	storyWorkspace,
 } from "../story-app.tsx";
 
@@ -37,19 +36,22 @@ const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 /** An automation being made beside Growth Desk's automations. */
 const newInRevenue = `/${storyWorkspace.slug}/bots/${growthDesk.handle}/automations/new`;
 
+/** An automation in the workspace list that is a bot's own, as these stories show. */
+type BotsAutomation = WorkspaceAutomation & { bot: Bot };
+
 function placed(
 	n: number,
 	name: string,
 	bot: Bot,
 	trigger: TestAutomationTrigger | readonly TestAutomationTrigger[],
 	fields: Partial<Pick<Automation, "state">> = {},
-): WorkspaceAutomation {
+): BotsAutomation {
 	const id = `0199a3a0-0000-7000-8000-0000000002${String(n).padStart(2, "0")}`;
 	return {
 		automation: {
 			id,
 			workspaceId: storyWorkspace.id,
-			botId: bot.id,
+			projectId: bot.defaultProjectId,
 			name,
 			instructions: `${name}: look over what changed and post a short summary.`,
 			triggers: automationTriggers(id, ...[trigger].flat()),
@@ -65,7 +67,7 @@ function placed(
 }
 
 const scheduled = (expression: string): TestAutomationTrigger => ({
-	kind: "schedule",
+	kind: "routine",
 	schedule: { repeat: "cron", expression },
 	timezone: "UTC",
 	nextScheduledAt: null,
@@ -89,7 +91,7 @@ const signups = placed(7, "New signup triage", linearHandler, {
 	auth: { kind: "basic", username: "sugabots" },
 });
 const standups = placed(8, "Standup notes", chief, {
-	kind: "schedule",
+	kind: "routine",
 	schedule: {
 		repeat: "weekly",
 		every: 1,
@@ -101,7 +103,7 @@ const standups = placed(8, "Standup notes", chief, {
 	nextScheduledAt: null,
 });
 const quarterClose = placed(9, "Quarter close", accountManager, {
-	kind: "schedule",
+	kind: "routine",
 	schedule: {
 		repeat: "monthly",
 		every: 3,
@@ -125,14 +127,14 @@ const pullRequestReviews = placed(10, "Pull request reviews", oncall, {
 	events: ["pull_request_opened", "pull_request_review"],
 });
 
-/** Each bot's GitHub connection, to `acme`, working on `acme/web` and `acme/infra`. */
-const channelRepositories = [
-	http.get(`${API}/bots/:botId/connections`, ({ params }) =>
+/** Each project's GitHub app, installed on `acme`, working on `acme/web` and `acme/infra`. */
+const projectRepositories = [
+	http.get(`${API}/projects/:projectId/connections`, ({ params }) =>
 		HttpResponse.json([
 			{
 				id: GITHUB_CONNECTION_ID,
 				workspaceId: engineering.workspaceId,
-				botId: params.botId,
+				projectId: params.projectId,
 				name: "GitHub",
 				handle: "github",
 				kind: "github",
@@ -153,7 +155,7 @@ const channelRepositories = [
 			},
 		]),
 	),
-	http.get(`${API}/bots/:botId/connections/:connectionId/repositories`, () =>
+	http.get(`${API}/projects/:projectId/connections/:connectionId/repositories`, () =>
 		HttpResponse.json({
 			account: "acme",
 			repositories: ["acme/web", "acme/infra"].map((repository) => ({
@@ -177,26 +179,26 @@ const everyAutomation = [
 ];
 
 /** The id of `one`'s feed, where its runs post. */
-const feedOf = (one: WorkspaceAutomation) =>
+const feedOf = (one: BotsAutomation) =>
 	`${one.automation.id.slice(0, -4)}f${one.automation.id.slice(-3)}`;
 
 /**
  * `items` as the workspace's automations, each with its feed beside its
  * bot's automations: the list, each bot's automations, and each feed, empty.
  */
-function automationsAnswer(items: WorkspaceAutomation[]) {
+function automationsAnswer(items: BotsAutomation[]) {
 	return [
 		http.get(`${API}/workspaces/:workspace/automations`, () => HttpResponse.json({ items })),
-		http.get(`${API}/bots/:botId/automations`, ({ params }) =>
+		http.get(`${API}/projects/:projectId/automations`, ({ params }) =>
 			HttpResponse.json(
 				items
 					.map(({ automation }) => automation)
-					.filter((automation) => automation.botId === params.botId),
+					.filter((automation) => automation.projectId === params.projectId),
 			),
 		),
-		http.get(`${API}/bots/:botId/tasks`, ({ params }) =>
+		http.get(`${API}/bots/:botId/threads`, ({ params }) =>
 			HttpResponse.json({
-				tasks: [],
+				threads: [],
 				automations: items
 					.filter((item) => item.bot.id === params.botId)
 					.map(({ automation, bot }) => ({
@@ -237,7 +239,7 @@ function automationsAnswer(items: WorkspaceAutomation[]) {
 				},
 				automation: {
 					id: one.automation.id,
-					botId: one.bot.id,
+					projectId: one.automation.projectId,
 					state: one.automation.state,
 					failed: false,
 					pausedAfterFailures: false,
@@ -251,7 +253,7 @@ function automationsAnswer(items: WorkspaceAutomation[]) {
 }
 
 /** `one`'s feed, beside its bot's automations, where the panel beside it sets the automation up. */
-const pageOf = (one: WorkspaceAutomation) =>
+const pageOf = (one: BotsAutomation) =>
 	`/${storyWorkspace.slug}/bots/${one.bot.handle}/automations/${one.automation.id}`;
 
 type Canvas = ReturnType<typeof within>;
@@ -266,17 +268,23 @@ async function openPanel(canvas: Canvas) {
 	});
 }
 
-/** The rows of the panel's Triggers, once the automation has loaded. */
-async function triggerRows(canvas: Canvas) {
+/** The rows of the panel's Routines or Triggers, its add row last, once the automation has loaded. */
+async function sectionRows(canvas: Canvas, section: "Routines" | "Triggers") {
 	const panel = await openPanel(canvas);
-	const group = await panel.findByRole("region", { name: "Triggers" });
+	const group = await panel.findByRole("region", { name: section });
 	return within(group).getAllByRole("button");
 }
 
-/** Opens the dialog of the automation's first trigger. */
+const ADD_ROW = /^Add (routine|trigger)$/;
+
+/** Opens the dialog of the automation's first routine, or of its first trigger when it has no routine. */
 async function openFirstTrigger(canvas: Canvas) {
-	const [first] = await triggerRows(canvas);
-	if (!first) throw new Error("No trigger to open");
+	const rows = [
+		...(await sectionRows(canvas, "Routines")),
+		...(await sectionRows(canvas, "Triggers")),
+	];
+	const first = rows.find((row) => !ADD_ROW.test(row.textContent ?? ""));
+	if (!first) throw new Error("No routine or trigger to open");
 	await userEvent.click(first);
 	return screen.findByRole("dialog");
 }
@@ -297,8 +305,8 @@ const meta = preview.meta({
 	},
 });
 
-/** A scheduled automation in its panel: on, when it runs, where its result goes, Run now, and ⋯. */
-export const Scheduled = meta.story({
+/** An automation with a routine in its panel: on, when it runs, where its result goes, Run now, and ⋯. */
+export const WithARoutine = meta.story({
 	render: () => <StoryApp path={pageOf(overnight)} />,
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
@@ -306,10 +314,8 @@ export const Scheduled = meta.story({
 			await panel.findByRole("heading", { name: "Overnight outbound" }),
 		).toBeInTheDocument();
 		await expect(panel.getByRole("switch", { name: "Automation on" })).toBeChecked();
-		await expect(await triggerRows(canvas)).toHaveLength(2);
-		await expect(
-			panel.getByRole("button", { name: /^Schedule.*Daily at 6:00/ }),
-		).toBeInTheDocument();
+		await expect(await sectionRows(canvas, "Routines")).toHaveLength(2);
+		await expect(panel.getByRole("button", { name: /^Daily at 6:00/ })).toBeInTheDocument();
 		await expect(panel.getByRole("button", { name: "Run now" })).toBeInTheDocument();
 		await expect(
 			panel.getByRole("button", { name: "More for Overnight outbound" }),
@@ -317,12 +323,12 @@ export const Scheduled = meta.story({
 	},
 });
 
-/** A trigger opens in a dialog: the schedule's groups, when it runs, in which time zone, Save and Remove. */
+/** A routine opens in a dialog: when it runs, the note saying so in its time zone, Save and Remove. */
 export const Trigger = meta.story({
 	render: () => <StoryApp path={pageOf(overnight)} />,
 	play: async ({ canvas }) => {
 		const dialog = await openFirstTrigger(canvas);
-		await expect(within(dialog).getByRole("heading", { name: "Schedule" })).toBeInTheDocument();
+		await expect(within(dialog).getByRole("heading", { name: "Routine" })).toBeInTheDocument();
 		await expect(within(dialog).getByRole("radio", { name: "Daily" })).toBeChecked();
 		await expect(
 			within(dialog).getByText(/^Runs every day at 6:00, .*UTC.*\.$/),
@@ -332,38 +338,43 @@ export const Trigger = meta.story({
 	},
 });
 
-/** Several triggers: two schedules and a webhook, each a row, then Add trigger. */
+/** Two routines and a webhook: each a row of its section, under which Add routine and Add trigger. */
 export const SeveralTriggers = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...automationsAnswer([...everyAutomation, releaseWatch]));
 	},
 	render: () => <StoryApp path={pageOf(releaseWatch)} />,
 	play: async ({ canvas }) => {
-		const rows = await triggerRows(canvas);
-		await expect(rows.map((row) => row.textContent)).toEqual([
-			"ScheduleWeekdays at 9:00",
-			"ScheduleFri at 17:00",
-			"WebhookWebhook",
-			"Add trigger",
+		const routines = await sectionRows(canvas, "Routines");
+		await expect(routines.map((row) => row.textContent)).toEqual([
+			"RoutineWeekdays at 9:00",
+			"RoutineFri at 17:00",
+			"Add routine",
 		]);
+		const triggers = await sectionRows(canvas, "Triggers");
+		await expect(triggers.map((row) => row.textContent)).toEqual(["WebhookWebhook", "Add trigger"]);
 	},
 });
 
-/** Add trigger's first step: the kinds of trigger, Sugabots' own, then the integrations the bot is connected to. */
+/**
+ * Add trigger's first step: the kinds of trigger, Sugabots' own, then the
+ * integrations the bot is connected to, found by typing. Routines are added
+ * from their own section, so they are not among them.
+ */
 export const AddTrigger = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...automationsAnswer([...everyAutomation, pullRequestReviews]), ...channelRepositories);
+		msw.use(...automationsAnswer([...everyAutomation, pullRequestReviews]), ...projectRepositories);
 	},
 	render: () => <StoryApp path={pageOf(pullRequestReviews)} />,
 	play: async ({ canvas, userEvent }) => {
 		const step = await openAddTrigger(canvas, true);
-		await expect(within(step).getByRole("button", { name: /^Schedule/ })).toBeVisible();
 		await expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible();
 		await expect(await within(step).findByRole("button", { name: /^GitHub/ })).toBeVisible();
+		await expect(within(step).queryByRole("button", { name: /^Routine/ })).toBeNull();
 		await expect(within(step).getByRole("link", { name: /^Connect another app/ })).toBeVisible();
-		await userEvent.type(within(step).getByRole("searchbox", { name: "Search triggers" }), "sched");
-		await expect(within(step).getByRole("button", { name: /^Schedule/ })).toBeVisible();
-		await expect(within(step).queryByRole("button", { name: /^Webhook/ })).toBeNull();
+		await userEvent.type(within(step).getByRole("searchbox", { name: "Search triggers" }), "hook");
+		await expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible();
+		await expect(within(step).queryByRole("button", { name: /^GitHub/ })).toBeNull();
 	},
 });
 
@@ -477,7 +488,7 @@ export const DeliveryIdHeader = meta.story({
 		msw.use(
 			...automationsAnswer([item]),
 			http.put(
-				`${API}/bots/:botId/automations/:automationId/triggers/:triggerId`,
+				`${API}/projects/:projectId/automations/:automationId/triggers/:triggerId`,
 				async ({ request, params }) => {
 					const input = (await request.json()) as AutomationTriggerInput;
 					if (input.kind !== "webhook") return HttpResponse.json({}, { status: 400 });
@@ -591,19 +602,17 @@ export const NewWebhook = meta.story({
 	},
 });
 
-/** A repository's events: which of the bot's GitHub connection's repositories, and what happening there runs it. */
+/** A repository's events: which of the repositories its project's GitHub app reaches, and what happening there runs it. */
 export const RepositoryTrigger = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...automationsAnswer([...everyAutomation, pullRequestReviews]), ...channelRepositories);
+		msw.use(...automationsAnswer([...everyAutomation, pullRequestReviews]), ...projectRepositories);
 	},
 	render: () => <StoryApp path={pageOf(pullRequestReviews)} />,
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
-		await expect(
-			await panel.findByRole("button", { name: /^GitHub.*On acme\/web/ }),
-		).toBeInTheDocument();
+		await expect(await panel.findByRole("button", { name: /^On acme\/web/ })).toBeInTheDocument();
 		const dialog = within(await openFirstTrigger(canvas));
-		// The bot's GitHub connection, then its repositories, load once the trigger opens.
+		// The project's GitHub app, then its repositories, load once the trigger opens.
 		await expect(
 			await dialog.findByRole("switch", { name: "A pull request is reviewed" }),
 		).toBeChecked();
@@ -611,10 +620,10 @@ export const RepositoryTrigger = meta.story({
 	},
 });
 
-/** A new automation on a repository waits for one to be picked, from its bot's. */
+/** A new automation on a repository waits for one to be picked, from its project's. */
 export const NewRepositoryAutomation = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...channelRepositories);
+		msw.use(...projectRepositories);
 	},
 	render: () => <StoryApp path={newInRevenue} />,
 	play: async ({ canvas, userEvent }) => {
@@ -630,53 +639,46 @@ export const NewRepositoryAutomation = meta.story({
 	},
 });
 
-/**
- * A new automation starts with no triggers on the first bot, posting its result
- * to the chat, and waits for a name and instructions.
- */
+/** A new automation starts with no routines or triggers, and waits for a name and instructions. */
 export const NewAutomation = meta.story({
 	render: () => <StoryApp path={newInRevenue} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { name: "New automation" }),
 		).toBeInTheDocument();
+		await expect(canvas.getByText("No routines")).toBeInTheDocument();
 		await expect(canvas.getByText("No triggers")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Create automation" })).toBeDisabled();
 		await expect(canvas.queryByRole("switch", { name: "On" })).toBeNull();
 	},
 });
 
-/** A schedule added: Weekly adds a row of days, and the bot list opens in place with the channel's own bots. */
-export const ChoosingDaysAndABot = meta.story({
+/** A routine added: Weekly adds a row of days. */
+export const ChoosingDays = meta.story({
 	render: () => <StoryApp path={newInRevenue} />,
 	play: async ({ canvas, userEvent }) => {
-		const step = await openAddTrigger(canvas);
-		await userEvent.click(within(step).getByRole("button", { name: /^Schedule/ }));
-		const dialog = within(await screen.findByRole("dialog", { name: "Schedule" }));
+		await userEvent.click(await canvas.findByRole("button", { name: "Add routine" }));
+		const dialog = within(await screen.findByRole("dialog", { name: "Routine" }));
 		await userEvent.click(dialog.getByRole("radio", { name: "Weekly" }));
 		await userEvent.click(dialog.getByRole("checkbox", { name: "Friday" }));
 		await expect(dialog.getByText(/Runs every week on Mon and Fri at 9:00/)).toBeInTheDocument();
-		await userEvent.click(dialog.getByRole("button", { name: "Add trigger" }));
+		await userEvent.click(dialog.getByRole("button", { name: "Add routine" }));
 		await expect(
 			await canvas.findByRole("button", { name: /^Mon Fri at 9:00/ }),
 		).toBeInTheDocument();
-		await userEvent.click(canvas.getByRole("button", { name: /^Bot(?!s\b)/ }));
-		// Only the bot's own: an automation is kept beside its bot.
-		await expect(canvas.getByRole("heading", { name: revenue.name })).toBeInTheDocument();
-		await expect(canvas.queryByRole("heading", { name: engineering.name })).toBeNull();
 	},
 });
 
 /** Somebody who may not manage a bot's automations reads them without the controls to change them. */
 export const AsAMember = meta.story({
 	beforeEach({ msw }) {
-		const asMember = storyChannels.map((channel) => ({
-			...channel,
-			permissions: { ...channel.permissions, manageAutomations: false, runAutomations: false },
+		const asMember = storyProjects.map((project) => ({
+			...project,
+			permissions: { ...project.permissions, manageAutomations: false, runAutomations: false },
 		}));
 		msw.use(
 			...automationsAnswer(everyAutomation),
-			...appHandlers({ role: "member", channels: asMember }),
+			...appHandlers({ role: "member", projects: asMember }),
 		);
 	},
 	render: () => <StoryApp path={pageOf(overnight)} />,
@@ -690,7 +692,8 @@ export const AsAMember = meta.story({
 		await expect(panel.queryByRole("button", { name: /^More for / })).toBeNull();
 		await expect(canvas.queryByRole("link", { name: "New automation" })).toBeNull();
 		await expect(panel.getByText("Daily at 6:00")).toBeInTheDocument();
-		await expect(panel.queryByRole("button", { name: /^Schedule/ })).toBeNull();
+		await expect(panel.queryByRole("button", { name: /^Daily at 6:00/ })).toBeNull();
+		await expect(panel.queryByRole("button", { name: "Add routine" })).toBeNull();
 		await expect(panel.queryByRole("button", { name: "Add trigger" })).toBeNull();
 		await expect(panel.queryByRole("button", { name: "Edit instructions" })).toBeNull();
 	},

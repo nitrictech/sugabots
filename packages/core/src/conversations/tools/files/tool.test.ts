@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Files } from "../../../files/files.ts";
 import { FILE_EDIT_TOOL, FILE_WRITE_TOOL, fileTools } from "./tool.ts";
 
-const by = { workspaceId: "workspace", botId: "bot", conversationId: "conversation" };
+const by = { botId: "bot", conversationId: "conversation" };
 
 const page: WrittenFile = {
 	id: "0199a3a0-0000-7000-8000-0000000000f2",

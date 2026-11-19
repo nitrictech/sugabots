@@ -45,6 +45,15 @@ describe("a reply's tool line", () => {
 		).toBe("Used HubSpot and Sentry for 6s");
 	});
 
+	it("gives a sub-second total in milliseconds, and a longer one in whole seconds", () => {
+		expect(
+			toolLineText([call("sentry__search", { finishedAt: "2026-09-14T00:00:00.473Z" })], looks),
+		).toBe("Used Sentry for 473ms");
+		expect(
+			toolLineText([call("sentry__search", { finishedAt: "2026-09-14T00:00:31.960Z" })], looks),
+		).toBe("Used Sentry for 32s");
+	});
+
 	it("says what the reply is waiting to have approved", () => {
 		expect(
 			toolLineText([call("sentry__search"), call("linear__create_issue", waiting)], looks),

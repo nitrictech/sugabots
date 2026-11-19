@@ -8,9 +8,6 @@ import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
 	bot,
-	channel,
-	channelBot,
-	channelMember,
 	conversation,
 	conversationSummary,
 	event,
@@ -18,6 +15,9 @@ import {
 	message,
 	modelProvider,
 	placedConversation,
+	project,
+	projectBot,
+	projectMember,
 	providerModel,
 	turn,
 	user,
@@ -71,7 +71,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		onPostgresAs(userId)(Context.get(conversations, ConversationView.Service));
 	const chatsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
-	const tasksAs = (userId: string) =>
+	const threadsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, ChatView.Service));
 	const controlsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Turns.Controls));
@@ -88,15 +88,15 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		complete: Context.get(conversations, Compactions.Service).complete,
 	});
 	let workspaceId: string;
-	let channelId: string;
+	let projectId: string;
 	let botId: string;
 	let memberId: string;
 	let outsiderId: string;
 	let outsiderEmail: string;
 
-	/** A task the person starts with the bot by sending it `message`, which the bot is asked to answer. */
-	async function startTask(input: { botId: string; startedById: string; message: string }) {
-		const started = await chatsAs(input.startedById).startTask({
+	/** A thread the person starts with the bot by sending it `message`, which the bot is asked to answer. */
+	async function startThread(input: { botId: string; startedById: string; message: string }) {
+		const started = await chatsAs(input.startedById).startThread({
 			botId: input.botId,
 			messageId: crypto.randomUUID(),
 			content: input.message,
@@ -104,9 +104,9 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		return started.conversation;
 	}
 
-	/** A task as `startTask` starts it, with its participants and messages. */
-	async function startTaskShown(input: Parameters<typeof startTask>[0]) {
-		const started = await startTask(input);
+	/** A thread as `startThread` starts it, with its participants and messages. */
+	async function startThreadShown(input: Parameters<typeof startThread>[0]) {
+		const started = await startThread(input);
 		return viewAs(input.startedById).get(started.id);
 	}
 
@@ -180,9 +180,9 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				{ workspaceId, userId: outsiderId },
 			]),
 		);
-		const [channelRow] = await onDatabase((db) =>
+		const [projectRow] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId,
 					name: "Suga-Team",
@@ -205,15 +205,15 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				})
 				.returning(),
 		);
-		if (!channelRow || !botRow) {
+		if (!projectRow || !botRow) {
 			throw new Error("Could not create conversation scope");
 		}
-		channelId = channelRow.id;
+		projectId = projectRow.id;
 		botId = botRow.id;
 		await onDatabase((db) =>
-			db.insert(channelMember).values({ workspaceId, channelId, userId: memberId }),
+			db.insert(projectMember).values({ workspaceId, projectId, userId: memberId }),
 		);
-		// The system bots belong to the workspace, not to the channel, and each is
+		// The system bots belong to the workspace, not to the project, and each is
 		// set up by being given a model.
 		const placed = await onDatabase((db) =>
 			db
@@ -239,8 +239,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		}
 	});
 
-	it("prepares a turn for a channel bot other than the one that spoke first", async () => {
-		// Every bot mentioned in a channel's main chat takes a turn, not only the
+	it("prepares a turn for a project bot other than the one that spoke first", async () => {
+		// Every bot mentioned in a project's thread takes a turn, not only the
 		// first: preparing one for any bot but the first must not discard it as
 		// "the conversation or its host bot no longer exists".
 		const [otherRow] = await onDatabase((db) =>
@@ -259,27 +259,27 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		);
 		if (!otherRow) throw new Error("Could not create the second bot");
 		await onDatabase((db) =>
-			db.insert(channelBot).values([
-				{ workspaceId, channelId, botId },
-				{ workspaceId, channelId, botId: otherRow.id },
+			db.insert(projectBot).values([
+				{ workspaceId, projectId, botId },
+				{ workspaceId, projectId, botId: otherRow.id },
 			]),
 		);
 		const chats = chatsAs(memberId);
-		const mainChat = await chats.openMainChat({ workspace: workspaceId, channelId });
+		const projectThread = await chats.startNamedThread({ projectId, name: "General" });
 		const posted = await chats.post({
-			conversationId: mainChat.id,
+			conversationId: projectThread.id,
 			messageId: crypto.randomUUID(),
 			content: "Who should answer this?",
 		});
 		await runOnPostgres(
 			queueTurnForTests({
-				conversationId: mainChat.id,
+				conversationId: projectThread.id,
 				botId: otherRow.id,
 				triggerMessageId: posted.id,
 				reason: "mention",
 			}),
 		);
-		const prepared = await prepareRunnable(turns, await runningTurn(mainChat.id, otherRow.id));
+		const prepared = await prepareRunnable(turns, await runningTurn(projectThread.id, otherRow.id));
 
 		expect(prepared.context.bot.id).toBe(otherRow.id);
 	});
@@ -287,7 +287,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	it("refuses a bot's turn by name once its model has been cleared", async () => {
 		// Cleared after the message is queued: a chat refuses the message itself
 		// when the model is already gone, so this is the turn that slips through.
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Anyone there?",
@@ -303,8 +303,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		});
 	});
 
-	it("shows a task as running while its turn lane is busy", async () => {
-		const details = await startTaskShown({
+	it("shows a thread as running while its turn lane is busy", async () => {
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Run as a workflow",
@@ -319,13 +319,13 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	});
 
 	it("loads a conversation with its participants and first message", async () => {
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Check the release\nPay attention to migrations.",
 		});
 
-		// A task is titled from its first message.
+		// A thread is titled from its first message.
 		expect(details.conversation.title).toBe("Check the release Pay attention to migrations.");
 		expect(details.participants.map(({ kind }) => kind).sort()).toEqual(["bot", "person"]);
 		expect(details.messages).toMatchObject([
@@ -347,7 +347,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	});
 
 	it("pages a large history without gaps at equal-timestamp boundaries", async () => {
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Message 000",
@@ -418,7 +418,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	});
 
 	it("replays a committed message after reconnect", async () => {
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "First",
@@ -447,7 +447,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		});
 	});
 
-	it("rejects channels and bots from another workspace at the database boundary", async () => {
+	it("rejects projects and bots from another workspace at the database boundary", async () => {
 		const [otherWorkspace] = await onDatabase((db) =>
 			db
 				.insert(workspace)
@@ -463,9 +463,9 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId: otherWorkspace.id, userId: memberId }),
 		);
-		const [foreignChannel] = await onDatabase((db) =>
+		const [foreignProject] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId: otherWorkspace.id,
 					name: "Foreign",
@@ -486,7 +486,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				})
 				.returning(),
 		);
-		if (!foreignChannel || !foreignBot) {
+		if (!foreignProject || !foreignBot) {
 			throw new Error("Could not create foreign conversation scope");
 		}
 
@@ -494,9 +494,9 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 			onDatabase((db) =>
 				seedConversation(db, {
 					workspaceId,
-					kind: "channel_conversation",
-					channelId: foreignChannel.id,
-					title: "Foreign channel",
+					kind: "project_thread",
+					projectId: foreignProject.id,
+					title: "Foreign project",
 					startedById: memberId,
 				}),
 			),
@@ -505,7 +505,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 			onDatabase((db) =>
 				seedConversation(db, {
 					workspaceId,
-					kind: "task",
+					kind: "project_thread",
 					botId: foreignBot.id,
 					title: "Foreign host",
 					startedById: memberId,
@@ -514,8 +514,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		).rejects.toThrow();
 	});
 
-	it("deletes a bot's task history with the bot", async () => {
-		const details = await startTaskShown({
+	it("deletes a bot's thread history with the bot", async () => {
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Keep this history",
@@ -531,7 +531,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	});
 
 	it("adds each human sender to the participant stack", async () => {
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "First",
@@ -552,8 +552,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		);
 	});
 
-	it("counts a quiet task's latest messages as recent, and a busy task's last week", async () => {
-		const details = await startTaskShown({
+	it("counts a quiet thread's latest messages as recent, and a busy thread's last week", async () => {
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Latest",
@@ -577,7 +577,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				]),
 		);
 		const recentIds = async () =>
-			(await tasksAs(memberId).botTasks(botId)).tasks
+			(await threadsAs(memberId).botThreads(botId)).threads
 				.find((listed) => listed.conversation.id === details.conversation.id)
 				?.participants.map(({ id }) => id);
 
@@ -592,7 +592,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	});
 
 	it("queues and persists a fresh summary after a completed exchange", async () => {
-		const started = await startTask({
+		const started = await startThread({
 			botId,
 			startedById: memberId,
 			message: "Summarize this conversation",
@@ -633,7 +633,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 			parentConversationId: started.id,
 		});
 
-		// And it stays out of the channel's thread list.
+		// And it stays out of the project's thread list.
 		const listed = await viewAs(memberId).list(workspaceId);
 		expect(listed.some((row) => row.id === firstSummary.summariser.conversationId)).toBe(false);
 		// Recorded as the Summariser's turn, measured at 1,000 tokens.
@@ -721,7 +721,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		// Only the first summary titles the conversation.
 		expect((await viewAs(memberId).get(started.id))?.conversation.title).toBe("Verify the release");
 
-		// The bot's own summary is written from its tasks' summaries, the newest first.
+		// The bot's own summary is written from its threads' summaries, the newest first.
 		const bot = await summaries.prepareBotSummary(started.id);
 		expect(bot).toMatchObject({
 			botId,
@@ -780,20 +780,20 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		]);
 	});
 
-	it("does not summarise a channel's main chat the bot replies in", async () => {
+	it("does not summarise a project's thread the bot replies in", async () => {
 		const [host] = await onDatabase((db) =>
 			db.select({ handle: bot.handle }).from(bot).where(eq(bot.id, botId)),
 		);
 		if (!host) throw new Error("The bot is gone");
-		await onDatabase((db) => db.insert(channelBot).values({ workspaceId, channelId, botId }));
+		await onDatabase((db) => db.insert(projectBot).values({ workspaceId, projectId, botId }));
 		const chats = chatsAs(memberId);
-		const mainChat = await chats.openMainChat({ workspace: workspaceId, channelId });
+		const projectThread = await chats.startNamedThread({ projectId, name: "General" });
 		await chats.post({
-			conversationId: mainChat.id,
+			conversationId: projectThread.id,
 			messageId: crypto.randomUUID(),
 			content: `@${host.handle} what changed?`,
 		});
-		const run = await runningTurn(mainChat.id);
+		const run = await runningTurn(projectThread.id);
 		const reply = await prepareRunnable(turns, run);
 		await turnRecords.complete(
 			replyTurnOf(reply),
@@ -804,7 +804,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 
 		expect(
 			await summaries.prepare({
-				conversationId: mainChat.id,
+				conversationId: projectThread.id,
 				botId,
 				sourceMessageId: reply.responseMessage.id,
 			}),
@@ -812,7 +812,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	});
 
 	it("records a summary the model could not write as the Summariser's failed turn", async () => {
-		const started = await startTask({
+		const started = await startThread({
 			botId,
 			startedById: memberId,
 			message: "Summarize this conversation",
@@ -858,7 +858,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 
 	it("requests cancellation only once while an authorized turn remains active", async () => {
 		await makeBotPrivate();
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Wait for review",
@@ -878,9 +878,9 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		expect(announced.filter(({ payload }) => payload.turnId === prepared.turnId)).toHaveLength(1);
 	});
 
-	it("does not expose a private bot's task to another workspace member", async () => {
+	it("does not expose a private bot's thread to another workspace member", async () => {
 		await makeBotPrivate();
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Private to its creator",
@@ -890,8 +890,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		expect(await viewAs(outsiderId).list(workspaceId)).toEqual([]);
 	});
 
-	it("compacts a long task into a summary and the newest messages, and searches what came before", async () => {
-		const details = await startTaskShown({
+	it("compacts a long thread into a summary and the newest messages, and searches what came before", async () => {
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Plan the trip",
@@ -1058,7 +1058,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	])(
 		"asks for a compaction only once a reply's prompt reaches the compaction line ($contextTokens tokens)",
 		async ({ contextTokens, asked }) => {
-			const details = await startTaskShown({
+			const details = await startThreadShown({
 				botId,
 				startedById: memberId,
 				message: "Plan the trip",
@@ -1096,7 +1096,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	);
 
 	it("searches history in any language: stemmed, as written, and as substrings", async () => {
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Plan the trip",
@@ -1149,7 +1149,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	});
 
 	it("finds the files a message carried, even one with nothing else in it", async () => {
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Contracts",
@@ -1216,11 +1216,11 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	});
 
 	/**
-	 * A task of twenty long messages, about 10K tokens each, before its
+	 * A thread of twenty long messages, about 10K tokens each, before its
 	 * first, with the bot's model given a 128K window and the system bots'
 	 * a 64K one.
 	 */
-	async function taskWithLongHistory() {
+	async function threadWithLongHistory() {
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)
@@ -1255,7 +1255,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				},
 			]),
 		);
-		const details = await startTaskShown({
+		const details = await startThreadShown({
 			botId,
 			startedById: memberId,
 			message: "Plan the trip",
@@ -1281,7 +1281,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	}
 
 	it("compacts on the bot's model, sized to its window", async () => {
-		const { details, earlier } = await taskWithLongHistory();
+		const { details, earlier } = await threadWithLongHistory();
 
 		const prepared = await preparedCompaction({
 			conversationId: details.conversation.id,
@@ -1320,7 +1320,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 	});
 
 	it("compacts for a bot without a model on the system bots' model, capped to its window", async () => {
-		const { details, earlier } = await taskWithLongHistory();
+		const { details, earlier } = await threadWithLongHistory();
 		await onDatabase((db) => db.update(bot).set({ model: null }).where(eq(bot.id, botId)));
 
 		const prepared = await preparedCompaction({

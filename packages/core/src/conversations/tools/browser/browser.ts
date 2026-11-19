@@ -44,7 +44,7 @@ export interface BrowserSession {
 }
 
 const SCREENSHOT_TOOL = "browser_take_screenshot";
-const IMAGE_BEFORE_PASSWORDS = userText`This computer's image is from before desktops had passwords. Upgrade the bot's computer to open its desktop.`;
+const IMAGE_BEFORE_PASSWORDS = userText`This computer's image is from before desktops had passwords. Upgrade it under Computer in its project's settings, or in its bot's settings if it's a bot's own computer, to open its desktop.`;
 const NO_BROWSER = userText`This computer's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
 
 /** A bot in a conversation, whose desktop there is drawn in the bot's colour. */

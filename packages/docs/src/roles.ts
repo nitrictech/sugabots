@@ -8,7 +8,7 @@ import {
 export interface RoleAbility {
 	label: string;
 	roles: readonly WorkspaceRole[];
-	/** When the answer depends on something, like which bots you made or which channels you're in. */
+	/** When the answer depends on something, like which bots you made or which projects you're in. */
 	note?: string;
 }
 
@@ -22,14 +22,14 @@ const BOTS_THEY_MADE = "Members, for bots they made; the owner and admins, for e
 /** What each role may do, as packages/core/src/authorization/permissions.ts grants it. */
 export const roleAbilities: readonly RoleAbility[] = [
 	{
-		label: "Talk to bots and take part in their tasks",
+		label: "Talk to bots and take part in their threads",
 		roles: EVERYONE,
 		note: "Public bots, and their own private ones",
 	},
 	{
-		label: "Join public channels and take part",
+		label: "Join public projects and take part",
 		roles: EVERYONE,
-		note: "The owner and admins are in every channel",
+		note: "The owner and admins are in every project",
 	},
 	{
 		label: "Change their Personal Assistant's look and connections",
@@ -54,26 +54,26 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Answer a bot's approval in a conversation",
 		roles: ALL_BUT_VIEWERS,
-		note: "Tasks of bots they can talk to, and channels they're in",
+		note: "Threads of bots they can talk to, and projects they're in",
 	},
 	{
 		label: "Use a bot's desktop",
 		roles: ALL_BUT_VIEWERS,
 		note: "Bots they can talk to; viewers can watch",
 	},
-	{ label: "Create channels", roles: ALL_BUT_VIEWERS },
+	{ label: "Create projects", roles: ALL_BUT_VIEWERS },
 	{
-		label: "Invite and remove people, and add and remove bots, in a channel",
+		label: "Invite and remove people, and add and remove bots, in a project",
 		roles: ALL_BUT_VIEWERS,
-		note: "Channels they're in",
+		note: "Projects they're in",
 	},
 	{
-		label: "Leave a channel",
+		label: "Leave a project",
 		roles: ["member", "viewer"],
-		note: "The owner and admins stay in every channel",
+		note: "The owner and admins stay in every project",
 	},
-	{ label: "Rename and delete channels, and delete their files", roles: ADMINISTRATORS },
-	{ label: "See that private bots exist, but not their tasks", roles: ADMINISTRATORS },
+	{ label: "Rename and delete projects, and delete their files", roles: ADMINISTRATORS },
+	{ label: "See that private bots exist, but not their threads", roles: ADMINISTRATORS },
 	{ label: "Connect models and web search", roles: ADMINISTRATORS },
 	{ label: "See what the workspace's models cost", roles: ADMINISTRATORS },
 	{ label: "Rename the workspace and set its time zone", roles: ADMINISTRATORS },

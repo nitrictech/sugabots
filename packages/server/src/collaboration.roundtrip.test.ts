@@ -148,14 +148,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			return { member, host };
 		}
 
-		async function startTask(input: { hostBotId: string; userId: string; content: string }) {
+		async function startThread(input: { hostBotId: string; userId: string; content: string }) {
 			const asPerson = CurrentActor.provide(
 				CurrentActor.AuthenticatedUserId.vouchedFor(input.userId),
 			);
 			return runtime.runPromise(
 				Effect.gen(function* () {
 					const chats = yield* Chats.Service;
-					const started = yield* chats.startTask({
+					const started = yield* chats.startThread({
 						botId: input.hostBotId,
 						messageId: crypto.randomUUID(),
 						content: input.content,
@@ -168,7 +168,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		it("finishes the host's turn when the helper answers", async () => {
 			const { member, host } = await aRoom();
 			const started = Date.now();
-			const opened = await startTask({
+			const opened = await startThread({
 				hostBotId: host.id,
 				userId: member.id,
 				content: "What pets does Helper have?",

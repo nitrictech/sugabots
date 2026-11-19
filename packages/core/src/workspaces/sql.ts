@@ -3,7 +3,7 @@ import type {
 	BotColor,
 	BotFace,
 	BotShape,
-	ChannelColor,
+	ProjectColor,
 	SystemBotKey,
 	WorkspaceRole,
 } from "@sugabots/contracts";
@@ -214,8 +214,24 @@ export const workspaceInvite = pgTable(
 	],
 );
 
-export const channel = pgTable(
-	"channel",
+/**
+ * A project: a long-running piece of work, made of its threads, led by one
+ * bot (`lead_bot_id`) and worked on by the bots in `project_bot`.
+ *
+ * A row is one of two things. An ordinary project, which people make, find in
+ * the directory and join (`default_of_bot_id` null). Or a bot's default
+ * project (`default_of_bot_id` names the bot): the hidden project where the
+ * bot's own threads live, led by that bot alone, with it as its only bot. It
+ * is made with its bot by the `bot_default_project` trigger and deleted with
+ * it; nobody joins it, and whoever reaches the bot reaches it (see
+ * `authorization/access.ts`), so its `name`, `slug` and `visibility` are only
+ * placeholders.
+ *
+ * `lead_bot_id` is null only on a project from before projects had leads that
+ * had no bots then; making a project, or changing it, always sets one.
+ */
+export const project = pgTable(
+	"project",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id")
@@ -223,30 +239,47 @@ export const channel = pgTable(
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		name: text("name").notNull(),
 		slug: text("slug").notNull(),
-		// One of the contract's channel colour names, as `bot.color` is a bot's.
+		// One of the contract's project colour names, as `bot.color` is a bot's.
 		// Null reads as the default colour.
-		color: text("color").$type<ChannelColor>(),
+		color: text("color").$type<ProjectColor>(),
 		description: text("description"),
 		visibility: text("visibility").$type<"public" | "private">().notNull().default("public"),
 		// Who made it. Kept when they leave, so the record survives the person.
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
+		/** The bot that works on the project and answers its threads unless another is asked. */
+		leadBotId: uuid("lead_bot_id").references((): AnyPgColumn => bot.id, { onDelete: "set null" }),
+		/** On a bot's default project: the bot, which it goes with. */
+		defaultOfBotId: uuid("default_of_bot_id").references((): AnyPgColumn => bot.id, {
+			onDelete: "cascade",
+		}),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		check("channel_visibility_check", sql`${table.visibility} in ('public', 'private')`),
-		uniqueIndex("channel_slug_idx").on(table.workspaceId, table.slug),
-		uniqueIndex("channel_id_workspace_id_idx").on(table.id, table.workspaceId),
+		check("project_visibility_check", sql`${table.visibility} in ('public', 'private')`),
+		// A default project is led by its own bot.
+		check(
+			"project_default_led_by_its_bot",
+			sql`${table.defaultOfBotId} is null or ${table.leadBotId} = ${table.defaultOfBotId}`,
+		),
+		// A default project's slug is never in an address, so it never takes one from a project people name.
+		uniqueIndex("project_slug_idx")
+			.on(table.workspaceId, table.slug)
+			.where(sql`${table.defaultOfBotId} is null`),
+		uniqueIndex("project_id_workspace_id_idx").on(table.id, table.workspaceId),
+		uniqueIndex("project_default_of_bot_idx").on(table.defaultOfBotId),
+		index("project_lead_bot_idx").on(table.leadBotId),
 	],
 );
 
 /**
- * Who is in a channel.
+ * Who is in a project.
  *
- * These rows are the whole answer to who is in a channel. A public channel is
- * listed to everybody in the workspace, but its conversations are reached only
- * with a row: joining writes one. Every workspace admin has one in every
- * channel, and demoting them leaves their rows as they are.
+ * These rows are the whole answer to who is in a project people made. A public
+ * project is listed to everybody in the workspace, but its conversations are
+ * reached only with a row: joining writes one. Every workspace admin has one in
+ * every such project, and demoting them leaves their rows as they are. A bot's
+ * default project has none: it is reached through its bot.
  *
  * There is no role here. What somebody may configure is their workspace role,
  * which lives on `workspace_member`. Adding a column here later is cheaper
@@ -254,39 +287,36 @@ export const channel = pgTable(
  *
  * The administrators' rows are written by triggers, which Drizzle has no way
  * to declare, so they live in migrations and are named here because this is
- * where somebody checking what writes these rows looks. Added in
- * `20260928141359_admins_in_every_pod`, extended to the owner in
- * `20260929002409_workspace_owner` and made to cover every channel in
- * `20261118061416_bots_leave_pods_keys`, then named for channels in
- * `20261118092649_pods_become_channels`: `channel_administrators` adds every
- * owner and admin to a new channel, and `administrator_channels` adds a
- * new owner or admin to every channel. Both take
- * `lock_channel_membership(workspace_id)`, as must anything that removes a row
+ * where somebody checking what writes these rows looks:
+ * `project_administrators` adds every owner and admin to a new project, and
+ * `administrator_projects` adds a new owner or admin to every project; neither
+ * touches a bot's default project. Both take
+ * `lock_project_membership(workspace_id)`, as must anything that removes a row
  * on the strength of somebody's role, so a promotion cannot slip between them.
  */
-export const channelMember = pgTable(
-	"channel_member",
+export const projectMember = pgTable(
+	"project_member",
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id").notNull(),
-		channelId: uuid("channel_id").notNull(),
+		projectId: uuid("project_id").notNull(),
 		userId: uuid("user_id").notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.channelId, table.workspaceId],
-			foreignColumns: [channel.id, channel.workspaceId],
-			name: "channel_member_channel_workspace_fkey",
+			columns: [table.projectId, table.workspaceId],
+			foreignColumns: [project.id, project.workspaceId],
+			name: "project_member_project_workspace_fkey",
 		}).onDelete("cascade"),
 		foreignKey({
 			columns: [table.workspaceId, table.userId],
 			foreignColumns: [workspaceMember.workspaceId, workspaceMember.userId],
-			name: "channel_member_workspace_member_fkey",
+			name: "project_member_workspace_member_fkey",
 		}).onDelete("cascade"),
-		uniqueIndex("channel_member_idx").on(table.channelId, table.userId),
-		// "Which channels can this person see", which is every sidebar load.
-		index("channel_member_user_id_idx").on(table.userId),
+		uniqueIndex("project_member_idx").on(table.projectId, table.userId),
+		// "Which projects can this person see", which is every sidebar load.
+		index("project_member_user_id_idx").on(table.userId),
 	],
 );
 
@@ -310,6 +340,10 @@ export const channelMember = pgTable(
  *
  * `color`, `face` and `shape` are the whole avatar. Small columns rather than
  * an image, which is what lets a bot created at run time have a face at all.
+ *
+ * Every bot but a system bot has a default project, where its own threads
+ * live, made with it by the `bot_default_project` trigger, which Drizzle has
+ * no way to declare, in `20261119001412_default_projects_and_lead_bots`.
  */
 export const bot = pgTable(
 	"bot",
@@ -379,31 +413,31 @@ export const bot = pgTable(
 	],
 );
 
-export type ChannelRow = typeof channel.$inferSelect;
+export type ProjectRow = typeof project.$inferSelect;
 export type BotRow = typeof bot.$inferSelect;
 
-/** A bot in a channel. */
-export const channelBot = pgTable(
-	"channel_bot",
+/** A bot in a project. */
+export const projectBot = pgTable(
+	"project_bot",
 	{
 		workspaceId: uuid("workspace_id").notNull(),
-		channelId: uuid("channel_id").notNull(),
+		projectId: uuid("project_id").notNull(),
 		botId: uuid("bot_id").notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		compositePrimaryKey({ columns: [table.channelId, table.botId] }),
+		compositePrimaryKey({ columns: [table.projectId, table.botId] }),
 		foreignKey({
-			columns: [table.channelId, table.workspaceId],
-			foreignColumns: [channel.id, channel.workspaceId],
-			name: "channel_bot_channel_workspace_fkey",
+			columns: [table.projectId, table.workspaceId],
+			foreignColumns: [project.id, project.workspaceId],
+			name: "project_bot_project_workspace_fkey",
 		}).onDelete("cascade"),
 		foreignKey({
 			columns: [table.botId, table.workspaceId],
 			foreignColumns: [bot.id, bot.workspaceId],
-			name: "channel_bot_bot_workspace_fkey",
+			name: "project_bot_bot_workspace_fkey",
 		}).onDelete("cascade"),
-		index("channel_bot_bot_id_idx").on(table.botId),
+		index("project_bot_bot_id_idx").on(table.botId),
 	],
 );
 

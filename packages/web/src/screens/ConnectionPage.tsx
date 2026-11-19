@@ -1,5 +1,4 @@
 import {
-	type Bot,
 	type Connection,
 	type ConnectionAccess,
 	type ConnectionToolSetting,
@@ -8,10 +7,8 @@ import {
 	connectionToolMutating,
 } from "@sugabots/contracts";
 import { projectLinks } from "@sugabots/contracts/project-links";
-import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Search } from "lucide-react";
-import { type FormEvent, type ReactNode, useDeferredValue, useId, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useState } from "react";
 import {
 	bearerAuthorization,
 	useConnectionActions,
@@ -19,7 +16,14 @@ import {
 } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useInstallGitHubApp } from "@/lib/github-connections.ts";
-import { botSettingsPageLink } from "@/lib/links.ts";
+import { countOf } from "@/lib/name-list.ts";
+import {
+	ownerName,
+	type ResourceOwner,
+	resourcePermissions,
+	resourceProjectId,
+	useNavigateToOwnerPage,
+} from "@/lib/resource-owner.tsx";
 import { TOOL_ACCESS_LABELS } from "@/lib/tool-access-labels.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
@@ -28,6 +32,7 @@ import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
+import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import {
 	PageBackLink,
 	SETTINGS_CARD,
@@ -43,7 +48,7 @@ import { GitHubRepositoriesGroup } from "./GitHubConnect.tsx";
 import { AccessToggle } from "./tool-access.tsx";
 
 /*
- * One connection, on a page of its own under its bot: who connected it and
+ * One connection, on a page of its own under its bot or project: who connected it and
  * what keeps it working (signing in again, its secret, a check that it
  * answers), then its tools as two settings, one for those that only read and
  * one for those that make changes, with any tool set apart from its group on
@@ -55,18 +60,20 @@ const TROUBLESHOOTING_URL = `${projectLinks.documentation}/connections#troublesh
 
 export function ConnectionPage({
 	connection,
-	bot,
+	owner,
 	back,
 }: {
 	connection: Connection;
-	bot: Bot;
-	/** The link back to the bot's connections, or to wherever the page was opened from: a `PageBackLink`. */
+	/** The bot or project the connection is of. */
+	owner: ResourceOwner;
+	/** The link back to its connections, or to wherever the page was opened from: a `PageBackLink`. */
 	back: ReactNode;
 }) {
 	const [page, setPage] = useState<"connection" | "tools">("connection");
-	const canManage = bot.permissions.manageConnections;
-	const actions = useConnectionActions(bot.id);
-	const detail = useConnectionWithTools(bot.id, connection.id);
+	const canManage = resourcePermissions(owner).manageConnections;
+	const projectId = resourceProjectId(owner);
+	const actions = useConnectionActions(projectId);
+	const detail = useConnectionWithTools(projectId, connection.id);
 	const setToolAccess = (toolAccess: Record<string, ConnectionAccess>) =>
 		actions.update.mutate({ connectionId: connection.id, json: { toolAccess } });
 
@@ -90,7 +97,7 @@ export function ConnectionPage({
 	return (
 		<ConnectionCard
 			connection={connection}
-			bot={bot}
+			owner={owner}
 			back={back}
 			tools={detail}
 			setToolAccess={setToolAccess}
@@ -103,23 +110,25 @@ type ToolsQuery = ReturnType<typeof useConnectionWithTools>;
 
 function ConnectionCard({
 	connection,
-	bot,
+	owner,
 	back,
 	tools,
 	setToolAccess,
 	onOpenTools,
 }: {
 	connection: Connection;
-	bot: Bot;
+	owner: ResourceOwner;
 	back: ReactNode;
 	tools: ToolsQuery;
 	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
 	onOpenTools: () => void;
 }) {
-	const canManage = bot.permissions.manageConnections;
-	const actions = useConnectionActions(bot.id);
-	const installApp = useInstallGitHubApp(bot.id);
-	const navigate = useNavigate();
+	const canManage = resourcePermissions(owner).manageConnections;
+	const projectId = resourceProjectId(owner);
+	const name = ownerName(owner);
+	const actions = useConnectionActions(projectId);
+	const installApp = useInstallGitHubApp(projectId);
+	const navigateToOwnerPage = useNavigateToOwnerPage();
 	const [removing, setRemoving] = useState(false);
 	const [replacingSecret, setReplacingSecret] = useState(false);
 	const preset = connectionPresetFor(connection.url);
@@ -137,7 +146,7 @@ function ConnectionCard({
 			return;
 		}
 		setRemoving(false);
-		await navigate({ ...botSettingsPageLink(bot, "connections"), replace: true });
+		await navigateToOwnerPage(owner, { page: "connections" }, { replace: true });
 	}
 
 	return (
@@ -148,14 +157,14 @@ function ConnectionCard({
 			hero={<ConnectionPageMark connection={connection} />}
 			title={connection.name}
 			description={
-				connection.connectedBy ? `Connected by ${connection.connectedBy}` : `For ${bot.name}`
+				connection.connectedBy ? `Connected by ${connection.connectedBy}` : `For ${name}`
 			}
 		>
 			{error && <Alert>{failureMessage(error)}</Alert>}
 			<SettingsGroup
 				label={connection.auth === "oauth" || !isServer ? "Account" : "Connection"}
 				// A test is a button under the group, with how it went beside it, so it never moves the page.
-				note={isServer && <TestConnection connection={connection} botId={bot.id} />}
+				note={isServer && <TestConnection connection={connection} projectId={projectId} />}
 			>
 				{(connection.auth === "oauth" || !isServer) && (
 					<SettingsRow
@@ -230,14 +239,14 @@ function ConnectionCard({
 				{replacingSecret && (
 					<SecretForm
 						connection={connection}
-						botId={bot.id}
+						projectId={projectId}
 						done={() => setReplacingSecret(false)}
 					/>
 				)}
 			</SettingsGroup>
 			{connection.kind === "github" && (
 				<GitHubRepositoriesGroup
-					botId={bot.id}
+					projectId={projectId}
 					connectionId={connection.id}
 					appSettingsUrl={connection.appSettingsUrl ?? connection.url}
 					canManage={canManage}
@@ -252,7 +261,7 @@ function ConnectionCard({
 			{canManage && (
 				<SettingsDanger
 					label={`Disconnect ${connection.name}`}
-					description={`${bot.name} loses access straight away.`}
+					description={`${name} loses access straight away.`}
 					action="Disconnect"
 					onClick={() => setRemoving(true)}
 				/>
@@ -264,8 +273,8 @@ function ConnectionCard({
 				description={
 					connection.kind === "github" ? (
 						<>
-							{bot.name} can no longer use its tools or its repositories. Its app stays on GitHub
-							until you delete it there:{" "}
+							{name} can no longer use its tools or its repositories. Its app stays on GitHub until
+							you delete it there:{" "}
 							<a
 								href={`${connection.appSettingsUrl ?? connection.url}/advanced`}
 								target="_blank"
@@ -277,7 +286,7 @@ function ConnectionCard({
 							in its advanced settings.
 						</>
 					) : (
-						`${bot.name} can no longer use its tools. Connecting it again means signing in or entering its details again.`
+						`${name} can no longer use its tools. Connecting it again means signing in or entering its details again.`
 					)
 				}
 				confirmLabel="Disconnect"
@@ -294,8 +303,8 @@ function ConnectionCard({
  * it, so a check never moves the page. A failure says why in a line, with the
  * way to fix it next to that.
  */
-function TestConnection({ connection, botId }: { connection: Connection; botId: string }) {
-	const actions = useConnectionActions(botId);
+function TestConnection({ connection, projectId }: { connection: Connection; projectId: string }) {
+	const actions = useConnectionActions(projectId);
 	const checked =
 		actions.test.variables?.connectionId === connection.id ? actions.test.data : undefined;
 	const reachable = checked ? checked.reachable : connection.status === "error" ? false : undefined;
@@ -358,12 +367,11 @@ function SignedInPerson({ name }: { name: string | null }) {
 	);
 }
 
-/** What changing a header connection's secret is called: adding one, or replacing the one it has. */
 /** Why bots can't use the connection yet, while it has no account to work through. */
 function accountRowNote(connection: Connection): string | undefined {
 	if (connection.signedIn) return undefined;
 	if (connection.kind === "github") {
-		return "The bot can't use GitHub until its app is installed on the account it works on.";
+		return "Bots can't use GitHub until the project's app is installed on the account they work on.";
 	}
 	if (connection.signInExpired) {
 		return `${connection.name} refused the last sign-in. Bots can't use it until someone signs in again.`;
@@ -371,6 +379,7 @@ function accountRowNote(connection: Connection): string | undefined {
 	return `Bots can't use ${connection.name} until someone signs in.`;
 }
 
+/** What changing a header connection's secret is called: adding one, or replacing the one it has. */
 function secretActionLabel(connection: Connection): string {
 	if (connection.secretHeader === null) return "Add access token";
 	return connection.hasSecret ? "Replace secret" : "Add secret";
@@ -379,14 +388,14 @@ function secretActionLabel(connection: Connection): string {
 /** A new secret for a header connection, or its first access token, in a row of its own group. */
 function SecretForm({
 	connection,
-	botId,
+	projectId,
 	done,
 }: {
 	connection: Connection;
-	botId: string;
+	projectId: string;
 	done: () => void;
 }) {
-	const actions = useConnectionActions(botId);
+	const actions = useConnectionActions(projectId);
 	const [secret, setSecret] = useState("");
 	const needsToken = connection.secretHeader === null;
 
@@ -470,18 +479,18 @@ function setApart(kinds: readonly ToolKind[]) {
 	);
 }
 
-/** How many of a kind's tools show before its list scrolls inside its card rather than lengthening the page. */
+/** How many tools show before the list scrolls inside its card rather than lengthening the page. */
 const TOOLS_SHOWN_BEFORE_SCROLLING = 8;
 
 const KIND_WORDS = {
 	read: {
 		heading: "Tools that read",
-		all: (count: number) => `All ${count} read ${count === 1 ? "tool" : "tools"}`,
+		all: (count: number) => `All ${countOf(count, "read tool", "read tools")}`,
 		sub: "Look things up without changing anything",
 	},
 	change: {
 		heading: "Tools that make changes",
-		all: (count: number) => `All ${count} change ${count === 1 ? "tool" : "tools"}`,
+		all: (count: number) => `All ${countOf(count, "change tool", "change tools")}`,
 		sub: "Create, edit, delete or send things",
 	},
 } as const;
@@ -607,11 +616,6 @@ function ToolSection({
 	);
 }
 
-/**
- * Every tool on a page of its own: those set apart from their kind first, each
- * saying what its kind is set to, with the way to put them all back; then the
- * rest by kind. Searching narrows all of them.
- */
 /** The connection's mark at the head of its pages. */
 function ConnectionPageMark({ connection }: { connection: Connection }) {
 	return (
@@ -619,6 +623,11 @@ function ConnectionPageMark({ connection }: { connection: Connection }) {
 	);
 }
 
+/**
+ * Every tool on a page of its own: those set apart from their kind first, each
+ * saying what its kind is set to, with the way to put them all back; then the
+ * rest by kind. Searching narrows all of them.
+ */
 function IndividualTools({
 	connection,
 	tools,
@@ -634,12 +643,9 @@ function IndividualTools({
 	error: unknown;
 	back: ReactNode;
 }) {
-	const [query, setQuery] = useState("");
-	const needle = useDeferredValue(query.trim().toLowerCase());
-	const matches = (tool: ConnectionToolSetting) =>
-		needle === "" ||
-		tool.name.toLowerCase().includes(needle) ||
-		wordsFromKey(tool.name).toLowerCase().includes(needle);
+	const search = useSearchFilter(tools, (tool) => [tool.name, wordsFromKey(tool.name)]);
+	const matched = new Set(search.matches);
+	const matches = (tool: ConnectionToolSetting) => matched.has(tool);
 	const kinds = toolKinds(tools);
 	const apart = setApart(kinds);
 	const shownApart = apart.filter(({ tool }) => matches(tool));
@@ -685,17 +691,13 @@ function IndividualTools({
 			<section aria-label="Tools" className={SETTINGS_CARD}>
 				{/* Above the list and as solid as the card, so no row shows past the list's top as it scrolls. */}
 				<div className="relative z-1 border-border border-b bg-settings-card p-2.5">
-					<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
-						<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
-						<input
-							type="search"
-							value={query}
-							onChange={(event) => setQuery(event.target.value)}
-							placeholder={`Search ${tools.length} ${connection.name} tools`}
-							aria-label="Search tools"
-							className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
-						/>
-					</label>
+					<SearchField
+						label="Search tools"
+						placeholder={`Search ${tools.length} ${connection.name} tools`}
+						look="outline"
+						value={search.query}
+						onChange={search.setQuery}
+					/>
 				</div>
 				{/* Sized by every tool, not those a search leaves, so searching never resizes it. */}
 				<div

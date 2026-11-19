@@ -53,7 +53,7 @@ function message(id: string, author: Message["author"], content: string): Messag
 	};
 }
 
-const CHANNEL = "0199a3a0-0000-7000-8000-00000000000b";
+const PROJECT = "0199a3a0-0000-7000-8000-00000000000b";
 
 /** Where a file would be served. Most stories have none, so nothing asks for one. */
 const fileUrlOf = (fileId: string) => `/files/${fileId}`;
@@ -87,7 +87,7 @@ const meta = preview.meta({
 		isRunning: false,
 		participants: [host, person],
 		members: [person, jay],
-		conversationKind: "task",
+		conversationKind: "project_thread",
 		onOpenItem: fn(),
 		fileUrlOf,
 	},
@@ -96,7 +96,7 @@ const meta = preview.meta({
 			// The bot has no connections, so its tools are named without a mark.
 			const [queryClient] = useState(() => {
 				const client = new QueryClient();
-				client.setQueryData(["connections", CHANNEL], []);
+				client.setQueryData(["connections", PROJECT], []);
 				return client;
 			});
 			useEffect(() => () => queryClient.clear(), [queryClient]);
@@ -235,7 +235,7 @@ export const AutomationResult = meta.story({
 
 const tractionReport: WrittenFile = {
 	id: "0199a3a0-0000-7000-8000-000000000a15",
-	conversationId: CHANNEL,
+	conversationId: PROJECT,
 	kind: "document",
 	title: "Weekly traction",
 	version: 4,
@@ -278,7 +278,7 @@ function tractionResult(parts: MessagePart[]): Message {
 export const AutomationResultWithFile = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${import.meta.env.VITE_API_URL}/channels/:channelId/files/:fileId/versions/4`, () =>
+			http.get(`${import.meta.env.VITE_API_URL}/projects/:projectId/files/:fileId/versions/4`, () =>
 				HttpResponse.json(tractionReport),
 			),
 		);
@@ -378,8 +378,9 @@ export const ThinkingWhileTyping = meta.story({
 });
 
 /**
- * Runs groups one author's messages under one face and name, a bot's tagged
- * Bot. Follow-ups show their time where the face would be, on hover.
+ * Runs groups one author's messages under one face and name: a bot's over its
+ * words, a person's in their first bubble. Follow-ups show their time beside
+ * their actions, on hover.
  */
 export const Runs = meta.story({
 	args: {
@@ -414,7 +415,6 @@ export const Runs = meta.story({
 	play: async ({ canvas }) => {
 		// Two messages in a row from one author carry the name once.
 		await expect(canvas.getAllByText("Issue Triager")).toHaveLength(1);
-		await expect(canvas.getAllByText("Bot")).toHaveLength(1);
 		await expect(canvas.getAllByText("Jay Park")).toHaveLength(1);
 		await expect(canvas.getAllByText("Sam Rivera")).toHaveLength(1);
 	},
@@ -545,7 +545,7 @@ const other: Extract<Participant, { kind: "bot" }> = {
 	shape: "circle",
 };
 
-/** InTheSidebar is a collaboration as its sidebar shows it: the same rows, a little smaller. */
+/** InTheSidebar is a collaboration as its sidebar shows it: the same messages, a little smaller. */
 export const InTheSidebar = meta.story({
 	args: {
 		compact: true,
@@ -577,42 +577,6 @@ export const InTheSidebar = meta.story({
 	],
 	play: async ({ canvas }) => {
 		await expect(canvas.getAllByText("Linear Handler")).toHaveLength(1);
-	},
-});
-
-/**
- * A bot's message that asked another bot shows the collaboration as a side
- * line under it: both faces, where it stands, and when it last moved.
- */
-export const CollaborationLine = meta.story({
-	args: {
-		participants: [host, person, other],
-		messages: [
-			reply("0199a3a0-0000-7000-8000-000000000311", [
-				{ type: "text", text: "Asking Linear Handler whether checkout is tracked." },
-				{
-					type: "collaboration",
-					id: "0199a3a0-0000-7000-8000-000000000312",
-					botId: other.id,
-					botName: other.name,
-					conversationId: "0199a3a0-0000-7000-8000-000000000313",
-					brief: "Is checkout tracked?",
-					status: "pending",
-					answer: null,
-					atOffset: 51,
-				},
-			]),
-		],
-		itemActivityAt: new Map([["0199a3a0-0000-7000-8000-000000000313", "2026-09-22T04:39:00.000Z"]]),
-	},
-	play: async ({ args, canvas, userEvent }) => {
-		const line = canvas.getByRole("button", {
-			name: /^Open Collaboration: Issue Triager and Linear Handler/,
-		});
-		await expect(line).toHaveTextContent("Asked Linear Handler");
-		await expect(line).toHaveAccessibleName(/, Working, Last reply \d/);
-		await userEvent.click(line);
-		await expect(args.onOpenItem).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-000000000313");
 	},
 });
 
@@ -964,7 +928,7 @@ export const TypingWithTheBot = meta.story({
 /**
  * A mention names someone in their own colours: a bot on its tint, a person on
  * a neutral chip, in your bubbles, other people's and a bot's markdown alike.
- * Linear Handler has not joined; it is named from the channel's bots. A handle in
+ * Linear Handler has not joined; it is named from the project's bots. A handle in
  * code and one that names nobody stay plain text, and an email address is a
  * link rather than a mention.
  */
@@ -1205,7 +1169,7 @@ export const PeoplesLinks = meta.story({
 	},
 });
 
-/** The rest of the channel, so `@here` has more people to notify than its card lists. */
+/** The rest of the project, so `@here` has more people to notify than its card lists. */
 const podmates = ["Ana Lopez", "Ben Ito", "Cleo Hart", "Dev Rao", "Eli Moss", "Fay Chen"].map(
 	(name, index) => testPerson({ id: `0199a3a0-0000-7000-8000-0000000004${10 + index}`, name }),
 );
@@ -1245,7 +1209,7 @@ export const MentionCards = meta.story({
 		function WithBots(Story) {
 			const [queryClient] = useState(() => {
 				const client = new QueryClient();
-				client.setQueryData(["connections", CHANNEL], []);
+				client.setQueryData(["connections", PROJECT], []);
 				client.setQueryData(["workspaces"], [workspace]);
 				client.setQueryData(
 					["workspaces", workspace.id, "members"],

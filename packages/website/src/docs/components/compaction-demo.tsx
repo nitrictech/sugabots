@@ -3,16 +3,16 @@ import { cn } from "cn";
 import { ChevronLeftIcon, ChevronRightIcon, PauseIcon, PlayIcon, SearchIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
+import { type CastName, cast } from "@/cast";
 import { BotAvatar } from "@/components/bot-avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { type CastName, cast } from "@/docs/cast";
 import { Say } from "@/docs/components/chat-demo";
 
 /** How the system bot that compacts a bot's history looks, as packages/core/src/workspaces/bots/system-bots.ts defines it. */
 const compactorLook: BotLook = { color: "purple", face: "square" };
 
-/** Where a message ends up once the chat has been compacted. */
+/** Where a message ends up once the thread has been compacted. */
 type Band =
 	/** Older than what the first compaction summarises: left out of what the bot reads, but it can search for it. */
 	| "left-out"
@@ -30,7 +30,7 @@ interface Line {
 
 /**
  * Where the messages the bot reads word for word start, as the summary gives
- * it: the day as well as the time, since long chats span days. Everything
+ * it: the day as well as the time, since long threads span days. Everything
  * before it can be searched.
  */
 const KEPT_FROM = "Thu 14 May 2026, 18:30 UTC";
@@ -93,7 +93,7 @@ const lines: readonly Line[] = [
 const summary = [
 	"Decisions: On 14 May, Dad chose the 18:40 flight on Friday 15th, and Trip Planner held it for four.",
 	"Key facts: €220 left in the pot.",
-	`This covers the chat up to ${KEPT_FROM}. Anything it leaves out can be searched.`,
+	`This covers the thread up to ${KEPT_FROM}. Anything it leaves out can be searched.`,
 ];
 
 interface Step {
@@ -110,16 +110,16 @@ interface Step {
 
 const steps: readonly Step[] = [
 	{
-		title: "The chat grows",
+		title: "The thread grows",
 		caption:
-			"Every time it replies, Trip Planner rereads the whole chat, so each message takes up a little more room.",
+			"Every time it replies, Trip Planner rereads the whole thread, so each message takes up a little more room.",
 		said: 4,
 		contextUsed: 22,
 		compaction: "idle",
 	},
 	{
 		title: "Filling up",
-		caption: "The longer the chat, the more of Trip Planner's short-term memory it fills.",
+		caption: "The longer the thread, the more of Trip Planner's short-term memory it fills.",
 		said: 7,
 		contextUsed: 62,
 		compaction: "idle",
@@ -127,14 +127,14 @@ const steps: readonly Step[] = [
 	{
 		title: "Nearly full",
 		caption:
-			"The chat has filled most of Trip Planner's short-term memory, so Sugabots starts compacting it in the background. Nobody waits for it.",
+			"The thread has filled most of Trip Planner's short-term memory, so Sugabots starts compacting it in the background. Nobody waits for it.",
 		said: 8,
 		contextUsed: 73,
 		compaction: "working",
 	},
 	{
 		title: "Still room to talk",
-		caption: "There's still room to spare, so the chat carries on in the meantime.",
+		caption: "There's still room to spare, so the thread carries on in the meantime.",
 		said: 10,
 		contextUsed: 81,
 		compaction: "working",
@@ -142,7 +142,7 @@ const steps: readonly Step[] = [
 	{
 		title: "Compacted",
 		caption:
-			"Trip Planner now rereads a short summary, then the latest messages word for word. Everyone still sees the whole chat.",
+			"Trip Planner now rereads a short summary, then the latest messages word for word. Everyone still sees the whole thread.",
 		said: 10,
 		contextUsed: 26,
 		compaction: "done",
@@ -165,7 +165,7 @@ const CONTEXT_LIMIT = 100;
 /** How long each step stays up while playing. */
 const STEP_MS = 3200;
 
-/** Steps through how a long chat gets compacted: what people see, and what the bot reads. */
+/** Steps through how a long thread gets compacted: what people see, and what the bot reads. */
 export function CompactionDemo() {
 	const [index, setIndex] = useState(0);
 	const [playing, setPlaying] = useState(false);
@@ -242,7 +242,7 @@ function PanelTitle({ children }: { children: string }) {
 	);
 }
 
-/** The chat as people see it: every message, however long it gets. */
+/** The thread as people see it: every message, however long it gets. */
 function PeopleView({ said }: { said: number }) {
 	return (
 		<div className="flex flex-col gap-3 p-4 sm:p-5">

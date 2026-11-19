@@ -4,10 +4,8 @@ import type { CodeHighlighterPlugin } from "streamdown";
 type HighlightResult = NonNullable<ReturnType<CodeHighlighterPlugin["highlight"]>>;
 
 /*
- * Fenced code is highlighted with Pierre's Highlights, which tokenizes
- * synchronously and also offers a tokenizer that keeps its state as code
- * streams in. Its muted themes sit closer to the monochrome bubble than
- * Streamdown's saturated GitHub pair.
+ * Fenced code is highlighted with Pierre's Highlights. Its muted themes sit
+ * closer to the monochrome bubble than Streamdown's saturated GitHub pair.
  */
 
 /*
@@ -30,7 +28,6 @@ async function importHighlighter() {
 		import("@pierre/highlights/themes"),
 	]);
 	return {
-		isSupportedLanguage,
 		/** Null for a language Highlights has no lexer for. */
 		highlight: (code: string, lang: string): HighlightResult | null => {
 			if (!isSupportedLanguage(lang)) return null;
@@ -68,7 +65,7 @@ export const codeHighlighter: CodeHighlighterPlugin = {
 	type: "code-highlighter",
 	// Streamdown calls neither of these; `highlight` returning null leaves the block as plain text.
 	getSupportedLanguages: () => [],
-	supportsLanguage: (lang) => ready?.isSupportedLanguage(lang) ?? false,
+	supportsLanguage: () => false,
 	getThemes: () => [LIGHT_KEY, DARK_KEY],
 	highlight: ({ code, language }, callback) => {
 		if (ready) return ready.highlight(code, language);

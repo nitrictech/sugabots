@@ -13,8 +13,9 @@ export const BOT_BRANCH_PREFIX = "sugabots/";
 const TOKEN_USERNAME = "x-access-token";
 
 /**
- * A bot's GitHub app as its turns and computer use it: each token is
- * for its account's installation, and only for its repositories.
+ * A project's GitHub app as the turns and computer working on the project use
+ * it: each token is for its account's installation, and only for its
+ * repositories.
  */
 export class Connected {
 	readonly connection: ConnectionRow;

@@ -19,7 +19,7 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
-import { ConnectionRow, valueText } from "./connection-row.tsx";
+import { ProviderFieldRow, valueText } from "./provider-field-row.tsx";
 
 /**
  * A subscription provider's credential, in place of a key: the person signs
@@ -68,14 +68,13 @@ export function ProviderSignInRow({
 					}}
 				/>
 			) : (
-				<ConnectionRow
+				<ProviderFieldRow
 					label="Account"
 					action={
 						provider.signedIn ? (
 							<Button
 								variant="ghost"
-								size="bare"
-								className="text-xs"
+								size="text"
 								disabled={actions.signOut.isPending || signOutBlocked !== undefined}
 								title={signOutBlocked}
 								onClick={() => actions.signOut.mutate({ providerId: provider.id })}
@@ -85,8 +84,7 @@ export function ProviderSignInRow({
 						) : (
 							<Button
 								variant="link"
-								size="bare"
-								className="text-xs"
+								size="text"
 								disabled={actions.startSignIn.isPending}
 								onClick={() => setWarning(true)}
 							>
@@ -96,7 +94,7 @@ export function ProviderSignInRow({
 					}
 				>
 					<span className={valueText}>{provider.signedIn ? "Signed in" : "Not signed in"}</span>
-				</ConnectionRow>
+				</ProviderFieldRow>
 			)}
 			{shownError && (
 				<div className="border-border border-b px-4 py-3 last:border-b-0">

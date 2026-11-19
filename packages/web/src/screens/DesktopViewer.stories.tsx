@@ -82,16 +82,20 @@ export const Opened = meta.story({
 			);
 		},
 	],
-	render: ({ conversationId }) => (
-		<div className="fixed inset-0 flex">
-			<DesktopStage
-				conversationId={conversationId}
-				bot={{ ...growthDesk, usesComputer: true }}
-				mayUse
-				onClose={fn()}
-			/>
-		</div>
-	),
+	render: function Opened({ conversationId }) {
+		const bot = { ...growthDesk, usesComputer: true };
+		return (
+			<div className="fixed inset-0 flex">
+				<DesktopStage
+					conversationId={conversationId}
+					owner={{ bot }}
+					bot={bot}
+					mayUse
+					onClose={fn()}
+				/>
+			</div>
+		);
+	},
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText("Growth Desk's computer")).toBeVisible();
 		await expect(await canvas.findByText(/couldn't be reached|Starting the desktop/)).toBeVisible();

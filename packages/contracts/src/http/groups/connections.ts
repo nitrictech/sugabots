@@ -16,26 +16,27 @@ import { uuidSchema } from "../../uuid.ts";
 import { BadRequest, Conflict, NotFound, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
-const root = "/bots/:botId/connections";
-const bot = { botId: uuidSchema };
-const connection = { botId: uuidSchema, connectionId: uuidSchema };
+const root = "/projects/:projectId/connections";
+const project = { projectId: uuidSchema };
+const connection = { projectId: uuidSchema, connectionId: uuidSchema };
 
+/** A project's connections; a bot's are its default project's. */
 export class ConnectionsApi extends HttpApiGroup.make("connections")
 	.add(
 		HttpApiEndpoint.get("list", root, {
-			params: bot,
+			params: project,
 			success: Schema.Array(connectionSchema),
 			error: refused,
 		}),
 		HttpApiEndpoint.post("create", root, {
-			params: bot,
+			params: project,
 			payload: newConnectionSchema,
 			success: connectionSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
 		}),
 		// Tests an address and secret without saving them, or anything about the test.
 		HttpApiEndpoint.post("testUnsaved", `${root}/test`, {
-			params: bot,
+			params: project,
 			payload: unsavedConnectionSchema,
 			success: connectionTestResultSchema,
 			error: [BadRequest, ...refused],
@@ -63,7 +64,7 @@ export class ConnectionsApi extends HttpApiGroup.make("connections")
 		// Makes the connection and starts its sign-in in one request, so a
 		// catalog entry is one click.
 		HttpApiEndpoint.post("connectFromCatalog", `${root}/connect`, {
-			params: bot,
+			params: project,
 			payload: connectFromCatalogSchema,
 			success: connectFromCatalogResultSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],

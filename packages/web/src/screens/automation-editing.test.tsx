@@ -1,12 +1,12 @@
-import type { Automation, WorkspaceAutomation } from "@sugabots/contracts";
+import type { Automation, Bot, WorkspaceAutomation } from "@sugabots/contracts";
 import { InternalServerError } from "@sugabots/contracts/http";
 import { automationTriggers, type TestAutomationTrigger } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { formatTime, today } from "@/lib/automation-schedule.ts";
-import { apiAnswers, bots, linear, mount, open, taskDetails, triager } from "@/test-api.tsx";
+import { formatTime, today } from "@/lib/routine-schedule.ts";
+import { apiAnswers, bots, linear, mount, open, threadDetails, triager } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -14,15 +14,15 @@ vi.mock("@/api.ts", () => import("@/test-client.ts"));
 const researcher = bots.find((bot) => bot.handle === "customer-research");
 if (!researcher) throw new Error("fixture");
 
-function automation(id: string, name: string, botId: string, expression: string): Automation {
+function automation(id: string, name: string, projectId: string, expression: string): Automation {
 	return {
 		id,
 		workspaceId: linear.workspaceId,
-		botId,
+		projectId,
 		name,
 		instructions: `${name}, please.`,
 		triggers: automationTriggers(id, {
-			kind: "schedule",
+			kind: "routine",
 			schedule: { repeat: "cron", expression },
 			timezone: "UTC",
 			nextScheduledAt: null,
@@ -35,21 +35,24 @@ function automation(id: string, name: string, botId: string, expression: string)
 	};
 }
 
-const morningBrief: WorkspaceAutomation = {
+/** An automation in the workspace list that is a bot's own, as these tests use. */
+type BotsAutomation = WorkspaceAutomation & { bot: Bot };
+
+const morningBrief: BotsAutomation = {
 	automation: automation(
 		"0199a3a0-0000-7000-8000-0000000000d1",
 		"Morning brief",
-		linear.id,
+		linear.defaultProjectId,
 		"0 8 * * 1-5",
 	),
 	bot: linear,
 };
-const churnReport: WorkspaceAutomation = {
+const churnReport: BotsAutomation = {
 	automation: {
 		...automation(
 			"0199a3a0-0000-7000-8000-0000000000d2",
 			"Weekly churn report",
-			researcher.id,
+			researcher.defaultProjectId,
 			"0 9 * * 1",
 		),
 		state: "paused",
@@ -70,30 +73,31 @@ afterEach(() => {
 });
 
 /** An automation's own page, where it is set up. */
-const itemPage = (one: WorkspaceAutomation) =>
+const itemPage = (one: BotsAutomation) =>
 	`/suga/bots/${one.bot.handle}/automations/${one.automation.id}`;
 /** An automation being made, under the triager's automations. */
 const newPage = `/suga/bots/${triager.handle}/automations/new`;
 
 /** The id of `one`'s feed, where its runs post. */
-const feedOf = (one: WorkspaceAutomation) =>
+const feedOf = (one: BotsAutomation) =>
 	`${one.automation.id.slice(0, -4)}f${one.automation.id.slice(-3)}`;
 
 /**
  * Serves `one` as its bot's only automation, with its feed, and its bot's
  * automations as `one` and `others`: what the automation's page reads to show it.
  */
-function serveAutomation(one: WorkspaceAutomation, others: readonly Automation[] = []) {
+function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []) {
 	const feed = feedOf(one);
 	client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [one] }));
-	client.api.automations.list.mockImplementation(({ params }: { params: { botId: string } }) =>
+	client.api.automations.list.mockImplementation(({ params }: { params: { projectId: string } }) =>
 		Effect.succeed(
-			[one.automation, ...others].filter((automation) => automation.botId === params.botId),
+			[one.automation, ...others].filter((automation) => automation.projectId === params.projectId),
 		),
 	);
-	client.api.chats.botTasks.mockReturnValue(
+	client.api.chats.botThreads.mockReturnValue(
 		Effect.succeed({
-			tasks: [],
+			bot: one.bot,
+			threads: [],
 			automations: [
 				{
 					automation: {
@@ -103,7 +107,6 @@ function serveAutomation(one: WorkspaceAutomation, others: readonly Automation[]
 						failed: false,
 						pausedAfterFailures: false,
 					},
-					bot: one.bot,
 					conversation: {
 						kind: "automation_feed",
 						id: feed,
@@ -119,7 +122,7 @@ function serveAutomation(one: WorkspaceAutomation, others: readonly Automation[]
 			],
 		}),
 	);
-	const details = taskDetails(one.bot);
+	const details = threadDetails(one.bot);
 	client.api.conversations.get.mockReturnValue(
 		Effect.succeed({
 			...details,
@@ -132,7 +135,7 @@ function serveAutomation(one: WorkspaceAutomation, others: readonly Automation[]
 			},
 			automation: {
 				id: one.automation.id,
-				botId: one.bot.id,
+				projectId: one.automation.projectId,
 				state: one.automation.state,
 				failed: false,
 				pausedAfterFailures: false,
@@ -142,7 +145,7 @@ function serveAutomation(one: WorkspaceAutomation, others: readonly Automation[]
 }
 
 /** Opens `one`'s own page, where it is set up. */
-async function openPanel(one: WorkspaceAutomation, others: readonly Automation[] = []) {
+async function openPanel(one: BotsAutomation, others: readonly Automation[] = []) {
 	serveAutomation(one, others);
 	const router = mount(itemPage(one));
 	const panel = await showPanel();
@@ -169,25 +172,28 @@ async function addTrigger(label: string) {
 	return screen.findByRole("dialog", { name: label });
 }
 
+/** Opens the dialog that adds a routine, and gives it. */
+async function addRoutine() {
+	fireEvent.click(await screen.findByRole("button", { name: "Add routine" }));
+	return screen.findByRole("dialog", { name: "Routine" });
+}
+
 /** The trigger of an automation whose triggers are `trigger` alone, as it is addressed. */
-const onlyTrigger = (one: WorkspaceAutomation) => ({
-	botId: one.automation.botId,
+const onlyTrigger = (one: BotsAutomation) => ({
+	projectId: one.automation.projectId,
 	automationId: one.automation.id,
 	triggerId: one.automation.id,
 });
 
 /** `one` with `trigger` as its only trigger. */
-function withTrigger(
-	one: WorkspaceAutomation,
-	trigger: TestAutomationTrigger,
-): WorkspaceAutomation {
+function withTrigger(one: BotsAutomation, trigger: TestAutomationTrigger): BotsAutomation {
 	return {
 		...one,
 		automation: { ...one.automation, triggers: automationTriggers(one.automation.id, trigger) },
 	};
 }
 
-/** Picks the time a schedule's chip, counted from 1, runs at. */
+/** Picks the time a routine's chip, counted from 1, runs at. */
 async function pickTime(chip: number, minutesPastMidnight: number) {
 	const trigger = screen.getByRole("combobox", { name: `Time ${chip}` });
 	open(trigger);
@@ -199,41 +205,40 @@ async function pickTime(chip: number, minutesPastMidnight: number) {
 }
 
 describe("a bot's automations", () => {
-	it("makes an automation for the bot it was begun from, then opens its feed", async () => {
+	it("makes an automation for the bot it was begun from, then opens its page", async () => {
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		client.api.automations.create.mockReturnValue(
 			Effect.succeed({ automation: morningBrief.automation, secrets: [] }),
 		);
 		const router = mount(newPage);
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Triage sweep" } });
-		// Begun from the bot's own automations, it is for that bot, with no other to choose.
-		expect(screen.queryByRole("button", { name: /^Bot(?!s\b)/ })).toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {
 			target: { value: "Sweep the queue." },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		expect(screen.getByText("No routines")).toBeDefined();
 		expect(screen.getByText("No triggers")).toBeDefined();
-		const schedule = await addTrigger("Schedule");
-		fireEvent.click(within(schedule).getByRole("radio", { name: "Weekly" }));
-		fireEvent.click(within(schedule).getByRole("checkbox", { name: "Thursday" }));
+		const routine = await addRoutine();
+		fireEvent.click(within(routine).getByRole("radio", { name: "Weekly" }));
+		fireEvent.click(within(routine).getByRole("checkbox", { name: "Thursday" }));
 		await pickTime(1, 10 * 60);
 		expect(
-			within(schedule).getByText(/^Runs every week on Mon and Thu at 10:00, your time \(.+\)\.$/),
+			within(routine).getByText(/^Runs every week on Mon and Thu at 10:00, your time \(.+\)\.$/),
 		).toBeDefined();
-		fireEvent.click(within(schedule).getByRole("button", { name: "Add trigger" }));
+		fireEvent.click(within(routine).getByRole("button", { name: "Add routine" }));
 		expect(await screen.findByRole("button", { name: /^Mon Thu at 10:00/ })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Create automation" }));
 
 		await waitFor(() =>
 			expect(client.api.automations.create).toHaveBeenCalledWith({
-				params: { botId: triager.id },
+				params: { projectId: triager.defaultProjectId },
 				payload: {
 					name: "Triage sweep",
 					instructions: "Sweep the queue.",
 					triggers: [
 						{
-							kind: "schedule",
+							kind: "routine",
 							schedule: {
 								repeat: "weekly",
 								every: 1,
@@ -265,7 +270,7 @@ describe("a bot's automations", () => {
 			target: { value: "Close the quarter." },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
-		await addTrigger("Schedule");
+		await addRoutine();
 		fireEvent.click(screen.getByRole("radio", { name: "Monthly" }));
 		// Found once: a role query reads the whole page, and the loop can click a month's worth of days.
 		const day = screen.getByRole("status", { name: "On the" });
@@ -279,7 +284,7 @@ describe("a bot's automations", () => {
 		expect(
 			screen.getByText(/^Runs every 3 months on the last day at 9:00 and 13:00, your time/),
 		).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
+		fireEvent.click(screen.getByRole("button", { name: "Add routine" }));
 		fireEvent.click(await screen.findByRole("button", { name: "Create automation" }));
 
 		await waitFor(() =>
@@ -288,7 +293,7 @@ describe("a bot's automations", () => {
 					payload: expect.objectContaining({
 						triggers: [
 							{
-								kind: "schedule",
+								kind: "routine",
 								schedule: {
 									repeat: "monthly",
 									every: 3,
@@ -301,29 +306,6 @@ describe("a bot's automations", () => {
 						],
 					}),
 				}),
-			),
-		);
-	});
-
-	it("makes an automation begun from a bot's automations for that bot, with no other to choose", async () => {
-		client.api.automations.create.mockReturnValue(
-			Effect.succeed({ automation: churnReport.automation, secrets: [] }),
-		);
-		mount(`/suga/bots/${researcher.handle}/automations/new`);
-
-		expect(await screen.findAllByText(researcher.name, { selector: "main *" })).not.toHaveLength(0);
-		expect(screen.queryByRole("button", { name: /^Bot(?!s\b)/ })).toBeNull();
-		fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Pipeline check" } });
-		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
-		fireEvent.change(await screen.findByLabelText("Instructions"), {
-			target: { value: "Check the pipeline." },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Done" }));
-		fireEvent.click(await screen.findByRole("button", { name: "Create automation" }));
-
-		await waitFor(() =>
-			expect(client.api.automations.create).toHaveBeenCalledWith(
-				expect.objectContaining({ params: { botId: researcher.id } }),
 			),
 		);
 	});
@@ -723,7 +705,7 @@ describe("a bot's automations", () => {
 	});
 
 	it("duplicates an automation, paused and with a name of its own, then opens the copy", async () => {
-		const copyOf = (n: number, name: string): WorkspaceAutomation => ({
+		const copyOf = (n: number, name: string): BotsAutomation => ({
 			...morningBrief,
 			automation: {
 				...morningBrief.automation,
@@ -745,14 +727,14 @@ describe("a bot's automations", () => {
 
 		await waitFor(() =>
 			expect(client.api.automations.create).toHaveBeenCalledWith({
-				params: { botId: linear.id },
+				params: { projectId: linear.defaultProjectId },
 				payload: {
 					name: "Morning brief copy 2",
 					instructions: morningBrief.automation.instructions,
 					state: "paused",
 					triggers: [
 						{
-							kind: "schedule",
+							kind: "routine",
 							schedule: { repeat: "cron", expression: "0 8 * * 1-5" },
 							timezone: "UTC",
 						},
@@ -775,7 +757,7 @@ describe("a bot's automations", () => {
 
 		await waitFor(() =>
 			expect(client.api.automations.update).toHaveBeenCalledWith({
-				params: { botId: researcher.id, automationId: churnReport.automation.id },
+				params: { projectId: researcher.defaultProjectId, automationId: churnReport.automation.id },
 				payload: { state: "enabled" },
 			}),
 		);
@@ -795,7 +777,7 @@ describe("a bot's automations", () => {
 
 		await waitFor(() =>
 			expect(client.api.automations.run).toHaveBeenCalledWith({
-				params: { botId: researcher.id, automationId: churnReport.automation.id },
+				params: { projectId: researcher.defaultProjectId, automationId: churnReport.automation.id },
 				payload: { requestId: expect.any(String) },
 			}),
 		);
@@ -813,29 +795,29 @@ describe("a bot's automations", () => {
 
 		await waitFor(() =>
 			expect(client.api.automations.update).toHaveBeenCalledWith({
-				params: { botId: linear.id, automationId: morningBrief.automation.id },
+				params: { projectId: linear.defaultProjectId, automationId: morningBrief.automation.id },
 				payload: { instructions: "Brief the team." },
 			}),
 		);
 	});
 
-	it("saves a schedule's change once it is saved, then closes", async () => {
+	it("saves a routine's change once it is saved, then closes", async () => {
 		client.api.automations.updateTrigger.mockReturnValue(
 			Effect.succeed({ automation: morningBrief.automation, secrets: [] }),
 		);
 		await openPanel(morningBrief);
-		const schedule = await openTrigger(/^Schedule.*Weekdays at 8:00/);
+		const routine = await openTrigger(/^Weekdays at 8:00/);
 
 		await pickTime(1, 8 * 60 + 30);
 		await pickTime(1, 9 * 60);
 		expect(client.api.automations.updateTrigger).not.toHaveBeenCalled();
-		fireEvent.click(within(schedule).getByRole("button", { name: "Save" }));
+		fireEvent.click(within(routine).getByRole("button", { name: "Save" }));
 
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenCalledWith({
 				params: onlyTrigger(morningBrief),
 				payload: {
-					kind: "schedule",
+					kind: "routine",
 					schedule: {
 						repeat: "weekly",
 						every: 1,
@@ -862,7 +844,7 @@ describe("a bot's automations", () => {
 		fireEvent.click(within(adding).getByRole("button", { name: "Add trigger" }));
 		await waitFor(() =>
 			expect(client.api.automations.addTrigger).toHaveBeenCalledWith({
-				params: { botId: linear.id, automationId: morningBrief.automation.id },
+				params: { projectId: linear.defaultProjectId, automationId: morningBrief.automation.id },
 				payload: {
 					kind: "webhook",
 					auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
@@ -873,8 +855,8 @@ describe("a bot's automations", () => {
 		);
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-		const schedule = await openTrigger(/^Schedule.*Weekdays at 8:00/);
-		fireEvent.click(within(schedule).getByRole("button", { name: "Remove" }));
+		const routine = await openTrigger(/^Weekdays at 8:00/);
+		fireEvent.click(within(routine).getByRole("button", { name: "Remove" }));
 		await waitFor(() =>
 			expect(client.api.automations.removeTrigger).toHaveBeenCalledWith({
 				params: onlyTrigger(morningBrief),
@@ -882,9 +864,9 @@ describe("a bot's automations", () => {
 		);
 	});
 
-	it("keeps an unfamiliar schedule until a repeat replaces it", async () => {
+	it("keeps a routine's unfamiliar schedule until a repeat replaces it", async () => {
 		const hourly = withTrigger(morningBrief, {
-			kind: "schedule",
+			kind: "routine",
 			schedule: { repeat: "cron", expression: "15 */2 * * *" },
 			timezone: "UTC",
 			nextScheduledAt: null,
@@ -894,18 +876,18 @@ describe("a bot's automations", () => {
 			Effect.succeed({ automation: hourly.automation, secrets: [] }),
 		);
 		await openPanel(hourly);
-		const schedule = await openTrigger(/^Schedule/);
+		const routine = await openTrigger(/^Custom schedule/);
 
-		expect(within(schedule).getByText("15 */2 * * *")).toBeDefined();
-		expect(within(schedule).getByRole("radio", { name: "Daily" })).toHaveProperty("checked", false);
-		fireEvent.click(within(schedule).getByRole("radio", { name: "Daily" }));
-		fireEvent.click(within(schedule).getByRole("button", { name: "Save" }));
+		expect(within(routine).getByText("15 */2 * * *")).toBeDefined();
+		expect(within(routine).getByRole("radio", { name: "Daily" })).toHaveProperty("checked", false);
+		fireEvent.click(within(routine).getByRole("radio", { name: "Daily" }));
+		fireEvent.click(within(routine).getByRole("button", { name: "Save" }));
 
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenCalledWith({
 				params: onlyTrigger(hourly),
 				payload: {
-					kind: "schedule",
+					kind: "routine",
 					schedule: { repeat: "daily", every: 1, times: [9 * 60], startsOn: today() },
 					timezone: "UTC",
 				},
@@ -953,7 +935,7 @@ describe("a bot's automations", () => {
 
 		await waitFor(() =>
 			expect(client.api.automations.remove).toHaveBeenCalledWith({
-				params: { botId: linear.id, automationId: morningBrief.automation.id },
+				params: { projectId: linear.defaultProjectId, automationId: morningBrief.automation.id },
 			}),
 		);
 		await waitFor(() =>
@@ -987,14 +969,14 @@ describe("a bot's automations", () => {
 		fireEvent.click(screen.getByRole("switch", { name: "Automation on" }));
 		await waitFor(() =>
 			expect(client.api.automations.update).toHaveBeenCalledWith({
-				params: { botId: linear.id, automationId: morningBrief.automation.id },
+				params: { projectId: linear.defaultProjectId, automationId: morningBrief.automation.id },
 				payload: { state: "paused" },
 			}),
 		);
 
-		// Its tasks, its feed and how it ran are not theirs to read.
+		// Its threads, its feed and how it ran are not theirs to read.
 		expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
-		expect(client.api.chats.botTasks).not.toHaveBeenCalled();
+		expect(client.api.chats.botThreads).not.toHaveBeenCalled();
 		expect(client.api.conversations.get).not.toHaveBeenCalled();
 		expect(client.api.automations.runs).not.toHaveBeenCalled();
 	});
@@ -1019,7 +1001,8 @@ describe("a bot's automations", () => {
 		);
 
 		expect(within(panel).getByText("Weekdays at 8:00")).toBeDefined();
-		expect(within(panel).queryByRole("button", { name: /^Schedule/ })).toBeNull();
+		expect(within(panel).queryByRole("button", { name: /^Weekdays at 8:00/ })).toBeNull();
+		expect(within(panel).queryByRole("button", { name: "Add routine" })).toBeNull();
 		expect(within(panel).queryByRole("button", { name: "Add trigger" })).toBeNull();
 		expect(within(panel).getByLabelText("Instructions")).toHaveProperty("readOnly", true);
 	});

@@ -8,37 +8,41 @@ import { userText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import type { Authorization } from "../../authorization/authorization.ts";
-import type { BotPermission } from "../../authorization/permissions.ts";
+import type { ProjectPermission } from "../../authorization/permissions.ts";
 import { query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { automation, automationTrigger } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 
-/** An automation, by the bot it belongs to and its own id. */
-export interface OnBot {
-	botId: string;
+/** An automation, by the project it belongs to and its own id. */
+export interface InProject {
+	projectId: string;
 	automationId: string;
 }
 
-/** An automation on a bot in a workspace. */
+/** An automation of a project in a workspace. */
 export interface Scope {
 	readonly workspaceId: string;
-	readonly botId: string;
+	readonly projectId: string;
 	readonly automationId: string;
 }
 
 /**
  * The scope of the automation named, once the current actor may take
- * `permission` on its bot.
+ * `permission` in its project.
  */
 export const scopeOf = (
 	authorization: Authorization.Interface,
-	{ botId, automationId }: OnBot,
-	permission: BotPermission,
+	{ projectId, automationId }: InProject,
+	permission: ProjectPermission,
 ) =>
 	Effect.map(
-		authorization.bot(botId, permission),
-		({ bot }): Scope => ({ workspaceId: bot.workspaceId, botId: bot.id, automationId }),
+		authorization.project(projectId, permission),
+		({ project }): Scope => ({
+			workspaceId: project.workspaceId,
+			projectId: project.id,
+			automationId,
+		}),
 	);
 
 /** The automation `scope` names, as a condition on `automation`, unless it has been removed. */
@@ -46,7 +50,7 @@ export const inScope = (scope: Scope) =>
 	and(
 		eq(automation.id, scope.automationId),
 		eq(automation.workspaceId, scope.workspaceId),
-		eq(automation.botId, scope.botId),
+		eq(automation.projectId, scope.projectId),
 		isNull(automation.deletedAt),
 	);
 
@@ -57,7 +61,7 @@ export function toAutomation(
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
-		botId: row.botId,
+		projectId: row.projectId,
 		name: row.name,
 		instructions: row.instructions,
 		triggers: triggers.map(toTrigger),
@@ -71,7 +75,7 @@ export function toAutomation(
 
 function toTrigger(row: schema.AutomationTriggerRow): AutomationTrigger {
 	const { settings } = row;
-	return settings.kind === "schedule"
+	return settings.kind === "routine"
 		? { id: row.id, ...settings, nextScheduledAt: row.nextScheduledAt?.toISOString() ?? null }
 		: { id: row.id, ...settings };
 }
@@ -101,6 +105,16 @@ export class AutomationNotFound
 {
 	get userMessage() {
 		return userText`No such automation`;
+	}
+}
+
+/** The automation's project has no lead bot to do its runs, which a project from before leads may lack. */
+export class AutomationProjectHasNoLead
+	extends Data.TaggedError("AutomationProjectHasNoLead")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`This project has no lead bot to run its automations. Choose one in the project's settings first.`;
 	}
 }
 
@@ -150,13 +164,13 @@ export class AutomationDeliveryIdTooLong
 	}
 }
 
-/** A repository trigger for a repository the automation's bot doesn't have. */
+/** A repository trigger for a repository the automation's project's GitHub app doesn't work on. */
 export class AutomationRepositoryNotConnected
 	extends Data.TaggedError("AutomationRepositoryNotConnected")
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`That repository isn't one the bot's GitHub app works on. Add it in the bot's settings first.`;
+		return userText`That repository isn't one the project's GitHub app works on. Add it to the GitHub app first.`;
 	}
 }
 

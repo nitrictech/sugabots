@@ -7,8 +7,6 @@ const growthDesk: Typer = {
 	kind: "bot",
 	id: "0199a3a0-0000-7000-8000-0000000000a1",
 	name: "Growth Desk",
-	color: "green",
-	face: "pill",
 };
 
 const person = (id: string, name: string): Typer =>
@@ -51,7 +49,7 @@ export const WithTheBot = meta.story({
 	},
 });
 
-/** Crowd is more people typing than there are faces: three stack, and the label counts the rest. */
+/** Crowd is more people typing than the line names: two are named, and it counts the rest. */
 export const Crowd = meta.story({
 	args: { typers: [ana, ben, cleo, dev] as const },
 	play: async ({ canvas }) => {

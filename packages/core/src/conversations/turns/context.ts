@@ -2,7 +2,7 @@ import {
 	type Message,
 	messageAuthorName,
 	quotedPreview,
-	START_TASK_TOOL,
+	START_THREAD_TOOL,
 } from "@sugabots/contracts";
 import { DateTime } from "effect";
 import type { Models } from "../../providers/models/models.ts";
@@ -343,7 +343,7 @@ function todayInstruction(now: Date, context: TurnContext): string {
 		`In ${spoken} (${timeZone}), it is ${workspaceTime(now, timeZone)}.`,
 		"Work out dates and durations from this yourself, such as how many weeks are left until a date someone gives you, rather than asking them.",
 		automationsOn
-			? `Schedules you set up run in ${spoken}. Say their times plainly, naming the zone once when you confirm a schedule ("8am ${spoken}"). Don't ask the person for their timezone, explain it, or call it the workspace's unless they bring it up.`
+			? `Routines you set up run in ${spoken}. Say their times plainly, naming the zone once when you confirm a schedule ("8am ${spoken}"). Don't ask the person for their timezone, explain it, or call it the workspace's unless they bring it up.`
 			: undefined,
 		'You don\'t know the person\'s own timezone, which may differ from the workspace\'s, so their date may differ from this. If an answer depends on their local date or time ("today", "tonight", whether somewhere is open now), ask or say what you assumed.',
 	]
@@ -424,17 +424,17 @@ function whoReachesYou(context: TurnContext): string {
 		return "You are a Personal Assistant: only your person talks to you or reads this conversation.";
 	}
 	return context.bot.visibility === "private"
-		? "You are private: only the person who made you can talk to you or read your tasks. Workspace admins can also read your instructions and manage your settings."
-		: "You are public: anyone in the workspace can talk to you, add you to their channels, and read your instructions.";
+		? "You are private: only the person who made you can talk to you or read your threads. Workspace admins can also read your instructions and manage your settings."
+		: "You are public: anyone in the workspace can talk to you, add you to their projects, and read your instructions.";
 }
 
 /** Which conversation the turn is in, and what that means for who replies there. */
 function whereYouAre(context: TurnContext): string {
-	if (context.channel) {
-		return `You are in "${context.conversation.title}" in the channel ${context.channel.name}, where its people talk to each other and to the bots they name. When someone asks to take something on as a task of your own, call ${START_TASK_TOOL}.`;
+	if (context.project) {
+		return `You are in "${context.conversation.title}" in the project ${context.project.name}, where its people talk to each other and to the bots they name. When someone asks to take something on as a thread of your own, call ${START_THREAD_TOOL}.`;
 	}
-	return context.conversation.kind === "task"
-		? "You are in one of your tasks: a conversation with you about one piece of work."
+	return context.conversation.kind === "project_thread"
+		? "You are in one of your threads: a conversation with you about one piece of work."
 		: "You are in a conversation of your own.";
 }
 
@@ -446,6 +446,8 @@ function whyYou(context: TurnContext): string {
 			return "It is your turn because a person mentioned you.";
 		case "reply":
 			return "It is your turn because a person replied to your message.";
+		case "optional":
+			return "It is your turn because you lead this project, and its latest message mentions only people, not any bot. It may well be meant for them alone. Reply only if you can clearly help or were asked something; otherwise stay silent by writing nothing at all, and people will see you read it.";
 		case "collaboration":
 			return "It is your turn because another bot asked you to collaborate.";
 		case "resume":
@@ -453,8 +455,8 @@ function whyYou(context: TurnContext): string {
 		case "brief":
 			// With no other bot named, the bot briefs itself, so the brief reads as its own reply.
 			return context.messages[0] && isOwnMessage(context.messages[0], context.bot.id)
-				? "It is your turn because you started this task for the person in it, and its first message, which you wrote, is your brief. None of the work it describes is done yet: start on it now."
-				: "It is your turn because a bot started this task for the person in it, and its first message is your brief. Start on the work it describes now.";
+				? "It is your turn because you started this thread for the person in it, and its first message, which you wrote, is your brief. None of the work it describes is done yet: start on it now."
+				: "It is your turn because a bot started this thread for the person in it, and its first message is your brief. Start on the work it describes now.";
 		case "routine":
 			return "It is your turn because this automation was triggered.";
 		default:

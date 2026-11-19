@@ -31,7 +31,7 @@ import { admitSummary, type SummaryRequest } from "./summary.workflow.ts";
  * Summaries, written by the `summarise` system bot.
  *
  * After a bot completes a turn, a summary is requested for the conversation, though
- * a channel is never summarised. The
+ * a project's thread or a direct message is never summarised. The
  * system bot reads what was said since the last summary and rewrites it, and on
  * the first pass also titles the conversation. Its turns live in a system conversation hanging off
  * the one being summarised, so a person can read back what the system bot did
@@ -96,11 +96,16 @@ export const make = Effect.gen(function* () {
 						if (!scope) {
 							return skipped("The conversation, the bot that triggered it, or its message is gone");
 						}
-						// A channel goes on and on, and keeps the name people gave it: only a
-						// conversation, one piece of work, is summarised and titled from its summary.
-						const served = { id: scope.conversationId, kind: scope.conversationKind };
+						// A thread of a project people made goes on and on, and keeps the name people
+						// gave it: only a bot's conversation, one piece of work, its threads included,
+						// is summarised and titled from its summary.
+						const served = {
+							id: scope.conversationId,
+							kind: scope.conversationKind,
+							botId: scope.conversationBotId,
+						};
 						if (!isBotConversation(served))
-							return skipped("Channels and direct messages are not summarised");
+							return skipped("Projects' threads and direct messages are not summarised");
 						const summariser = yield* query((db) =>
 							findRunnableSystemBot(db, scope.workspaceId, SUMMARISE_SYSTEM_BOT),
 						);
@@ -288,12 +293,14 @@ const SUMMARY_TRANSCRIPT_OVERLAP_MESSAGES = 10;
 const BOT_SUMMARY_CONVERSATIONS = 15;
 
 /**
- * The conversations a bot's summary is written from: its own tasks and automation
- * feeds, which everyone who reaches the bot sees. A collaboration it was asked
- * in belongs to the conversation that asked, which they may not see.
+ * The conversations a bot's summary is written from: its own threads, in its
+ * default project, and automation feeds, which everyone who reaches the bot
+ * sees. A collaboration it was asked in belongs to the conversation that
+ * asked, which they may not see; so does a thread of a project people made,
+ * whose `bot_id` the view leaves null.
  */
 const BOT_SUMMARY_SOURCES = [
-	"task",
+	"project_thread",
 	"automation_feed",
 ] as const satisfies readonly ConversationKind[];
 

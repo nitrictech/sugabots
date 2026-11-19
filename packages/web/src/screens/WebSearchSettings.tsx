@@ -10,7 +10,7 @@ import {
 import { type ReactNode, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useSearchProvider, useSearchProviderActions } from "@/lib/search-provider.ts";
-import { Alert, Success } from "@/ui/alert.tsx";
+import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
@@ -19,9 +19,10 @@ import {
 	SettingsGroup,
 	SettingsRadioMark,
 	SettingsRow,
-	SettingsRowIcon,
+	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { LetterTile } from "./letter-tile.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
 /*
@@ -165,7 +166,7 @@ function ProviderChoice({
 							onChange={() => onChoose(candidate.id)}
 							className="sr-only"
 						/>
-						<SettingsRowIcon>{candidate.name.charAt(0)}</SettingsRowIcon>
+						<LetterTile name={candidate.name} />
 						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
 							<span className="truncate font-medium text-sm text-foreground">{candidate.name}</span>
 							<span className="text-pretty text-subtle-foreground text-xs">
@@ -260,15 +261,19 @@ function testStanding(
 	latest: SearchProviderTestResult | undefined,
 ): ReactNode {
 	if (latest) {
-		return latest.reachable ? (
-			<Success>Search works</Success>
-		) : (
-			<Alert>{latest.error ?? "The search did not work."}</Alert>
+		return (
+			<SettingsTestOutcome good={latest.reachable}>
+				{latest.reachable ? "Search works" : (latest.error ?? "The search did not work.")}
+			</SettingsTestOutcome>
 		);
 	}
 	if (provider?.status === "connected") return "The last test search worked.";
 	if (provider?.status === "error") {
-		return <Alert>{provider.lastTestError ?? "The last test search failed."}</Alert>;
+		return (
+			<SettingsTestOutcome good={false}>
+				{provider.lastTestError ?? "The last test search failed."}
+			</SettingsTestOutcome>
+		);
 	}
 	return undefined;
 }

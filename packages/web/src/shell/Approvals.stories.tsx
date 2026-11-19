@@ -8,7 +8,7 @@ import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyTaskFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyThreadFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * Every approval across the workspace, opened from the sidebar: what waits on
@@ -51,9 +51,9 @@ function request(id: string, tool: string, approval: ToolCallPart["approval"]): 
 			face: growthDesk.face,
 			shape: "circle",
 		},
-		channelId: revenue.id,
-		conversationId: storyTaskFor(growthDesk).id,
-		rootConversationId: storyTaskFor(growthDesk).id,
+		projectId: revenue.id,
+		conversationId: storyThreadFor(growthDesk).id,
+		rootConversationId: storyThreadFor(growthDesk).id,
 	};
 }
 
@@ -123,7 +123,7 @@ export const Opened = meta.story({
 			name: "Approval request: Send quote in Stripe",
 		});
 		await expect(page).toHaveTextContent("Acme Retail");
-		// The link waits for the channels and bots too, which can answer after the request.
+		// The link waits for the projects and bots too, which can answer after the request.
 		await expect(
 			await canvas.findByRole("link", { name: "Open conversation" }),
 		).toBeInTheDocument();

@@ -6,6 +6,7 @@ import { seedConversation } from "../conversations/seed.test-support.ts";
 import { automation, message, type TurnStatus, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
+import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
 import {
 	BOT_CACHES,
 	clearingOrder,
@@ -78,7 +79,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 			seedConversation(db, {
 				id,
 				workspaceId,
-				kind: "task",
+				kind: "project_thread",
 				botId,
 				title: "Conversation",
 				doneAt: done ? lastTurnAt : null,
@@ -114,12 +115,13 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 
 	/** An automation run in `state`, whose turn started at `startedAt`. */
 	async function anAutomationRun(state: RunState, startedAt: Date) {
+		const projectId = await runOnPostgres(defaultProjectOf(botId));
 		const [defined] = await onDatabase((db) =>
 			db
 				.insert(automation)
 				.values({
 					workspaceId,
-					botId,
+					projectId,
 					name: `Checks ${crypto.randomUUID()}`,
 					instructions: "Check.",
 				})

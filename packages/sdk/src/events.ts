@@ -39,7 +39,7 @@ export interface EventStream extends AsyncIterable<StreamEvent> {
 }
 
 export interface EventsApi {
-	/** Conversations, unread counts, bots and channels across one workspace. */
+	/** Conversations, unread counts, bots and projects across one workspace. */
 	workspace(workspaceId: string, options?: EventStreamOptions): EventStream;
 	/** One conversation's messages, turns, tool calls and collaborations. */
 	conversation(conversationId: string, options?: EventStreamOptions): EventStream;

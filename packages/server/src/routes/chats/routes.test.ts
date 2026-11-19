@@ -37,42 +37,45 @@ const signedIn = (init: RequestInit = {}) => ({
 	headers: { authorization: "Bearer member", "content-type": "application/json" },
 });
 
-const startTask = (body: object = {}) =>
+const startThread = (body: object = {}) =>
 	signedIn({ method: "POST", body: JSON.stringify({ id: MESSAGE, message: "Hi", ...body }) });
 
-describe("starting a task with a bot", () => {
+describe("starting a thread with a bot", () => {
 	it("hands on the bot and the message, and no files, which can't be uploaded before it starts", async () => {
-		let asked: Parameters<Chats.Interface["startTask"]>[0] | undefined;
+		let asked: Parameters<Chats.Interface["startThread"]>[0] | undefined;
 		await app({
-			startTask: (input) => {
+			startThread: (input) => {
 				asked = input;
 				return Effect.fail(new Chats.HostHasNoModel());
 			},
-		}).request(`/bots/${BOT}/tasks`, startTask({ attachments: [UPLOAD] }));
+		}).request(`/bots/${BOT}/threads`, startThread({ attachments: [UPLOAD] }));
 
 		expect(asked).toEqual({ botId: BOT, messageId: MESSAGE, content: "Hi" });
 	});
 
 	it("is a conflict with a bot that has no model, and not found with one the person cannot see", async () => {
 		const refusing = (failure: Chats.HostHasNoModel | ResourceHidden) =>
-			app({ startTask: () => Effect.fail(failure) }).request(`/bots/${BOT}/tasks`, startTask());
+			app({ startThread: () => Effect.fail(failure) }).request(
+				`/bots/${BOT}/threads`,
+				startThread(),
+			);
 
 		expect((await refusing(new Chats.HostHasNoModel())).status).toBe(409);
 		expect((await refusing(new ResourceHidden({ resource: "bot" }))).status).toBe(404);
 	});
 });
 
-describe("changing a channel's thread", () => {
-	it("is a conflict once the chat is archived, or when it is the channel's main chat", async () => {
-		const renamed = await app({
-			changeChat: () => Effect.fail(new Chats.ChatArchived()),
-		}).request(
+describe("changing a project's thread", () => {
+	it("is a conflict once the thread is archived", async () => {
+		const archivedThread = app({ changeThread: () => Effect.fail(new Chats.ChatArchived()) });
+		const renamed = await archivedThread.request(
 			`/conversations/${CHAT}/name`,
 			signedIn({ method: "PUT", body: JSON.stringify({ name: "Launch" }) }),
 		);
-		const archived = await app({
-			changeChat: () => Effect.fail(new Chats.FirstChatNotArchivable()),
-		}).request(`/conversations/${CHAT}/archived`, signedIn({ method: "PUT" }));
+		const archived = await archivedThread.request(
+			`/conversations/${CHAT}/archived`,
+			signedIn({ method: "PUT" }),
+		);
 
 		expect(renamed.status).toBe(409);
 		expect(archived.status).toBe(409);

@@ -2,19 +2,19 @@
 
 The words Sugabots uses for its concepts. The product, the docs, bot prompts, comments and identifiers all use these and no others. The **Code** column is the name in the code; where the code still uses an older one, [Code renames](#code-renames) maps it, and `node lint/check-glossary.ts --report` counts what is left.
 
-A comment explains with these definitions. "Everyone who can see the bot reads its tasks" is right; "everyone in the pod reads its threads" is not, even where the code it describes is not renamed yet.
+A comment explains with these definitions. "Everyone who can see the bot reads its threads" is right; "everyone in the channel reads its tasks" is not, even where the code it describes is not renamed yet.
 
 ## People and the workspace
 
 | Term | Meaning | Code |
 |---|---|---|
-| **Workspace** | A team's space: its people, bots, channels and settings. Everything below belongs to one workspace. A person may belong to several. | `workspace` |
+| **Workspace** | A team's space: its people, bots, projects and settings. Everything below belongs to one workspace. A person may belong to several. | `workspace` |
 | **Server** | One Sugabots installation, holding one or more workspaces. | `Installation` |
 | **Person** | Someone with an account, in one or more workspaces. | `user` |
 | **Role** | What a person may do in a workspace: **owner**, **admin**, **member** or **viewer**. | `workspace_member.role` |
 | **Owner** | The one person who created the workspace, or was handed it. Can do everything an admin can, and hand ownership to someone else. | |
-| **Admin** | May manage the workspace's settings, people and every bot, and sees private bots in lists (not their tasks). Admins are members of every channel. | |
-| **Member** | May create bots and channels, talk to public bots and take part in channels. | |
+| **Admin** | May manage the workspace's settings, people and every bot, and sees private bots in lists (not their threads). Admins are members of every project. | |
+| **Member** | May create bots and projects, talk to public bots and take part in projects. | |
 | **Viewer** | May read what they reach and take part, but not create or change anything. | |
 | **Invitation** | An email inviting someone to the workspace with a role. | `workspace_invite` |
 | **Setup** | Making a new workspace: its creator becomes its owner. | `onboarding` |
@@ -24,54 +24,58 @@ A comment explains with these definitions. "Everyone who can see the bot reads i
 
 | Term | Meaning | Code |
 |---|---|---|
-| **Bot** | An AI teammate with a name, handle, look, model and instructions. Owns its tasks, files, computer, connections, repositories and automations. | `bot` |
+| **Bot** | An AI teammate with a name, handle, look, model and instructions. Every bot has its own hidden **default project**, which it leads alone, so it has **threads**, **files**, **computers**, **connections** and **automations** just as a project does. | `bot` |
 | **Handle** | A bot's or person's `@name`, unique across the workspace. | `handle` |
 | **Creator** | The person who made a bot. The creator and admins may change it. | `createdById` |
-| **Public bot** | A bot everyone in the workspace can see and talk to, along with its tasks and files. Only public bots can be added to channels. | `visibility: "public"` |
-| **Private bot** | A bot only its creator can see and talk to. Admins see that it exists, not its tasks. Other bots may still ask it for help. | `visibility: "private"` |
+| **Public bot** | A bot everyone in the workspace can see and talk to, along with its threads and files. Only public bots can be added to projects. | `visibility: "public"` |
+| **Private bot** | A bot only its creator can see and talk to. Admins see that it exists, not its threads. Other bots may still ask it for help. | `visibility: "private"` |
 | **Pinned bot** | A bot a person has pinned to their sidebar. The sidebar shows pinned bots only; the rest are found by browsing. A bot is pinned for its creator when made. | `pinned_bot` |
 | **Personal Assistant** | Each person's own bot that nobody else can talk to: a guide that knows the workspace, points them to the right bot, tells them what needs their attention, and does things for them with their approval. Neither public nor private: only its person ever sees it. Always first in the sidebar. We manage its instructions; its person may change its look and add connections. | `bot` with `assistantOf` |
 | **System bot** | A bot that does background work and nobody talks to: the **Summariser** writes summaries, **Compaction** shortens long conversations. | `systemBotKey`: `summarise`, `compact` |
 | **Instructions** | A bot's prompt: who it is and how it works. A new bot starts by interviewing its creator to write them. | `prompt` |
 | **Model** | The language model a bot runs on, from one of the workspace's model providers. | `model` |
 
-## Conversations
+## Projects and conversations
 
 | Term | Meaning | Code |
 |---|---|---|
-| **Channel** | A long-running project shared by many people and many bots, holding its main chat, threads and files. **Public** channels are listed in the channel directory for anyone to find and join, but nobody is made a member; **private** ones are invitation-only. Any channel member or an admin may invite or remove people, and anyone may leave. Members add bots, which must be public; a bot made private leaves every channel. Admins are members of every channel. | `channel` |
-| **Main chat** | A channel's own conversation, with all its people and bots, where work is discussed and threads are started. | `channel_conversation` with `main` |
-| **Thread** | One focused conversation in a channel, beside its main chat, listed under the channel in the sidebar. Every channel member sees it. Only a channel has threads: a bot's conversations are tasks, and a reply to a message is just a message. | `channel_conversation` |
-| **Channel member** | A person or bot in a channel. | `channel_member`, `channel_bot` |
-| **Channel directory** | The list of public channels, and the private ones you're in, where you find, join and create channels. | |
-| **Task** | A conversation with one bot about one piece of work. Whoever can see the bot may see it and join in. Can be marked done. | `task` |
+| **Project** | A long-running piece of work shared by many people and many bots, led by one **lead bot**, holding its **threads**, **files**, **computers**, **connections**, **automations** and (to come) **tasks**. **Public** projects are listed in the project directory for anyone to find and join, but nobody is made a member; **private** ones are invitation-only. Any project member or an admin may invite or remove people, and anyone may leave. Members add bots, which must be public; a bot made private leaves every project. Admins are members of every project. | `project` |
+| **Thread** | A conversation in a project, with the project's people and bots; a project is made of its threads and has no chat of its own. A **bot's threads** are the threads of its default project: conversations with that one bot, which whoever can see the bot may see and join. A thread can be marked done. | `project_thread` |
+| **Lead bot** | The one bot that works on a project and answers its threads by default. Every project has one, chosen from public bots; a bot's default project is led by the bot. A project from before leads, with no bots, has none until someone chooses one. | `project.lead_bot_id` |
+| **Default project** | The hidden project every bot has, with only that bot in it as lead: where its own threads, files, computers, connections and automations live. Never listed in the project directory; nobody joins it; whoever can reach the bot reaches it. Made and deleted with its bot. | `project` with `default_of_bot_id` |
+| **Project member** | A person or bot in a project. | `project_member`, `project_bot` |
+| **Project directory** | The list of public projects, and the private ones you're in, where you find, join and create projects. | |
+| **Task** | *To come:* a piece of work on a project's board (Kanban), which people and bots move through its stages. | |
 | **Direct message** | A conversation between two or more people, with no bots. Only its people see it. | `direct_message` |
-| **Message** | One post in a main chat, thread, task or direct message, by a person or a bot. | `message` |
+| **Message** | One post in a thread or direct message, by a person or a bot. | `message` |
 | **Mention** | `@handle` in a message. Mentioning a bot asks it to reply; mentioning several bots asks each of them, at the same time. | `mention` |
 | **Turn** | One bot working on a reply: reading, using tools and writing. | `turn` |
-| **Floor** | Which bots reply to a message. In a task, the bot it's with; in a channel's main chat or threads, the bots mentioned, or the bot being replied to; in a direct message, none. | `FloorControl` |
-| **Collaboration** | A bot asking any other bot, public or private, for help. The other bot works in a task of its own and its answer comes back to the asker. | `collaboration` |
+| **Floor** | Which bots reply to a message in a thread, the same rule in every project: the project's bots it mentions, each at once; else the project's bot it replies to; else, when it mentions only people, the lead bot reads it and may stay silent, reacting 👀; else the lead bot. Mentions of bots outside the project are ignored, so in a bot's own threads that bot always answers. In a direct message, none. | `FloorControl` |
+| **Collaboration** | A bot asking any other bot, public or private, for help. The other bot works in a thread of its own and its answer comes back to the asker. | `collaboration` |
 | **Tool** | Something a bot can do besides write: run commands, search the web, use a connection. | `tool` |
 | **Approval** | A person allowing or refusing a tool call before it runs. | `approval` |
 | **Inbox** | What needs a person's attention: mentions, replies, finished work. | `inbox` |
 | **Summary** | The Summariser's short account of one conversation. | `summary` |
-| **Bot summary** | An at-a-glance account of what a bot has been doing across all its tasks. | `bot_summary` |
+| **Bot summary** | An at-a-glance account of what a bot has been doing across all its threads. | `bot_summary` |
 
-## A bot's resources
+## A project's resources
+
+A bot's resources are its default project's.
 
 | Term | Meaning | Code |
 |---|---|---|
-| **File** | A file a person uploaded or a bot made, such as a document or an HTML page, in a task or a channel's conversation. A bot's **Files** are those from its tasks; a channel's are those from its main chat and threads. | `file` |
-| **Computer** | A bot's one machine, where it runs commands and keeps files. Paused when idle. | `computer` |
+| **File** | A file a person uploaded or a bot made, such as a document or an HTML page, in a thread. A project's **Files** are those from its threads, so a bot's are those from its own threads. | `file` |
+| **Computer** | A machine a project's bots work on: run commands, keep files, use a desktop. A bot working in a project's thread uses the project's computer. An **online computer** runs at the workspace's computer provider and is paused when idle; a **personal computer** (to come, with the desktop app) is a person's own machine they let a bot use. | `computer` |
 | **Computer provider** | The service the workspace's computers run at. | `computer_provider` |
-| **Allowed host** | An internet address a computer may reach, set for the workspace or for one bot. | `allowed_host` |
+| **Allowed host** | An internet address a computer may reach, set for the workspace or for one project. | `allowed_host`, `project_allowed_host` |
 | **Blocked host** | An address no computer may reach. | `blocked_host` |
-| **Connection** | A service a bot is connected to: an MCP server or an HTTP endpoint, signed in with a key or OAuth, or its GitHub app. Belongs to one bot. | `connection` |
-| **GitHub app** | A bot's own GitHub App, made for it and installed on a GitHub account or organisation. Each bot has at most one. | `connection` of kind `github` |
-| **Repository** | A GitHub repository a bot works on, picked from what its GitHub app's installation can reach. | `repository` |
-| **Automation** | Work a bot does on its own, with instructions, started by its triggers. | `automation` |
-| **Trigger** | What starts an automation: a **schedule**, a **webhook** call, or a **GitHub** event. An automation may have several, of any kind. | `automation_trigger` |
-| **Run** | One time an automation ran, with its own task. | `run` |
+| **Connection** | A service a project is connected to: an MCP server or an HTTP endpoint, signed in with a key or OAuth, or its GitHub app. Belongs to one project. A bot working in a project's thread uses the project's connections and its own. | `connection` |
+| **GitHub app** | A project's own GitHub App, made for it and installed on a GitHub account or organisation. Each project, so each bot, has at most one. | `connection` of kind `github` |
+| **Repository** | A GitHub repository a project works on, picked from what its GitHub app's installation can reach. | `repository` |
+| **Automation** | Work a project's lead bot does on its own, with instructions, started by its routines and triggers, in a thread of the project, on its computer. | `automation` |
+| **Routine** | When an automation runs on a timetable, such as every weekday at 9. | `automation_trigger` of kind `routine` |
+| **Trigger** | An event that starts an automation: a **webhook** call or a **GitHub** event. An automation may have several routines and triggers. | `automation_trigger` |
+| **Run** | One time an automation ran, with its own thread. | `run` |
 | **Usage** | What the workspace spent on models, by model and by bot. | `usage` |
 
 ## Code renames
@@ -83,11 +87,11 @@ Old names still in the code, and what replaces them. Rename a name when you touc
 | `agent`, `agentId`, `Agent*` | `bot`, `botId`, `Bot*` |
 | `systemAgentKey`, system agent | `systemBotKey`, system bot |
 | `provisionedKey: "personal-assistant"` | `assistantOf` |
-| `pod`, `pod_member`, `podId` | `channel`, `channel_member`, `channelId` |
-| `crew`, `crewOf` | the channel's bots, `channelBotsOf` |
+| `pod`, `pod_member`, `podId` | `project`, `project_member`, `projectId` |
+| `crew`, `crewOf` | the project's bots |
 | `thread` (the table) | `conversation`, see below |
-| thread type `conversation` | `task` |
-| thread type `pod_chat` | `channel_conversation`; `main` marks the main chat |
+| thread type `conversation` | `project_thread` in the bot's default project |
+| thread type `pod_chat` | `project_thread` |
 | thread type `direct`, `direct_member` | `direct_message`, `direct_message_member` |
 | thread types `routine`, `routine_feed` | `run`, `automation_feed` |
 | thread type `system_agent` | `system` |
@@ -97,14 +101,18 @@ Old names still in the code, and what replaces them. Rename a name when you touc
 | `sandbox`, `sandbox_provider`, `sandbox_lease` | `computer`, `computer_provider`, `computer_lease` |
 | `sandbox_allowed_host`, `sandbox_blocked_host` | `allowed_host`, `blocked_host` |
 | `routine` | `automation` |
-| `routine_trigger`, kind `cron` | `automation_trigger`, kind `schedule` |
+| `routine_trigger`, kind `cron` | `automation_trigger`, kind `routine` |
 | `routine_execution` | `run` |
 | `activity` (the inbox) | `inbox` |
 | `tool-approvals` | `approvals` |
+| `channel`, `channel_member`, `channel_bot`, `channelId` | `project`, `project_member`, `project_bot`, `projectId` |
+| `channel_conversation` (a channel's main chat or thread) | `project_thread`; projects have no main chat |
+| `task` (a conversation with one bot), `bot_thread` | a thread in the bot's default project (`project_thread`) |
+| trigger kind `schedule` | `routine` |
 
 ### The `conversation` table
 
-Not a word people see. Messages, turns, tool calls, summaries, read state and files each belong to one main chat, thread, task or direct message, so they all point at one shared parent: a `conversation` row holding only what every kind has (its workspace, kind, title and times). What makes each kind what it is lives in its own table, keyed by the same id: `task` (its bot, who started it, when it was done), `channel_conversation` (its channel, whether it's the main chat, when it was archived), `direct_message` and its members, `collaboration` and `run`. Say "conversation" in code that works the same for every kind; otherwise name the kind.
+Not a word people see. Messages, turns, tool calls, summaries, read state and files each belong to one thread or direct message, so they all point at one shared parent: a `conversation` row holding only what every kind has (its workspace, kind, title and times). What makes each kind what it is lives in its own table, keyed by the same id: `project_thread` (its project, who started it, when it was done or archived), `direct_message` and its members, `collaboration` and `run`. Say "conversation" in code that works the same for every kind; otherwise name the kind.
 
 ## Retired terms
 
@@ -112,15 +120,18 @@ Words for things that no longer exist. Don't use them, even in comments explaini
 
 | Term | Was | Now |
 |---|---|---|
-| **Pod** | A group of people and bots sharing a computer, connections and access. | **Public** and **private** bots, and **channels**; resources belong to each **bot**. |
+| **Pod** | A group of people and bots sharing a computer, connections and access. | **Public** and **private** bots, and **projects**; resources belong to each **project**, a bot's to its default project. |
 | **Personal pod** | A person's private pod. | Their **Personal Assistant** and **private** bots. |
-| **Pod chat** | A pod's chat. | A channel's **main chat** and **threads**. |
-| **Bot channel** | A bot's own channel inside a pod. | The bot's **tasks**. |
-| **Crew** | The bots in a pod. | A channel's bots. |
-| **Thread** (with a bot) | A conversation with one bot. | **Task**. A thread is a conversation in a channel. |
+| **Pod chat** | A pod's chat. | A project's **threads**. |
+| **Bot channel** | A bot's own channel inside a pod. | The bot's **threads**. |
+| **Crew** | The bots in a pod. | A project's bots. |
+| **Channel** | A long-running space for many people and bots. | **Project**. |
+| **Main chat**, **main thread** | A channel's or project's own conversation, beside its threads, which every project had and none could archive. | Gone: a project is made of its **threads**, any of which can be archived. |
+| **Task** (a conversation with one bot) | A conversation with one bot about one piece of work. | A bot's **thread**. "Task" is kept for work on a project's board. |
+| **Schedule** (an automation's) | When an automation runs on a timetable. | **Routine**. |
 | **Artifact** | Something a bot made to keep. | A **file**. |
 | **Document** (as a kind of thing) | What a bot makes. | A **file**; "document" only describes what a file contains. |
 | **Sandbox** | A bot's machine. | **Computer**. |
-| **Routine** | Work a bot does on its own, or one of its schedules. | **Automation**, and its **schedule** triggers. |
+| **Routine** (work a bot does on its own) | An automation as a whole. | **Automation**; a routine is now when an automation runs on a timetable. |
 | **Agent** | A bot. | **Bot**. |
 | **Scribe** | The system bot that writes summaries, named as a character. | **Summariser**. |

@@ -1,48 +1,11 @@
-import { type BotLook, StillBotFace } from "@sugabots/avatars";
+import { StillBotFace } from "@sugabots/avatars";
 import { cn } from "cn";
 import type { ReactNode } from "react";
+import type { ChatAuthor, ChatPerson } from "@/components/chat";
 
-export interface Person {
-	name: string;
-	initials: string;
-	/** A licensed photo; without one, the avatar shows the initials. */
-	photo?: string;
-}
-
-export interface Bot {
-	name: string;
-	look: BotLook;
-}
-
-export type Author = { kind: "person"; person: Person } | { kind: "bot"; bot: Bot };
-
-/** The people and bots in the card demos. Their photos are from Unsplash; see the README. */
-export const people = {
-	gary: { name: "Gary Lum", initials: "GL", photo: "/people/gary-lum.jpg" },
-	lorraine: { name: "Lorraine Delgado", initials: "LD", photo: "/people/lorraine-delgado.jpg" },
-} as const satisfies Record<string, Person>;
-
-export const bots = {
-	growthDesk: { name: "Growth Desk", look: { color: "green", face: "pill", shape: "leaf" } },
-	pricingAnalyst: {
-		name: "Pricing Analyst",
-		look: { color: "sky", face: "pill", shape: "hexagon" },
-	},
-	copywriter: { name: "Copywriter", look: { color: "orange", face: "pill", shape: "blob" } },
-	researcher: { name: "Researcher", look: { color: "sky", face: "pill", shape: "drop" } },
-	inboxSorter: { name: "Inbox Sorter", look: { color: "green", face: "pill", shape: "squircle" } },
-	journal: { name: "Journal", look: { color: "purple", face: "pill", shape: "pebble" } },
-	ticketDesk: { name: "Ticket Desk", look: { color: "purple", face: "pill", shape: "circle" } },
-} as const satisfies Record<string, Bot>;
-
-export function PersonAvatar({ person, className }: { person: Person; className?: string }) {
+function PersonAvatar({ person }: { person: ChatPerson }) {
 	return (
-		<span
-			className={cn(
-				"grid size-7 shrink-0 place-items-center overflow-hidden rounded-full bg-landing-button text-xs font-semibold text-landing-secondary",
-				className,
-			)}
-		>
+		<span className="grid size-7 shrink-0 place-items-center overflow-hidden rounded-full bg-landing-button text-xs font-semibold text-landing-secondary">
 			{person.photo ? (
 				<img src={person.photo} alt="" className="size-full object-cover" />
 			) : (
@@ -52,14 +15,9 @@ export function PersonAvatar({ person, className }: { person: Person; className?
 	);
 }
 
-function AuthorAvatar({ author, className }: { author: Author; className?: string }) {
-	if (author.kind === "person")
-		return <PersonAvatar person={author.person} className={className} />;
-	return <StillBotFace {...author.bot.look} className={cn("size-7", className)} />;
-}
-
-export function authorName(author: Author) {
-	return author.kind === "person" ? author.person.name : author.bot.name;
+function AuthorAvatar({ author }: { author: ChatAuthor }) {
+	if (author.kind === "person") return <PersonAvatar person={author} />;
+	return <StillBotFace {...author.look} className="size-7" />;
 }
 
 /** The author's name, the app's "Bot" chip for a bot, and when they said it, as a message row heads its text. */
@@ -78,7 +36,7 @@ function MessageByline({ name, time, isBot }: { name: string; time: string; isBo
 }
 
 interface MessageRowProps {
-	author: Author;
+	author: ChatAuthor;
 	time: string;
 	text: string;
 	/** What hangs under the text, such as a reaction. */
@@ -92,7 +50,7 @@ export function MessageRow({ author, time, text, children, className }: MessageR
 		<div className={cn("flex gap-3", className)}>
 			<AuthorAvatar author={author} />
 			<div className="flex min-w-0 flex-col gap-0.5">
-				<MessageByline name={authorName(author)} time={time} isBot={author.kind === "bot"} />
+				<MessageByline name={author.name} time={time} isBot={author.kind === "bot"} />
 				<p className="text-sm/normal text-pretty text-landing-message">{text}</p>
 				{children}
 			</div>

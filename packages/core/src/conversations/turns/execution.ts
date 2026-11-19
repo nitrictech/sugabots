@@ -125,12 +125,12 @@ export const make = Effect.gen(function* () {
 						const request = run.request;
 						const loaded = yield* query((db) => loadTurnContext(db, request.conversationId));
 						if (!loaded) return yield* refuseRun(run, "The conversation is gone", CANCELLED);
-						// In a channel the bot has to be one of the channel's, whoever a
+						// In a project the bot has to be one of the project's, whoever a
 						// mention picks; in a bot's own conversation, it has to be that bot. A
 						// direct message between people has no bot at all. This is what
 						// stops a turn request naming a bot from elsewhere.
-						const speaker = loaded.channel
-							? loaded.channel.bots.find(({ id }) => id === request.botId)
+						const speaker = loaded.project
+							? loaded.project.bots.find(({ id }) => id === request.botId)
 							: loaded.bot?.id === request.botId
 								? loaded.bot
 								: undefined;
@@ -225,11 +225,20 @@ export const make = Effect.gen(function* () {
 									usesComputer: speaker.usesComputer,
 									naturalBrowsing: speaker.naturalBrowsing,
 									color: speaker.color,
+									defaultProjectId: speaker.defaultProject?.id ?? null,
 								},
+								// The rule `computerProjectIdOf` writes in SQL: a collaborator works
+								// in a conversation of its own, with what is its own.
+								projectId:
+									loaded.kind === "collaboration"
+										? (speaker.defaultProject?.id ?? null)
+										: loaded.projectId,
 								reason: request.reason,
-								channel: loaded.channel
-									? { name: loaded.channel.name, slug: loaded.channel.slug }
-									: null,
+								// A bot's default project is where its own threads are, not a project people made.
+								project:
+									loaded.project && loaded.project.defaultOfBotId === null
+										? { name: loaded.project.name }
+										: null,
 								workspaceName: loaded.workspace.name,
 								workspaceSlug: loaded.workspace.slug,
 								workspaceTimeZone: loaded.workspace.timeZone,
@@ -311,7 +320,7 @@ export interface TurnContext {
 		workspaceId: string;
 		title: string;
 		kind: ConversationKind;
-		/** The bot the conversation is with; none in a channel's conversation or between people. */
+		/** The bot the conversation is with; none in a project's thread or between people. */
 		botId: string | null;
 		/** Set when another bot opened this conversation by asking this one for help. */
 		parentConversationId: string | null;
@@ -337,14 +346,25 @@ export interface TurnContext {
 		naturalBrowsing: boolean;
 		/** Its colour, which its desktop in the computer is drawn in. */
 		color: BotColor;
+		/** Its default project, whose connections it brings wherever it works; none for a system bot. */
+		defaultProjectId: string | null;
 	};
+	/**
+	 * The project whose computer, connections and automations the turn works
+	 * with: the one its thread, automation feed or run is in, or for a
+	 * collaboration the bot's own default project. None for a system bot.
+	 */
+	projectId: string | null;
 	/** Why this bot has the turn, when the trigger recorded it. */
 	reason: TurnReason | undefined;
-	/** The channel the conversation is in, by name and address; none in a bot's own conversation. */
-	channel: { name: string; slug: string } | null;
+	/**
+	 * The project people made that the conversation is in, by name; none in a
+	 * bot's own conversation, its threads in its default project included.
+	 */
+	project: { name: string } | null;
 	workspaceName: string;
 	workspaceSlug: string;
-	/** The workspace's timezone, which the schedules the bot sets up run in. */
+	/** The workspace's timezone, which the routines the bot sets up run in. */
 	workspaceTimeZone: string;
 	/**
 	 * The person whose message this turn answers, who the bot acts for when
@@ -431,7 +451,7 @@ const MAX_HISTORY_MESSAGES = 1_000;
 /** How a run is refused whose reply nobody needs any more. */
 const CANCELLED = { status: "cancelled", userMessage: TURN_CANCELLED } as const;
 
-/** What people are told when a bot asked to reply in a conversation is not in its channel. */
+/** What people are told when a bot asked to reply in a conversation is not in its project. */
 const NOT_HERE = userText`The bot asked to reply doesn't answer here, so it cannot reply.`;
 
 /**
@@ -461,13 +481,6 @@ function notRunnable(reason: string, ended?: Ended): NotRunnable {
 	return { _tag: "NotRunnable", reason, ended };
 }
 
-/**
- * Everything the model is told about the conversation, in one statement: the
- * conversation with its workspace, its channel and the bots in it or the bot it is
- * with, the people and bots in it, its compaction, and its newest completed
- * messages since the compaction kept them, with the parts placed in them.
- */
-/** What a bot that speaks in a conversation is read with. */
 const SPEAKER_COLUMNS = {
 	id: true,
 	name: true,
@@ -475,7 +488,6 @@ const SPEAKER_COLUMNS = {
 	color: true,
 	face: true,
 	shape: true,
-	description: true,
 	model: true,
 	prompt: true,
 	disabledTools: true,
@@ -485,6 +497,15 @@ const SPEAKER_COLUMNS = {
 	visibility: true,
 } as const;
 
+/** Its default project, whose connections it brings to every project it works in. */
+const SPEAKER_RELATIONS = { defaultProject: { columns: { id: true } } } as const;
+
+/**
+ * Everything the model is told about the conversation, in one statement: the
+ * conversation with its workspace, its project and the bots in it or the bot it is
+ * with, the people and bots in it, its compaction, and its newest completed
+ * messages since the compaction kept them, with the parts placed in them.
+ */
 const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 	db: Executor,
 	conversationId: string,
@@ -494,7 +515,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 		columns: {
 			id: true,
 			workspaceId: true,
-			channelId: true,
+			projectId: true,
 			parentConversationId: true,
 			botId: true,
 			title: true,
@@ -503,11 +524,11 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 		},
 		with: {
 			workspace: { columns: { name: true, slug: true, timeZone: true } },
-			channel: {
-				columns: { id: true, name: true, slug: true },
-				with: { bots: { columns: SPEAKER_COLUMNS, orderBy: { name: "asc" } } },
+			project: {
+				columns: { id: true, name: true, defaultOfBotId: true },
+				with: { bots: { columns: SPEAKER_COLUMNS, with: SPEAKER_RELATIONS } },
 			},
-			bot: { columns: SPEAKER_COLUMNS },
+			bot: { columns: SPEAKER_COLUMNS, with: SPEAKER_RELATIONS },
 			participants: {
 				columns: {},
 				orderBy: { createdAt: "asc", id: "asc" },

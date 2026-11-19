@@ -125,13 +125,13 @@ function approvalLink(request: ApprovalRequest) {
 
 /**
  * A request waiting on the person, as a card: what the bot would do, which
- * bot, in which channel and when, the request itself, and Allow and Deny, with a
+ * bot, in which project and when, the request itself, and Allow and Deny, with a
  * way to the conversation it was asked in.
  */
 function WaitingCard({ request }: { request: ApprovalRequest }) {
 	const { bot, call } = request;
 	const { action } = useApprovalApp(request);
-	const { channel, askedIn: asked } = useAskedIn(request);
+	const { project, askedIn: asked } = useAskedIn(request);
 	const review = useReviewToolCall(request.conversationId);
 	// A phone answers with two wide buttons, and opens the request whole from its name.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
@@ -180,7 +180,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 				<span className="flex-1 max-md:hidden" />
 				<RequestConversationLink
 					request={request}
-					channel={channel}
+					project={project}
 					// A phone reaches the conversation from the request's own page.
 					className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-foreground max-md:hidden"
 				/>

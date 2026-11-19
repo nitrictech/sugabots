@@ -9,8 +9,8 @@ import {
 	type WebhookSource,
 	webhookSecretLongEnough,
 } from "@sugabots/contracts";
-import { ChevronDown, Eye, EyeOff, Webhook } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { Eye, EyeOff, Webhook } from "lucide-react";
+import { type ChangeEvent, type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import {
 	WEBHOOK_ALGORITHM_OPTIONS,
@@ -29,16 +29,13 @@ import {
 	useAutomationSecret,
 } from "@/lib/automations.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { resourcePermissions } from "@/lib/resource-owner.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/ui/dropdown-menu.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { SettingsMenuRow } from "@/ui/settings-menu-row.tsx";
 import { SettingsControlRow, SettingsFieldLabel, SettingsGroup } from "@/ui/settings-page.tsx";
+import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import type { PlacedAutomation } from "./AutomationEditor.tsx";
 import { FilterGroup } from "./AutomationWebhookFilter.tsx";
 
@@ -150,7 +147,7 @@ export function NewWebhookGroups({
 	draft: WebhookDraft;
 	note: ReactNode;
 	onChange: (draft: WebhookDraft) => void;
-	onFilterEditingChange?: (editing: boolean) => void;
+	onFilterEditingChange: (editing: boolean) => void;
 }) {
 	const changeAuth = (auth: WebhookAuth) => onChange({ ...draft, auth });
 	return (
@@ -170,8 +167,10 @@ export function NewWebhookGroups({
 				/>
 				<SecretField
 					auth={draft.auth}
-					value={draft.secret}
-					onChange={(secret) => onChange({ ...draft, secret })}
+					field={{
+						value: draft.secret,
+						onChange: (event) => onChange({ ...draft, secret: event.currentTarget.value }),
+					}}
 				/>
 			</SettingsGroup>
 			<FilterGroup
@@ -208,9 +207,9 @@ export function WebhookGroups({
 	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
 	onChangeFilter: (filter: WebhookCondition[]) => Promise<unknown>;
 }) {
-	const { automation, bot } = placed;
-	const canManage = bot.permissions.manageAutomations;
-	const address = { botId: bot.id, automationId: automation.id, triggerId };
+	const { automation, owner } = placed;
+	const canManage = resourcePermissions(owner).manageAutomations;
+	const address = { projectId: automation.projectId, automationId: automation.id, triggerId };
 	const saved = useAutomationSecret({ ...address, canManage }).data;
 	const url = webhookAddress(triggerId);
 	return (
@@ -278,7 +277,7 @@ function AuthRows({
 	return (
 		<>
 			{!isSource(auth.kind) && (
-				<MenuRow
+				<SettingsMenuRow
 					label="Auth"
 					options={WEBHOOK_AUTH_OPTIONS}
 					value={auth.kind}
@@ -296,13 +295,13 @@ function AuthRows({
 			)}
 			{auth.kind === "hmac" && (
 				<>
-					<MenuRow
+					<SettingsMenuRow
 						label="Algorithm"
 						options={WEBHOOK_ALGORITHM_OPTIONS}
 						value={auth.algorithm}
 						onChange={(algorithm) => onChange({ ...auth, algorithm })}
 					/>
-					<MenuRow
+					<SettingsMenuRow
 						label="Encoding"
 						options={WEBHOOK_ENCODING_OPTIONS}
 						value={auth.encoding}
@@ -321,7 +320,7 @@ function AuthRows({
 			)}
 			{!isSource(auth.kind) &&
 				(deliveryIdHeader === undefined ? (
-					<MenuRow
+					<SettingsMenuRow
 						label="Delivery ID"
 						value="automatic"
 						options={[
@@ -364,7 +363,7 @@ function SourceRow({
 	onChange: (auth: WebhookAuth) => void;
 }) {
 	return (
-		<MenuRow
+		<SettingsMenuRow
 			label="Source"
 			options={SOURCE_OPTIONS}
 			value={sourceOf(auth)}
@@ -373,54 +372,6 @@ function SourceRow({
 				onChange(source === "generic" ? DEFAULT_WEBHOOK_AUTH : { kind: source })
 			}
 		/>
-	);
-}
-
-/**
- * A row whose value is picked from a menu that opens under its arrow, which
- * turns while the menu is open. `mark` draws an icon beside each option.
- */
-function MenuRow<Value extends string>({
-	label,
-	options,
-	value,
-	mark,
-	onChange,
-}: {
-	label: string;
-	options: readonly { value: Value; label: string }[];
-	value: Value;
-	mark?: (value: Value) => ReactNode;
-	onChange: (value: Value) => void;
-}) {
-	const current = options.find((option) => option.value === value);
-	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				aria-label={`${label}: ${current?.label ?? value}`}
-				className="group focus-ring flex min-h-11.5 w-full cursor-pointer items-center gap-3 border-border border-b px-4 py-2.5 text-left text-sm text-foreground transition-colors last:border-b-0 hover:bg-panel"
-			>
-				<SettingsFieldLabel>{label}</SettingsFieldLabel>
-				<span className="flex min-w-0 flex-1 items-center gap-2.5">
-					{mark?.(value)}
-					<span className="min-w-0 flex-1 truncate">{current?.label ?? value}</span>
-				</span>
-				<ChevronDown
-					aria-hidden
-					size={15}
-					strokeWidth={2.4}
-					className="shrink-0 text-subtle-foreground transition-transform group-data-popup-open:rotate-180"
-				/>
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="min-w-56">
-				{options.map((option) => (
-					<DropdownMenuItem key={option.value} onClick={() => onChange(option.value)}>
-						{mark?.(option.value)}
-						{option.label}
-					</DropdownMenuItem>
-				))}
-			</DropdownMenuContent>
-		</DropdownMenu>
 	);
 }
 
@@ -466,34 +417,13 @@ function CommittedFieldRow({
 	allowEmpty?: boolean;
 	onCommit: (value: string) => void;
 }) {
-	const [draft, setDraft] = useState(value);
+	const { fieldProps } = useCommittedDraft(value, onCommit, { allowEmpty });
 	const id = useId();
-
-	function commit() {
-		const next = draft.trim();
-		if ((next === "" && !allowEmpty) || next === value) {
-			setDraft(value);
-			return;
-		}
-		setDraft(next);
-		onCommit(next);
-	}
-
 	return (
 		<SettingsControlRow label={label} htmlFor={id}>
 			<input
 				id={id}
-				value={draft}
-				onChange={(event) => setDraft(event.target.value)}
-				onBlur={commit}
-				onKeyDown={(event) => {
-					if (event.key === "Enter") event.currentTarget.blur();
-					if (event.key === "Escape" && draft !== value) {
-						// Undoing the edit takes this Escape, so the dialog around it stays open.
-						event.stopPropagation();
-						setDraft(value);
-					}
-				}}
+				{...fieldProps}
 				autoComplete="off"
 				spellCheck={false}
 				placeholder={placeholder}
@@ -530,13 +460,15 @@ function SecretGroup({
 	savedSecret: string;
 }) {
 	const actions = useAutomationActions();
-	const [draft, setDraft] = useState(savedSecret);
-	const next = draft.trim();
-
-	function commit() {
-		if (next === savedSecret || !secretReady(auth, next)) return;
-		actions.rotateSecret.mutate({ ...address, secret: next === "" ? null : next });
-	}
+	const { draft, fieldProps } = useCommittedDraft(
+		savedSecret,
+		(secret) => {
+			// One too short stays in the field, with the note saying why, until it is long enough.
+			if (!secretReady(auth, secret)) return;
+			actions.rotateSecret.mutate({ ...address, secret: secret === "" ? null : secret });
+		},
+		{ allowEmpty: true },
+	);
 
 	return (
 		<SettingsGroup note={hasSecret ? authNote(auth) : NO_SECRET_NOTE}>
@@ -548,14 +480,11 @@ function SecretGroup({
 			/>
 			<SecretField
 				auth={auth}
-				value={draft}
-				onChange={setDraft}
-				onCommit={commit}
-				onRevert={draft === savedSecret ? undefined : () => setDraft(savedSecret)}
+				field={fieldProps}
 				error={
 					actions.rotateSecret.error
 						? failureMessage(actions.rotateSecret.error)
-						: secretReady(auth, next)
+						: secretReady(auth, draft)
 							? undefined
 							: SECRET_TOO_SHORT_NOTE
 				}
@@ -566,23 +495,22 @@ function SecretGroup({
 
 /**
  * A secret as a field, typed or pasted in, such as the signing secret a
- * sender made. It shows hidden until Show, and can be copied. `onCommit`
- * runs when it is left or Enter is pressed, and `onRevert`, given while there
- * is an edit to undo, on Escape.
+ * sender made. It shows hidden until Show, and can be copied. `field` is
+ * spread onto the input: its value and how it changes, and for a saved
+ * secret, `useCommittedDraft`'s saving when it is left.
  */
 function SecretField({
 	auth,
-	value,
-	onChange,
-	onCommit,
-	onRevert,
+	field,
 	error,
 }: {
 	auth: WebhookAuth;
-	value: string;
-	onChange: (value: string) => void;
-	onCommit?: () => void;
-	onRevert?: () => void;
+	field: {
+		value: string;
+		onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+		onBlur?: () => void;
+		onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
+	};
 	error?: string;
 }) {
 	const id = useId();
@@ -595,28 +523,22 @@ function SecretField({
 				<input
 					id={id}
 					type={shown ? "text" : "password"}
-					value={value}
-					onChange={(event) => onChange(event.target.value)}
-					onBlur={onCommit}
-					onKeyDown={(event) => {
-						if (event.key === "Enter") event.currentTarget.blur();
-						if (event.key === "Escape" && onRevert) {
-							// Undoing the edit takes this Escape, so the dialog around it stays open.
-							event.stopPropagation();
-							onRevert();
-						}
-					}}
+					{...field}
 					autoComplete="off"
 					spellCheck={false}
 					placeholder={secretPlaceholder(auth)}
 					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-xs text-foreground outline-none placeholder:font-sans placeholder:text-sm placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
 				/>
-				{value !== "" && (
+				{field.value !== "" && (
 					<>
 						<IconButton label={shown ? "Hide" : "Show"} size="lg" onClick={() => setShown(!shown)}>
 							{shown ? <EyeOff /> : <Eye />}
 						</IconButton>
-						<CopyIconButton label={`Copy ${label.toLowerCase()}`} text={value.trim()} size="lg" />
+						<CopyIconButton
+							label={`Copy ${label.toLowerCase()}`}
+							text={field.value.trim()}
+							size="lg"
+						/>
 					</>
 				)}
 			</div>

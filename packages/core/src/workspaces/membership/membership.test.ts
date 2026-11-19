@@ -6,9 +6,9 @@ import { CurrentActor } from "../../authorization/current-actor.ts";
 import { noComputers } from "../../computers/testing.ts";
 import {
 	bot,
-	channel,
-	channelMember,
 	modelProvider,
+	project,
+	projectMember,
 	providerModel,
 	searchProvider,
 	user,
@@ -535,13 +535,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
-	it("puts an administrator in every channel, whether invited or promoted", async () => {
+	it("puts an administrator in every project, whether invited or promoted", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const kim = await person("Kim");
 		const [shared] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId: workspace.id,
 					name: "Launch",
@@ -549,13 +549,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				})
 				.returning(),
 		);
-		if (!shared) throw new Error("The channel was not created");
+		if (!shared) throw new Error("The project was not created");
 		const inShared = () =>
 			onDatabase((db) =>
 				db
-					.select({ userId: channelMember.userId })
-					.from(channelMember)
-					.where(eq(channelMember.channelId, shared.id)),
+					.select({ userId: projectMember.userId })
+					.from(projectMember)
+					.where(eq(projectMember.projectId, shared.id)),
 			).then((rows) => rows.map((row) => row.userId).toSorted());
 
 		const bobMember = await join(workspace.id, ada.id, bob);
@@ -648,13 +648,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
 	});
 
-	it("transfers ownership, putting the new owner in every channel and making the old one an admin", async () => {
+	it("transfers ownership, putting the new owner in every project and making the old one an admin", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const bobMember = await join(workspace.id, ada.id, bob, "viewer");
 		const [shared] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId: workspace.id,
 					name: "Launch",
@@ -662,7 +662,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				})
 				.returning(),
 		);
-		if (!shared) throw new Error("The channel was not created");
+		if (!shared) throw new Error("The project was not created");
 
 		expect(
 			await run(ada.id, (m) =>
@@ -675,9 +675,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ userId: channelMember.userId })
-					.from(channelMember)
-					.where(eq(channelMember.channelId, shared.id)),
+					.select({ userId: projectMember.userId })
+					.from(projectMember)
+					.where(eq(projectMember.projectId, shared.id)),
 			).then((rows) => rows.map((row) => row.userId).toSorted()),
 		).toEqual([ada.id, bob.id].toSorted());
 		// Ada holds nothing of the owner's now, and Bob can leave nothing behind.
@@ -733,13 +733,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
-	it("takes a removed member out of their channels, does not put them back when they rejoin, and gives them one Personal Assistant", async () => {
+	it("takes a removed member out of their projects, does not put them back when they rejoin, and gives them one Personal Assistant", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const bobMember = await join(workspace.id, ada.id, bob);
 		const [shared] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId: workspace.id,
 					name: "Private",
@@ -747,11 +747,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				})
 				.returning(),
 		);
-		if (!shared) throw new Error("The channel was not created");
+		if (!shared) throw new Error("The project was not created");
 		await onDatabase((db) =>
 			db
-				.insert(channelMember)
-				.values({ workspaceId: workspace.id, channelId: shared.id, userId: bob.id }),
+				.insert(projectMember)
+				.values({ workspaceId: workspace.id, projectId: shared.id, userId: bob.id }),
 		);
 
 		await run(ada.id, (m) => m.remove({ workspace: workspace.id, memberId: bobMember.id }));
@@ -761,8 +761,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			await onDatabase((db) =>
 				db
 					.select()
-					.from(channelMember)
-					.where(and(eq(channelMember.channelId, shared.id), eq(channelMember.userId, bob.id))),
+					.from(projectMember)
+					.where(and(eq(projectMember.projectId, shared.id), eq(projectMember.userId, bob.id))),
 			),
 		).toEqual([]);
 		expect(
@@ -775,13 +775,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		).toHaveLength(1);
 	});
 
-	it("lets somebody who created a channel leave, and keeps the channel", async () => {
+	it("lets somebody who created a project leave, and keeps the project", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		await join(workspace.id, ada.id, bob);
 		const [shared] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId: workspace.id,
 					name: "Launch",
@@ -790,11 +790,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				})
 				.returning(),
 		);
-		if (!shared) throw new Error("The channel was not created");
+		if (!shared) throw new Error("The project was not created");
 
 		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
 		expect(
-			await onDatabase((db) => db.select().from(channel).where(eq(channel.id, shared.id))),
+			await onDatabase((db) => db.select().from(project).where(eq(project.id, shared.id))),
 		).toHaveLength(1);
 	});
 
@@ -832,7 +832,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			role: "owner",
 			permissions: {
 				manageMembers: true,
-				createChannels: true,
+				createProjects: true,
 				manageAdmins: true,
 				transferOwnership: true,
 			},
@@ -841,7 +841,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			role: "viewer",
 			permissions: {
 				manageMembers: false,
-				createChannels: false,
+				createProjects: false,
 				manageAdmins: false,
 				transferOwnership: false,
 			},

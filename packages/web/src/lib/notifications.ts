@@ -38,20 +38,33 @@ export function useNotificationSettings() {
 	});
 }
 
-export function useUpdateNotificationPreferences() {
+/**
+ * Changes some of the person's notification preferences. The API takes them
+ * all at once, so the rest are sent as `settings` has them.
+ */
+export function useChangeNotificationPreferences(settings: NotificationSettings) {
 	const queries = useQueryClient();
-	return useMutation({
+	const update = useMutation({
 		mutationFn: (preferences: NotificationPreferences) =>
 			Effect.runPromise(client.api.notifications.updatePreferences({ payload: preferences })),
-		onSuccess: (settings) => queries.setQueryData(settingsKey, settings),
+		onSuccess: (saved) => queries.setQueryData(settingsKey, saved),
 	});
+	return (change: Partial<NotificationPreferences>) =>
+		update.mutate({
+			level: settings.level,
+			pausedUntil: settings.pausedUntil,
+			quietHours: settings.quietHours,
+			turnFailures: settings.turnFailures,
+			automationRuns: settings.automationRuns,
+			...change,
+		});
 }
 
 /**
- * Where a level applies in place of the one above it: a channel, in place of the
- * person's own, or one of its bots, in place of the channel's.
+ * Where a level applies in place of the one above it: a project, in place of the
+ * person's own, or one of its bots, in place of the project's.
  */
-export type NotificationPlace = { kind: "channel"; id: string } | { kind: "bot"; id: string };
+export type NotificationPlace = { kind: "project"; id: string } | { kind: "bot"; id: string };
 
 /** Sets the level for a place, or with null goes back to the one above it. */
 export function useSetNotificationLevel() {
@@ -96,7 +109,7 @@ function paramsOf(place: NotificationPlace) {
 
 /** Where a place's own choices are kept in the settings, and its id there. */
 function fieldOf(place: NotificationPlace) {
-	return [place.kind === "channel" ? "channels" : "bots", place.id] as const;
+	return [place.kind === "project" ? "projects" : "bots", place.id] as const;
 }
 
 /** `record` with `id` set to `value`, or without it when `value` is null. */

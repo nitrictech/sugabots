@@ -2,12 +2,12 @@ import type { AnsweredApproval, ApprovalRequest, ToolCallPart } from "@sugabots/
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, channels, linear, mount } from "@/test-api.tsx";
+import { apiAnswers, linear, mount, projects } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const channel = channels[0] as (typeof channels)[number];
+const project = projects[0] as (typeof projects)[number];
 const host = {
 	kind: "bot" as const,
 	id: linear.id,
@@ -39,7 +39,7 @@ function request(id: string, approval: ToolCallPart["approval"]): ApprovalReques
 	return {
 		call: call(id, approval),
 		bot: host,
-		channelId: channel.id,
+		projectId: project.id,
 		conversationId: "0199a3a0-0000-7000-8000-0000000003b1",
 		rootConversationId: "0199a3a0-0000-7000-8000-0000000003b1",
 	};
@@ -108,30 +108,30 @@ describe("Approvals", () => {
 	it("opens a request raised in a collaboration at the asker's conversation, not the collaborator's", async () => {
 		const collaboration = "0199a3a0-0000-7000-8000-0000000003d1";
 		const root = "0199a3a0-0000-7000-8000-0000000003d2";
-		const inTask = {
+		const inThread = {
 			...waiting,
-			channelId: null,
+			projectId: null,
 			conversationId: collaboration,
 			rootConversationId: root,
 		};
-		const inChannel = {
+		const inProject = {
 			...request("0199a3a0-0000-7000-8000-0000000003c3", waiting.call.approval),
 			conversationId: collaboration,
 			rootConversationId: root,
 		};
 
-		inbox({ waiting: [inTask], answered: [] });
-		mount(`/suga/approvals/${inTask.call.id}`);
+		inbox({ waiting: [inThread], answered: [] });
+		mount(`/suga/approvals/${inThread.call.id}`);
 		expect(
 			(await screen.findByRole("link", { name: "Open conversation" })).getAttribute("href"),
-		).toBe(`/suga/tasks/${root}?item=${collaboration}`);
+		).toBe(`/suga/threads/${root}?item=${collaboration}`);
 		cleanup();
 
-		inbox({ waiting: [inChannel], answered: [] });
-		mount(`/suga/approvals/${inChannel.call.id}`);
+		inbox({ waiting: [inProject], answered: [] });
+		mount(`/suga/approvals/${inProject.call.id}`);
 		expect(
 			(await screen.findByRole("link", { name: "Open conversation" })).getAttribute("href"),
-		).toBe(`/suga/channels/${channel.slug}/${root}?item=${collaboration}`);
+		).toBe(`/suga/projects/${project.slug}/${root}?item=${collaboration}`);
 	});
 
 	it("says a request is gone when the inbox no longer holds it", async () => {

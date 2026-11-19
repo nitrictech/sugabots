@@ -1,10 +1,12 @@
 import type { ConnectionTool, NewConnection } from "@sugabots/contracts";
+import { inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Credentials } from "../../credentials/credentials.ts";
 import {
 	bot as botTable,
 	connection,
+	project,
 	user,
 	workspace,
 	workspaceMember,
@@ -24,8 +26,8 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 	let connections: Promised<ConnectionRepository.Interface>;
 	let workspaceId: string;
 	let userId: string;
-	let botId: string;
-	let otherBotId: string;
+	let projectId: string;
+	let otherProjectId: string;
 
 	beforeAll(async () => {
 		connections = await servedOnPostgres(ConnectionRepository.Service, ConnectionRepository.layer);
@@ -35,9 +37,10 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		await closeDatabase();
 	});
 
-	const create = (input: NewConnection) => connections.create(workspaceId, botId, userId, input);
-	/** The connection as the settings page is shown it, through the bot `owner`. */
-	const shown = (connectionId: string, owner = botId) =>
+	const create = (input: NewConnection) =>
+		connections.create(workspaceId, projectId, userId, input);
+	/** The connection as the settings page is shown it, through the project `owner`. */
+	const shown = (connectionId: string, owner = projectId) =>
 		runOnPostgres(
 			Effect.flatMap(Credentials.Service, (cipher) =>
 				connectionIn(workspaceId, owner, connectionId, cipher),
@@ -79,8 +82,20 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 				.returning(),
 		);
 		if (!bot || !otherBot) throw new Error("bot fixture");
-		botId = bot.id;
-		otherBotId = otherBot.id;
+		// Each bot's connections are its default project's.
+		const defaults = await onDatabase((db) =>
+			db
+				.select({ id: project.id, botId: project.defaultOfBotId })
+				.from(project)
+				.where(inArray(project.defaultOfBotId, [bot.id, otherBot.id])),
+		);
+		const defaultOf = (botId: string) => {
+			const found = defaults.find((one) => one.botId === botId);
+			if (!found) throw new Error("default project fixture");
+			return found.id;
+		};
+		projectId = defaultOf(bot.id);
+		otherProjectId = defaultOf(otherBot.id);
 	});
 
 	it("refuses a second connection with the same name", async () => {
@@ -99,7 +114,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 
 	/** Records that the connection's server listed `tools`, as a test of its configuration would. */
 	async function listTools(connectionId: string, tools: ConnectionTool[]) {
-		const target = await connections.target(workspaceId, botId, connectionId);
+		const target = await connections.target(workspaceId, projectId, connectionId);
 		if (!target) throw new Error("no target");
 		await connections.recordTest(workspaceId, connectionId, target.configurationUpdatedAt, {
 			tools,
@@ -139,15 +154,15 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			signInRejectedAt: "2026-10-05T21:00:08.000Z",
 		});
 		await listTools(wiki.id, [lookup, edit]);
-		await connections.update(workspaceId, botId, wiki.id, { toolAccess: { edit: "off" } });
+		await connections.update(workspaceId, projectId, wiki.id, { toolAccess: { edit: "off" } });
 		await listTools(tracker.id, [lookup, wipe]);
-		await connections.update(workspaceId, botId, tracker.id, { toolAccess: { lookup: "off" } });
+		await connections.update(workspaceId, projectId, tracker.id, { toolAccess: { lookup: "off" } });
 
-		const forBot = await connections.targetsForBot(workspaceId, botId);
+		const forProject = await connections.targetsForProject(workspaceId, projectId);
 
 		// Linear is still waiting on its first sign-in, Notion's was refused, and
 		// every one of Tracker's tools is off, so none of them is reached.
-		expect(forBot).toEqual({
+		expect(forProject).toEqual({
 			targets: [
 				expect.objectContaining({
 					connectionId: wiki.id,
@@ -170,7 +185,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			expect.objectContaining({ name: "wipe", access: "off" }),
 		]);
 
-		await connections.update(workspaceId, botId, made.id, { toolAccess: { lookup: "off" } });
+		await connections.update(workspaceId, projectId, made.id, { toolAccess: { lookup: "off" } });
 		await listTools(made.id, [edit]);
 		await listTools(made.id, [lookup, edit]);
 
@@ -184,17 +199,19 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
 		await listTools(made.id, [lookup, edit, wipe]);
 
-		await connections.update(workspaceId, botId, made.id, { toolAccess: { edit: "allow" } });
-		await connections.update(workspaceId, botId, made.id, { toolAccess: { wipe: "ask" } });
+		await connections.update(workspaceId, projectId, made.id, { toolAccess: { edit: "allow" } });
+		await connections.update(workspaceId, projectId, made.id, { toolAccess: { wipe: "ask" } });
 
 		expect((await shown(made.id))?.tools.map((tool) => tool.access)).toEqual([
 			"allow",
 			"allow",
 			"ask",
 		]);
-		expect((await connections.target(workspaceId, botId, made.id))?.configurationRevision).toBe(1);
+		expect((await connections.target(workspaceId, projectId, made.id))?.configurationRevision).toBe(
+			1,
+		);
 		await expect(
-			connections.update(workspaceId, botId, made.id, { toolAccess: { ghost: "allow" } }),
+			connections.update(workspaceId, projectId, made.id, { toolAccess: { ghost: "allow" } }),
 		).rejects.toThrow(ConnectionRepository.UnknownConnectionTool);
 	});
 
@@ -202,7 +219,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
 		await listTools(made.id, [lookup, edit, wipe]);
 
-		await connections.update(workspaceId, botId, made.id, { access: "ask" });
+		await connections.update(workspaceId, projectId, made.id, { access: "ask" });
 
 		expect((await shown(made.id))?.tools.map((tool) => tool.access)).toEqual(["ask", "ask", "ask"]);
 	});
@@ -213,7 +230,9 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		await listTools(made.id, [described, edit, wipe]);
 
 		const [listed] = await runOnPostgres(
-			Effect.flatMap(Credentials.Service, (cipher) => connectionsIn(workspaceId, botId, cipher)),
+			Effect.flatMap(Credentials.Service, (cipher) =>
+				connectionsIn(workspaceId, projectId, cipher),
+			),
 		);
 		expect(listed?.toolCounts).toEqual({ allow: 1, ask: 1, off: 1 });
 		expect(listed).not.toHaveProperty("tools");
@@ -226,13 +245,13 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 	});
 
 	it("gives a GitHub connection this version's tools, whenever it was made", async () => {
-		const made = await connections.createGitHub(workspaceId, botId, userId, {
+		const made = await connections.createGitHub(workspaceId, projectId, userId, {
 			id: crypto.randomUUID(),
 			app: { appId: 42, slug: "acme-sugabots", owner: { login: "acme", type: "Organization" } },
 			appCredentialEncrypted: "sealed",
 		});
 
-		await connections.update(workspaceId, botId, made.id, {
+		await connections.update(workspaceId, projectId, made.id, {
 			toolAccess: { list_issues: "off" },
 		});
 
@@ -258,7 +277,9 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			{ name: "lookup", readOnly: true, access: "allow" },
 			{ name: "upload_file", readOnly: false, access: "allow" },
 		]);
-		await connections.update(workspaceId, botId, made.id, { toolAccess: { upload_file: "off" } });
+		await connections.update(workspaceId, projectId, made.id, {
+			toolAccess: { upload_file: "off" },
+		});
 		expect((await shown(made.id))?.tools).toContainEqual(
 			expect.objectContaining({ name: "upload_file", access: "off" }),
 		);
@@ -286,7 +307,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 				.insert(connection)
 				.values({
 					workspaceId,
-					botId,
+					projectId,
 					createdById: userId,
 					kind: "http",
 					name: "Alerts",
@@ -297,9 +318,9 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		);
 		if (!made) throw new Error("fixture");
 
-		await connections.update(workspaceId, botId, made.id, { toolAccess: { delete: "ask" } });
+		await connections.update(workspaceId, projectId, made.id, { toolAccess: { delete: "ask" } });
 
-		expect((await connections.targetsForBot(workspaceId, botId)).targets).toEqual([
+		expect((await connections.targetsForProject(workspaceId, projectId)).targets).toEqual([
 			expect.objectContaining({ connectionId: made.id, kind: "http" }),
 		]);
 		expect((await shown(made.id))?.tools.map(({ name, access }) => [name, access])).toEqual([
@@ -311,20 +332,20 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		]);
 	});
 
-	it("does not expose a connection through another bot", async () => {
+	it("does not expose a connection through another project", async () => {
 		const made = await create({
 			name: "Wiki",
 			url: "https://wiki.example.com/mcp",
 		});
 
-		expect(await shown(made.id, otherBotId)).toBeUndefined();
-		expect(await connections.target(workspaceId, otherBotId, made.id)).toBeUndefined();
+		expect(await shown(made.id, otherProjectId)).toBeUndefined();
+		expect(await connections.target(workspaceId, otherProjectId, made.id)).toBeUndefined();
 		expect(
-			await connections.update(workspaceId, otherBotId, made.id, {
+			await connections.update(workspaceId, otherProjectId, made.id, {
 				toolAccess: { lookup: "ask" },
 			}),
 		).toBeUndefined();
-		expect(await connections.remove(workspaceId, otherBotId, made.id)).toBe(false);
+		expect(await connections.remove(workspaceId, otherProjectId, made.id)).toBe(false);
 		expect((await shown(made.id))?.id).toEqual(made.id);
 	});
 
@@ -340,7 +361,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			signedIn: false,
 			hasSecret: false,
 		});
-		expect(await connections.target(workspaceId, botId, made.id)).toMatchObject({
+		expect(await connections.target(workspaceId, projectId, made.id)).toMatchObject({
 			auth: "oauth",
 			headers: {},
 		});
@@ -352,7 +373,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		});
 		expect(await connections.byOauthState("state-1")).toEqual({
 			workspaceId,
-			botId,
+			projectId,
 			connectionId: made.id,
 		});
 		expect((await shown(made.id))?.signedIn).toBe(false);
@@ -377,7 +398,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			secret: "Bearer abc",
 		});
 
-		expect(await connections.target(workspaceId, botId, made.id)).toMatchObject({
+		expect(await connections.target(workspaceId, projectId, made.id)).toMatchObject({
 			connectionId: made.id,
 			handle: "wiki",
 			url: "https://wiki.example.com/mcp",
@@ -388,7 +409,9 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			name: "Open",
 			url: "https://open.example.com/mcp",
 		});
-		expect(await connections.target(workspaceId, botId, open.id)).toMatchObject({ headers: {} });
+		expect(await connections.target(workspaceId, projectId, open.id)).toMatchObject({
+			headers: {},
+		});
 	});
 
 	it("records what a test found, and forgets it when the connection changes", async () => {
@@ -396,7 +419,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			name: "Wiki",
 			url: "https://wiki.example.com/mcp",
 		});
-		const target = await connections.target(workspaceId, botId, made.id);
+		const target = await connections.target(workspaceId, projectId, made.id);
 		if (!target) throw new Error("no target");
 		expect(target.configurationRevision).toBe(1);
 
@@ -409,10 +432,14 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 			status: "connected",
 			tools: [{ name: "web_search_exa" }],
 		});
-		expect((await connections.target(workspaceId, botId, made.id))?.configurationRevision).toBe(1);
+		expect((await connections.target(workspaceId, projectId, made.id))?.configurationRevision).toBe(
+			1,
+		);
 
-		await connections.update(workspaceId, botId, made.id, { secret: "exa-key" });
-		expect((await connections.target(workspaceId, botId, made.id))?.configurationRevision).toBe(2);
+		await connections.update(workspaceId, projectId, made.id, { secret: "exa-key" });
+		expect((await connections.target(workspaceId, projectId, made.id))?.configurationRevision).toBe(
+			2,
+		);
 		expect(await shown(made.id)).toMatchObject({
 			status: "untested",
 			hasSecret: true,
@@ -430,12 +457,12 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 				secret: "Bearer abc",
 			});
 		const headersOf = async (connectionId: string) =>
-			(await connections.target(workspaceId, botId, connectionId))?.headers;
+			(await connections.target(workspaceId, projectId, connectionId))?.headers;
 
 		it("drops the stored secret, which would otherwise go to the new address", async () => {
 			const made = await withSecret();
 
-			await connections.update(workspaceId, botId, made.id, {
+			await connections.update(workspaceId, projectId, made.id, {
 				url: "https://elsewhere.example/mcp",
 			});
 
@@ -446,7 +473,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		it("keeps a secret given with the new address", async () => {
 			const made = await withSecret();
 
-			await connections.update(workspaceId, botId, made.id, {
+			await connections.update(workspaceId, projectId, made.id, {
 				url: "https://elsewhere.example/mcp",
 				secret: "Bearer new",
 			});
@@ -457,7 +484,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		it("keeps the secret when the address given is the one it has", async () => {
 			const made = await withSecret();
 
-			await connections.update(workspaceId, botId, made.id, {
+			await connections.update(workspaceId, projectId, made.id, {
 				url: "https://wiki.example.com/mcp",
 			});
 
@@ -476,7 +503,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 				state: "",
 			});
 
-			await connections.update(workspaceId, botId, made.id, {
+			await connections.update(workspaceId, projectId, made.id, {
 				url: "https://elsewhere.example/mcp",
 			});
 

@@ -18,7 +18,7 @@ import { appHandlers, StoryApp, storyUser, storyWorkspace } from "@/story-app.ts
 /*
  * A direct message as the app shows it: between people, one other or a
  * group, which nobody else sees and no bot answers. Each goes by the others'
- * names, with no task controls, and Back on a phone returns to the list of
+ * names, with no Mark done, and Back on a phone returns to the list of
  * them.
  */
 
@@ -142,7 +142,7 @@ export const WithTwoOthers = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { level: 1, name: title }, { timeout: 10_000 }),
 		).toBeVisible();
-		await expect(canvas.getByRole("button", { name: /^3 members/ })).toBeVisible();
+		await expect(canvas.getByRole("button", { name: /^3 people/ })).toBeVisible();
 		await expect(
 			await canvas.findByText(
 				"This is a private conversation between Priya Shah, Theo Hart and you. Only the people here can see it.",

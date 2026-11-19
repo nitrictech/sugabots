@@ -8,11 +8,11 @@ import {
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useChannels } from "@/lib/channels.ts";
+import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useLivelinessChoice } from "@/lib/liveliness.tsx";
 import { SETTINGS_BESIDE, useMediaQuery } from "@/lib/media.ts";
+import { useProjects } from "@/lib/projects.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -28,7 +28,7 @@ import {
 } from "@/lib/workspace.ts";
 import type {
 	BotSettingsPage as BotSettingsPageId,
-	ChannelSettingsPage,
+	ProjectSettingsPage,
 	WorkspaceSettingSection,
 } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
@@ -45,23 +45,28 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { BotComputerPage, BotConnection, BotConnectionsSettings } from "./BotResourcesSettings.tsx";
+import { useCopy } from "@/ui/use-copy.ts";
 import { BotSettingsPage } from "./BotSettingsPage.tsx";
 import { ComputerSettings } from "./ComputerSettings.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { NotificationsSettings } from "./NotificationsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
+import {
+	ComputerSettingsPage,
+	ConnectionSettingsPage,
+	ConnectionsSettingsPage,
+} from "./ResourceSettings.tsx";
 import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
-import { WorkspaceBotsSettings, WorkspaceChannelsSettings } from "./WorkspaceChannelsSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
+import { WorkspaceBotsSettings, WorkspaceProjectsSettings } from "./WorkspaceProjectsSettings.tsx";
 
 export function WorkspaceSettings({
 	section,
 	selectedBot,
-	selectedChannelId,
-	channelPage,
+	selectedProjectId,
+	projectPage,
 	botPage,
 	selectedConnectionId,
 	connectionSignInError,
@@ -72,12 +77,12 @@ export function WorkspaceSettings({
 	section: WorkspaceSettingSection;
 	/** A bot open on its own page. */
 	selectedBot?: Bot;
-	selectedChannelId?: string;
-	/** Which of the selected channel's pages is open. */
-	channelPage?: ChannelSettingsPage;
+	selectedProjectId?: string;
+	/** Which of the selected project's pages is open. */
+	projectPage?: ProjectSettingsPage;
 	/** Which of the selected bot's pages is open. */
 	botPage?: BotSettingsPageId;
-	/** The connection of the selected bot open on its own page. */
+	/** The connection of the selected bot or project open on its own page. */
 	selectedConnectionId?: string;
 	connectionSignInError?: string;
 	/** The provider open on the Models page. */
@@ -108,26 +113,28 @@ export function WorkspaceSettings({
 					<ModelsSettings />
 				)
 			) : selectedBot && selectedConnectionId ? (
-				<BotConnection
+				<ConnectionSettingsPage
 					key={selectedConnectionId}
-					bot={selectedBot}
+					owner={{ bot: selectedBot }}
 					connectionId={selectedConnectionId}
 				/>
 			) : selectedBot && botPage === "connections" ? (
-				<BotConnectionsSettings
+				<ConnectionsSettingsPage
 					key={selectedBot.id}
-					bot={selectedBot}
+					owner={{ bot: selectedBot }}
 					signInError={connectionSignInError}
 				/>
 			) : selectedBot && botPage === "computer" ? (
-				<BotComputerPage key={selectedBot.id} bot={selectedBot} />
+				<ComputerSettingsPage key={selectedBot.id} owner={{ bot: selectedBot }} />
 			) : selectedBot ? (
 				<BotSettingsPage key={selectedBot.id} bot={selectedBot} />
-			) : section === "channels" ? (
-				<WorkspaceChannelsSettings
-					selectedChannelId={selectedChannelId}
-					channelPage={channelPage}
-					canCreateChannels={may.createChannels}
+			) : section === "projects" ? (
+				<WorkspaceProjectsSettings
+					selectedProjectId={selectedProjectId}
+					projectPage={projectPage}
+					selectedConnectionId={selectedConnectionId}
+					connectionSignInError={connectionSignInError}
+					canCreateProjects={may.createProjects}
 				/>
 			) : section === "bots" ? (
 				<WorkspaceBotsSettings canCreate={may.createBots} />
@@ -167,7 +174,7 @@ export function WorkspaceSettings({
 					{section === "computers" && (
 						<SettingsPage
 							title="Computers"
-							description="Give bots their own computer to run commands, browse and edit files."
+							description="Give each project and each bot a computer to run commands, browse and edit files on."
 						>
 							{may.manageProviders ? (
 								<ComputerSettings />
@@ -198,11 +205,11 @@ export function WorkspaceSettings({
 /** What General says the workspace holds, once both counts have loaded. */
 function workspaceSummary(
 	people: number | undefined,
-	channels: number | undefined,
+	projects: number | undefined,
 ): string | undefined {
-	if (people === undefined || channels === undefined) return undefined;
+	if (people === undefined || projects === undefined) return undefined;
 	const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
-	return `Workspace with ${plural(people, "member")} and ${plural(channels, "channel")}`;
+	return `Workspace with ${plural(people, "member")} and ${plural(projects, "project")}`;
 }
 
 function GeneralSettings({
@@ -216,7 +223,7 @@ function GeneralSettings({
 }) {
 	const { workspace } = useWorkspace();
 	const { data: members } = useWorkspaceMembers(workspace?.id);
-	const { data: channels } = useChannels();
+	const { data: projects } = useProjects();
 	const [choosingTimeZone, setChoosingTimeZone] = useState(false);
 	// Loaded with the page, so the dialog opens with its automations note already in place.
 	useWorkspaceTimeZone(workspace?.id ?? "", canUpdate && workspace !== undefined);
@@ -236,7 +243,7 @@ function GeneralSettings({
 	}
 
 	return (
-		<SettingsPage title="General" description={workspaceSummary(members?.length, channels?.length)}>
+		<SettingsPage title="General" description={workspaceSummary(members?.length, projects?.length)}>
 			<SettingsGroup>
 				{canUpdate ? (
 					// Keeps the slug: it is in every link to the workspace, which nothing redirects from.
@@ -274,7 +281,7 @@ function GeneralSettings({
 				<>
 					<SettingsDanger
 						label="Delete workspace"
-						description={`Removes every channel, bot and conversation in ${workspace.name}.`}
+						description={`Removes every project, bot and conversation in ${workspace.name}.`}
 						action="Delete"
 						onClick={() => setConfirmingDelete(true)}
 					/>
@@ -282,7 +289,7 @@ function GeneralSettings({
 						open={confirmingDelete}
 						onOpenChange={setConfirmingDelete}
 						title={`Delete ${workspace.name}?`}
-						description="Its channels, bots, conversations and connections are deleted, and everyone in it loses it. This can't be undone."
+						description="Its projects, bots, conversations and connections are deleted, and everyone in it loses it. This can't be undone."
 						pending={deleteWorkspace.isPending}
 						error={deleteWorkspace.error ? failureMessage(deleteWorkspace.error) : undefined}
 						onDelete={() => confirmDelete(workspace.id)}
@@ -393,27 +400,12 @@ function ProfileSettings() {
 	);
 }
 
-/** How long Copied shows before the button reads Copy link again. */
-const COPIED_FEEDBACK_MS = 2000;
-
 /** The link that lets somebody new sign up, where the installation signs people up by referral. */
 function ReferralLinkSettings() {
 	const { data: link } = useReferralLink();
 	const reset = useResetReferralLink();
-	const [copied, setCopied] = useState(false);
-	useEffect(() => {
-		if (!copied) return;
-		const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
-		return () => clearTimeout(timer);
-	}, [copied]);
+	const { copied, label, copy } = useCopy("Copy");
 	if (!link) return null;
-
-	function copy(url: string) {
-		void navigator.clipboard
-			?.writeText(url)
-			.then(() => setCopied(true))
-			.catch(() => setCopied(false));
-	}
 
 	return (
 		<SettingsGroup
@@ -427,10 +419,7 @@ function ReferralLinkSettings() {
 						variant="ghost"
 						size="bare"
 						disabled={reset.isPending}
-						onClick={() => {
-							setCopied(false);
-							reset.mutate();
-						}}
+						onClick={() => reset.mutate()}
 						className="rounded-md px-1 py-0.5 text-xs"
 					>
 						<RotateCcw aria-hidden />
@@ -449,13 +438,9 @@ function ReferralLinkSettings() {
 				<span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
 					{withoutScheme(link)}
 				</span>
-				<Button
-					size="sm"
-					onClick={() => copy(link)}
-					className="bg-link text-background hover:bg-link hover:opacity-90"
-				>
+				<Button size="sm" onClick={() => void copy(link)}>
 					{copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-					{copied ? "Copied" : "Copy"}
+					{label}
 				</Button>
 			</div>
 		</SettingsGroup>

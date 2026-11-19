@@ -6,38 +6,40 @@ import type {
 	ConversationSummary,
 	FilePart,
 	Participant,
+	Project,
 	SessionUser,
 } from "@sugabots/contracts";
 import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Archive, FileText, Hash, Monitor, Pencil, RefreshCcw } from "lucide-react";
+import { Archive, FileText, Monitor, Pencil, RefreshCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { scheduleLabel } from "@/lib/automation-schedule.ts";
 import { useAutomationActions, useAutomations } from "@/lib/automations.ts";
 import { useModelName } from "@/lib/bots.ts";
-import { useBuiltInBots } from "@/lib/built-in-bots.ts";
-import { useComputerAccess } from "@/lib/computer-providers.ts";
+import { useComputerGap } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnectionActions, useConnections } from "@/lib/connections.ts";
 import { useConversationActivity } from "@/lib/conversations.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { botSettingsLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
+import type { ResourceOwner } from "@/lib/resource-owner.tsx";
+import { automationStartsLabel } from "@/lib/routine-schedule.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
+import { useSystemBots } from "@/lib/system-bots.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
-import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
-import { SystemBotsNotSetUp } from "./BuiltInBotSetup.tsx";
-import { ChannelConversationActions, type ChannelConversationToChange } from "./ChatMenu.tsx";
 import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
+import { ParticipantAvatar } from "./ParticipantAvatar.tsx";
+import { ProjectThreadActions, type ProjectThreadToChange } from "./ProjectThreadMenu.tsx";
+import { SystemBotsNotSetUp } from "./SystemBotsNotSetUp.tsx";
 
 /**
  * The Details' scrolling list: a column on a phone, and from a tablet up a
@@ -49,14 +51,16 @@ const DETAILS_SCROLL =
 /** How many rows a list shows before Show more. */
 const FILES_SHOWN = 3;
 const AUTOMATIONS_SHOWN = 2;
-/** A summary longer than this is folded to four lines until asked for the rest. */
+/** How big a bot's face is over a phone's Details, as a project's mark is there: `size-22`. */
+const DETAILS_FACE_PX = 88;
+/** A summary longer than this is folded to three lines until asked for the rest. */
 const SUMMARY_FOLDED_OVER = 240;
 
 /**
- * A bot beside its task. On a phone: its face, name and model, and the way to
- * its settings and automations, then what the task is about. From a tablet
+ * A bot beside its thread. On a phone: its face, name and model, and the way to
+ * its settings and automations, then what the thread is about. From a tablet
  * up, floating cards: what the bot works with (its connections and how full
- * its short-term memory is), the files shared in the task, and its computer.
+ * its short-term memory is), the files shared in the thread, and its computer.
  */
 export function DetailsSidebar({
 	bot,
@@ -76,9 +80,9 @@ export function DetailsSidebar({
 	onOpenDesktop: () => void;
 	onClose: () => void;
 }) {
-	const backToChat = useBackToHere("Chat");
+	const backToThread = useBackToHere("Thread");
 	const activity = useConversationActivity(conversationId).data;
-	const summariser = useBuiltInBots().data?.find(({ key }) => key === "summarise");
+	const summariser = useSystemBots().data?.find(({ key }) => key === "summarise");
 	const modelName = useModelName(bot.model);
 	return (
 		<ChatSidebar label="Details" onClose={onClose} headerless floating>
@@ -89,28 +93,18 @@ export function DetailsSidebar({
 						color={bot.color}
 						face={bot.face}
 						shape={bot.shape}
-						size={36}
-						className="shrink-0 max-md:size-22"
+						size={DETAILS_FACE_PX}
+						className="shrink-0"
 					/>
-					<div className="flex min-w-0 flex-1 flex-col leading-snug max-md:gap-0.5">
-						<h3 className="m-0 truncate font-semibold text-sm text-foreground max-md:text-xl">
-							{bot.name}
-						</h3>
-						<p className="m-0 truncate text-subtle-foreground text-xs max-md:text-sm">
+					<div className="flex min-w-0 flex-col gap-0.5 leading-snug">
+						<h3 className="m-0 truncate font-semibold text-foreground text-xl">{bot.name}</h3>
+						<p className="m-0 truncate text-sm text-subtle-foreground">
 							{modelName ?? "No model chosen"}
 						</p>
 					</div>
-					<IconButton
-						label="Bot settings"
-						variant="bar"
-						render={<Link {...botSettingsLink(bot)} state={backToChat} />}
-						className="border border-border-strong max-md:hidden"
-					>
-						<SettingsIcon size={15} />
-					</IconButton>
-					<div className="flex justify-center gap-7 pt-2 md:hidden">
+					<div className="flex justify-center gap-7 pt-2">
 						<RoundAction
-							render={<Link {...botSettingsLink(bot)} state={backToChat} />}
+							render={<Link {...botSettingsLink(bot)} state={backToThread} />}
 							icon={<SettingsIcon size={20} />}
 							label="Settings"
 						/>
@@ -121,7 +115,7 @@ export function DetailsSidebar({
 						/>
 					</div>
 				</div>
-				{/* What a phone keeps under the bot; from a tablet up, the task says it. */}
+				{/* What a phone keeps under the bot; from a tablet up, the thread says it. */}
 				<div className="contents md:hidden">
 					<Summary
 						summary={activity?.summary}
@@ -130,7 +124,12 @@ export function DetailsSidebar({
 				</div>
 				<Context bot={bot} memory={activity?.context ?? undefined} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
-				<Computer bot={bot} conversationId={conversationId} onOpen={onOpenDesktop} />
+				<Computer
+					owner={{ bot }}
+					bot={bot}
+					conversationId={conversationId}
+					onOpen={onOpenDesktop}
+				/>
 				{/* From a tablet up, automations are in the bot's sidebar. */}
 				<div className="contents md:hidden">
 					<Automations bot={bot} onOpen={onOpenAutomations} />
@@ -175,90 +174,72 @@ export interface ConversationContents {
 	fileUrlOf: (fileId: string) => string;
 }
 
-/** A conversation between people, beside it: who is in it, and the files shared there. */
-export function PeopleDetails({
-	user,
-	contents,
-	onClose,
-}: {
-	user: SessionUser;
-	contents: ConversationContents;
-	onClose: () => void;
-}) {
-	return (
-		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-75">
-			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6 xl:[&>section:first-child]:border-t-0">
-				<People participants={contents.participants} user={user} />
-				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
-			</div>
-		</ChatSidebar>
-	);
-}
-
 /**
- * One of a channel's conversations, beside it: its name, and on a phone, renaming it
- * and archiving it for whoever may; then who is in it and the files shared
- * there.
+ * One of a project's threads, beside it. On a phone: its project's mark, its
+ * name, and renaming it and archiving it for whoever may. From a tablet up,
+ * floating cards, as a bot's thread has: who is in it, the project's computer
+ * and the files shared there.
  */
-export function ChannelDetails({
+export function ProjectDetails({
+	project,
 	name,
 	people,
 	bots,
 	toChange,
 	user,
 	contents,
+	computer,
 	onClose,
 }: {
+	project: Project;
 	name: string;
-	/** How many people and bots are in the channel, as its intro counts them. */
+	/** How many people and bots are in the project. */
 	people: number;
 	bots: number;
-	/** The channel's conversation, for whoever may rename or archive it. */
-	toChange?: ChannelConversationToChange;
+	/** The project's thread, for whoever may rename or archive it. */
+	toChange?: ProjectThreadToChange;
 	user: SessionUser;
 	contents: ConversationContents;
+	/**
+	 * The project's computer, as its lead bot works on it in this thread, and
+	 * opening its desktop; none while the project has no lead bot.
+	 */
+	computer?: { bot: Bot; conversationId: string; onOpen: () => void };
 	onClose: () => void;
 }) {
 	return (
-		<ChatSidebar label="Details" onClose={onClose} headerless className="xl:w-75">
-			<div className="tab-bar-clearance flex min-h-0 flex-1 flex-col overflow-y-auto pb-6">
-				<div className="flex items-center gap-3 px-5 pt-5 pb-4 max-md:flex-col max-md:gap-2.5 max-md:px-4 max-md:pt-1 max-md:text-center">
-					<span
-						aria-hidden
-						className="grid size-9 shrink-0 place-items-center rounded-xl bg-chip text-soft-foreground max-md:size-22"
-					>
-						<Hash size={18} strokeWidth={2} className="max-md:size-9" />
-					</span>
-					<div className="flex min-w-0 flex-1 flex-col leading-snug max-md:gap-0.5">
-						<h3 className="m-0 truncate font-semibold text-sm text-foreground max-md:text-xl">
-							{name}
-						</h3>
-						<p className="m-0 truncate text-subtle-foreground text-xs max-md:text-sm">
-							{[countOf(people, "person", "people"), countOf(bots, "bot", "bots")].join(", ")}
+		<ChatSidebar label="Details" onClose={onClose} headerless floating>
+			<div className={DETAILS_SCROLL}>
+				{/* On a phone, the project's mark large in the middle, the thread's name under it, then what can be done with it. */}
+				<div className="flex flex-col items-center gap-2.5 px-4 pt-1 pb-4 text-center md:hidden">
+					<ProjectInitial project={project} size="lg" className="size-22 rounded-3xl text-3xl" />
+					<div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
+						<h3 className="m-0 truncate font-semibold text-foreground text-xl">{name}</h3>
+						<p className="m-0 truncate text-sm text-subtle-foreground">
+							{project.name} · {countOf(people, "person", "people")}, {countOf(bots, "bot", "bots")}
 						</p>
 					</div>
 					{toChange && (
-						<ChannelConversationActions {...toChange}>
+						<ProjectThreadActions {...toChange}>
 							{({ rename, archive }) => (
-								<div className="flex justify-center gap-7 pt-2 md:hidden">
+								<div className="flex justify-center gap-7 pt-2">
 									<RoundAction
 										render={<button type="button" onClick={rename} />}
 										icon={<Pencil size={20} strokeWidth={1.75} />}
 										label="Rename"
 									/>
-									{archive && (
-										<RoundAction
-											render={<button type="button" onClick={archive} />}
-											icon={<Archive size={20} strokeWidth={1.75} />}
-											label="Archive"
-										/>
-									)}
+									<RoundAction
+										render={<button type="button" onClick={archive} />}
+										icon={<Archive size={20} strokeWidth={1.75} />}
+										label="Archive"
+									/>
 								</div>
 							)}
-						</ChannelConversationActions>
+						</ProjectThreadActions>
 					)}
 				</div>
 				<People participants={contents.participants} user={user} />
+				{computer && <Computer owner={{ project }} {...computer} />}
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
 			</div>
 		</ChatSidebar>
@@ -282,19 +263,6 @@ function People({
 				))}
 			</ul>
 		</SidebarSection>
-	);
-}
-
-function Face({ participant, size }: { participant: Participant; size: number }) {
-	return participant.kind === "bot" ? (
-		<BotAvatar
-			color={participant.color}
-			face={participant.face}
-			shape={participant.shape}
-			size={size}
-		/>
-	) : (
-		<PersonAvatar person={participant} size={size} />
 	);
 }
 
@@ -337,7 +305,7 @@ function Summary({
 	summariserHasModel,
 }: {
 	summary: ConversationSummary | null | undefined;
-	/** `undefined` while the built-in bots load, so the unconfigured state is not flashed. */
+	/** `undefined` while the system bots load, so the unconfigured state is not flashed. */
 	summariserHasModel: boolean | undefined;
 }) {
 	const [open, setOpen] = useState(false);
@@ -375,14 +343,14 @@ function ParticipantRow({ participant, user }: { participant: Participant; user:
 	return (
 		<li className="flex h-7.5 items-center gap-2.5 max-md:h-11 max-md:gap-3">
 			<span aria-hidden className="contents">
-				<Face participant={participant} size={22} />
+				<ParticipantAvatar participant={participant} size={22} />
 			</span>
 			<span className="min-w-0 flex-1 truncate text-xs text-foreground max-md:text-sm">
 				{participant.name}
 				{participant.id === user.id && <span className="text-subtle-foreground"> (you)</span>}
 			</span>
 			<span className="text-subtle-foreground text-xs">
-				{participant.kind === "bot" ? "Bot" : "Member"}
+				{participant.kind === "bot" ? "Bot" : "Person"}
 			</span>
 		</li>
 	);
@@ -401,7 +369,7 @@ function Automations({
 	/** Opens the bot's automations beside the chat: all of them, or the one `automationId` names. */
 	onOpen: (automationId?: string) => void;
 }) {
-	const automations = useAutomations(bot.id);
+	const automations = useAutomations(bot.defaultProjectId);
 	const actions = useAutomationActions();
 	const list = automations.data ?? [];
 	if (list.length === 0) return null;
@@ -409,13 +377,9 @@ function Automations({
 		<SidebarSection
 			title="Automations"
 			end={
-				<button
-					type="button"
-					onClick={() => onOpen()}
-					className="focus-ring rounded-sm text-subtle-foreground text-xs hover:text-foreground max-md:text-xs"
-				>
+				<Button variant="quiet" size="text" className="rounded-sm" onClick={() => onOpen()}>
 					See all
-				</button>
+				</Button>
 			}
 		>
 			<Expandable items={list} shown={AUTOMATIONS_SHOWN}>
@@ -429,9 +393,9 @@ function Automations({
 							<span className="truncate text-xs text-foreground max-md:text-sm">
 								{automation.name}
 							</span>
-							{scheduleLabel(automation) && (
+							{automationStartsLabel(automation) && (
 								<span className="truncate text-subtle-foreground text-xs">
-									{scheduleLabel(automation)}
+									{automationStartsLabel(automation)}
 								</span>
 							)}
 						</button>
@@ -445,7 +409,7 @@ function Automations({
 							}
 							onChange={(on) =>
 								actions.update.mutate({
-									botId: bot.id,
+									projectId: automation.projectId,
 									automationId: automation.id,
 									json: { state: on ? "enabled" : "paused" },
 								})
@@ -459,14 +423,14 @@ function Automations({
 }
 
 /**
- * What the bot works with in the task: the apps it can reach, which are its
+ * What the bot works with in the thread: the apps it can reach, which are its
  * connections, with how many of their tools it may use, each opening the
  * bot's settings, and how full its short-term memory is. A connection whose
  * sign-in expired says so instead, with a sign-in for someone who may.
  */
 function Context({ bot, memory }: { bot: Bot; memory: ConversationContext | undefined }) {
-	const backToChat = useBackToHere("Chat");
-	const connections = useConnections(bot.id);
+	const backToThread = useBackToHere("Thread");
+	const connections = useConnections(bot.defaultProjectId);
 	const list =
 		connections.data?.filter(
 			(connection) => connection.signInExpired || usableToolCount(connection) > 0,
@@ -485,7 +449,7 @@ function Context({ bot, memory }: { bot: Bot; memory: ConversationContext | unde
 								) : (
 									<Link
 										{...botSettingsLink(bot)}
-										state={backToChat}
+										state={backToThread}
 										className="focus-ring -mx-1.5 flex h-7.5 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
 									>
 										<ConnectionMark
@@ -520,22 +484,24 @@ function Context({ bot, memory }: { bot: Bot; memory: ConversationContext | unde
 }
 
 /**
- * The bot's computer: its screen while the bot is using it, else whether it
- * has one, opening the desktop beside the chat, which says how to get one
- * when it has none.
+ * The owner's computer, a bot's or a project's: its screen while `bot` is
+ * using it, else whether it has one, opening the desktop beside the thread,
+ * which says how to get one when it has none.
  */
 function Computer({
+	owner,
 	bot,
 	conversationId,
 	onOpen,
 }: {
+	owner: ResourceOwner;
+	/** The bot at work on it: the bot itself, or a project's lead bot. */
 	bot: Bot;
 	conversationId: string;
 	onOpen: () => void;
 }) {
-	const computersOn = useComputerAccess().data?.enabled === true;
+	const hasComputer = useComputerGap(owner) === null;
 	const inUse = useDesktopInUse(conversationId, bot.id);
-	const hasComputer = bot.usesComputer && computersOn;
 	return (
 		<SidebarSection title="Computer">
 			{hasComputer && inUse ? (
@@ -561,7 +527,7 @@ function Computer({
 
 /** A connection whose sign-in expired: its name, why the bot can't use it, and a sign-in for someone who may. */
 function ExpiredTool({ bot, connection }: { bot: Bot; connection: Connection }) {
-	const actions = useConnectionActions(bot.id);
+	const actions = useConnectionActions(bot.defaultProjectId);
 	return (
 		<div className="-mx-1.5 flex items-center gap-2.5 px-1.5 py-1 max-md:gap-3">
 			<ConnectionMark presetId={connectionMarkFor(connection)} name={connection.name} size="md" />

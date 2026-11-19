@@ -12,12 +12,13 @@ import {
 import { useFolded } from "@/lib/folded.ts";
 import { directMessageLink, newDirectMessageLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
-import { END_SLOT, sidebarRowClassName } from "@/shell/ConversationList.tsx";
 import { ListTime } from "@/shell/Page.tsx";
+import { END_SLOT } from "@/shell/SidebarBot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { buttonStyles } from "@/ui/button.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { sidebarRow } from "@/ui/sidebar-row.ts";
 
 /** How large each of a group's two overlapping faces is, as a share of the whole avatar. */
 const GROUP_FACE_SCALE = 0.72;
@@ -52,7 +53,7 @@ export function DirectMessages({
 }
 
 /**
- * Direct messages in the sidebar, under the channels, beneath a heading that
+ * Direct messages in the sidebar, under the bots, beneath a heading that
  * folds them away, most recent first: each with the person's face, or for a
  * group how many others are in it, bold and counted while something in it is
  * unread.
@@ -100,7 +101,7 @@ export function DirectMessagesSection({
 					<Link
 						{...newDirectMessageLink()}
 						aria-current={newMessageOpen ? "page" : undefined}
-						className={sidebarRowClassName(newMessageOpen)}
+						className={sidebarRow({ selected: newMessageOpen, phone: true })}
 					>
 						<span
 							aria-hidden
@@ -117,7 +118,7 @@ export function DirectMessagesSection({
 }
 
 /**
- * Direct messages' heading, a row like a channel's, which folds them away or
+ * Direct messages' heading, a row like a project's, which folds them away or
  * opens them. Folded over something unread, it is bold, and says how much to
  * a screen reader.
  */
@@ -189,7 +190,7 @@ function DirectMessageRow({ item, selected }: { item: DirectMessageListItem; sel
 		<Link
 			{...directMessageLink(item.conversation.id)}
 			aria-current={selected ? "page" : undefined}
-			className={sidebarRowClassName(selected)}
+			className={sidebarRow({ selected, phone: true })}
 		>
 			{group ? (
 				<span

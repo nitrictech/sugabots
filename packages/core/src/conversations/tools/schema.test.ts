@@ -143,7 +143,7 @@ describe("native Effect tool schemas through the AI SDK", () => {
 	it.each([
 		...Object.entries(
 			fileTools({
-				by: { workspaceId: "workspace", botId: "bot", conversationId: "conversation" },
+				by: { botId: "bot", conversationId: "conversation" },
 				turnId: "turn",
 				calls: { completedOutputs: unexpectedExecution },
 				authoring: {
@@ -158,7 +158,7 @@ describe("native Effect tool schemas through the AI SDK", () => {
 		),
 		...Object.entries(
 			automationTools({
-				bot: { botId: "bot", askedBy: "user" },
+				bot: { botId: "bot", projectId: "project", askedBy: "user" },
 				timeZone: "UTC",
 				automations: {
 					list: unexpectedExecution,

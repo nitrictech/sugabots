@@ -9,15 +9,14 @@ import {
 import { Effect } from "effect";
 import { useEffect } from "react";
 import { client } from "@/api.ts";
-import { NotReadyError } from "@/lib/failure.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
+import { botThreadsKey } from "@/lib/chats.ts";
+import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
 /**
  * The bots in the workspace being looked at.
  *
  * One query for the whole roster, which the sidebar lists and every bot route
- * resolves its handle out of — the same arrangement channels have, and the
- * reason there is no by-id fetch on the way into a page.
+ * resolves its handle out of.
  *
  * The API scopes it: every public bot, your own private ones and your
  * Personal Assistant; an administrator also sees others' private bots listed.
@@ -94,17 +93,15 @@ export function useAssistant(): Bot | undefined {
  */
 export function useEnsureAssistant() {
 	const invalidate = useInvalidateBots();
-	const workspaceId = useWorkspace().workspace?.id;
+	const workspaceId = useRequiredWorkspaceId();
 	return useMutation({
-		mutationFn: (model?: string) => {
-			if (!workspaceId) throw new NotReadyError();
-			return Effect.runPromise(
+		mutationFn: (model?: string) =>
+			Effect.runPromise(
 				client.api.bots.ensureAssistant({
-					params: { workspace: workspaceId },
+					params: { workspace: workspaceId() },
 					payload: model === undefined ? {} : { model },
 				}),
-			);
-		},
+			),
 		onSuccess: invalidate,
 	});
 }
@@ -162,17 +159,13 @@ export function useModelName(model: string | null): string | null {
 
 export function useCreateBot() {
 	const invalidate = useInvalidateBots();
-	const workspaceId = useWorkspace().workspace?.id;
+	const workspaceId = useRequiredWorkspaceId();
 
 	return useMutation({
-		mutationFn: (input: NewBot) => {
-			if (!workspaceId) {
-				throw new NotReadyError();
-			}
-			return Effect.runPromise(
-				client.api.bots.create({ params: { workspace: workspaceId }, payload: input }),
-			);
-		},
+		mutationFn: (input: NewBot) =>
+			Effect.runPromise(
+				client.api.bots.create({ params: { workspace: workspaceId() }, payload: input }),
+			),
 		onSuccess: invalidate,
 	});
 }
@@ -225,8 +218,8 @@ function useInvalidateBots(): () => Promise<void> {
 	return async () => {
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["bots", workspaceId] }),
-			// A bot's tasks list shows it.
-			queries.invalidateQueries({ queryKey: ["bot-tasks", workspaceId] }),
+			// A bot's threads list shows it.
+			queries.invalidateQueries({ queryKey: botThreadsKey(workspaceId) }),
 		]);
 	};
 }

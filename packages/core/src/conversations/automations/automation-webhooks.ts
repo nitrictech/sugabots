@@ -67,7 +67,7 @@ export const makeWebhooks = Effect.gen(function* () {
 								return yield* new AutomationDeliveryIdTooLong();
 							const run = yield* acceptTrigger({
 								workspaceId: found.workspaceId,
-								botId: found.botId,
+								projectId: found.projectId,
 								automationId: found.automationId,
 								triggerId,
 								triggerIdentity: idempotencyKey,
@@ -89,7 +89,7 @@ export const makeWebhooks = Effect.gen(function* () {
 /** What a webhook trigger of an enabled automation checks its callers with. */
 interface EnabledWebhook {
 	workspaceId: string;
-	botId: string;
+	projectId: string;
 	automationId: string;
 	auth: WebhookAuth;
 	/** Where a generic webhook's delivery id is, if anywhere. */
@@ -107,7 +107,7 @@ const enabledWebhook = (triggerId: string) =>
 			db
 				.select({
 					workspaceId: automation.workspaceId,
-					botId: automation.botId,
+					projectId: automation.projectId,
 					automationId: automation.id,
 					settings: automationTrigger.settings,
 					secret: automationTrigger.secretEncrypted,

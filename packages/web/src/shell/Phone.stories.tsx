@@ -10,7 +10,7 @@ import {
 	storyChatActivity,
 	storyChatDetails,
 	storyConversationFor,
-	storyTaskFor,
+	storyThreadFor,
 	storyUser,
 	storyWorkspace,
 } from "@/story-app.tsx";
@@ -38,17 +38,17 @@ const meta = preview.meta({
 });
 
 /**
- * Home: the channels the person is in, each with its conversations, then
+ * Home: the projects the person is in, each opening its threads, then
  * the bots they pinned, with Home marked among the tabs.
  */
 export const Home = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/home`} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { level: 1, name: "Home" })).toBeVisible();
-		const channels = canvas.getByRole("region", { name: "Channels" });
-		await expect(within(channels).getByRole("link", { name: revenue.name })).toBeVisible();
-		await expect(within(channels).getByRole("link", { name: engineering.name })).toBeVisible();
-		await expect(within(channels).getByRole("link", { name: "Browse channels" })).toBeVisible();
+		const projects = canvas.getByRole("region", { name: "Projects" });
+		await expect(within(projects).getByRole("link", { name: revenue.name })).toBeVisible();
+		await expect(within(projects).getByRole("link", { name: engineering.name })).toBeVisible();
+		await expect(within(projects).getByRole("link", { name: "Browse projects" })).toBeVisible();
 		const bots = canvas.getByRole("region", { name: "Bots" });
 		await expect(within(bots).getByRole("link", { name: "Browse bots" })).toBeVisible();
 		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
@@ -59,7 +59,7 @@ export const Home = meta.story({
 	},
 });
 
-/** Direct messages, under Home: going to Inbox and back to Home returns to them, not to a channel. */
+/** Direct messages, under Home: going to Inbox and back to Home returns to them, not to a project. */
 export const DirectMessagesHome = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/dm`} />,
 	play: async ({ canvas, userEvent }) => {
@@ -126,8 +126,8 @@ function unreadMention(index: number): InboxItem {
 		author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
 		preview: "@rowan-ellis can you sign off the Acme quote before 5?",
 		at: new Date(Date.now() - (index + 1) * 60_000).toISOString(),
-		channelId: null,
-		rootConversationId: storyTaskFor(growthDesk).id,
+		projectId: null,
+		rootConversationId: storyThreadFor(growthDesk).id,
 	};
 }
 
@@ -156,9 +156,9 @@ function waitingApproval(index: number): ApprovalRequest {
 			face: growthDesk.face,
 			shape: "circle",
 		},
-		channelId: null,
-		conversationId: storyTaskFor(growthDesk).id,
-		rootConversationId: storyTaskFor(growthDesk).id,
+		projectId: null,
+		conversationId: storyThreadFor(growthDesk).id,
+		rootConversationId: storyThreadFor(growthDesk).id,
 	};
 }
 
@@ -198,10 +198,10 @@ export const Profile = meta.story({
 	},
 });
 
-/** A channel's Bots, opened from You: that part alone, under the channel's name. */
-export const ChannelPart = meta.story({
+/** A project's Bots, opened from You: that part alone, under the project's name. */
+export const ProjectPart = meta.story({
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/settings/channels/${revenue.slug}/bots`} />
+		<StoryApp path={`/${storyWorkspace.slug}/settings/projects/${revenue.slug}/bots`} />
 	),
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { level: 2, name: "Bots" })).toBeVisible();
@@ -212,7 +212,7 @@ export const ChannelPart = meta.story({
 
 const plan: WrittenFileSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
-	conversationId: storyTaskFor(growthDesk).id,
+	conversationId: storyThreadFor(growthDesk).id,
 	kind: "document",
 	title: "Q4 outreach plan",
 	version: 1,
@@ -221,11 +221,11 @@ const plan: WrittenFileSummary = {
 	updatedAt: "2026-09-29T07:00:00.000Z",
 };
 
-/** A file opened from the channel's Files takes the whole screen. */
+/** A file opened from the project's Files takes the whole screen. */
 export const OpenFile = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/channels/:channelId/files`, () => HttpResponse.json([plan])),
+			http.get(`${API}/projects/:projectId/files`, () => HttpResponse.json([plan])),
 			http.get(`${API}/files/:fileId`, () =>
 				HttpResponse.json({
 					...plan,
@@ -239,7 +239,7 @@ export const OpenFile = meta.story({
 		);
 	},
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/files/${plan.id}`} />
+		<StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}/files/${plan.id}`} />
 	),
 	play: async ({ canvas }) => {
 		const file = await canvas.findByRole("region", { name: "File" });
@@ -268,60 +268,60 @@ export const Opened = meta.story({
 	},
 });
 
-/** A channel's Files, whose Back returns to that channel's Home, not the workspace's first. */
+/** A project's Files, whose Back returns to that project's Home, not the workspace's first. */
 export const Files = meta.story({
 	beforeEach({ msw }) {
-		msw.use(http.get(`${API}/channels/:channelId/files`, () => HttpResponse.json([])));
+		msw.use(http.get(`${API}/projects/:projectId/files`, () => HttpResponse.json([])));
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${engineering.slug}/files`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${engineering.slug}/files`} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("link", { name: `Back to ${engineering.name}` }),
-		).toHaveAttribute("href", `/${storyWorkspace.slug}/channels/${engineering.slug}`);
+		).toHaveAttribute("href", `/${storyWorkspace.slug}/projects/${engineering.slug}`);
 	},
 });
 
-const longTask = storyConversationFor(growthDesk);
+const longThread = storyConversationFor(growthDesk);
 const LONG_TITLE = "Bot setup and purpose definition for the quarter";
 
 /**
- * A task with a bot: its name heads its messages, and over them a pill with
- * its name, shortened to fit, and the bot it is in, as every task's pill is,
+ * A thread with a bot: its name heads its messages, and over them a pill with
+ * its name, shortened to fit, and the bot it is with, as every bot's thread's pill is,
  * between Back and the ⋯, which holds the computer and Mark done.
  */
-export const Task = meta.story({
+export const BotThread = meta.story({
 	beforeEach({ msw }) {
 		const details = storyChatDetails(growthDesk);
 		msw.use(
-			http.get(`${API}/conversations/${longTask.id}`, () =>
+			http.get(`${API}/conversations/${longThread.id}`, () =>
 				HttpResponse.json({
 					...details,
 					conversation: {
 						...details.conversation,
-						id: longTask.id,
-						rootConversationId: longTask.id,
-						kind: "task",
+						id: longThread.id,
+						rootConversationId: longThread.id,
+						kind: "project_thread",
 						title: LONG_TITLE,
 					},
 				}),
 			),
-			http.get(`${API}/conversations/${longTask.id}/activity`, () =>
+			http.get(`${API}/conversations/${longThread.id}/activity`, () =>
 				HttpResponse.json(storyChatActivity(growthDesk)),
 			),
 		);
 	},
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/tasks/${longTask.id}`} />
+		<StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/threads/${longThread.id}`} />
 	),
 	play: async ({ canvas, userEvent }) => {
-		const more = await canvas.findByRole("button", { name: "More for this task" });
+		const more = await canvas.findByRole("button", { name: "More for this thread" });
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
-		// Back returns to the bot the task is with.
+		// Back returns to the bot the thread is with.
 		await expect(canvas.getByRole("link", { name: `Back to ${growthDesk.name}` })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/bots/${growthDesk.handle}`,
 		);
-		// The task's name heads its messages, and the pill over them, shortened to fit.
+		// The thread's name heads its messages, and the pill over them, shortened to fit.
 		await expect(await canvas.findByRole("heading", { level: 2, name: LONG_TITLE })).toBeVisible();
 		const pill = canvas
 			.getByText(LONG_TITLE, { selector: "button[aria-hidden] span" })
@@ -335,13 +335,17 @@ export const Task = meta.story({
 	},
 });
 
-/** The channel's main chat, with a # in place of a bot's face. */
-export const Channel = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
+/** A project: its work to pick from, as its sidebar lists it, its Files, and + to start a thread. */
+export const Project = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { level: 1, name: "General" }),
+			await canvas.findByRole("heading", { level: 1, name: revenue.name }),
 		).toBeInTheDocument();
+		const work = await canvas.findByRole("list", { name: `${revenue.name}'s work` });
+		await expect(await within(work).findByRole("link", { name: /Planning/ })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "Files" })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: `New thread in ${revenue.name}` })).toBeVisible();
 	},
 });
 

@@ -1,28 +1,28 @@
-import type { Channel, InboxItem } from "@sugabots/contracts";
+import type { InboxItem, Project } from "@sugabots/contracts";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { CheckCheck, Inbox as InboxIcon, ListFilter, MessageCircle } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
-import { useChannels } from "@/lib/channels.ts";
 import {
 	useAttentionCounts,
 	useDirectMessages,
 	useInboxFeed,
-	useMarkChatsRead,
+	useMarkConversationsRead,
 } from "@/lib/chats.ts";
 import { directMessageLink, inboxItemPageLink, inboxMessageLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
+import { useProjects } from "@/lib/projects.ts";
 import {
-	type ActivityState,
-	AutomationTriggerIcon,
 	automationText,
 	collaborationText,
-} from "@/screens/ChatActivityRow.tsx";
-import { collaborationActivityState } from "@/screens/ConversationMessages.tsx";
+	collaborationWorkState,
+	type WorkState,
+} from "@/lib/work-state.ts";
+import { AutomationTriggerIcon } from "@/screens/RunRow.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
-import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
+import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import {
 	DropdownMenu,
@@ -46,18 +46,19 @@ const KINDS: readonly { value: Kind; label: string }[] = [
 ];
 
 /**
- * Inbox: what is new across the workspace's chats, newest first, down the
- * left: messages that mention the person or that they have not read, automation
- * runs, and collaborations one bot opened with another. A filter menu in its
- * header narrows it to the kinds ticked there, shaded while on, and a toggle beside it shows only what is unread, as it
- * does to begin with; Mark all as read reads everything unread at
- * once. The one chosen opens beside it as `children`: a message in its chat,
- * which reads it, or a run or collaboration as a page of its own. On a phone
- * the list is the page until one is chosen.
+ * Inbox: what is new across the workspace's conversations, newest first, down
+ * the left: messages that mention the person or that they have not read,
+ * automation runs, and collaborations one bot opened with another. A filter
+ * menu in its header narrows it to the kinds ticked there, shaded while on,
+ * and a toggle beside it shows only what is unread, as it does to begin with;
+ * Mark all as read reads everything unread at once. The one chosen opens
+ * beside it as `children`: a message in its conversation, which reads it, or
+ * a run or collaboration as a page of its own. On a phone the list is the page
+ * until one is chosen.
  */
 export function Inbox({ children }: { children: ReactNode }) {
 	const feed = useInboxFeed();
-	const { data: channels } = useChannels();
+	const { data: projects } = useProjects();
 	const chosen = useChosenItem();
 	// As wide as the viewer last dragged it.
 	const [width, setWidth] = usePaneWidth("inbox");
@@ -76,18 +77,18 @@ export function Inbox({ children }: { children: ReactNode }) {
 		if (!next.delete(kind)) next.add(kind);
 		setKinds(next);
 	};
-	const markRead = useMarkChatsRead();
+	const markRead = useMarkConversationsRead();
 	const directMessages = useDirectMessages();
 	const directIds = new Set(directMessages.data?.items.map((item) => item.conversation.id));
-	// A direct message between people opens among them; the rest open here, in a channel or with a bot.
+	// A direct message between people opens among them; the rest open here, in a project or with a bot.
 	const placeOf = (item: InboxItem): RowPlace | undefined => {
 		// Runs and collaborations are bots' work, never in a direct message.
 		if (item.kind === "run" || item.kind === "collaboration") return { kind: "bot" };
-		if (item.channelId !== null) {
-			const channel = channels?.find((candidate) => candidate.id === item.channelId);
-			return channel && { kind: "channel", channel };
+		if (item.projectId !== null) {
+			const project = projects?.find((candidate) => candidate.id === item.projectId);
+			return project && { kind: "project", project };
 		}
-		// Outside a channel, a message is in a task or a direct message: which, once the direct messages are known.
+		// Outside a project, a message is in a bot's thread or a direct message: which, once the direct messages are known.
 		if (!directMessages.isSuccess) return undefined;
 		return directIds.has(item.rootConversationId) ? { kind: "direct" } : { kind: "bot" };
 	};
@@ -305,8 +306,8 @@ function isChosen(item: InboxItem, chosen: ChosenItem | undefined): boolean {
 		: item.messageId === chosen.messageId;
 }
 
-/** How an automation run's state reads in its row, as its line in the chat says it. */
-function runState(state: Extract<InboxItem, { kind: "run" }>["state"]): ActivityState {
+/** How an automation run's state reads in its row, as its line in the conversation says it. */
+function runState(state: Extract<InboxItem, { kind: "run" }>["state"]): WorkState {
 	if (state === "completed") return "done";
 	if (state === "failed" || state === "cancelled") return "failed";
 	return "running";
@@ -335,7 +336,7 @@ function wordsOf(item: InboxItem): { title: string; detail: string } {
 				title: collaborationText(
 					item.initiator.name,
 					item.recipient.name,
-					collaborationActivityState(item.status),
+					collaborationWorkState(item.status),
 				),
 				detail: item.brief,
 			};
@@ -401,8 +402,8 @@ function itemIdOf(item: InboxItem): string {
 		: item.messageId;
 }
 
-/** Where a row's item is: in a channel, with a bot, or in a direct message between people. */
-type RowPlace = { kind: "channel"; channel: Channel } | { kind: "bot" } | { kind: "direct" };
+/** Where a row's item is: in a project, with a bot, or in a direct message between people. */
+type RowPlace = { kind: "project"; project: Project } | { kind: "bot" } | { kind: "direct" };
 
 /**
  * Where a row opens: a run or collaboration as a page of its own, and a
@@ -417,7 +418,7 @@ function linkOf(item: InboxItem) {
 
 /**
  * One thing that happened: a dot while it is unread, who or what it is about,
- * what happened and its channel's mark, and under them a line about it and when,
+ * what happened and its project's mark, and under them a line about it and when,
  * shaded while it is open.
  */
 function InboxRow({
@@ -426,13 +427,13 @@ function InboxRow({
 	selected,
 }: {
 	item: InboxItem;
-	/** Where the item is, once the channels are loaded; until then the row cannot open. */
+	/** Where the item is, once the projects are loaded; until then the row cannot open. */
 	place: RowPlace | undefined;
 	/** Whether it is the one open beside the list. */
 	selected: boolean;
 }) {
 	const { title, detail } = wordsOf(item);
-	const channel = place?.kind === "channel" ? place.channel : undefined;
+	const project = place?.kind === "project" ? place.project : undefined;
 	const content = (
 		<>
 			<span className="w-1.5 shrink-0 pt-1.75">
@@ -457,10 +458,10 @@ function InboxRow({
 					>
 						{title}
 					</span>
-					{channel && (
-						<span title={channel.name} className="flex">
-							<ChannelInitial channel={channel} size="sm" />
-							<span className="sr-only">in {channel.name}</span>
+					{project && (
+						<span title={project.name} className="flex">
+							<ProjectInitial project={project} size="sm" />
+							<span className="sr-only">in {project.name}</span>
 						</span>
 					)}
 					{place?.kind === "direct" && (

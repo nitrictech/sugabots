@@ -6,17 +6,17 @@ import {
 	botColors,
 	botFaces,
 	botShapes,
-	type ChannelColor,
-	channelColors,
+	type ProjectColor,
+	projectColors,
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import { useId } from "react";
-import { channelPalettes } from "@/shell/ChannelTile.tsx";
+import { projectPalettes } from "@/lib/project-looks.ts";
 import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
 /*
  * Choosing how a bot looks: one of the bot colours, one of the head shapes
- * and one of the eye styles; and a channel's colour, from its own eight. Each is a
+ * and one of the eye styles; and a project's colour, from its own eight. Each is a
  * set of native radio buttons, so arrow keys move the choice. The shapes and
  * eyes are drawn alone on neutral chips, since the face shown above the picker
  * already carries the colour. All of a bot's sets span the full row so their
@@ -60,18 +60,18 @@ export function LookPicker({
 	);
 }
 
-/** ChannelColourPicker picks a channel's colour from the channel palette. */
-export function ChannelColourPicker({
+/** ProjectColourPicker picks a project's colour from the project palette. */
+export function ProjectColourPicker({
 	value,
 	onChange,
 }: {
-	value: ChannelColor;
-	onChange: (color: ChannelColor) => void;
+	value: ProjectColor;
+	onChange: (color: ProjectColor) => void;
 }) {
 	return (
 		<Swatches
-			colors={channelColors}
-			swatch={(color) => channelPalettes[color].swatch}
+			colors={projectColors}
+			swatch={(color) => projectPalettes[color].swatch}
 			value={value}
 			onChange={onChange}
 		/>

@@ -5,10 +5,10 @@ import type { UserText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
 import { Context, Effect, Layer, type Scope } from "effect";
 import { blockedHostsOf, reachOf } from "../../computers/allowed-hosts.ts";
-import { BotComputers } from "../../computers/bot-computers.ts";
 import { ComputerNetwork } from "../../computers/computer-network.ts";
 import { ComputerProviderRepository } from "../../computers/computer-provider-repository.ts";
 import { Computers } from "../../computers/computers.ts";
+import { ProjectComputers } from "../../computers/project-computers.ts";
 import { effectRunner, type RunEffect, serviceOperations } from "../../database/database.ts";
 import { ConversationFiles } from "../../files/conversation-files.ts";
 import { Ids } from "../../ids/ids.ts";
@@ -36,18 +36,20 @@ import {
 import { REQUEST_NETWORK_ACCESS_TOOL, requestNetworkAccess } from "./network-access/tool.ts";
 
 /**
- * The tools that work in a bot's computer: `run_command`, `read_file`,
- * `write_file`, `copy_file_to_computer` and `share_file`, and the `browser_`
- * tools of a browser the bot drives there (see `browser/browser.ts`), and
- * `request_network_access`, whose calls wait for a person, to reach a host
- * the computer may not. Offered to every turn, and usable while the bot uses
- * the computer and the workspace has an enabled computer provider, looked up on
+ * The tools that work in the computer of the project a turn works in:
+ * `run_command`, `read_file`, `write_file`, `copy_file_to_computer` and
+ * `share_file`, and the `browser_` tools of a browser the bot drives there
+ * (see `browser/browser.ts`), and `request_network_access`, whose calls wait
+ * for a person, to reach a host the computer may not. A bot working in
+ * another project's thread uses that project's computer, not its own. Offered
+ * to every turn, and usable while the bot uses computers, the turn works in a
+ * project, and the workspace has an enabled computer provider, looked up on
  * every call, so enabling one applies from the next turn. The computer is
  * opened by a turn's first call to one of the tools, not when the turn starts.
  */
 export interface Interface {
 	/**
-	 * The tools for a turn, in its bot's computer. While they are usable, the
+	 * The tools for a turn, in its project's computer. While they are usable, the
 	 * turn's lease on the computer is renewed while the scope is open and
 	 * released when it closes, which is when the turn's run ends, or it stops
 	 * to wait for an approval.
@@ -85,7 +87,7 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const providers = yield* ComputerProviderRepository.Service;
-	const botComputers = yield* BotComputers.Service;
+	const projectComputers = yield* ProjectComputers.Service;
 	const computers = yield* Computers.Service;
 	const network = yield* ComputerNetwork.Service;
 	const files = yield* ConversationFiles.Service;
@@ -127,12 +129,20 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		forTurn: (turn) =>
 			Effect.gen(function* (): Effect.fn.Return<Offered, never, Scope.Scope> {
-				const { workspaceId, turnId, conversationId, botId, acceptsImages, usesComputer, attach } =
-					turn;
-				const bot = { workspaceId, botId };
+				const {
+					workspaceId,
+					projectId,
+					turnId,
+					conversationId,
+					botId,
+					acceptsImages,
+					usesComputer,
+					attach,
+				} = turn;
 				const place = placeOf({ conversationId, botId });
-				const provider = usesComputer ? yield* providers.enabled(workspaceId) : undefined;
-				if (!provider) {
+				const provider =
+					usesComputer && projectId !== null ? yield* providers.enabled(workspaceId) : undefined;
+				if (!provider || projectId === null) {
 					return {
 						...offeredIn({
 							turnId,
@@ -152,18 +162,21 @@ export const make = Effect.gen(function* () {
 						signsIn: false,
 					};
 				}
+				const project = { workspaceId, projectId };
 				const [reach, blocked, disk] = yield* operation(
 					"forTurn",
 					Effect.all([
-						reachOf(bot, computers.forConnection(provider.connection)),
+						reachOf(project, computers.forConnection(provider.connection)),
 						blockedHostsOf(workspaceId),
-						botComputers.diskOf(bot),
+						projectComputers.diskOf(project),
 					]),
 				);
-				const holder: BotComputers.Holder = { kind: "turn", id: turnId };
-				yield* Effect.addFinalizer(() => botComputers.release(holder));
+				const holder: ProjectComputers.Holder = { kind: "turn", id: turnId };
+				yield* Effect.addFinalizer(() => projectComputers.release(holder));
 				yield* Effect.forkScoped(
-					botComputers.renew(holder).pipe(Effect.delay(BotComputers.LEASE_RENEWAL), Effect.forever),
+					projectComputers
+						.renew(holder)
+						.pipe(Effect.delay(ProjectComputers.LEASE_RENEWAL), Effect.forever),
 				);
 				// The tools run as promises, with the turn's services.
 				const run = effectRunner<never>({
@@ -172,7 +185,7 @@ export const make = Effect.gen(function* () {
 				// Opening the computer serves every call in the turn, so it stops when
 				// the turn ends rather than with the call that started it.
 				const turnEnded = yield* Effect.abortSignal;
-				const prepared = botComputers.open(bot, provider, holder).pipe(
+				const prepared = projectComputers.open(project, provider, holder).pipe(
 					// The folders are made on first use, so any computer gains them.
 					Effect.tap(({ computer }) =>
 						computer.exec(`mkdir -p '${place.folder}' '${place.home}'`, {
@@ -212,7 +225,7 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
 	Layer.provide([
-		BotComputers.layer,
+		ProjectComputers.layer,
 		Computers.layer,
 		ComputerNetwork.layer,
 		ComputerProviderRepository.layer,
@@ -243,12 +256,14 @@ const NEVER_RUN: RunEffect<never> = () =>
 	Promise.reject(new Error("The computer tools aren't usable"));
 
 const NO_COMPUTER_NOTE =
-	"You have no computer in this turn, so calls to the computer tools are refused. If the task needs one, say so: a workspace admin can enable a computer provider and let you use one.";
+	"You have no computer in this turn, so calls to the computer tools are refused. If the thread needs one, say so: a workspace admin can enable a computer provider and let you use one.";
 
-/** A turn that may use its bot's computer. */
+/** A turn that may use the computer of the project it works in. */
 export interface Turn {
 	readonly workspaceId: string;
-	/** Whether an admin let the turn's bot use the computer. */
+	/** The project whose computer the turn uses; none for a turn that works in no project. */
+	readonly projectId: string | null;
+	/** Whether an admin let the turn's bot use computers. */
 	readonly usesComputer: boolean;
 	/** Holds the computer's lease while the turn runs. */
 	readonly turnId: string;

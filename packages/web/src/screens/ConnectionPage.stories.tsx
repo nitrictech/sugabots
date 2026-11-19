@@ -4,7 +4,7 @@ import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, connectionHandlers, StoryApp, storyChannels } from "../story-app.tsx";
+import { appHandlers, connectionHandlers, StoryApp, storyProjects } from "../story-app.tsx";
 
 /*
  * One connection on its own page under its bot: who connected it and what keeps
@@ -32,7 +32,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		botId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: "0199a3a0-0000-7000-8000-00000000b071",
 		kind: "mcp",
 		auth: "header",
 		signedIn: true,
@@ -190,7 +190,7 @@ const alerts = connection(8, {
 });
 
 const appRepositories = (account: string | null) =>
-	http.get(`${API}/bots/:botId/connections/:connectionId/repositories`, () =>
+	http.get(`${API}/projects/:projectId/connections/:connectionId/repositories`, () =>
 		HttpResponse.json({
 			account,
 			repositories:
@@ -205,7 +205,7 @@ const appRepositories = (account: string | null) =>
 	);
 
 const pagePath = (one: TestConnection) =>
-	`/nitric/settings/channels/${revenue.slug}/connections/${one.id}`;
+	`/nitric/settings/projects/${revenue.slug}/connections/${one.id}`;
 
 const meta = preview.meta({
 	title: "Views/Connection",
@@ -226,7 +226,7 @@ const meta = preview.meta({
 			alerts,
 		];
 		msw.use(
-			http.patch(`${API}/bots/:botId/connections/:connectionId`, async ({ request }) => {
+			http.patch(`${API}/projects/:projectId/connections/:connectionId`, async ({ request }) => {
 				const change = (await request.json()) as ConnectionUpdate;
 				current = {
 					...current,
@@ -340,7 +340,7 @@ export const NotSignedIn = meta.story({
 	},
 });
 
-/** The bot's GitHub App's connection: the repositories it works on, from the account the app is installed on. */
+/** A project's GitHub App connection: the repositories its bots work on, from the account the app is installed on. */
 export const GitHubApp = meta.story({
 	beforeEach({ msw }) {
 		msw.use(appRepositories("acme"));
@@ -363,15 +363,18 @@ export const AddingARepository = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			appRepositories("acme"),
-			http.get(`${API}/bots/:botId/connections/:connectionId/github/reachable`, async () => {
-				await delay(300);
-				return HttpResponse.json(
-					["acme/web", "acme/infra", "acme/docs"].map((repository) => ({
-						repository,
-						private: repository !== "acme/docs",
-					})),
-				);
-			}),
+			http.get(
+				`${API}/projects/:projectId/connections/:connectionId/github/reachable`,
+				async () => {
+					await delay(300);
+					return HttpResponse.json(
+						["acme/web", "acme/infra", "acme/docs"].map((repository) => ({
+							repository,
+							private: repository !== "acme/docs",
+						})),
+					);
+				},
+			),
 		);
 	},
 	render: () => <StoryApp path={pagePath(gitHubApp)} />,
@@ -467,7 +470,7 @@ export const HundredsOfTools = meta.story({
 export const LoadingTools = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/bots/:botId/connections/:connectionId`, () => delay("infinite")),
+			http.get(`${API}/projects/:projectId/connections/:connectionId`, () => delay("infinite")),
 			...connectionHandlers([linearCustom]),
 			...appHandlers(),
 		);
@@ -487,9 +490,9 @@ export const Member = meta.story({
 			...connectionHandlers([linear]),
 			...appHandlers({
 				role: "member",
-				channels: storyChannels.map((channel) => ({
-					...channel,
-					permissions: { ...channel.permissions, manageConnections: false },
+				projects: storyProjects.map((project) => ({
+					...project,
+					permissions: { ...project.permissions, manageConnections: false },
 				})),
 			}),
 		);

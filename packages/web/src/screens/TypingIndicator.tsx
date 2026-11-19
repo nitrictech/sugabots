@@ -1,11 +1,10 @@
 import type { BotParticipant, PersonParticipant } from "@sugabots/contracts";
 import { cn } from "cn";
 import { listNames } from "@/lib/name-list.ts";
+import { TypingDots } from "@/ui/typing-dots.tsx";
 
 /** Somebody the indicator shows: a bot at work on its reply, or a person writing in the composer. */
-export type Typer =
-	| Pick<BotParticipant, "kind" | "id" | "name" | "color" | "face">
-	| Pick<PersonParticipant, "kind" | "id" | "name" | "email" | "image">;
+export type Typer = Pick<BotParticipant | PersonParticipant, "kind" | "id" | "name">;
 
 /** Whether there is anybody to show, which `TypingIndicator` needs. */
 export function anyoneTyping<T extends Typer>(
@@ -36,11 +35,7 @@ export function TypingIndicator({
 				className,
 			)}
 		>
-			<span aria-hidden className="typing-dots typing-dots-small">
-				<i />
-				<i />
-				<i />
-			</span>
+			<TypingDots />
 			<span aria-hidden>{label}</span>
 		</div>
 	);

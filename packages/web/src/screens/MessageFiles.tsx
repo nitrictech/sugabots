@@ -12,7 +12,9 @@ import { type KeyboardEvent, type ReactNode, useRef, useState } from "react";
 import { extensionOf, type FileLook, fileLookOf, fileSizeLabel } from "@/lib/file-looks.ts";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@/ui/dialog.tsx";
+import { FileRow } from "@/ui/file-row.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
+import { IconTile } from "@/ui/icon-tile.tsx";
 import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
 
 /**
@@ -293,19 +295,18 @@ function DownloadButton({
 function FileChip({ file, url }: { file: FilePart; url: string | undefined }) {
 	const extension = extensionOf(file.name).toUpperCase();
 	return (
-		<div className="flex w-full items-center gap-2.5 rounded-lg border border-border bg-card py-2 pr-2 pl-2.5">
-			<span className="grid size-8 shrink-0 place-items-center rounded-md bg-tile text-soft-foreground">
-				<FileLookIcon look={lookOf(file)} />
-			</span>
-			<span className="flex min-h-7.5 min-w-0 flex-1 flex-col justify-center gap-px">
-				<MiddleTruncated text={file.name} className="font-medium text-sm text-foreground" />
-				<span className="text-xs text-subtle-foreground">
-					{extension ? `${extension} · ` : ""}
-					{fileSizeLabel(file.size)}
-				</span>
-			</span>
-			{url && <DownloadButton file={file} url={url} size="lg" />}
-		</div>
+		<FileRow
+			look="card"
+			className="w-full pr-2"
+			icon={
+				<IconTile size="md" tone="tile">
+					<FileLookIcon look={lookOf(file)} />
+				</IconTile>
+			}
+			title={<MiddleTruncated text={file.name} />}
+			subtitle={`${extension ? `${extension} · ` : ""}${fileSizeLabel(file.size)}`}
+			trailing={url && <DownloadButton file={file} url={url} size="lg" />}
+		/>
 	);
 }
 

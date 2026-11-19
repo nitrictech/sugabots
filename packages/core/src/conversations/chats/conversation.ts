@@ -1,40 +1,32 @@
-import type { AutomationFeed, ChannelConversation, DirectMessage, Task } from "@sugabots/contracts";
+import type { AutomationFeed, DirectMessage, ProjectThread } from "@sugabots/contracts";
 import type * as schema from "../../database/schema.ts";
 
-/** A channel's main chat or thread as the API describes it. Throws on a conversation of another kind. */
-export function toChannelConversation(row: schema.PlacedConversationRow): ChannelConversation {
-	if (row.kind !== "channel_conversation" || !row.channelId)
-		throw new Error(`Conversation ${row.id} is not in a channel`);
+/**
+ * A project's thread, one of a bot's threads included, as the API describes
+ * it. Throws on a conversation of another kind.
+ */
+export function toProjectThread(row: schema.PlacedConversationRow): ProjectThread {
+	if (row.kind !== "project_thread" || !row.projectId)
+		throw new Error(`Conversation ${row.id} is not in a project`);
 	return {
-		kind: "channel_conversation",
+		kind: "project_thread",
 		...commonFields(row),
-		channelId: row.channelId,
-		main: row.main,
-		archivedAt: row.archivedAt?.toISOString() ?? null,
-	};
-}
-
-/** A bot's task as the API describes it. Throws on a conversation of another kind. */
-export function toTask(row: schema.PlacedConversationRow): Task {
-	if (row.kind !== "task" || !row.botId) {
-		throw new Error(`Conversation ${row.id} is not a task`);
-	}
-	return {
-		kind: "task",
-		...commonFields(row),
+		projectId: row.projectId,
 		botId: row.botId,
+		archivedAt: row.archivedAt?.toISOString() ?? null,
 		doneAt: row.doneAt?.toISOString() ?? null,
 	};
 }
 
 /** An automation's feed as the API describes it. Throws on a conversation of another kind. */
 export function toAutomationFeed(row: schema.PlacedConversationRow): AutomationFeed {
-	if (row.kind !== "automation_feed" || !row.automationId || !row.botId) {
+	if (row.kind !== "automation_feed" || !row.automationId || !row.projectId) {
 		throw new Error(`Conversation ${row.id} is not an automation's feed`);
 	}
 	return {
 		kind: "automation_feed",
 		...commonFields(row),
+		projectId: row.projectId,
 		botId: row.botId,
 		automationId: row.automationId,
 	};

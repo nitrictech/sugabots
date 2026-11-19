@@ -15,19 +15,16 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { Code } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useModels } from "@/lib/bots.ts";
-import {
-	BUILT_IN_BOT_KEYS,
-	useBuiltInBots,
-	useChooseBuiltInBotModel,
-} from "@/lib/built-in-bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import {
+	modelName,
 	useChooseDefaultModel,
 	useModelProviders,
 	useProviderActions,
 } from "@/lib/model-providers.ts";
 import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
+import { SYSTEM_BOT_KEYS, useChooseSystemBotModel, useSystemBots } from "@/lib/system-bots.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -38,9 +35,9 @@ import {
 	DialogFormHeader,
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	SettingsAddMark,
+	SettingsChoiceRow,
 	SettingsFieldRow,
 	SettingsGroup,
 	SettingsPage,
@@ -51,7 +48,7 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { ModelChoiceList } from "./ModelChoiceList.tsx";
-import { API_FORMATS, BackToModels, modelName, ProviderTile } from "./ProviderSettings.tsx";
+import { API_FORMATS, BackToModels, ProviderTile } from "./ProviderSettings.tsx";
 
 /**
  * The providers most people connect, listed whether or not they are, each
@@ -299,12 +296,12 @@ function DefaultRow({
 /** The Summariser's model stands for the system bots', since choosing one sets them all. */
 function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) {
 	const backToModels = useBackToHere("Models");
-	const systemBots = useBuiltInBots();
+	const systemBots = useSystemBots();
 	const current = systemBots.data?.find((bot) => bot.key === "summarise")?.model ?? null;
 	return (
 		<DefaultRow
 			label="Summaries"
-			description="Used for conversation summaries, chat titles and compacting long chats"
+			description="Used for conversation summaries, thread titles and compacting long conversations"
 			model={chosenModelName(providers, current)}
 			render={<Link from="/$workspace" to="./settings/providers/system" state={backToModels} />}
 		/>
@@ -340,22 +337,22 @@ export function DefaultModelSettings() {
 
 /**
  * One model for everything Sugabots does behind the scenes: conversation summaries,
- * chat titles and compacting long chats. Choosing it sets it for every system
+ * thread titles and compacting long conversations. Choosing it sets it for every system
  * bot at once.
  */
 export function SystemModelSettings() {
-	const systemBots = useBuiltInBots();
-	const summarise = useChooseBuiltInBotModel("summarise");
-	const compact = useChooseBuiltInBotModel("compact");
+	const systemBots = useSystemBots();
+	const summarise = useChooseSystemBotModel("summarise");
+	const compact = useChooseSystemBotModel("compact");
 	const choosers = { summarise, compact };
 	return (
 		<ModelChoicePage
 			title="Summaries"
-			description="The model Sugabots uses behind the scenes: summaries, chat titles and compacting long chats. A fast, cheap model works best."
+			description="The model Sugabots uses behind the scenes: summaries, thread titles and compacting long conversations. A fast, cheap model works best."
 			current={systemBots.data?.find((bot) => bot.key === "summarise")?.model ?? null}
 			pending={summarise.isPending || compact.isPending}
 			choose={(modelId) =>
-				Promise.all(BUILT_IN_BOT_KEYS.map((key) => choosers[key].mutateAsync(modelId)))
+				Promise.all(SYSTEM_BOT_KEYS.map((key) => choosers[key].mutateAsync(modelId)))
 			}
 		/>
 	);
@@ -680,15 +677,12 @@ function CustomProviderStep({
 						placeholder="https://llm.example.com/v1"
 						mono
 					/>
-					<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5">
-						<span className="flex-1 text-sm text-foreground">Format</span>
-						<SegmentedControl
-							label="API format"
-							options={API_FORMATS}
-							value={apiFormat}
-							onChange={setApiFormat}
-						/>
-					</div>
+					<SettingsChoiceRow
+						label="Format"
+						options={API_FORMATS}
+						value={apiFormat}
+						onChange={setApiFormat}
+					/>
 					<SettingsFieldRow
 						label="API key"
 						value={apiKey}

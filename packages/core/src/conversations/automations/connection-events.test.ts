@@ -10,7 +10,7 @@ import type { RepositoryActivity } from "../../providers/connections/github/gith
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
 import { Automations } from "./automations.ts";
-import { anAutomationOwner } from "./testing.ts";
+import { anAutomationOwner, defaultProjectOf } from "./testing.ts";
 
 const opened: RepositoryActivity = {
 	event: "pull_request_opened",
@@ -38,16 +38,16 @@ describe.skipIf(!process.env.DATABASE_URL)("connection automations, against Post
 	beforeEach(async () => {
 		owner = await anAutomationOwner();
 		automations = onPostgresAs(owner.userId)(Context.get(conversations, Automations.Service));
-		connectionId = await gitHubConnectionWith(owner.workspaceId, owner.botId, "acme/web");
+		connectionId = await gitHubConnectionWith(owner.workspaceId, owner.ownProjectId, "acme/web");
 	});
 
 	const repositoryAutomation = (
 		repository: string,
 		events: RepositoryActivity["event"][],
-		on = { botId: owner.botId, connectionId },
+		on = { projectId: owner.ownProjectId, connectionId },
 	) =>
 		automations.create(
-			{ botId: on.botId },
+			{ projectId: on.projectId },
 			{
 				name: `Reviews ${crypto.randomUUID()}`,
 				instructions: "Review it.",
@@ -101,16 +101,16 @@ describe.skipIf(!process.env.DATABASE_URL)("connection automations, against Post
 		expect(await deliver(crypto.randomUUID())).toEqual([]);
 	});
 
-	it("runs only the automations of the bot whose GitHub app the delivery came to", async () => {
+	it("runs only the automations of the project whose GitHub app the delivery came to", async () => {
 		const other = await anotherBotOf(owner);
 		const otherConnectionId = await gitHubConnectionWith(
 			owner.workspaceId,
-			other.botId,
+			other.projectId,
 			"acme/web",
 		);
 		const ours = await repositoryAutomation("acme/web", ["pull_request_opened"]);
 		await repositoryAutomation("acme/web", ["pull_request_opened"], {
-			botId: other.botId,
+			projectId: other.projectId,
 			connectionId: otherConnectionId,
 		});
 
@@ -131,14 +131,14 @@ describe.skipIf(!process.env.DATABASE_URL)("connection automations, against Post
 	});
 });
 
-/** The bot's GitHub app, with `repository`, as one installed on its account. */
-async function gitHubConnectionWith(workspaceId: string, botId: string, repository: string) {
+/** The project's GitHub app, with `repository`, as one installed on its account. */
+async function gitHubConnectionWith(workspaceId: string, projectId: string, repository: string) {
 	const [connected] = await onDatabase((db) =>
 		db
 			.insert(connection)
 			.values({
 				workspaceId,
-				botId,
+				projectId,
 				kind: "github",
 				name: "GitHub",
 				handle: "github",
@@ -162,7 +162,7 @@ async function gitHubConnectionWith(workspaceId: string, botId: string, reposito
 	return connected.id;
 }
 
-/** A second bot in the owner's workspace. */
+/** A second bot in the owner's workspace, with its default project. */
 async function anotherBotOf(owner: { workspaceId: string; userId: string }) {
 	const suffix = crypto.randomUUID();
 	const [bot] = await onDatabase((db) =>
@@ -180,5 +180,5 @@ async function anotherBotOf(owner: { workspaceId: string; userId: string }) {
 			.returning(),
 	);
 	if (!bot) throw new Error("fixture");
-	return { botId: bot.id };
+	return { botId: bot.id, projectId: await defaultProjectOf(bot.id) };
 }

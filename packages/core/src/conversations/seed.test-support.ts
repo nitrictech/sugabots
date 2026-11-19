@@ -6,12 +6,12 @@ import type { Executor } from "../database/database.ts";
 import {
 	automationFeed,
 	automationRun,
-	channelConversation,
 	collaboration,
 	conversation,
 	directMessage,
+	project,
+	projectThread,
 	systemConversation,
-	task,
 } from "../database/schema.ts";
 
 /**
@@ -29,14 +29,16 @@ type ConversationSeed = {
 } & KindSeed;
 
 type KindSeed =
-	| { kind: "task"; botId: string; startedById?: string | null; doneAt?: Date | null }
-	| {
-			kind: "channel_conversation";
-			channelId: string;
-			main?: boolean;
+	| ({
+			kind: "project_thread";
 			archivedAt?: Date | null;
+			doneAt?: Date | null;
 			startedById?: string | null;
-	  }
+	  } & (
+			| { projectId: string }
+			/** One of the bot's threads: in its default project. */
+			| { botId: string }
+	  ))
 	| { kind: "direct_message"; directKey: string; startedById?: string | null }
 	| { kind: "automation_feed"; automationId: string }
 	| {
@@ -74,21 +76,16 @@ export function seedConversation(db: Executor, seed: ConversationSeed) {
 function kindRowOf(db: Executor, conversationId: string, seed: ConversationSeed) {
 	const { workspaceId } = seed;
 	switch (seed.kind) {
-		case "task":
-			return db.insert(task).values({
+		case "project_thread":
+			return db.insert(projectThread).values({
 				conversationId,
 				workspaceId,
-				botId: seed.botId,
-				startedById: seed.startedById,
-				doneAt: seed.doneAt,
-			});
-		case "channel_conversation":
-			return db.insert(channelConversation).values({
-				conversationId,
-				workspaceId,
-				channelId: seed.channelId,
-				main: seed.main,
+				projectId:
+					"projectId" in seed
+						? seed.projectId
+						: sql`(select ${project.id} from ${project} where ${project.defaultOfBotId} = ${seed.botId})`,
 				archivedAt: seed.archivedAt,
+				doneAt: seed.doneAt,
 				startedById: seed.startedById,
 			});
 		case "direct_message":

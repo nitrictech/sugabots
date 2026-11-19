@@ -3,9 +3,9 @@ import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { seedConversation } from "@sugabots/core/conversations/seed.test-support";
 import {
 	bot,
-	channel,
-	channelMember,
 	message,
+	project,
+	projectMember,
 	turn,
 	user,
 	workspace,
@@ -44,8 +44,8 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 	afterAll(closeDatabase);
 
 	/**
-	 * A workspace with a member in a channel, an administrator the database has
-	 * put in it too, another member outside the channel, and one person left
+	 * A workspace with a member in a project, an administrator the database has
+	 * put in it too, another member outside the project, and one person left
 	 * outside the workspace.
 	 */
 	async function fixture() {
@@ -87,8 +87,8 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 			]),
 		);
 
-		// A task with a public bot, one with a private bot the member made, and
-		// a thread in a channel the member is in.
+		// A thread with a public bot, one with a private bot the member made, and
+		// a thread of a project the member is in.
 		const [publicBot, privateBot] = await onDatabase((db) =>
 			db
 				.insert(bot)
@@ -108,7 +108,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		);
 		const [room] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId: space.id,
 					name: "Room",
@@ -122,32 +122,32 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		}
 		await onDatabase((db) =>
 			db
-				.insert(channelMember)
-				.values({ workspaceId: space.id, channelId: room.id, userId: member.id }),
+				.insert(projectMember)
+				.values({ workspaceId: space.id, projectId: room.id, userId: member.id }),
 		);
 		const conversation = await onDatabase((db) =>
 			seedConversation(db, {
 				workspaceId: space.id,
-				kind: "task",
+				kind: "project_thread",
 				botId: publicBot.id,
-				title: "A task",
+				title: "A thread",
 				startedById: member.id,
 			}),
 		);
-		const privateTask = await onDatabase((db) =>
+		const privateThread = await onDatabase((db) =>
 			seedConversation(db, {
 				workspaceId: space.id,
-				kind: "task",
+				kind: "project_thread",
 				botId: privateBot.id,
-				title: "A private task",
+				title: "A private thread",
 				startedById: member.id,
 			}),
 		);
-		const channelThread = await onDatabase((db) =>
+		const projectThread = await onDatabase((db) =>
 			seedConversation(db, {
 				workspaceId: space.id,
-				kind: "channel_conversation",
-				channelId: room.id,
+				kind: "project_thread",
+				projectId: room.id,
 				title: "A thread",
 			}),
 		);
@@ -161,8 +161,8 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId: space.id, userId: elsewhere.id }),
 		);
-		// A private bot of somebody outside the channel, asked from it, and the
-		// public bot asked from the member's private task.
+		// A private bot of somebody outside the project, asked from it, and the
+		// public bot asked from the member's private thread.
 		const [elsewhereBot] = await onDatabase((db) =>
 			db
 				.insert(bot)
@@ -231,17 +231,17 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				}),
 			);
 		};
-		const askedFromChannel = await askedFrom(
-			channelThread.id,
+		const askedFromProject = await askedFrom(
+			projectThread.id,
 			publicBot.id,
 			elsewhereBot.id,
-			"Asked from the channel",
+			"Asked from the project",
 		);
-		const askedFromPrivateTask = await askedFrom(
-			privateTask.id,
+		const askedFromPrivateThread = await askedFrom(
+			privateThread.id,
 			privateBot.id,
 			publicBot.id,
-			"Asked from a private task",
+			"Asked from a private thread",
 		);
 
 		// The real services, over the real database, since that is what the
@@ -257,10 +257,10 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 			space,
 			room,
 			conversation,
-			privateTask,
-			channelThread,
-			askedFromChannel,
-			askedFromPrivateTask,
+			privateThread,
+			projectThread,
+			askedFromProject,
+			askedFromPrivateThread,
 		};
 	}
 
@@ -295,7 +295,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(member.id).workspace("not-a-uuid")).toBeUndefined();
 	});
 
-	it("gives a member a public bot's task's stream", async () => {
+	it("gives a member a public bot's thread's stream", async () => {
 		const { access, elsewhere, conversation } = await fixture();
 
 		expect(await access(elsewhere.id).conversation(conversation.id)).toBe(
@@ -303,7 +303,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		);
 	});
 
-	it("gives someone outside the workspace nothing for its tasks", async () => {
+	it("gives someone outside the workspace nothing for its threads", async () => {
 		const { access, outsider, conversation } = await fixture();
 
 		expect(await access(outsider.id).conversation(conversation.id)).toBeUndefined();
@@ -315,7 +315,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(member.id).conversation(crypto.randomUUID())).toBeUndefined();
 	});
 
-	it("lets every member hear the workspace's events about a public bot's task", async () => {
+	it("lets every member hear the workspace's events about a public bot's thread", async () => {
 		const { access, member, elsewhere, outsider, conversation } = await fixture();
 
 		expect(await access(member.id).hears(conversationAudience(conversation.id))).toBe(true);
@@ -323,62 +323,66 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		expect(await access(outsider.id).hears(conversationAudience(conversation.id))).toBe(false);
 	});
 
-	it("lets only a private bot's creator hear about its tasks, not an administrator", async () => {
-		const { access, member, administrator, elsewhere, privateTask } = await fixture();
+	it("lets only a private bot's creator hear about its threads, not an administrator", async () => {
+		const { access, member, administrator, elsewhere, privateThread } = await fixture();
 
-		expect(await access(member.id).hears(conversationAudience(privateTask.id))).toBe(true);
-		expect(await access(administrator.id).hears(conversationAudience(privateTask.id))).toBe(false);
-		expect(await access(elsewhere.id).hears(conversationAudience(privateTask.id))).toBe(false);
+		expect(await access(member.id).hears(conversationAudience(privateThread.id))).toBe(true);
+		expect(await access(administrator.id).hears(conversationAudience(privateThread.id))).toBe(
+			false,
+		);
+		expect(await access(elsewhere.id).hears(conversationAudience(privateThread.id))).toBe(false);
 	});
 
-	it("lets only the people in a channel hear about its threads", async () => {
-		const { access, member, administrator, elsewhere, space, channelThread } = await fixture();
+	it("lets only the people in a project hear about its threads", async () => {
+		const { access, member, administrator, elsewhere, space, projectThread } = await fixture();
 
-		expect(await access(member.id).hears(conversationAudience(channelThread.id))).toBe(true);
-		expect(await access(administrator.id).hears(conversationAudience(channelThread.id))).toBe(true);
+		expect(await access(member.id).hears(conversationAudience(projectThread.id))).toBe(true);
+		expect(await access(administrator.id).hears(conversationAudience(projectThread.id))).toBe(true);
 		expect(await access(elsewhere.id).workspace(space.id)).toBe(`workspace:${space.id}`);
-		expect(await access(elsewhere.id).hears(conversationAudience(channelThread.id))).toBe(false);
+		expect(await access(elsewhere.id).hears(conversationAudience(projectThread.id))).toBe(false);
 	});
 
 	it("keeps a collaboration with the conversation it was opened from, not the bot asked", async () => {
-		const { access, member, elsewhere, askedFromPrivateTask } = await fixture();
+		const { access, member, elsewhere, askedFromPrivateThread } = await fixture();
 
-		expect(await access(member.id).conversation(askedFromPrivateTask.id)).toBe(
-			`conversation:${askedFromPrivateTask.id}`,
+		expect(await access(member.id).conversation(askedFromPrivateThread.id)).toBe(
+			`conversation:${askedFromPrivateThread.id}`,
 		);
-		expect(await access(member.id).hears(conversationAudience(askedFromPrivateTask.id))).toBe(true);
-		// Everyone reaches the public bot that was asked, but not the private task.
-		expect(await access(elsewhere.id).conversation(askedFromPrivateTask.id)).toBeUndefined();
-		expect(await access(elsewhere.id).hears(conversationAudience(askedFromPrivateTask.id))).toBe(
+		expect(await access(member.id).hears(conversationAudience(askedFromPrivateThread.id))).toBe(
+			true,
+		);
+		// Everyone reaches the public bot that was asked, but not the private thread.
+		expect(await access(elsewhere.id).conversation(askedFromPrivateThread.id)).toBeUndefined();
+		expect(await access(elsewhere.id).hears(conversationAudience(askedFromPrivateThread.id))).toBe(
 			false,
 		);
 	});
 
-	it("shows the channel a collaboration with a private bot opened from it", async () => {
-		const { access, member, administrator, elsewhere, askedFromChannel } = await fixture();
+	it("shows the project a collaboration with a private bot opened from it", async () => {
+		const { access, member, administrator, elsewhere, askedFromProject } = await fixture();
 
-		expect(await access(member.id).conversation(askedFromChannel.id)).toBe(
-			`conversation:${askedFromChannel.id}`,
+		expect(await access(member.id).conversation(askedFromProject.id)).toBe(
+			`conversation:${askedFromProject.id}`,
 		);
-		expect(await access(administrator.id).hears(conversationAudience(askedFromChannel.id))).toBe(
+		expect(await access(administrator.id).hears(conversationAudience(askedFromProject.id))).toBe(
 			true,
 		);
-		// The private bot's creator is not in the channel.
-		expect(await access(elsewhere.id).conversation(askedFromChannel.id)).toBeUndefined();
-		expect(await access(elsewhere.id).hears(conversationAudience(askedFromChannel.id))).toBe(false);
+		// The private bot's creator is not in the project.
+		expect(await access(elsewhere.id).conversation(askedFromProject.id)).toBeUndefined();
+		expect(await access(elsewhere.id).hears(conversationAudience(askedFromProject.id))).toBe(false);
 	});
 
-	it("gives an administrator without a row in the channel nothing, since reach is the row", async () => {
-		const { access, administrator, room, channelThread } = await fixture();
+	it("gives an administrator without a row in the project nothing, since reach is the row", async () => {
+		const { access, administrator, room, projectThread } = await fixture();
 		await onDatabase((db) =>
 			db
-				.delete(channelMember)
+				.delete(projectMember)
 				.where(
-					and(eq(channelMember.channelId, room.id), eq(channelMember.userId, administrator.id)),
+					and(eq(projectMember.projectId, room.id), eq(projectMember.userId, administrator.id)),
 				),
 		);
 
-		expect(await access(administrator.id).conversation(channelThread.id)).toBeUndefined();
+		expect(await access(administrator.id).conversation(projectThread.id)).toBeUndefined();
 	});
 });
 

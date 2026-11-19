@@ -3,10 +3,10 @@ import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { BlobDeletions } from "@sugabots/core/blob-store/deletions";
-import { BotComputerSetup } from "@sugabots/core/computers/bot-computer-setup";
-import { BotComputers } from "@sugabots/core/computers/bot-computers";
 import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
 import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
+import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
+import { ProjectComputers } from "@sugabots/core/computers/project-computers";
 import { Automations } from "@sugabots/core/conversations/automations/automations";
 import { AutomationRuns } from "@sugabots/core/conversations/automations/runs";
 import { Conversations } from "@sugabots/core/conversations/conversations";
@@ -40,9 +40,9 @@ import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
-import { ChannelAdministration } from "@sugabots/core/workspaces/channels/channel-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
+import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
@@ -90,20 +90,20 @@ const OutsideSystems = Layer.mergeAll(
 );
 
 /**
- * Accounts, members, channels, bots, their files and the providers they
+ * Accounts, members, projects, bots, their files and the providers they
  * use, trying a model, and notifying people.
  */
 const WorkspacesAndProviders = Layer.mergeAll(
 	Membership.layer,
 	Notifications.layer,
 	Onboarding.layer,
-	ChannelAdministration.layer,
+	ProjectAdministration.layer,
 	BotAdministration.layer,
 	ModelProviderSetup.layer,
 	SearchProviderSetup.layer,
 	ComputerProviderSetup.layer,
 	ComputerNetwork.layer,
-	BotComputerSetup.layer,
+	ProjectComputerSetup.layer,
 	GitHubApps.layer,
 	GitHubConnections.layer,
 	ConnectionSetup.layer,
@@ -134,7 +134,7 @@ const Background = Layer.mergeAll(
 	BlobDeletions.layer,
 	UnsentUploads.layer,
 	PresetSeeding.layer,
-	BotComputers.sweepLayer,
+	ProjectComputers.sweepLayer,
 );
 
 /** The API and the web app on `PORT`, with better-auth answering who is calling. */

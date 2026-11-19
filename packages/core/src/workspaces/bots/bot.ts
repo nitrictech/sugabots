@@ -1,6 +1,8 @@
 import type { Bot } from "@sugabots/contracts";
+import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { type Actor, botPermissions } from "../../authorization/permissions.ts";
 import type * as schema from "../../database/schema.ts";
+import { pinnedBot, project } from "../../database/schema.ts";
 
 /**
  * A bot row that is a bot people talk to: anything but a system bot, which
@@ -16,16 +18,33 @@ export function personFacingBotRow(row: schema.BotRow): PersonFacingBotRow | und
 }
 
 /**
- * The row as the API returns it to `viewer`: timestamps as ISO strings, what
- * they may do with it, and whether they pinned it.
+ * SQL for the id of the default project of the bot `botId` names, to select
+ * beside it for {@link toBot}. Every bot but a system bot has one.
  */
-export function toBot(row: PersonFacingBotRow, viewer: { actor: Actor; pinned?: boolean }): Bot {
+export function defaultProjectIdOf(botId: SQLWrapper): SQL<string> {
+	return sql<string>`(select default_project.id from ${project} as default_project where default_project.default_of_bot_id = ${botId})`;
+}
+
+/** SQL for whether the person `userId` pinned the bot `botId` names, to select beside it for {@link toBot}. */
+export function pinnedBy(botId: SQLWrapper, userId: string): SQL<boolean> {
+	return sql<boolean>`exists (select 1 from ${pinnedBot} where ${pinnedBot.botId} = ${botId} and ${pinnedBot.userId} = ${userId})`;
+}
+
+/**
+ * The row as the API returns it to `viewer`: timestamps as ISO strings, what
+ * they may do with it, and whether they pinned it. `defaultProjectId` is its
+ * default project's, whose routes hold its computer, connections and
+ * automations.
+ */
+export function toBot(
+	row: PersonFacingBotRow & { defaultProjectId: string },
+	viewer: { actor: Actor; pinned: boolean },
+): Bot {
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
 		name: row.name,
 		handle: row.handle,
-		systemBotKey: row.systemBotKey,
 		description: row.description,
 		color: row.color,
 		face: row.face,
@@ -38,7 +57,8 @@ export function toBot(row: PersonFacingBotRow, viewer: { actor: Actor; pinned?: 
 		createdById: row.createdById,
 		visibility: row.visibility,
 		assistant: row.assistantOf !== null,
-		pinned: viewer.pinned ?? false,
+		pinned: viewer.pinned,
+		defaultProjectId: row.defaultProjectId,
 		permissions: botPermissions(viewer.actor, row),
 		createdAt: row.createdAt.toISOString(),
 	};

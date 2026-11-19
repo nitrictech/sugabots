@@ -1,22 +1,26 @@
+import type { Project } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Bot, Hash, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAssistant, useBots } from "@/lib/bots.ts";
-import { useChannels } from "@/lib/channels.ts";
-import { useChannelConversationMarkers, useDirectMessages } from "@/lib/chats.ts";
-import { botLink, botsLink, channelLink, channelsLink, newDirectMessageLink } from "@/lib/links.ts";
+import { useDirectMessages, useProjectThreadMarkers } from "@/lib/chats.ts";
+import { useComputerAccess } from "@/lib/computer-providers.ts";
+import { botLink, botsLink, newDirectMessageLink, projectLink, projectsLink } from "@/lib/links.ts";
+import { ownerPages } from "@/lib/owner-pages.ts";
+import { useProjects } from "@/lib/projects.ts";
+import { OwnerLink, ownerLink } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import {
-	ChannelConversations,
-	NOTHING_NEW,
-	SidebarBot,
-	sidebarRowClassName,
-} from "@/shell/ConversationList.tsx";
 import { DirectMessageCards } from "@/shell/DirectMessages.tsx";
+import { OwnerWork } from "@/shell/OwnerWork.tsx";
 import { sidebarBots } from "@/shell/Sidebar.tsx";
-import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
+import { NOTHING_NEW, SidebarBot } from "@/shell/SidebarBot.tsx";
+import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { sidebarRow } from "@/ui/sidebar-row.ts";
+
+/** A row of Home on a phone, sized for a thumb. */
+const HOME_ROW = sidebarRow({ phone: true });
 
 /** A page of Home on a phone, under its title, with `action` beside it. */
 function MobilePage({
@@ -76,19 +80,19 @@ export function MobileDirectMessages({ className }: { className?: string }) {
 }
 
 /**
- * Home on a phone: the Personal Assistant, the channels the person is in,
- * each with its conversations, and the bots they pinned.
+ * Home on a phone: the Personal Assistant, the projects the person is in,
+ * each opening its threads, and the bots they pinned.
  */
 export function MobileHome({ className }: { className?: string }) {
-	const { data: channels } = useChannels();
+	const { data: projects } = useProjects();
 	const { bots } = useBots();
 	const assistant = useAssistant();
-	const { data: markers } = useChannelConversationMarkers();
+	const { data: markers } = useProjectThreadMarkers();
 	const pinned = sidebarBots(bots ?? []);
 	return (
 		<MobilePage title="Home" className={className}>
 			{assistant && (
-				<Link {...botLink(assistant)} className={sidebarRowClassName(false)}>
+				<Link {...botLink(assistant)} className={HOME_ROW}>
 					<BotAvatar
 						color={assistant.color}
 						face={assistant.face}
@@ -98,23 +102,18 @@ export function MobileHome({ className }: { className?: string }) {
 					<span className="min-w-0 flex-1 truncate">{assistant.name}</span>
 				</Link>
 			)}
-			<HomeSection label="Channels">
-				{channels
-					?.filter((channel) => channel.isMember)
-					.map((channel) => (
-						<div key={channel.id} className="flex flex-col gap-px">
-							<Link {...channelLink(channel)} className={sidebarRowClassName(false)}>
-								<ChannelInitial channel={channel} />
-								<span className="min-w-0 flex-1 truncate font-medium">{channel.name}</span>
-							</Link>
-							<div className="pl-4">
-								<ChannelConversations channel={channel} />
-							</div>
-						</div>
+			<HomeSection label="Projects">
+				{projects
+					?.filter((project) => project.isMember)
+					.map((project) => (
+						<Link key={project.id} {...projectLink(project)} className={HOME_ROW}>
+							<ProjectInitial project={project} />
+							<span className="min-w-0 flex-1 truncate font-medium">{project.name}</span>
+						</Link>
 					))}
-				<Link {...channelsLink()} className={sidebarRowClassName(false)}>
+				<Link {...projectsLink()} className={HOME_ROW}>
 					<Hash aria-hidden size={18} strokeWidth={1.75} className="shrink-0" />
-					Browse channels
+					Browse projects
 				</Link>
 			</HomeSection>
 			<HomeSection label="Bots">
@@ -127,10 +126,48 @@ export function MobileHome({ className }: { className?: string }) {
 						/>
 					))}
 				</ul>
-				<Link {...botsLink()} className={sidebarRowClassName(false)}>
+				<Link {...botsLink()} className={HOME_ROW}>
 					<Bot aria-hidden size={18} strokeWidth={1.75} className="shrink-0" />
 					Browse bots
 				</Link>
+			</HomeSection>
+		</MobilePage>
+	);
+}
+
+/**
+ * A project on a phone, its sidebar as a page: its work, as the sidebar
+ * beside it lists it on a wider screen, then its own pages, and + to start a
+ * thread.
+ */
+export function MobileProject({ project }: { project: Project }) {
+	const owner = { project };
+	const computersOn = useComputerAccess().data?.enabled === true;
+	return (
+		<MobilePage
+			title={project.name}
+			action={
+				<IconButton
+					label={`New thread in ${project.name}`}
+					render={ownerLink(owner, { page: "newThread" })}
+				>
+					<Plus strokeWidth={2.2} />
+				</IconButton>
+			}
+		>
+			<OwnerWork owner={owner} selectedConversationId={undefined} />
+			<HomeSection label="Pages">
+				{ownerPages(owner, { computersOn }).map(({ to, label, icon: Icon }) => (
+					<OwnerLink
+						key={to.page}
+						owner={owner}
+						to={to}
+						className={cn(HOME_ROW, "[&>svg]:size-4.5 [&>svg]:shrink-0")}
+					>
+						<Icon />
+						{label}
+					</OwnerLink>
+				))}
 			</HomeSection>
 		</MobilePage>
 	);

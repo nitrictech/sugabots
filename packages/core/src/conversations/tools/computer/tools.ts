@@ -12,9 +12,9 @@ import { tool } from "ai";
 import { Effect, Schema, Semaphore, Stream } from "effect";
 import { contentType as mediaTypeForName } from "mime-types";
 import type { BlobStore } from "../../../blob-store/blob-store.ts";
-import type { BotComputers } from "../../../computers/bot-computers.ts";
 import { BOT_CACHES } from "../../../computers/computer-disk-clearing.ts";
 import { Computers } from "../../../computers/computers.ts";
+import type { ProjectComputers } from "../../../computers/project-computers.ts";
 import type { RunEffect } from "../../../database/database.ts";
 import type { ConversationFiles } from "../../../files/conversation-files.ts";
 import type { Ids } from "../../../ids/ids.ts";
@@ -55,7 +55,7 @@ const MAX_READ_BYTES = MAX_READ_CHARACTERS * 4;
 const MAX_WRITE_CHARACTERS = 1_000_000;
 
 /**
- * Where a turn works in its bot's computer. Both are under `/workspace`, so
+ * Where a turn works in the computer of the project it works in. Both are under `/workspace`, so
  * they last as long as the computer does and come across when it moves to a
  * new image.
  */
@@ -80,7 +80,7 @@ export function placeOf(turn: { conversationId: string; botId: string }): Place 
  * Opens the bot's computer on the first call that needs it, and reuses it for
  * the rest of the turn, so a turn that never runs anything never starts one.
  */
-export type OpenSandbox = () => Promise<BotComputers.Opened>;
+export type OpenSandbox = () => Promise<ProjectComputers.Opened>;
 
 /** The bot's computer as a turn's tools reach it. */
 export interface TurnComputer {
@@ -93,8 +93,8 @@ export interface TurnComputer {
  * The bot's computer, opened once per turn. A failed opening is not kept, so
  * the next call tries again.
  */
-export function openOncePerTurn(open: () => Promise<BotComputers.Opened>): OpenSandbox {
-	let opening: Promise<BotComputers.Opened> | undefined;
+export function openOncePerTurn(open: () => Promise<ProjectComputers.Opened>): OpenSandbox {
+	let opening: Promise<ProjectComputers.Opened> | undefined;
 	let told = false;
 	return async () => {
 		opening ??= open().catch((cause: unknown) => {
@@ -127,7 +127,7 @@ export async function inComputer<A>(
 		computer: Computers.Computer,
 	) => Effect.Effect<A, Computers.Unavailable | Computers.FileFailed>,
 ): Promise<(A & { note?: UserText }) | Failed> {
-	let opened: BotComputers.Opened;
+	let opened: ProjectComputers.Opened;
 	try {
 		opened = await computer.open();
 	} catch (cause) {
@@ -154,7 +154,7 @@ export async function inComputer<A>(
 }
 
 /** What the bot needs to know about how its computer came back, if anything. */
-function arrivalNote(arrival: BotComputers.Opened["arrival"]): UserText | undefined {
+function arrivalNote(arrival: ProjectComputers.Opened["arrival"]): UserText | undefined {
 	switch (arrival) {
 		case "rebooted":
 			return userText`Your computer was paused since it was last used. Its files are kept, but programs that were running have stopped.`;
@@ -183,7 +183,7 @@ const pathIn = (place: Place) =>
 
 export function runCommandTool(computer: TurnComputer, place: Place) {
 	return tool({
-		description: `Run a bash command on your computer, a Linux machine of your own. Commands start in this conversation's folder, ${place.folder}: a scratchpad kept between your turns in the conversation, so clone and build here. Your home, ${place.home} (also $HOME), is kept across all your conversations: keep notes, settings and tools you want everywhere there. When the computer's disk runs short, the folders of finished conversations, such as ended automation runs and conversations marked done, are cleared, and so are the caches in your home (${BOT_CACHES.map((cache) => `~/${cache}`).join(", ")}): push anything that must outlast its conversation, or keep it elsewhere in your home. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. Your turn waits on every command, and no one hears from you until it ends, so keep waits short: sleep or poll for a few seconds while something starts up, never minutes for a person or another system to respond. When something will only be ready later, say what you're waiting for and end your turn. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a task needs one for something other than the browser, and the computer has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The computer, its browser included, reaches only the hosts the turn's note lists; to reach another the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
+		description: `Run a bash command on your computer, a Linux machine of your own. Commands start in this conversation's folder, ${place.folder}: a scratchpad kept between your turns in the conversation, so clone and build here. Your home, ${place.home} (also $HOME), is kept across all your conversations: keep notes, settings and tools you want everywhere there. When the computer's disk runs short, the folders of finished conversations, such as ended automation runs and conversations marked done, are cleared, and so are the caches in your home (${BOT_CACHES.map((cache) => `~/${cache}`).join(", ")}): push anything that must outlast its conversation, or keep it elsewhere in your home. Nothing else carries over between commands, so cd or export in the same command. Returns the exit code and the end of stdout and stderr. A command still running at its timeout is stopped. Your turn waits on every command, and no one hears from you until it ends, so keep waits short: sleep or poll for a few seconds while something starts up, never minutes for a person or another system to respond. When something will only be ready later, say what you're waiting for and end your turn. It can't ask a person anything, so pass flags that skip prompts. For web pages, use the browser_ tools. Commands run without a screen; when a thread needs one for something other than the browser, and the computer has sugabots-desktop, run "sugabots-desktop start" to get a desktop, set the DISPLAY it prints for the programs you start, and use scrot to take screenshots and xdotool to click and type. Stop it with "sugabots-desktop stop <number>" when you're done. The computer, its browser included, reaches only the hosts the turn's note lists; to reach another the thread needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`,
 		inputSchema: Schema.Struct({
 			command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000)).annotate({
 				description: "The bash command to run",
@@ -437,7 +437,7 @@ export function writeFileTool(computer: TurnComputer, place: Place) {
  * when last measured, so the bot frees space before it runs out, and stops
  * when a command fails for lack of it, rather than trying again.
  */
-export function diskNote(disk: BotComputers.MeasuredDisk | undefined): string | undefined {
+export function diskNote(disk: ProjectComputers.MeasuredDisk | undefined): string | undefined {
 	if (!disk || computerDiskLevel(disk) === "normal") return undefined;
 	return `Your computer's disk was ${computerDiskPercent(disk)}% full when last measured: ${formatDiskSize(disk.usedBytes)} of ${formatDiskSize(disk.totalBytes)}. Once it fills, commands that write fail with "No space left on device". Before installing, cloning or building, remove what you no longer need, such as package caches in your home and clones and builds you've finished with. If a command fails for lack of space, don't try it again: tell the people in the conversation that your computer's disk is full.`;
 }
@@ -451,7 +451,7 @@ export function networkNote(reach: Computers.Reach): string {
 	const unreachable =
 		"fails as if it weren't there: a name that doesn't resolve, a TLS error or an empty reply";
 	if (reach.kind === "allowlist") {
-		return `Your computer, its browser included, connects only to these hosts (*. covers a domain's subdomains): ${reach.hosts.join(", ")}. A connection to any other host ${unreachable}. To reach one the task needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
+		return `Your computer, its browser included, connects only to these hosts (*. covers a domain's subdomains): ${reach.hosts.join(", ")}. A connection to any other host ${unreachable}. To reach one the thread needs, call ${REQUEST_NETWORK_ACCESS_TOOL}.`;
 	}
 	if (reach.blockedHosts.length === 0) {
 		return "Your computer, its browser included, connects to any host on the internet.";

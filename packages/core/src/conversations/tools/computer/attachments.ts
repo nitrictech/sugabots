@@ -12,7 +12,7 @@ import type { Ids } from "../../../ids/ids.ts";
  * changes, so a second copy could only undo their work.
  *
  * A bot keeps every copy in its own computer, so it can read in one of its
- * tasks a copy made in another. Everyone who can see one of a bot's tasks can
+ * threads a copy made in another. Everyone who can see one of a bot's threads can
  * see them all, so this lets no person see more than they could.
  */
 

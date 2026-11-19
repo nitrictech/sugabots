@@ -1,5 +1,6 @@
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
 import type { ConnectionLook } from "@/lib/connections.ts";
+import { countOf, listNames } from "@/lib/name-list.ts";
 import {
 	BROWSER_TOOL_PREFIX,
 	BUILT_IN_HANDLE,
@@ -9,7 +10,7 @@ import {
 	stepLabel,
 	wordsFromKey,
 } from "@/lib/tool-names.ts";
-import { awaitsApproval, durationOf, formatTotal } from "./tool-activity.ts";
+import { awaitsApproval } from "./tool-activity.ts";
 
 /*
  * A reply's tool calls as the tool line says them: in one line over the reply
@@ -17,6 +18,10 @@ import { awaitsApproval, durationOf, formatTotal } from "./tool-activity.ts";
  * was about to do, each call written as what it did to what ("Read
  * image.png", "Ran ls -la") with a note on how it went (`noteOf`), rather
  * than as the tool's name and its raw output.
+ *
+ * What the bot says just before a call is narration ("Now let me get the
+ * cycle:"). The conversation leaves it out, where it would read as a sentence
+ * pointing at nothing; the tool line shows it over the calls it introduced.
  *
  * The built-in tools are matched by key, as `@/lib/tool-names.ts` does; a
  * connection's tool, or a built-in one not listed here, is named by its key and
@@ -128,11 +133,11 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 		case "update_automation":
 			return step("Changed the automation", name(input.name), "Changed an automation");
 		case "mark_done":
-			return { action: "Marked the task done" };
-		case "start_task":
-		// The tool's name before tasks were called that, which earlier calls record.
+			return { action: "Marked the thread done" };
 		case "start_thread":
-			return step("Started the task", name(input.title), "Started a task");
+		// The name some recorded calls of `start_thread` have.
+		case "start_task":
+			return step("Started the thread", name(input.title), "Started a thread");
 		case "save_instructions":
 			return { action: "Saved its instructions" };
 		case "request_network_access":
@@ -313,13 +318,16 @@ export function toolLineText(
 	looks: ReadonlyMap<string, ConnectionLook>,
 ): string {
 	const apps = (matching: (call: ToolCallPart) => boolean) =>
-		listed([
-			...new Set(
-				calls
-					.filter(matching)
-					.map((call) => appOf(call, looks.get(splitToolKey(call.tool).handle))),
-			),
-		]);
+		listNames(
+			[
+				...new Set(
+					calls
+						.filter(matching)
+						.map((call) => appOf(call, looks.get(splitToolKey(call.tool).handle))),
+				),
+			],
+			{ maxNamed: Number.POSITIVE_INFINITY },
+		);
 	const denied = (call: ToolCallPart) => call.approval?.status === "denied";
 	const waiting = awaitsApproval;
 	// An allowed call is as good as running: its turn starts it a moment later.
@@ -345,10 +353,18 @@ export function toolLineText(
 	return used ? `Used ${used}, ${tail}` : capitalised(tail);
 }
 
-/** "A", "A and B", "A, B and C". */
-function listed(names: readonly string[]): string {
-	if (names.length <= 1) return names[0] ?? "";
-	return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+function durationOf(call: ToolCallPart): number {
+	if (!call.finishedAt) return 0;
+	return Math.max(new Date(call.finishedAt).getTime() - new Date(call.startedAt).getTime(), 0);
+}
+
+/**
+ * What the calls took together: `32s`. Rounded to the second, because the
+ * total is there to be read at a glance rather than added up.
+ */
+function formatTotal(ms: number): string {
+	if (ms < 1_000) return `${Math.round(ms)}ms`;
+	return `${Math.round(ms / 1_000)}s`;
 }
 
 function capitalised(text: string): string {
@@ -379,7 +395,7 @@ export function noteOf(call: ToolCallPart): { text: string; failed: boolean } | 
 	const refusal = refusalIn(call.output);
 	if (refusal) return failed(refusal);
 	const count = resultCountIn(outputValue(call.output));
-	return count === undefined ? undefined : said(resultCount(count));
+	return count === undefined ? undefined : said(countOf(count, "result", "results"));
 }
 
 /**
@@ -389,8 +405,7 @@ export function noteOf(call: ToolCallPart): { text: string; failed: boolean } | 
  * non-zero `exitCode` or timeout.
  */
 function refusalIn(output: unknown): string | undefined {
-	if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
-	const answer = output as Record<string, unknown>;
+	const answer = asRecord(output);
 	const why = [answer.reason, answer.error, answer.message].find(
 		(value): value is string => typeof value === "string",
 	);
@@ -416,8 +431,4 @@ function resultCountIn(output: unknown): number | undefined {
 		([key, value]) => key !== "images" && Array.isArray(value),
 	)?.[1] as unknown[] | undefined;
 	return list?.length;
-}
-
-function resultCount(count: number): string {
-	return `${count} ${count === 1 ? "result" : "results"}`;
 }

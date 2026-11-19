@@ -1,7 +1,7 @@
+import { Collapsible } from "@base-ui/react/collapsible";
 import { cn } from "cn";
 import { ChevronRightIcon } from "lucide-react";
 import type * as React from "react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collapsible.tsx";
 
 function Trace({ className, ...props }: React.ComponentProps<"div">) {
 	return (
@@ -73,16 +73,16 @@ function TraceDescription({ className, ...props }: React.ComponentProps<"span">)
 function TraceCollapsible({
 	className,
 	...props
-}: Omit<React.ComponentProps<typeof Collapsible>, "open"> &
+}: Omit<Collapsible.Root.Props, "open"> &
 	(
 		| { open?: undefined }
 		| {
 				open: boolean;
-				onOpenChange: NonNullable<React.ComponentProps<typeof Collapsible>["onOpenChange"]>;
+				onOpenChange: NonNullable<Collapsible.Root.Props["onOpenChange"]>;
 		  }
 	)) {
 	return (
-		<Collapsible
+		<Collapsible.Root
 			data-slot="trace-collapsible"
 			className={cn("flex w-full min-w-0 flex-col", className)}
 			{...props}
@@ -90,13 +90,9 @@ function TraceCollapsible({
 	);
 }
 
-function TraceCollapsibleTrigger({
-	className,
-	children,
-	...props
-}: React.ComponentProps<typeof CollapsibleTrigger>) {
+function TraceCollapsibleTrigger({ className, children, ...props }: Collapsible.Trigger.Props) {
 	return (
-		<CollapsibleTrigger
+		<Collapsible.Trigger
 			data-slot="trace-collapsible-trigger"
 			className={cn(
 				"group/trace-collapsible-trigger flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-md text-left text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 has-[[data-status=error]]:text-destructive",
@@ -108,17 +104,13 @@ function TraceCollapsibleTrigger({
 			<TraceIcon className="transition-transform group-aria-expanded/trace-collapsible-trigger:rotate-90">
 				<ChevronRightIcon />
 			</TraceIcon>
-		</CollapsibleTrigger>
+		</Collapsible.Trigger>
 	);
 }
 
-function TraceCollapsibleContent({
-	className,
-	children,
-	...props
-}: React.ComponentProps<typeof CollapsibleContent>) {
+function TraceCollapsibleContent({ className, children, ...props }: Collapsible.Panel.Props) {
 	return (
-		<CollapsibleContent
+		<Collapsible.Panel
 			data-slot="trace-collapsible-content"
 			className="h-(--collapsible-panel-height) min-w-0 overflow-hidden transition-height duration-200 data-ending-style:h-0 data-starting-style:h-0"
 			{...props}
@@ -132,7 +124,7 @@ function TraceCollapsibleContent({
 			>
 				{children}
 			</div>
-		</CollapsibleContent>
+		</Collapsible.Panel>
 	);
 }
 

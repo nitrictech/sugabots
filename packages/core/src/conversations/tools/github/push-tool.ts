@@ -15,7 +15,7 @@ import {
 /** The largest bundle a push carries: a whole branch's history, read into the API's memory. */
 const MAX_BUNDLE_BYTES = 256 * 1024 * 1024;
 
-/** The bot's computer, while the turn may use it, for tools that work from a checkout there. */
+/** The computer of the project the turn works in, while the turn may use it, for tools that work from a checkout there. */
 export interface Workspace extends TurnComputer {
 	readonly place: Place;
 }

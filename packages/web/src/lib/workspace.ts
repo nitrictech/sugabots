@@ -17,6 +17,7 @@ import { useParams } from "@tanstack/react-router";
 import { Effect, Schema } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
+import { NotReadyError } from "@/lib/failure.ts";
 import { loadFailure } from "@/lib/query.ts";
 
 /**
@@ -113,7 +114,7 @@ export function useUpdateWorkspace(workspaceId: string | undefined) {
 	});
 }
 
-/** The workspace's time zone, and how many automations' schedules would move with it. */
+/** The workspace's time zone, and how many automations have routines that would move with it. */
 export function useWorkspaceTimeZone(workspaceId: string, enabled: boolean) {
 	return useQuery({
 		queryKey: ["workspaces", workspaceId, "time-zone"],
@@ -125,7 +126,7 @@ export function useWorkspaceTimeZone(workspaceId: string, enabled: boolean) {
 	});
 }
 
-/** Moves the workspace, and the automation schedules in its old zone, to another time zone. */
+/** Moves the workspace, and the routines in its old zone, to another time zone. */
 export function useChangeWorkspaceTimeZone(workspaceId: string) {
 	const queries = useQueryClient();
 	return useMutation({
@@ -189,7 +190,7 @@ export function useCancelWorkspaceInvitation(workspaceId: string) {
 }
 
 /**
- * Leaving takes the whole client with it: every channel, bot and conversation on
+ * Leaving takes the whole client with it: every project, bot and conversation on
  * screen belonged to a workspace this person is no longer in, so the cache is
  * cleared rather than refetched.
  */
@@ -207,8 +208,8 @@ export function useLeaveWorkspace(workspaceId: string) {
 /**
  * Changing what somebody may do, and taking them out of the workspace.
  *
- * Both invalidate more than the roster: a role decides which channels somebody
- * reaches and what each channel's `permissions` say, so when the person changed is
+ * Both invalidate more than the roster: a role decides which projects somebody
+ * reaches and what each project's `permissions` say, so when the person changed is
  * the one looking, everything scoped to them is stale. Invalidating on every
  * change rather than working out whether it was you keeps that correct for one
  * refetch nobody will notice.
@@ -221,9 +222,9 @@ function useMemberChange<Input>(workspaceId: string, change: (input: Input) => P
 			Promise.all([
 				queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "members"] }),
 				queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
-				queries.invalidateQueries({ queryKey: ["channels"] }),
-				// Making somebody an administrator or the owner puts them in every channel.
-				queries.invalidateQueries({ queryKey: ["channel-members"] }),
+				queries.invalidateQueries({ queryKey: ["projects"] }),
+				// Making somebody an administrator or the owner puts them in every project.
+				queries.invalidateQueries({ queryKey: ["project-members"] }),
 				queries.invalidateQueries({ queryKey: ["bots"] }),
 			]),
 	});
@@ -260,6 +261,19 @@ export function useRemoveWorkspaceMember(workspaceId: string) {
 			client.api.workspaces.removeMember({ params: { workspace: workspaceId, memberId } }),
 		),
 	);
+}
+
+/**
+ * The id of the workspace being looked at, for a mutation to send. Its getter
+ * throws `NotReadyError` while the workspace is still loading, which the
+ * mutation then fails with.
+ */
+export function useRequiredWorkspaceId(): () => string {
+	const workspaceId = useWorkspace().workspace?.id;
+	return () => {
+		if (!workspaceId) throw new NotReadyError();
+		return workspaceId;
+	};
 }
 
 /**
@@ -330,7 +344,7 @@ export function useWorkspaceRole(): WorkspaceRole | undefined {
 }
 
 const NOTHING_YET: WorkspacePermissions = {
-	createChannels: false,
+	createProjects: false,
 	createBots: false,
 	updateWorkspace: false,
 	manageProviders: false,

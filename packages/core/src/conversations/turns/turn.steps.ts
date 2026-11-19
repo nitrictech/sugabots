@@ -1,7 +1,7 @@
 import {
 	type CollaborationPart,
 	conversationStream,
-	START_TASK_TOOL,
+	START_THREAD_TOOL,
 	streamEvent,
 } from "@sugabots/contracts";
 import { type DomainError, userText } from "@sugabots/errors";
@@ -32,7 +32,7 @@ import type { UserFacing } from "../../user-message.ts";
 import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import { AssistantGuide } from "../assistant/assistant-guide.ts";
 import { BotAutomations } from "../automations/bot-automations.ts";
-import { BotTasks } from "../chats/bot-tasks.ts";
+import { BotThreads } from "../chats/bot-threads.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
 import { assistantRequests } from "../tools/assistant/tool.ts";
@@ -42,7 +42,7 @@ import { COLLABORATE_TOOL, collaborateTool } from "../tools/collaborate/tool.ts"
 import { ComputerTools, type Request } from "../tools/computer.ts";
 import { ConnectionTools, type OfferedTool } from "../tools/connections.ts";
 import { FILE_TOOLS } from "../tools/files/tool.ts";
-import { startTaskTool } from "../tools/start-task/tool.ts";
+import { startThreadTool } from "../tools/start-thread/tool.ts";
 import {
 	callToolApproval,
 	findApprovalTarget,
@@ -106,7 +106,7 @@ type SegmentServices =
 	| ConversationFiles.Service
 	| BotAutomations.Service
 	| Installation.Service
-	| BotTasks.Service
+	| BotThreads.Service
 	| AssistantGuide.Service
 	| Ids.Service;
 
@@ -177,6 +177,8 @@ const emptyReply: ReplyDraft = { content: "", collaborations: [], toolCalls: [] 
 
 type StreamOutcome =
 	| { kind: "completed"; contextTokens: number | undefined }
+	/** On an optional turn, the bot wrote nothing: it chose not to answer. */
+	| { kind: "silent"; contextTokens: number | undefined }
 	| {
 			kind: "suspended";
 			checkpoint: TurnCheckpoint;
@@ -331,6 +333,15 @@ const generateReply = (
 					);
 				}
 				const { contextTokens } = streamed.value;
+				const completion = {
+					contextTokens,
+					contextCapacity: prepared.context.windowTokens,
+					readKeptFrom: prepared.context.compaction?.keptFrom.toISOString() ?? null,
+				};
+				if (streamed.value.kind === "silent") {
+					yield* turns.staySilent(replyTurn, completion);
+					return finished;
+				}
 				// One transaction: the answer must be readable by the time anyone
 				// hears the turn completed, or the asking bot wakes to nothing
 				// and gives up waiting for an answer that lands a moment later.
@@ -348,11 +359,7 @@ const generateReply = (
 									),
 								);
 						}
-						yield* turns.complete(replyTurn, draft, {
-							contextTokens,
-							contextCapacity: prepared.context.windowTokens,
-							readKeptFrom: prepared.context.compaction?.keptFrom.toISOString() ?? null,
-						});
+						yield* turns.complete(replyTurn, draft, completion);
 					}),
 				);
 				return finished;
@@ -416,7 +423,7 @@ const streamReply = (
 			const files = yield* ConversationFiles.Service;
 			const automations = yield* BotAutomations.Service;
 			const installation = yield* Installation.Service;
-			const botTasks = yield* BotTasks.Service;
+			const botThreads = yield* BotThreads.Service;
 			const assistantGuide = yield* AssistantGuide.Service;
 			const signal = yield* Effect.abortSignal;
 
@@ -446,6 +453,7 @@ const streamReply = (
 			};
 			const computer = yield* computerTools.forTurn({
 				workspaceId: prepared.context.conversation.workspaceId,
+				projectId: prepared.context.projectId,
 				usesComputer: prepared.context.bot.usesComputer,
 				turnId: prepared.turnId,
 				conversationId: prepared.context.conversation.id,
@@ -453,22 +461,28 @@ const streamReply = (
 				color: prepared.context.bot.color,
 				naturalBrowsing: prepared.context.bot.naturalBrowsing,
 				acceptsImages: prepared.context.bot.acceptsImages,
-				// A task or a channel's conversation serves the files in it, so only there can people be shown one.
-				...((prepared.context.conversation.kind === "task" ||
-					prepared.context.conversation.kind === "channel_conversation") && {
+				// A thread serves the files in it, so only there can people be shown one.
+				...(prepared.context.conversation.kind === "project_thread" && {
 					attach: (file) => turns.attachFile(replyTurnOf(prepared), file),
 				}),
 			});
 			// The connections' sessions live as long as the turn.
 			const connections = yield* Effect.acquireRelease(
-				connectionTools.forBot(prepared.context.conversation.workspaceId, prepared.context.bot.id, {
-					turnId: prepared.turnId,
-					botId: prepared.context.bot.id,
-					conversationId: prepared.context.conversation.id,
-					files,
-					workspace: computer.usable ? computer.workspace : undefined,
-					computerSignsIn: computer.signsIn,
-				}),
+				connectionTools.forTurn(
+					prepared.context.conversation.workspaceId,
+					{
+						projectId: prepared.context.projectId,
+						ownProjectId: prepared.context.bot.defaultProjectId,
+					},
+					{
+						turnId: prepared.turnId,
+						botId: prepared.context.bot.id,
+						conversationId: prepared.context.conversation.id,
+						files,
+						workspace: computer.usable ? computer.workspace : undefined,
+						computerSignsIn: computer.signsIn,
+					},
+				),
 				(opened) => Effect.promise(() => opened.close()),
 			);
 			const noteCollaboration = (collaboration: Pick<CollaborationPart, "id" | "atOffset">) =>
@@ -491,14 +505,14 @@ const streamReply = (
 								workspaceId: prepared.context.conversation.workspaceId,
 								workspaceSlug: prepared.context.workspaceSlug,
 							};
-							const startsTasks: Request = {
-								tool: startTaskTool({
+							const startsThreads: Request = {
+								tool: startThreadTool({
 									bot: {
 										botId: prepared.context.bot.id,
 										workspaceId: prepared.context.conversation.workspaceId,
 										askedBy: assistantOf,
 									},
-									tasks: botTasks,
+									threads: botThreads,
 									run: runInTurn,
 								}),
 								refusal: () => undefined,
@@ -521,10 +535,10 @@ const streamReply = (
 								}),
 								refusal: () => undefined,
 							};
-							// A task it starts, or a bot it asks, is seen by others, so it waits for its person too.
+							// A thread it starts, or a bot it asks, is seen by others, so it waits for its person too.
 							const requests: Record<string, Request> = {
 								...assistantRequests({ guide: assistantGuide, person, run: runInTurn }),
-								[START_TASK_TOOL]: startsTasks,
+								[START_THREAD_TOOL]: startsThreads,
 								[COLLABORATE_TOOL]: collaborates,
 							};
 							return { guide: assistantGuide, person, requests };
@@ -581,7 +595,7 @@ const streamReply = (
 				bots,
 				webAppUrl: installation.webAppUrl,
 				automations,
-				tasks: botTasks,
+				threads: botThreads,
 				bus: events,
 				run: runInTurn,
 				...(assistant && { assistant }),
@@ -611,6 +625,7 @@ const streamReply = (
 					signInExpired: connections.signInExpired,
 					instructions: connections.instructions,
 					addable: connections.addable,
+					fromProjectAndBot: connections.fromProjectAndBot,
 					connectionsPageUrl: `${installation.webAppUrl}${botConnectionsPath(prepared.context.workspaceSlug, prepared.context.bot.handle)}`,
 				}),
 				computer: computer.note,
@@ -667,6 +682,10 @@ const streamReply = (
 						(files) => files.length > 0,
 					);
 					if (!answered && !(yield* carriesFiles)) {
+						// Writing nothing is how a bot declines an optional turn.
+						if (prepared.run.request.reason === "optional") {
+							return { kind: "silent" as const, contextTokens };
+						}
 						return yield* new ReplyWithoutAnswer();
 					}
 					return { kind: "completed" as const, contextTokens };

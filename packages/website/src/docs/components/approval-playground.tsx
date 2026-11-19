@@ -1,11 +1,11 @@
-import { cn } from "cn";
 import { PlugIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
+import { cast } from "@/cast";
 import { type ApprovalDecision, ChatApproval, ChatMessage, ChatToolLine } from "@/components/chat";
 import { riseIn } from "@/components/reveal";
 import { Card } from "@/components/ui/card";
-import { cast } from "@/docs/cast";
+import { ChoiceChips } from "@/components/ui/choice-chips";
 
 /** A tool's approval setting, as the app labels it. */
 const approvals = {
@@ -30,7 +30,7 @@ function outcomeOf(setting: ApprovalSetting): Outcome {
 
 const outcomeText: Record<Outcome, string> = {
 	refused: "The call is refused, and the bot is told the tool is off.",
-	waits: "The call waits in the chat until someone who's allowed to answer it does.",
+	waits: "The call waits in the thread until someone who's allowed to answer it does.",
 	runs: "The tool is allowed, so it runs straight away.",
 };
 
@@ -39,41 +39,7 @@ const decisionOutcomes = {
 	denied: `Denied by you. ${cast.inboxSorter.name} won't go ahead.`,
 } as const;
 
-function Choice<T extends string>({
-	label,
-	options,
-	value,
-	onChange,
-}: {
-	label: string;
-	options: Record<T, string>;
-	value: T;
-	onChange: (value: T) => void;
-}) {
-	return (
-		<fieldset className="flex flex-col gap-2">
-			<legend className="pb-1.5 text-sm font-semibold">{label}</legend>
-			<div className="flex flex-wrap gap-2">
-				{(Object.keys(options) as T[]).map((option) => (
-					<button
-						key={option}
-						type="button"
-						aria-pressed={option === value}
-						onClick={() => onChange(option)}
-						className={cn(
-							"rounded-full border-2 px-3 py-0.5 text-sm font-semibold transition-colors",
-							option === value
-								? "border-foreground bg-foreground text-background"
-								: "border-input text-muted-foreground hover:text-foreground",
-						)}
-					>
-						{options[option]}
-					</button>
-				))}
-			</div>
-		</fieldset>
-	);
-}
+const CHOICE_LEGEND = "pb-1.5 text-sm font-semibold";
 
 /** The approval rules to play with: set a tool's approval, pick the tool, and answer the request. */
 export function ApprovalPlayground() {
@@ -94,14 +60,16 @@ export function ApprovalPlayground() {
 	return (
 		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
 			<div className="flex flex-wrap gap-6 border-b px-5 py-4">
-				<Choice
+				<ChoiceChips
 					label="The tool's approval"
+					labelClassName={CHOICE_LEGEND}
 					options={approvals}
 					value={setting}
 					onChange={reset(setSetting)}
 				/>
-				<Choice
+				<ChoiceChips
 					label="The bot wants to"
+					labelClassName={CHOICE_LEGEND}
 					options={toolLabels}
 					value={tool}
 					onChange={reset(setTool)}

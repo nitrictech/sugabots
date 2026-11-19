@@ -140,7 +140,7 @@ function TabLink({
 }
 
 /**
- * Which tab the page is under: anything in a channel is Home's, a chat opened
+ * Which tab the page is under: anything in a project is Home's, a chat opened
  * from Inbox is Inbox's, and settings, reached from You, are You's.
  */
 function useMobileTab(): MobileTab {

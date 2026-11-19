@@ -12,23 +12,23 @@ import {
 	conversationStandingFor,
 	ResourceHidden,
 	reachesBotFor,
-	reachesChannelFor,
 	reachesConversationFor,
+	reachesProjectFor,
 } from "./access.ts";
 import { CurrentActor } from "./current-actor.ts";
 
 /**
- * What the current actor can see. A channel's conversations are seen by the
- * people in it; a bot, and its tasks and automations, by whoever reaches the
+ * What the current actor can see. A project's threads are seen by the
+ * people in it; a bot, and its threads and automations, by whoever reaches the
  * bot; a collaboration by whoever sees the conversation it was opened from;
  * a direct message by the people in it. Lists are scoped by
- * `reachesChannelFor`, `reachesBotFor` and `reachesConversationFor`, the rules
- * `Authorization` checks for one channel, bot or conversation written as SQL, so a
+ * `reachesProjectFor`, `reachesBotFor` and `reachesConversationFor`, the rules
+ * `Authorization` checks for one project, bot or conversation written as SQL, so a
  * list holds what reading each one directly would allow.
  */
 export interface Interface {
-	/** The rule for the channels the actor is in, for queries that scope a list. */
-	readonly reachesChannel: Effect.Effect<ReachesChannel, never, CurrentActor.Service>;
+	/** The rule for the projects the actor is in, for queries that scope a list. */
+	readonly reachesProject: Effect.Effect<ReachesProject, never, CurrentActor.Service>;
 	/** The rule for the bots the actor reaches, for queries that scope a list. */
 	readonly reachesBot: Effect.Effect<ReachesBot, never, CurrentActor.Service>;
 	/** The rule for the conversations the actor reaches, for queries that scope a list. */
@@ -45,26 +45,26 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Visibility") {}
 
-/** SQL for "somebody is in this channel", given the column naming it: `placedConversation.channelId`, `channel.id`. */
-export type ReachesChannel = (channelId: SQLWrapper) => SQL<boolean>;
+/** SQL for "somebody is in this project", given the column naming it: `placedConversation.projectId`, `project.id`. */
+export type ReachesProject = (projectId: SQLWrapper) => SQL<boolean>;
 
 /** SQL for "somebody reaches this bot", given the column naming it: `bot.id`, `placedConversation.botId`. */
 export type ReachesBot = (botId: SQLWrapper) => SQL<boolean>;
 
 /**
  * SQL for "somebody reaches this conversation", given the columns naming it, its
- * workspace, kind, root, channel and bot: `placedConversation`, or an alias of it.
+ * workspace, kind, root, project and bot: `placedConversation`, or an alias of it.
  */
 export type ReachesConversation = (row: ConversationReachColumns) => SQL<boolean>;
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("Visibility");
 	return Service.of({
-		reachesChannel: Effect.map(
+		reachesProject: Effect.map(
 			CurrentActor.Service,
 			({ userId }) =>
-				(channelId) =>
-					reachesChannelFor(channelId, userId),
+				(projectId) =>
+					reachesProjectFor(projectId, userId),
 		),
 
 		reachesBot: Effect.map(

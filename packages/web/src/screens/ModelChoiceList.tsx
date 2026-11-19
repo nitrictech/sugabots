@@ -1,5 +1,6 @@
 import type { WorkspaceModelsResponse } from "@sugabots/contracts";
 import { Check } from "lucide-react";
+import { modelName } from "@/lib/model-providers.ts";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 export type ModelChoice = Pick<
@@ -40,7 +41,7 @@ export function ModelChoiceList({
 				{inGroup.map((model) => (
 					<ModelChoiceRow
 						key={model.modelId}
-						label={model.displayName ?? model.modelId}
+						label={modelName(model)}
 						chosen={model.modelId === chosen}
 						onChoose={onChoose && (() => onChoose(model.modelId))}
 					/>
@@ -51,7 +52,7 @@ export function ModelChoiceList({
 }
 
 /** One model in a {@link ModelChoiceList}, pressed while it is the one chosen. */
-export function ModelChoiceRow({
+function ModelChoiceRow({
 	label,
 	chosen,
 	onChoose,

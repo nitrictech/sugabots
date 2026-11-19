@@ -1,13 +1,13 @@
-import type { Bot, Channel } from "@sugabots/contracts";
+import type { Bot, Project } from "@sugabots/contracts";
 import { createRoute, Navigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { useBotWithHandle } from "@/lib/bots.ts";
-import { findChannel, useChannels } from "@/lib/channels.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
-import { botSettingsLink, channelSettingsLink } from "@/lib/links.ts";
+import { botSettingsLink, projectSettingsLink } from "@/lib/links.ts";
+import { findProject, useProjects } from "@/lib/projects.ts";
 import {
 	botSettingsPage,
-	channelSettingsPage,
+	projectSettingsPage,
 	workspaceSettingSection,
 } from "@/lib/workspace-settings.ts";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
@@ -61,20 +61,33 @@ function SettingsMemberRoute() {
 	);
 }
 
-export const settingsChannelRoute = createRoute({
+export const settingsProjectRoute = createRoute({
 	getParentRoute: () => shellRoute,
-	path: "/settings/channels/$channel",
+	path: "/settings/projects/$project",
 	// The dialog waits for the rosters, so its code downloads alongside rather than after.
 	loader: () => WorkspaceSettings.preload(),
-	component: SettingsChannelRoute,
+	component: SettingsProjectRoute,
 });
 
-/** One of a channel's pages besides General: People or Bots. */
-export const settingsChannelPageRoute = createRoute({
+/** One of a project's pages besides General: People, Bots, Connections or Computer. */
+export const settingsProjectPageRoute = createRoute({
 	getParentRoute: () => shellRoute,
-	path: "/settings/channels/$channel/$page",
+	path: "/settings/projects/$project/$page",
+	validateSearch: (search: Record<string, unknown>): { oauth_error?: string } => ({
+		oauth_error: optionalString(search.oauth_error),
+	}),
+	// A sign-in error shown for one project must not follow you to the next.
+	remountDeps: ({ params }) => [params.workspace, params.project],
 	loader: () => WorkspaceSettings.preload(),
-	component: SettingsChannelPageRoute,
+	component: SettingsProjectPageRoute,
+});
+
+/** One of a project's connections, by its id. */
+export const settingsProjectConnectionRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/projects/$project/connections/$connection",
+	loader: () => WorkspaceSettings.preload(),
+	component: SettingsProjectConnectionRoute,
 });
 
 export const settingsBotRoute = createRoute({
@@ -146,71 +159,117 @@ export const settingsDefaultModelRoute = createRoute({
 	),
 });
 
-function SettingsChannelRoute() {
-	const { channel: slug } = settingsChannelRoute.useParams();
-	const { data: channels, isPending, error } = useChannels();
-	// A channel's settings are for the people in it.
-	const channel = memberChannel(channels, slug);
+function SettingsProjectRoute() {
+	const { project: slug } = settingsProjectRoute.useParams();
+	const { data: projects, isPending, error } = useProjects();
+	// A project's settings are for the people in it.
+	const project = memberProject(projects, slug);
 	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!channel) return <ChannelSettingsMissing channels={channels} slug={slug} error={error} />;
+	if (!project) return <ProjectSettingsMissing projects={projects} slug={slug} error={error} />;
 	return (
 		<SettingsLayout>
-			<WorkspaceSettings section="channels" selectedChannelId={channel.id} />
+			<WorkspaceSettings section="projects" selectedProjectId={project.id} />
 		</SettingsLayout>
 	);
 }
 
-function SettingsChannelPageRoute() {
-	const { channel: slug, page: pageSegment } = settingsChannelPageRoute.useParams();
-	const { data: channels, isPending, error } = useChannels();
-	const channel = memberChannel(channels, slug);
-	const page = channelSettingsPage(pageSegment);
+function SettingsProjectPageRoute() {
+	const { project: slug, page: pageSegment } = settingsProjectPageRoute.useParams();
+	const signInError = useSignInErrorOnce(settingsProjectPageRoute);
+	const { data: projects, isPending, error } = useProjects();
+	const project = memberProject(projects, slug);
+	const page = projectSettingsPage(pageSegment);
 	if (!page) {
-		return <Navigate {...channelSettingsLink({ slug })} replace />;
+		return <Navigate {...projectSettingsLink({ slug })} replace />;
 	}
 	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!channel) return <ChannelSettingsMissing channels={channels} slug={slug} error={error} />;
+	if (!project) return <ProjectSettingsMissing projects={projects} slug={slug} error={error} />;
 	return (
 		<SettingsLayout>
-			<WorkspaceSettings section="channels" selectedChannelId={channel.id} channelPage={page} />
+			<WorkspaceSettings
+				section="projects"
+				selectedProjectId={project.id}
+				projectPage={page}
+				connectionSignInError={signInError && signInFailureReason(signInError)}
+			/>
+		</SettingsLayout>
+	);
+}
+
+function SettingsProjectConnectionRoute() {
+	const { project: slug, connection } = settingsProjectConnectionRoute.useParams();
+	const { data: projects, isPending, error } = useProjects();
+	const project = memberProject(projects, slug);
+	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
+	if (!project) return <ProjectSettingsMissing projects={projects} slug={slug} error={error} />;
+	return (
+		<SettingsLayout>
+			<WorkspaceSettings
+				section="projects"
+				selectedProjectId={project.id}
+				projectPage="connections"
+				selectedConnectionId={connection}
+			/>
 		</SettingsLayout>
 	);
 }
 
 /**
- * Why a channel's settings are not shown: it could not be loaded, it is not
- * here, or the person is not in it, which a public channel's own page joins.
+ * Why the sign-in that returned to `route`'s page did not finish, as its
+ * `?oauth_error=` said, taken out of the address once read and kept, so a
+ * reload does not show it twice.
  */
-function ChannelSettingsMissing({
-	channels,
+function useSignInErrorOnce(
+	route: typeof settingsProjectPageRoute | typeof settingsBotPageRoute,
+): string | undefined {
+	const { oauth_error: oauthError } = route.useSearch();
+	const navigate = route.useNavigate();
+	const [signInError, setSignInError] = useState(oauthError);
+	useEffect(() => {
+		if (oauthError === undefined) return;
+		setSignInError(oauthError);
+		void navigate({
+			search: (previous) => ({ ...previous, oauth_error: undefined }),
+			replace: true,
+		});
+	}, [oauthError, navigate]);
+	return signInError;
+}
+
+/**
+ * Why a project's settings are not shown: it could not be loaded, it is not
+ * here, or the person is not in it, which a public project's own page joins.
+ */
+function ProjectSettingsMissing({
+	projects,
 	slug,
 	error,
 }: {
-	channels: readonly Channel[] | undefined;
+	projects: readonly Project[] | undefined;
 	slug: string;
 	error: unknown;
 }) {
-	const channel = findChannel(channels, slug);
+	const project = findProject(projects, slug);
 	return (
 		<Panes>
-			{channel ? (
-				<EmptyState title="You're not in this channel">
+			{project ? (
+				<EmptyState title="You're not in this project">
 					Join it from its page to see its settings.
 				</EmptyState>
 			) : (
-				<EmptyState title={error ? "Could not load this channel" : "No such channel here"} />
+				<EmptyState title={error ? "Could not load this project" : "No such project here"} />
 			)}
 		</Panes>
 	);
 }
 
-/** The channel at `slug` when the person is in it, as its settings need. */
-function memberChannel(
-	channels: readonly Channel[] | undefined,
+/** The project at `slug` when the person is in it, as its settings need. */
+function memberProject(
+	projects: readonly Project[] | undefined,
 	slug: string,
-): Channel | undefined {
-	const channel = findChannel(channels, slug);
-	return channel?.isMember ? channel : undefined;
+): Project | undefined {
+	const project = findProject(projects, slug);
+	return project?.isMember ? project : undefined;
 }
 
 /** The bot at `handle` for a settings page, once found; while it loads nothing, and if missing, why. */
@@ -238,18 +297,7 @@ function SettingsBotRoute() {
 
 function SettingsBotPageRoute() {
 	const { bot, page: pageSegment } = settingsBotPageRoute.useParams();
-	const { oauth_error: oauthError } = settingsBotPageRoute.useSearch();
-	const navigate = settingsBotPageRoute.useNavigate();
-	// Kept after the error leaves the address, so a reload does not show it twice.
-	const [signInError, setSignInError] = useState(oauthError);
-	useEffect(() => {
-		if (oauthError === undefined) return;
-		setSignInError(oauthError);
-		void navigate({
-			search: (previous) => ({ ...previous, oauth_error: undefined }),
-			replace: true,
-		});
-	}, [oauthError, navigate]);
+	const signInError = useSignInErrorOnce(settingsBotPageRoute);
 	const page = botSettingsPage(pageSegment);
 	if (!page) {
 		return <Navigate {...botSettingsLink({ handle: bot })} replace />;

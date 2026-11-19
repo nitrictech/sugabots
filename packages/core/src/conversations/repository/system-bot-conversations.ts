@@ -2,7 +2,7 @@ import { type ConversationKind, messageAuthorName } from "@sugabots/contracts";
 import { and, asc, eq, gte } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
-import { bot, conversation, message, user } from "../../database/schema.ts";
+import { bot, message, placedConversation, user } from "../../database/schema.ts";
 import { messageTextWithPlacedParts } from "./message-text.ts";
 import {
 	participantColumns,
@@ -25,6 +25,8 @@ interface SystemBotScope {
 	conversationId: string;
 	workspaceId: string;
 	conversationKind: ConversationKind;
+	/** The bot the conversation is with, as `placedConversation` reads it. */
+	conversationBotId: string | null;
 	conversationTitle: string;
 	/** The model of the bot whose reply asked for this work, which reads the conversation next. */
 	botModel: string | null;
@@ -47,13 +49,14 @@ export const loadSystemBotScope = Effect.fn("SystemBotConversations.loadSystemBo
 ) {
 	const [row] = yield* db
 		.select({
-			conversationId: conversation.id,
-			workspaceId: conversation.workspaceId,
-			conversationKind: conversation.kind,
-			conversationTitle: conversation.title,
+			conversationId: placedConversation.id,
+			workspaceId: placedConversation.workspaceId,
+			conversationKind: placedConversation.kind,
+			conversationBotId: placedConversation.botId,
+			conversationTitle: placedConversation.title,
 			botModel: bot.model,
 		})
-		.from(conversation)
+		.from(placedConversation)
 		// The bot in the payload is whoever's reply triggered this, not the
 		// system bot doing the work, and not necessarily the conversation's
 		// bot: requiring that bot meant a shared conversation stopped being
@@ -61,9 +64,12 @@ export const loadSystemBotScope = Effect.fn("SystemBotConversations.loadSystemBo
 		.innerJoin(bot, eq(bot.id, request.botId))
 		.innerJoin(
 			message,
-			and(eq(message.id, request.sourceMessageId), eq(message.conversationId, conversation.id)),
+			and(
+				eq(message.id, request.sourceMessageId),
+				eq(message.conversationId, placedConversation.id),
+			),
 		)
-		.where(eq(conversation.id, request.conversationId))
+		.where(eq(placedConversation.id, request.conversationId))
 		.limit(1);
 	return row satisfies SystemBotScope | undefined;
 });

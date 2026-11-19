@@ -1,11 +1,11 @@
 import type { Bot, SessionUser } from "@sugabots/contracts";
-import { Plus, RefreshCcw, X } from "lucide-react";
+import { Plus, RefreshCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useWorkspaceAutomationsById } from "@/lib/automations.ts";
-import { useBotTasks, useOpenAutomationFeed } from "@/lib/chats.ts";
+import { useBotThreads, useOpenAutomationFeed } from "@/lib/chats.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { AutomationRow, NoAutomations } from "@/shell/Automations.tsx";
-import { Stage, StageMark, type StageParent } from "@/shell/Stage.tsx";
+import { Stage, StageClose, StageMark, type StageParent } from "@/shell/Stage.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { NewAutomationPage } from "./AutomationEditor.tsx";
@@ -17,22 +17,22 @@ interface AutomationsStageProps {
 	user: SessionUser;
 	view: AutomationsView;
 	onViewChange: (view: AutomationsView) => void;
-	/** Opens something else beside the bot's chat, such as a file from an automation's feed. */
+	/** Opens something else beside the bot's thread, such as a file from an automation's feed. */
 	onStagedChange: StagedChange;
 	onClose: () => void;
 }
 
-/** Which of a bot's automations are open beside its chat: all of them, one, or a new one being made. */
+/** Which of a bot's automations are open beside its thread: all of them, one, or a new one being made. */
 export type AutomationsView =
 	| { kind: "list" }
 	| { kind: "automation"; automationId: string }
 	| { kind: "new" };
 
 /**
- * A bot's automations, open large beside its chat as its computer is: all of
+ * A bot's automations, open large beside its thread as its computer is: all of
  * them, each opening its own feed in their place, or a new one being made.
  * An automation or a new one is a level inside the list, and the Back before its
- * name returns to the list, so the bot's chat stays in view throughout.
+ * name returns to the list, so the bot's thread stays in view throughout.
  * Escape goes back up a level at a time, as the Back does, then closes it.
  */
 export function AutomationsStage({
@@ -54,7 +54,7 @@ export function AutomationsStage({
 				automationId={view.automationId}
 				onStagedChange={onStagedChange}
 				parent={parent}
-				trailing={<CloseButton onClose={onClose} />}
+				trailing={<StageClose onClose={onClose} />}
 			/>
 		);
 	}
@@ -75,8 +75,7 @@ export function AutomationsStage({
 			>
 				<div className="-mx-6 min-h-0 flex-1 overflow-y-auto max-md:-mx-3">
 					<NewAutomationPage
-						choices={[{ bot }]}
-						initialBotId={bot.id}
+						owner={{ bot }}
 						onCancel={() => onViewChange({ kind: "list" })}
 						onCreated={(automation) =>
 							onViewChange({ kind: "automation", automationId: automation.id })
@@ -125,7 +124,7 @@ function AutomationList({
 	onOpen: (automationId: string) => void;
 	onNew: () => void;
 }) {
-	const list = useBotTasks(bot.id);
+	const list = useBotThreads(bot.id);
 	const automationById = useWorkspaceAutomationsById();
 	const automations = list.data?.automations ?? [];
 	if (list.isError) {
@@ -144,7 +143,7 @@ function AutomationList({
 					bot.permissions.manageAutomations
 						? {
 								newAutomation: <button type="button" onClick={onNew} />,
-								// Not linked: the bot's chat is already open beside this panel.
+								// Not linked: the bot's thread is already open beside this panel.
 								whoToAsk: bot.name,
 							}
 						: undefined
@@ -157,7 +156,8 @@ function AutomationList({
 			{automations.map((row) => (
 				<li key={row.automation.id}>
 					<AutomationRow
-						row={row}
+						row={{ ...row, bot }}
+						owner={{ bot }}
 						automation={automationById.get(row.automation.id)}
 						selected={false}
 						render={<button type="button" onClick={() => onOpen(row.automation.id)} />}
@@ -194,7 +194,7 @@ function AutomationFeed({
 	const [itemConversationId, setItemConversationId] = useState<string>();
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	return (
-		// In place of the list, and like it, covering the chat on a phone; there
+		// In place of the list, and like it, covering the thread on a phone; there
 		// while its feed opens, so it holds the focus from the start.
 		<section
 			aria-label="Automation"
@@ -208,8 +208,7 @@ function AutomationFeed({
 			) : (
 				opened.data && (
 					<ConversationChat
-						conversation={{ kind: "botConversation", bot }}
-						channel={null}
+						conversationPlace={{ project: null, conversation: { kind: "botThread", bot } }}
 						conversationId={opened.data.id}
 						user={user}
 						itemConversationId={itemConversationId}
@@ -220,14 +219,5 @@ function AutomationFeed({
 				)
 			)}
 		</section>
-	);
-}
-
-/** Closes the automations, as a stage's Close does. */
-function CloseButton({ onClose }: { onClose: () => void }) {
-	return (
-		<IconButton label="Close" variant="bar" onClick={onClose} className="max-md:hidden">
-			<X size={16} strokeWidth={1.75} />
-		</IconButton>
 	);
 }

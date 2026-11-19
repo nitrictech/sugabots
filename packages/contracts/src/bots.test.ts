@@ -62,8 +62,13 @@ describe("bot request contracts", () => {
 		}
 	});
 
-	it("makes updates shallow partials and strips channel placement", () => {
-		expect(Schema.decodeUnknownSync(botUpdateSchema)({ extra: true })).toEqual({});
+	it("makes updates shallow partials and strips project placement", () => {
+		expect(
+			Schema.decodeUnknownSync(botUpdateSchema)({
+				name: "Renamed",
+				projectId: "0199a3a0-0000-7000-8000-000000000001",
+			}),
+		).toEqual({ name: "Renamed" });
 		expect(Schema.decodeSync(botUpdateSchema)({ name: "  Renamed  " })).toEqual({
 			name: "Renamed",
 		});

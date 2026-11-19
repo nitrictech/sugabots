@@ -15,9 +15,9 @@ import { readTools } from "./read-tools.ts";
 import { toolContext } from "./shared.ts";
 
 /**
- * The tools of a bot's GitHub connection, offered like an MCP server's
- * through the turn's catalog, so the bot's choice for each, and its
- * approvals, apply the same way. Each works on the connection's repositories
+ * The tools of a project's GitHub app, offered like an MCP server's through
+ * the catalog of each turn that can use the project's connections, so the
+ * speaking bot's choice for each, and its approvals, apply the same way. Each works on the connection's repositories
  * alone, with a token for its account that the computer never sees.
  */
 export function gitHubTools({
@@ -71,6 +71,6 @@ export function gitHubNote(connected: Connected, signedIn: boolean): string {
 		.join(", ");
 	const reading = signedIn
 		? "In the computer, git clone and fetch of them are signed in to read, outside the computer, without a token. There is no gh; read issues, pull requests and checks with the connection's tools."
-		: "The computer's provider can't sign its requests in, so only public ones can be cloned.";
+		: "The computer isn't signed in to them, so only public ones can be cloned.";
 	return `Your GitHub connection, ${connected.connection.handle}, works on: ${listed}. ${reading} Nothing on your computer can push: commit your work, then use ${connected.connection.handle}'s push_branch with the commit's hash and a branch under ${BOT_BRANCH_PREFIX}, then open_pull_request. Stack a chain of pull requests, each based on the branch of the one below, with create_stack, and put more on top of a stack with add_to_stack. Change a pull request you opened with update_pull_request, or push to its branch again; answer its reviewers with comment_on_pull_request and reply_to_code_comment. Review others' with review_pull_request. Work on issues with comment_on_issue, open_issue and update_issue, and acknowledge what you were asked with react. When a check fails, read why with list_check_runs and get_job_log.`;
 }

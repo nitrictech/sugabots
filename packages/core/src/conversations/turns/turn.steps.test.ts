@@ -1,7 +1,7 @@
 import {
 	type ConnectionAccess,
 	conversationStream,
-	START_TASK_TOOL,
+	START_THREAD_TOOL,
 	streamEvent,
 } from "@sugabots/contracts";
 import { tool } from "ai";
@@ -21,12 +21,12 @@ import { unimplemented } from "../../testing.ts";
 import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import { AssistantGuide } from "../assistant/assistant-guide.ts";
 import { BotAutomations } from "../automations/bot-automations.ts";
-import { BotTasks } from "../chats/bot-tasks.ts";
+import { BotThreads } from "../chats/bot-threads.ts";
 import { SEARCH_HISTORY_TOOL } from "../repository/message-text.ts";
 import {
-	ADD_BOT_TO_CHANNEL_TOOL,
-	CREATE_CHANNEL_TOOL,
-	JOIN_CHANNEL_TOOL,
+	ADD_BOT_TO_PROJECT_TOOL,
+	CREATE_PROJECT_TOOL,
+	JOIN_PROJECT_TOOL,
 	PIN_BOT_TOOL,
 	WORKSPACE_GUIDE_TOOL,
 } from "../tools/assistant/tool.ts";
@@ -99,7 +99,7 @@ const prepared: PreparedTurn = {
 			id: run.request.conversationId,
 			workspaceId: "0199a3a0-0000-7000-8000-000000000002",
 			title: "Check the release",
-			kind: "task",
+			kind: "project_thread",
 			botId: run.request.botId,
 			parentConversationId: null,
 		},
@@ -116,12 +116,14 @@ const prepared: PreparedTurn = {
 			visibility: "public",
 			color: "orange",
 			acceptsImages: false,
+			defaultProjectId: "0199a3a0-0000-7000-8000-000000000004",
 		},
+		projectId: "0199a3a0-0000-7000-8000-000000000004",
 		reason: "default",
 		windowTokens: 128_000,
 		compaction: undefined,
 		automationInstructions: new Map(),
-		channel: null,
+		project: null,
 		workspaceName: "Suga",
 		workspaceSlug: "suga",
 		workspaceTimeZone: "UTC",
@@ -206,7 +208,7 @@ describe("runSegment", () => {
 				collaborations: collaborations(),
 				toolCalls: calls,
 				connectionTools: {
-					forBot: () =>
+					forTurn: () =>
 						Effect.succeed({
 							tools: {
 								wiki__wipe: {
@@ -225,6 +227,7 @@ describe("runSegment", () => {
 							signInExpired: [],
 							instructions: {},
 							addable: [],
+							fromProjectAndBot: false,
 							close,
 						}),
 				},
@@ -362,7 +365,7 @@ describe("runSegment", () => {
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 				connectionTools: {
-					forBot: () =>
+					forTurn: () =>
 						Effect.succeed({
 							tools: {
 								notes__write: connectionTool("write", true),
@@ -372,6 +375,7 @@ describe("runSegment", () => {
 							signInExpired: [],
 							instructions: {},
 							addable: [],
+							fromProjectAndBot: false,
 							close: async () => undefined,
 						}),
 				},
@@ -382,11 +386,11 @@ describe("runSegment", () => {
 		expect(offered).toEqual(
 			expect.arrayContaining([
 				WORKSPACE_GUIDE_TOOL,
-				CREATE_CHANNEL_TOOL,
-				JOIN_CHANNEL_TOOL,
-				ADD_BOT_TO_CHANNEL_TOOL,
+				CREATE_PROJECT_TOOL,
+				JOIN_PROJECT_TOOL,
+				ADD_BOT_TO_PROJECT_TOOL,
 				PIN_BOT_TOOL,
-				START_TASK_TOOL,
+				START_THREAD_TOOL,
 				COLLABORATE_TOOL,
 			]),
 		);
@@ -395,8 +399,8 @@ describe("runSegment", () => {
 		const approvals = received?.toolApproval as
 			| Record<string, (input: unknown) => unknown>
 			| undefined;
-		expect(approvals?.[CREATE_CHANNEL_TOOL]?.({ name: "Launch" })).toBe("user-approval");
-		expect(approvals?.[START_TASK_TOOL]?.({ title: "Report", brief: "Write it." })).toBe(
+		expect(approvals?.[CREATE_PROJECT_TOOL]?.({ name: "Launch" })).toBe("user-approval");
+		expect(approvals?.[START_THREAD_TOOL]?.({ title: "Report", brief: "Write it." })).toBe(
 			"user-approval",
 		);
 		// The bot it asks acts with its own connections, so its person allows that too.
@@ -445,7 +449,7 @@ describe("runSegment", () => {
 				collaborations: collaborations(),
 				toolCalls: toolCalls(),
 				connectionTools: {
-					forBot: () =>
+					forTurn: () =>
 						Effect.succeed({
 							tools: {
 								wiki__lookup: offered("lookup", "allow"),
@@ -456,6 +460,7 @@ describe("runSegment", () => {
 							signInExpired: [],
 							instructions: {},
 							addable: [],
+							fromProjectAndBot: false,
 							close: async () => undefined,
 						}),
 				},
@@ -468,7 +473,7 @@ describe("runSegment", () => {
 			SEARCH_HISTORY_TOOL,
 			READ_CONVERSATION_FILE_TOOL,
 			...AUTOMATION_TOOLS,
-			// No person asked this turn, so it is offered no start_task.
+			// No person asked this turn, so it is offered no start_thread.
 			MARK_DONE_TOOL,
 			SAVE_INSTRUCTIONS_TOOL,
 			"collaborate",
@@ -618,7 +623,7 @@ describe("runSegment", () => {
 								{
 									name: "Morning standup",
 									instructions: "Ask how everyone is going.",
-									schedule: "0 9 * * 1-5",
+									routineExpression: "0 9 * * 1-5",
 									results: "post_to_chat",
 								},
 								{ toolCallId: "sdk-1", messages: [] } as never,
@@ -653,8 +658,8 @@ describe("runSegment", () => {
 
 			if (called) {
 				expect(create).toHaveBeenCalledWith(
-					{ botId: prepared.context.bot.id, askedBy },
-					expect.objectContaining({ name: "Morning standup", schedule: "0 9 * * 1-5" }),
+					{ botId: prepared.context.bot.id, projectId: prepared.context.projectId, askedBy },
+					expect.objectContaining({ name: "Morning standup", routineExpression: "0 9 * * 1-5" }),
 				);
 				expect(outcome).toMatchObject({ refused: expect.any(String) });
 			} else {
@@ -717,7 +722,7 @@ describe("runSegment", () => {
 		vi.mocked(execution.prepare).mockReturnValueOnce(
 			Effect.succeed({
 				_tag: "NotRunnable",
-				reason: "The bot left its channel",
+				reason: "The bot left its project",
 				ended: undefined,
 			}),
 		);
@@ -891,7 +896,7 @@ function segmentWith(given: Given) {
 					Installation.Service,
 					Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
 				),
-				unimplemented(BotTasks.Service, {}),
+				unimplemented(BotThreads.Service, {}),
 				unimplemented(AssistantGuide.Service, {}),
 				unimplemented(
 					ApprovedToolCalls.Service,
@@ -946,7 +951,7 @@ function segmentAskingApproval(
 		collaborations: collaborations(),
 		toolCalls: toolCalls(),
 		connectionTools: {
-			forBot: () =>
+			forTurn: () =>
 				Effect.succeed({
 					tools: {
 						wiki__wipe: {
@@ -971,6 +976,7 @@ function segmentAskingApproval(
 					signInExpired: [],
 					instructions: {},
 					addable: [],
+					fromProjectAndBot: false,
 					close: async () => undefined,
 				}),
 		},

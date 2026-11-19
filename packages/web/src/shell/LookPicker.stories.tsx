@@ -1,10 +1,10 @@
-import type { BotColor, BotFace, BotShape, ChannelColor } from "@sugabots/contracts";
+import type { BotColor, BotFace, BotShape, ProjectColor } from "@sugabots/contracts";
 import { useState } from "react";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { BotAvatar } from "./Bot.tsx";
-import { ChannelTile } from "./ChannelTile.tsx";
-import { ChannelColourPicker, LookPicker } from "./LookPicker.tsx";
+import { LookPicker, ProjectColourPicker } from "./LookPicker.tsx";
+import { ProjectInitial } from "./SidebarProject.tsx";
 
 function Look() {
 	const [color, setColor] = useState<BotColor>("green");
@@ -54,19 +54,19 @@ export const Pick = meta.story({
 	},
 });
 
-function ChannelLook() {
-	const [color, setColor] = useState<ChannelColor>("green");
+function ProjectLook() {
+	const [color, setColor] = useState<ProjectColor>("green");
 	return (
 		<div className="flex max-w-105 flex-col items-center gap-4 rounded-panel bg-list p-4">
-			<ChannelTile bots={[{ color: "sky", face: "pill" }]} color={color} size={72} />
-			<ChannelColourPicker value={color} onChange={setColor} />
+			<ProjectInitial project={{ name: "Revenue", color }} size="lg" />
+			<ProjectColourPicker value={color} onChange={setColor} />
 		</div>
 	);
 }
 
-/** ChannelColour picks a channel's colour from its own palette; the tile above follows it. */
-export const ChannelColour = meta.story({
-	render: () => <ChannelLook />,
+/** ProjectColour picks a project's colour from its own palette; the mark above follows it. */
+export const ProjectColour = meta.story({
+	render: () => <ProjectLook />,
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("radio", { name: "amber" }));
 		await expect(canvas.getByRole("radio", { name: "amber" })).toBeChecked();

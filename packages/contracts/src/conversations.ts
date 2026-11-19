@@ -23,13 +23,12 @@ export const DEFAULT_CONVERSATION_HISTORY_LIMIT = 50;
 export const MAX_CONVERSATION_HISTORY_LIMIT = 100;
 
 /**
- * What kind of conversation it is: a task with a bot, a channel's main chat
- * or conversation, a direct message between people, a collaboration a bot asked
- * for, an automation's run or feed, or a system bot's conversation.
+ * What kind of conversation it is: a project's thread (a bot's threads being
+ * its default project's), a direct message between people, a collaboration a
+ * bot asked for, an automation's run or feed, or a system bot's conversation.
  */
 export const conversationKindSchema = Schema.Literals([
-	"task",
-	"channel_conversation",
+	"project_thread",
 	"collaboration",
 	"run",
 	"automation_feed",
@@ -41,8 +40,7 @@ export type ConversationKind = typeof conversationKindSchema.Type;
 
 /** The conversations whose messages notify people: not an automation's feed, nor those bots work in. */
 export const NOTIFYING_CONVERSATION_KINDS: ReadonlySet<ConversationKind> = new Set([
-	"task",
-	"channel_conversation",
+	"project_thread",
 	"direct_message",
 ]);
 
@@ -61,19 +59,19 @@ export const conversationHistoryQuerySchema = Schema.Struct({
 export type ConversationHistoryQuery = typeof conversationHistoryQuerySchema.Type;
 
 /**
- * A conversation of any kind, with where it is placed: its channel, its bot,
+ * A conversation of any kind, with where it is placed: its project, its bot,
  * the conversation people open that it is in, and the one it was opened under.
  */
 export const placedConversationSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	/** The channel it is in; only a channel's own conversations are in one. */
-	channelId: Schema.NullOr(uuidSchema),
-	/** The bot it is with; null on a channel's conversation and a direct message. */
+	/** The project it is in; only a project's own conversations are in one. */
+	projectId: Schema.NullOr(uuidSchema),
+	/** The bot it is with; null on a project's thread and a direct message. */
 	botId: Schema.NullOr(uuidSchema),
 	/**
-	 * The conversation people open that it is in: its own id on a task, a
-	 * channel's conversation, a direct message and an automation's feed; the
+	 * The conversation people open that it is in: its own id on a bot's thread,
+	 * a project's thread, a direct message and an automation's feed; the
 	 * one it hangs under on a collaboration; the automation's feed on a run.
 	 * Null on a system bot's conversation.
 	 */
@@ -90,9 +88,9 @@ export const placedConversationSchema = Schema.Struct({
 	 * collaboration, which holds the card for it, or the one a system bot serves.
 	 */
 	parentConversationId: Schema.NullOr(uuidSchema),
-	/** When somebody marked the task done; null while it is open, and on any other kind. */
+	/** When somebody marked the bot's thread done; null while it is open, and on any other kind. */
 	doneAt: Schema.NullOr(isoTimestampSchema),
-	/** Who started a task, channel conversation or direct message. */
+	/** Who started a bot's thread, a project's thread or a direct message. */
 	startedById: Schema.NullOr(uuidSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
@@ -280,9 +278,10 @@ export type ToolApprovalStatus = typeof toolApprovalStatusSchema.Type;
 
 /**
  * Who may decide a tool call's approval: `conversation`, those who decide
- * approvals in the conversation it was raised in; `computer-managers`, those
- * who decide what the bot's computer may reach and has installed, for a bot's
- * request to change that.
+ * approvals in the conversation it was raised in; `computer-managers`, for a
+ * bot's request to change the computer its turn works on, such as what it may
+ * reach, those who manage that computer's project: the conversation's project,
+ * or in a collaboration the collaborating bot's default project.
  */
 const toolApprovalDecidersSchema = Schema.Literals(["conversation", "computer-managers"]);
 
@@ -348,20 +347,20 @@ export const toolCallPartSchema = Schema.Struct({
 
 export type ToolCallPart = typeof toolCallPartSchema.Type;
 
-/** The tool a bot starts a task with, for the person it is answering. */
-export const START_TASK_TOOL = "start_task";
+/** The tool a bot starts a thread with, for the person it is answering. */
+export const START_THREAD_TOOL = "start_thread";
 
-/** A task a bot started with `start_task`: what the tool returns, and what the chat links to. */
-export const botStartedTaskSchema = Schema.Struct({
+/** A thread a bot started with `start_thread`: what the tool returns, and what the chat links to. */
+export const botStartedThreadSchema = Schema.Struct({
 	id: uuidSchema,
 	title: Schema.String,
 	/** The bot it is with, by name, when that is another bot. */
 	with: Schema.optional(Schema.String),
-	/** That bot's id, which the chat finds it by. Absent from tasks started before it was recorded. */
+	/** That bot's id, which the chat finds it by. Absent from threads started before it was recorded. */
 	withBotId: Schema.optional(uuidSchema),
 });
 
-export type BotStartedTask = typeof botStartedTaskSchema.Type;
+export type BotStartedThread = typeof botStartedThreadSchema.Type;
 
 /** A file attached to the message, served by the conversation it was sent in. */
 export const filePartSchema = Schema.Struct({
@@ -581,12 +580,23 @@ export const reactionEmojiSchema = Schema.String.pipe(
 	),
 );
 
-/** One emoji on a message, with the people who reacted with it, earliest first. */
+/** Who reacted with an emoji, and when. */
+const reactorSchema = Schema.Struct({
+	id: uuidSchema,
+	name: Schema.String,
+	at: isoTimestampSchema,
+});
+
+/**
+ * One emoji on a message, with the people who reacted with it and the bots,
+ * each earliest first. A bot reacts only with 👀, to a message it read and
+ * chose not to answer.
+ */
 const messageReactionSchema = Schema.Struct({
 	emoji: reactionEmojiSchema,
-	people: Schema.mutable(
-		Schema.Array(Schema.Struct({ id: uuidSchema, name: Schema.String, at: isoTimestampSchema })),
-	),
+	people: Schema.mutable(Schema.Array(reactorSchema)),
+	/** Absent when no bot reacted with it. */
+	bots: Schema.optional(Schema.mutable(Schema.Array(reactorSchema))),
 });
 
 export type MessageReaction = typeof messageReactionSchema.Type;
@@ -607,7 +617,7 @@ export const messageSchema = Schema.Struct({
 	automationResultOf: Schema.optional(automationResultOfSchema),
 	/** The message this one quotes and answers, in the same conversation. */
 	replyTo: Schema.optional(messageReplyToSchema),
-	/** People's reactions, in the order each emoji was first used. Absent when there are none. */
+	/** People's and bots' reactions, in the order each emoji was first used. Absent when there are none. */
 	reactions: Schema.optional(messageReactionsSchema),
 	createdAt: isoTimestampSchema,
 	/** When the bot's turn that wrote this reply ended. Absent on people's messages and replies still being written. */
@@ -629,7 +639,7 @@ export const MAX_SUMMARY_CHARACTERS = 4_000;
 /** The most a bot's summary of what it has been doing may say. */
 export const MAX_BOT_SUMMARY_CHARACTERS = 1_000;
 
-/** What a bot has been doing lately, written by the Summariser from its tasks' summaries. */
+/** What a bot has been doing lately, written by the Summariser from its threads' summaries. */
 export const botSummarySchema = Schema.Struct({
 	content: Schema.String,
 	updatedAt: isoTimestampSchema,
@@ -663,18 +673,20 @@ export const conversationDetailsSchema = Schema.Struct({
 		Schema.Struct({
 			approveToolCalls: Schema.Boolean,
 			/**
-			 * The bots in the conversation whose requests to change their computers this
-			 * person may decide: each bot's creator or an admin decides its own.
+			 * The bots in the conversation whose requests to change the computer their
+			 * turns work on this person may decide: those who manage that computer's
+			 * project, which is the conversation's project, or in a collaboration the
+			 * collaborating bot's default project.
 			 */
 			approveComputerRequestsOf: Schema.optional(Schema.Array(uuidSchema)),
 		}),
 	),
 	automationRun: Schema.NullOr(runSchema),
-	/** On an automation's feed: the automation, how it stands, and the bot that runs it. */
+	/** On an automation's feed: the automation, how it stands, and the project it belongs to. */
 	automation: Schema.optional(
 		Schema.Struct({
 			id: uuidSchema,
-			botId: uuidSchema,
+			projectId: uuidSchema,
 			state: automationStateSchema,
 			/** Its latest run failed, and nothing has run it since. */
 			failed: Schema.Boolean,
@@ -684,11 +696,11 @@ export const conversationDetailsSchema = Schema.Struct({
 	),
 	participants: Schema.mutable(Schema.Array(participantSchema)),
 	/**
-	 * The channel's bots, whether or not they have spoken. Who a mention can name,
+	 * The project's bots, whether or not they have spoken. Who a mention can name,
 	 * which is wider than who has joined.
 	 */
-	channelBots: Schema.mutable(Schema.Array(participantSchema)),
-	/** The channel's people, whether or not they have written here: the people a mention can name. */
+	projectBots: Schema.mutable(Schema.Array(participantSchema)),
+	/** The project's people, whether or not they have written here: the people a mention can name. */
 	members: Schema.mutable(Schema.Array(personParticipantSchema)),
 	messages: Schema.mutable(Schema.Array(messageSchema)),
 	olderMessagesCursor: Schema.NullOr(Schema.String),

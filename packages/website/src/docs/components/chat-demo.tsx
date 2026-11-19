@@ -1,11 +1,11 @@
 import { RotateCcwIcon } from "lucide-react";
 import { Children, type ReactNode, useState } from "react";
+import { type CastName, cast } from "@/cast";
 import { ChatCollaboration, ChatMessage, ChatText } from "@/components/chat";
 import { MotionCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { Button } from "@/components/ui/button";
-import { type CastName, cast } from "@/docs/cast";
 
-/** Seconds between one line of a demo chat and the next. */
+/** Seconds between one line of a demo conversation and the next. */
 const LINE_STAGGER_S = 0.55;
 
 interface SayProps {
@@ -30,7 +30,7 @@ export function Say({ from, collaboratesWith, children }: SayProps) {
 }
 
 interface ChatProps {
-	/** Where the chat happens, e.g. "Family · Trip Planner". */
+	/** Where the chat happens, e.g. "Lisbon trip". */
 	title: string;
 	children: ReactNode;
 }

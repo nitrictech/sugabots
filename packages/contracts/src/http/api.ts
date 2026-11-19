@@ -1,9 +1,7 @@
 import { HttpApi } from "effect/unstable/httpapi";
 import { ApprovalsApi } from "./groups/approvals.ts";
 import { AutomationsApi } from "./groups/automations.ts";
-import { BotComputerApi } from "./groups/bot-computer.ts";
 import { BotsApi } from "./groups/bots.ts";
-import { ChannelsApi } from "./groups/channels.ts";
 import { ChatsApi } from "./groups/chats.ts";
 import { ComputerProvidersApi } from "./groups/computer-providers.ts";
 import { ConnectionsApi } from "./groups/connections.ts";
@@ -15,6 +13,8 @@ import { ModelProvidersApi } from "./groups/model-providers.ts";
 import { ModelTrialsApi } from "./groups/model-trials.ts";
 import { NotificationsApi } from "./groups/notifications.ts";
 import { OnboardingApi } from "./groups/onboarding.ts";
+import { ProjectComputerApi } from "./groups/project-computer.ts";
+import { ProjectsApi } from "./groups/projects.ts";
 import { ReferralsApi } from "./groups/referrals.ts";
 import { SearchProvidersApi } from "./groups/search-providers.ts";
 import { SystemApi } from "./groups/system.ts";
@@ -37,14 +37,14 @@ export class Api extends HttpApi.make("sugabots")
 	.add(SystemApi)
 	.add(WorkspacesApi)
 	.add(BotsApi)
-	.add(ChannelsApi)
+	.add(ProjectsApi)
 	.add(OnboardingApi)
 	.add(SystemBotsApi)
 	.add(ModelTrialsApi)
 	.add(ModelProvidersApi)
 	.add(SearchProvidersApi)
 	.add(ComputerProvidersApi)
-	.add(BotComputerApi)
+	.add(ProjectComputerApi)
 	.add(GitHubConnectionsApi)
 	.add(GitHubWebhooksApi)
 	.add(ConnectionsApi)

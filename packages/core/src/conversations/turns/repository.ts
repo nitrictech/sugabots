@@ -18,6 +18,7 @@ import {
 	ACTIVE_TURN_STATUSES,
 	conversation,
 	message,
+	messageReaction,
 	type StoredMessagePart,
 	type TurnReason,
 	toolCall,
@@ -27,7 +28,12 @@ import { ConversationFiles } from "../../files/conversation-files.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { ConversationEvents } from "../conversation-events.ts";
 import { ConversationEvent } from "../events.ts";
-import { type ParticipantRow, toMessage } from "../repository/participants.ts";
+import {
+	type ParticipantRow,
+	reactionColumns,
+	toMessage,
+	toReactions,
+} from "../repository/participants.ts";
 import {
 	type Ended,
 	endedAs,
@@ -116,6 +122,12 @@ export interface Interface {
 		draft: ReplyDraft,
 		failure: { userMessage: UserText; mayRunAgain: boolean },
 	) => Effect.Effect<boolean>;
+	/**
+	 * Completes an optional turn whose bot chose not to answer: its empty
+	 * reply is taken back, and the bot reacts 👀 to the message it read, so
+	 * people see it was read.
+	 */
+	readonly staySilent: (turn: ReplyTurn, completion: TurnCompletion) => Effect.Effect<void>;
 	/** Stops the run short, keeping the reply written so far. */
 	readonly cancel: (turn: ReplyTurn, draft: ReplyDraft) => Effect.Effect<void>;
 	readonly completeSystemBotTurn: (
@@ -514,6 +526,54 @@ export const make = Effect.gen(function* () {
 							}),
 						]);
 						return true;
+					}),
+				),
+			),
+
+		staySilent: (reply, completion) =>
+			operation(
+				"staySilent",
+				transaction(
+					Effect.gen(function* () {
+						const locked = yield* lockAndTransition(
+							eq(turn.id, reply.turnId),
+							TurnEvent.Complete(),
+						);
+						if (locked?.decided._tag !== "Next") return;
+						yield* write(locked.id, locked.decided.state, measurementColumns(completion));
+						yield* query((db) => db.delete(message).where(eq(message.id, reply.messageId)));
+						const [read] = yield* query((db) =>
+							db
+								.select({ messageId: turn.triggerMessageId })
+								.from(turn)
+								.where(eq(turn.id, locked.id)),
+						);
+						if (!read) return yield* Effect.die(new Error("A turn being completed is gone"));
+						yield* query((db) =>
+							db
+								.insert(messageReaction)
+								.values({ messageId: read.messageId, botId: reply.botId, emoji: SEEN_EMOJI })
+								.onConflictDoNothing(),
+						);
+						const reactions = yield* query((db) =>
+							db.query.messageReaction.findMany({
+								where: { messageId: read.messageId },
+								...reactionColumns,
+							}),
+						);
+						yield* emit([
+							ConversationEvent.TurnStayedSilent({
+								conversationId: reply.conversationId,
+								workspaceId: reply.workspaceId,
+								turnId: locked.id,
+								botId: reply.botId,
+							}),
+							ConversationEvent.ReactionsChanged({
+								conversationId: reply.conversationId,
+								messageId: read.messageId,
+								reactions: toReactions(reactions),
+							}),
+						]);
 					}),
 				),
 			),
@@ -917,6 +977,9 @@ interface ContextMeasurement {
 	/** The window the prompt was read with. */
 	contextCapacity?: number;
 }
+
+/** What a bot reacts with to a message it read on an optional turn and chose not to answer. */
+const SEEN_EMOJI = "👀";
 
 /** How a reply completed, for what reacts to it (see `TurnCompleted`). */
 interface TurnCompletion extends ContextMeasurement {

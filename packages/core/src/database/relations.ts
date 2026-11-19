@@ -12,8 +12,8 @@ export const relations = defineRelations(schema, (r) => ({
 			to: r.workspace.id,
 			optional: false,
 		}),
-		// Only on a channel's conversation.
-		channel: r.one.channel({ from: r.placedConversation.channelId, to: r.channel.id }),
+		// On a project's thread, and an automation's feed and runs.
+		project: r.one.project({ from: r.placedConversation.projectId, to: r.project.id }),
 		// On a direct message between people: everybody in it.
 		directMessageMembers: r.many.user({
 			from: r.placedConversation.id.through(r.directMessageMember.conversationId),
@@ -43,14 +43,18 @@ export const relations = defineRelations(schema, (r) => ({
 			to: r.placedConversation.rootConversationId,
 		}),
 	},
-	channel: {
+	bot: {
+		// None for a system bot.
+		defaultProject: r.one.project({ from: r.bot.id, to: r.project.defaultOfBotId }),
+	},
+	project: {
 		bots: r.many.bot({
-			from: r.channel.id.through(r.channelBot.channelId),
-			to: r.bot.id.through(r.channelBot.botId),
+			from: r.project.id.through(r.projectBot.projectId),
+			to: r.bot.id.through(r.projectBot.botId),
 		}),
 		members: r.many.user({
-			from: r.channel.id.through(r.channelMember.channelId),
-			to: r.user.id.through(r.channelMember.userId),
+			from: r.project.id.through(r.projectMember.projectId),
+			to: r.user.id.through(r.projectMember.userId),
 		}),
 	},
 	message: {
@@ -71,7 +75,9 @@ export const relations = defineRelations(schema, (r) => ({
 		reactions: r.many.messageReaction({ from: r.message.id, to: r.messageReaction.messageId }),
 	},
 	messageReaction: {
-		user: r.one.user({ from: r.messageReaction.userId, to: r.user.id, optional: false }),
+		// One of the two, by `message_reaction_one_reactor`.
+		user: r.one.user({ from: r.messageReaction.userId, to: r.user.id }),
+		bot: r.one.bot({ from: r.messageReaction.botId, to: r.bot.id }),
 	},
 	conversationRead: {
 		user: r.one.user({ from: r.conversationRead.userId, to: r.user.id, optional: false }),

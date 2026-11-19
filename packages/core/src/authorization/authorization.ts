@@ -7,8 +7,8 @@ import {
 	type AuthorizationDenied,
 	type BotStanding,
 	botStandingFor,
-	type ChannelStanding,
-	channelStandingFor,
+	type ProjectStanding,
+	projectStandingFor,
 	ResourceHidden,
 	requireReach,
 	type WorkspaceStanding,
@@ -17,8 +17,8 @@ import {
 import { CurrentActor } from "./current-actor.ts";
 import {
 	type BotPermission,
-	type ChannelPermission,
 	mayInWorkspace,
+	type ProjectPermission,
 	type WorkspacePermission,
 } from "./permissions.ts";
 
@@ -43,17 +43,21 @@ export interface Interface {
 		permission: WorkspacePermission,
 	) => Effect.Effect<WorkspaceStanding, AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * `channelId` names a channel of a workspace the actor belongs to, whether or
+	 * `projectId` names a project of a workspace the actor belongs to, whether or
 	 * not they are in it, as the directory shows a public one to join.
 	 */
-	readonly channelFound: (
-		channelId: string,
-	) => Effect.Effect<ChannelStanding, ResourceHidden, CurrentActor.Service>;
-	/** `channelId` names a channel the actor is in, and the action is one they may take in it. */
-	readonly channel: (
-		channelId: string,
-		permission: ChannelPermission,
-	) => Effect.Effect<ChannelStanding, AuthorizationDenied, CurrentActor.Service>;
+	readonly projectFound: (
+		projectId: string,
+	) => Effect.Effect<ProjectStanding, ResourceHidden, CurrentActor.Service>;
+	/**
+	 * `projectId` names a project, and the action is one the actor may take in
+	 * it. A project they don't reach is hidden, unless the action is one they
+	 * may take anyway, as an administrator manages a private bot's computer.
+	 */
+	readonly project: (
+		projectId: string,
+		permission: ProjectPermission,
+	) => Effect.Effect<ProjectStanding, AuthorizationDenied, CurrentActor.Service>;
 	/**
 	 * `botId` names a bot, and the action is one the actor may take on it.
 	 * A bot they don't reach is hidden, unless the action is one they may take
@@ -86,24 +90,24 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		channel: (channelId, permission) =>
+		project: (projectId, permission) =>
 			operation(
-				"channel",
+				"project",
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => channelStandingFor(db, channelId, userId));
-					return yield* decideInChannel(standing, permission, "channel");
+					const standing = yield* query((db) => projectStandingFor(db, projectId, userId));
+					return yield* decideInProject(standing, permission, "project");
 				}),
 			),
 
-		channelFound: (channelId) =>
+		projectFound: (projectId) =>
 			operation(
-				"channelFound",
+				"projectFound",
 				Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => channelStandingFor(db, channelId, userId));
+					const standing = yield* query((db) => projectStandingFor(db, projectId, userId));
 					if (!standing?.actor.workspaceRole)
-						return yield* new ResourceHidden({ resource: "channel" });
+						return yield* new ResourceHidden({ resource: "project" });
 					return standing;
 				}),
 			),
@@ -127,19 +131,17 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /**
- * Hidden whatever the action, for a channel the actor cannot reach (see
- * `requireReach`). Only once they reach it does being unable to act become
- * forbidden.
+ * The standing when the actor may take the action. Otherwise hidden, for a
+ * project the actor cannot reach (see `requireReach`); only once they reach it
+ * does being unable to act become forbidden.
  */
-function decideInChannel<Standing extends ChannelStanding>(
+function decideInProject<Standing extends ProjectStanding>(
 	standing: Standing | undefined,
-	permission: ChannelPermission,
-	resource: "channel",
+	permission: ProjectPermission,
+	resource: "project",
 ): Effect.Effect<Standing, AuthorizationDenied> {
+	if (standing?.may(permission)) return Effect.succeed(standing);
 	return requireReach(standing, resource).pipe(
-		Effect.filterOrFail(
-			(reached) => reached.may(permission),
-			() => new ActionForbidden({ permission }),
-		),
+		Effect.flatMap(() => Effect.fail(new ActionForbidden({ permission }))),
 	);
 }

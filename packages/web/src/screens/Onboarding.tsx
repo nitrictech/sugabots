@@ -17,7 +17,8 @@ import {
 	type Workspace,
 } from "@sugabots/contracts";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, Search, X } from "lucide-react";
+import { cn } from "cn";
+import { X } from "lucide-react";
 import {
 	type FormEvent,
 	type KeyboardEvent,
@@ -31,7 +32,8 @@ import {
 import { useBots, useCreateBot, useEnsureAssistant, useModels } from "@/lib/bots.ts";
 import { useStartInterview } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
+import { modelName, useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
+import { countOf } from "@/lib/name-list.ts";
 import {
 	useChooseFirstModel,
 	useCompleteOnboarding,
@@ -46,14 +48,15 @@ import {
 	useUpdateWorkspace,
 	useWorkspace,
 } from "@/lib/workspace.ts";
-import { modelName } from "@/screens/ProviderSettings.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
+import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
+import { AuthBackButton, AuthHeading, QuietLink } from "./AuthLayout.tsx";
 import { AddProviderDialog } from "./ModelsSettings.tsx";
 import { ProviderTile } from "./ProviderSettings.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
@@ -110,9 +113,7 @@ function SetupSteps({ session, workspace, onAddress, onCancel }: SetupProps) {
 	// The Personal Assistant the workspace made for its maker, which the model step sets up,
 	// and the first bot they make here, a public one of the workspace's.
 	const assistant = bots?.find((bot) => bot.assistant);
-	const firstBot = bots?.find(
-		(bot) => !bot.assistant && bot.systemBotKey === null && bot.createdById === session.user?.id,
-	);
+	const firstBot = bots?.find((bot) => !bot.assistant && bot.createdById === session.user?.id);
 	const assistantHasModel =
 		models.data?.models.some((model) => model.modelId === assistant?.model) ?? false;
 	// Coming back part way through picks up where the workspace says it got to.
@@ -230,18 +231,7 @@ function OnboardingFrame({
 	return (
 		<main className="flex min-h-full flex-col overflow-auto bg-background text-foreground">
 			<header className="grid shrink-0 grid-cols-centered items-center px-8 pt-7 max-md:px-4">
-				<span>
-					{onBack && (
-						<button
-							type="button"
-							onClick={onBack}
-							className="focus-ring inline-flex items-center gap-0.5 rounded-md font-medium text-sm text-link"
-						>
-							<ChevronLeft aria-hidden size={16} strokeWidth={2.4} />
-							Back
-						</button>
-					)}
-				</span>
+				<span>{onBack && <AuthBackButton onClick={onBack} />}</span>
 				{current !== undefined && (
 					<ol
 						aria-label={`Step ${current + 1} of ${counted.length}`}
@@ -250,25 +240,27 @@ function OnboardingFrame({
 						{counted.map((step, index) => (
 							<li
 								key={step}
-								className={`h-1.5 rounded-full transition-all ${
+								className={cn(
+									"h-1.5 rounded-full transition-all",
 									index === current
 										? "w-5.5 bg-foreground"
 										: index < current
 											? "w-1.5 bg-muted-foreground"
-											: "w-1.5 bg-border-strong"
-								}`}
+											: "w-1.5 bg-border-strong",
+								)}
 							/>
 						))}
 					</ol>
 				)}
 				{onCancel && (
-					<button
-						type="button"
+					<Button
+						variant="link"
+						size="bare"
 						onClick={onCancel}
-						className="focus-ring col-start-3 justify-self-end rounded-md font-medium text-sm text-link"
+						className="col-start-3 justify-self-end text-sm"
 					>
 						Cancel
-					</button>
+					</Button>
 				)}
 			</header>
 			<div className="grid flex-1 place-items-center px-4 py-10">
@@ -278,34 +270,8 @@ function OnboardingFrame({
 	);
 }
 
-function StepHeading({ title, children }: { title: ReactNode; children?: ReactNode }) {
-	return (
-		<>
-			<h1 className="m-0 text-balance text-center font-bold text-3xl leading-tight tracking-tight">
-				{title}
-			</h1>
-			{children && (
-				<p className="m-0 text-pretty text-center text-sm text-muted-foreground leading-normal">
-					{children}
-				</p>
-			)}
-		</>
-	);
-}
-
-function QuietLink({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-	return (
-		<button
-			type="button"
-			onClick={onClick}
-			className="focus-ring self-center rounded-md px-1.5 py-1.5 font-medium text-sm text-muted-foreground"
-		>
-			{children}
-		</button>
-	);
-}
-
-const fieldClass =
+/** A field standing on its own in a step, as a rounded box, rather than in a `FormRow`. */
+const STANDALONE_FIELD =
 	"focus-ring w-full rounded-2xl bg-list px-4 py-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground";
 
 function WorkspaceStep({
@@ -343,9 +309,9 @@ function WorkspaceStep({
 
 	return (
 		<form onSubmit={submit} className="flex flex-col gap-5.5">
-			<StepHeading title="Name your workspace">
+			<AuthHeading title="Name your workspace">
 				It's just you for now. You can invite people later.
-			</StepHeading>
+			</AuthHeading>
 			<input
 				aria-label="Workspace name"
 				// biome-ignore lint/a11y/noAutofocus: the step asks one question, and this is it.
@@ -354,7 +320,7 @@ function WorkspaceStep({
 				onChange={(event) => setName(event.target.value)}
 				maxLength={WORKSPACE_NAME_MAX_LENGTH}
 				placeholder={firstName ? `e.g. ${firstName}'s bots` : "e.g. Acme"}
-				className={fieldClass}
+				className={STANDALONE_FIELD}
 			/>
 			{(create.error || update.error) && (
 				<Alert>
@@ -419,10 +385,10 @@ function ConnectProviderStep({
 
 	return (
 		<div className="flex flex-col gap-5.5">
-			<StepHeading title="Connect a provider">
+			<AuthHeading title="Connect a provider">
 				Bots think with a model from a provider you already use. Pick one to start; you can add more
 				later.
-			</StepHeading>
+			</AuthHeading>
 			{ready.length > 0 && (
 				<SettingsGroup label="Connected" headingLevel={2}>
 					{ready.map((provider) => (
@@ -485,7 +451,6 @@ function ChooseModelStep({
 	const signInService = providerLacksCredential(provider)
 		? presetSignInService(provider.preset)
 		: undefined;
-	const [search, setSearch] = useState("");
 	const group = useId();
 	const starters = provider.preset
 		? providerPreset(provider.preset).models.map((model) => model.modelId)
@@ -502,11 +467,8 @@ function ChooseModelStep({
 	);
 	const chosen = choices.find((model) => model.id === chosenId);
 	const large = choices.length > MODEL_SEARCH_THRESHOLD;
-	const needle = search.trim().toLowerCase();
-	const shown = choices.filter(
-		(model) =>
-			needle === "" || `${model.modelId} ${model.displayName ?? ""}`.toLowerCase().includes(needle),
-	);
+	const search = useSearchFilter(choices, (model) => [model.modelId, model.displayName]);
+	const shown = search.matches;
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
@@ -521,9 +483,9 @@ function ChooseModelStep({
 
 	return (
 		<form onSubmit={submit} className="flex flex-col gap-5.5">
-			<StepHeading title="Choose a model">
+			<AuthHeading title="Choose a model">
 				Your first bot thinks with this. You can switch on more of {provider.name}'s models later.
-			</StepHeading>
+			</AuthHeading>
 			{choices.length === 0 && signInService ? (
 				<div className="overflow-hidden rounded-panel bg-list">
 					<ProviderSignInRow provider={provider} service={signInService} />
@@ -537,17 +499,12 @@ function ChooseModelStep({
 					<legend className="sr-only">Model</legend>
 					{large && (
 						<div className="border-border border-b p-3">
-							<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-								<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-								<input
-									type="search"
-									value={search}
-									onChange={(event) => setSearch(event.target.value)}
-									placeholder={`Search ${choices.length} models`}
-									aria-label="Search models"
-									className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-								/>
-							</label>
+							<SearchField
+								label="Search models"
+								placeholder={`Search ${choices.length} models`}
+								value={search.query}
+								onChange={search.setQuery}
+							/>
 						</div>
 					)}
 					{/*
@@ -631,7 +588,7 @@ function BotStep({
 
 	return (
 		<form onSubmit={submit} className="flex flex-col gap-5.5">
-			<StepHeading title="Make your first bot" />
+			<AuthHeading title="Make your first bot" />
 			<div className="flex justify-center">
 				<BotAvatar color={color} face={face} shape={shape} size={96} />
 			</div>
@@ -651,7 +608,7 @@ function BotStep({
 				onChange={(event) => setName(event.target.value)}
 				maxLength={BOT_NAME_MAX_LENGTH}
 				placeholder="Give it a name"
-				className={fieldClass}
+				className={STANDALONE_FIELD}
 			/>
 			{!model && <Alert>Choose a model first, so the bot has something to think with.</Alert>}
 			{create.error && <Alert>{failureMessage(create.error)}</Alert>}
@@ -731,9 +688,9 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 	const count = emails.length;
 	return (
 		<form onSubmit={submit} className="flex flex-col gap-5.5">
-			<StepHeading title="Bring your friends">
-				Invite people to your workspace. You can add them to channels later.
-			</StepHeading>
+			<AuthHeading title="Bring your friends">
+				Invite people to your workspace. You can add them to projects later.
+			</AuthHeading>
 			<div className="focus-ring-within flex min-h-13 flex-wrap items-center gap-1.5 rounded-2xl bg-list px-3 py-2.5">
 				{emails.map((email) => (
 					<span
@@ -779,7 +736,7 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 					? "Sending…"
 					: count === 0
 						? "Continue"
-						: `Send ${count} ${count === 1 ? "invite" : "invites"}`}
+						: `Send ${countOf(count, "invite", "invites")}`}
 			</Button>
 			<QuietLink onClick={onContinue}>Skip for now</QuietLink>
 		</form>
@@ -797,13 +754,13 @@ function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }
 		} catch {
 			return;
 		}
-		// The new bot asks its maker what it's for in a task of its own, as its greeting says.
-		const task = await interview.mutateAsync(bot.id).catch(() => null);
+		// The new bot asks its maker what it's for in a thread of its own, as its greeting says.
+		const thread = await interview.mutateAsync(bot.id).catch(() => null);
 		// Onboarding is outside any workspace, so this names one; the link helpers are for pages inside.
-		if (task) {
+		if (thread) {
 			await navigate({
-				to: "/$workspace/bots/$bot/tasks/$conversation",
-				params: { workspace: workspace.slug, bot: bot.handle, conversation: task.id },
+				to: "/$workspace/bots/$bot/threads/$conversation",
+				params: { workspace: workspace.slug, bot: bot.handle, conversation: thread.id },
 				replace: true,
 			});
 			return;
@@ -817,7 +774,7 @@ function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }
 
 	return (
 		<>
-			<StepHeading title={`${bot.name} is ready`} />
+			<AuthHeading title={`${bot.name} is ready`} />
 			<div
 				className="flex flex-col gap-0.75 rounded-3xl bg-list px-4 py-4.5"
 				style={botColorVariables(bot.color)}
@@ -847,7 +804,7 @@ function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }
 				disabled={complete.isPending}
 				onClick={() => void finish()}
 			>
-				Start chatting
+				Start talking
 			</Button>
 		</>
 	);
@@ -862,9 +819,9 @@ function AssistantMissing({ modelId }: { modelId?: string }) {
 	const ensure = useEnsureAssistant();
 	return (
 		<>
-			<StepHeading title="Your Personal Assistant is missing">
+			<AuthHeading title="Your Personal Assistant is missing">
 				It is your first bot. Make it again to carry on.
-			</StepHeading>
+			</AuthHeading>
 			{ensure.error && <Alert>{failureMessage(ensure.error)}</Alert>}
 			<Button
 				size="lg"

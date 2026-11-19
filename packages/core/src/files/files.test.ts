@@ -7,11 +7,11 @@ import { Credentials } from "../credentials/credentials.ts";
 import {
 	blobDeletion,
 	bot,
-	channel,
-	channelBot,
-	channelMember,
 	fileVersion,
 	message,
+	project,
+	projectBot,
+	projectMember,
 	turn,
 	user,
 	workspace,
@@ -32,13 +32,13 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 	let memberId: string;
 	let outsiderId: string;
 	let adminId: string;
-	let channelId: string;
-	/** A bot outside the channel, working in a task of its own. */
+	let projectId: string;
+	/** A bot outside the project, working in a thread of its own. */
 	let botElsewhere: Files.BotInConversation;
-	/** The channel's bot, asked by the bot outside it from that bot's task. */
-	let writerAskedFromTask: Files.BotInConversation;
-	/** The bot outside the channel, asked from the channel's main chat. */
-	let strangerAskedFromChannel: Files.BotInConversation;
+	/** The project's bot, asked by the bot outside it from that bot's thread. */
+	let writerAskedFromThread: Files.BotInConversation;
+	/** The bot outside the project, asked from one of the project's threads. */
+	let strangerAskedFromProject: Files.BotInConversation;
 
 	const authoring = async () => ({
 		service: await runOnPostgres(Effect.provide(Files.Authoring, Files.authoringLayer)),
@@ -118,7 +118,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			);
 		};
 
-		it("gives the channel's people an address on the content origin that opens the page", async () => {
+		it("gives the project's people an address on the content origin that opens the page", async () => {
 			const made = await aPage();
 			const pages = (await pagesAt("https://pages.example-content.com"))(memberId);
 
@@ -152,7 +152,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			});
 		});
 
-		it("hides a page from people outside its channel", async () => {
+		it("hides a page from people outside its project", async () => {
 			const made = await aPage();
 			const pages = (await pagesAt("https://pages.example-content.com"))(outsiderId);
 
@@ -275,14 +275,14 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		);
 		const [room] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({ workspaceId, name: "Planning", slug: `planning-${stamp}` })
 				.returning(),
 		);
 		if (!room) throw new Error("fixture");
-		channelId = room.id;
+		projectId = room.id;
 		await onDatabase((db) =>
-			db.insert(channelMember).values({ workspaceId, channelId, userId: memberId }),
+			db.insert(projectMember).values({ workspaceId, projectId, userId: memberId }),
 		);
 		const [writer, stranger] = await onDatabase((db) =>
 			db
@@ -302,46 +302,46 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		);
 		if (!writer || !stranger) throw new Error("fixture");
 		await onDatabase((db) =>
-			db.insert(channelBot).values({ workspaceId, channelId, botId: writer.id }),
+			db.insert(projectBot).values({ workspaceId, projectId, botId: writer.id }),
 		);
-		const mainChat = await onDatabase((db) =>
+		const planning = await onDatabase((db) =>
 			seedConversation(db, {
 				workspaceId,
-				kind: "channel_conversation",
-				channelId,
-				main: true,
+				kind: "project_thread",
+				projectId,
 				title: "Planning",
 			}),
 		);
-		const strangersTask = await onDatabase((db) =>
-			seedConversation(db, { workspaceId, kind: "task", botId: stranger.id, title: "Elsewhere" }),
+		const strangersThread = await onDatabase((db) =>
+			seedConversation(db, {
+				workspaceId,
+				kind: "project_thread",
+				botId: stranger.id,
+				title: "Elsewhere",
+			}),
 		);
-		by = { workspaceId, botId: writer.id, conversationId: mainChat.id };
-		botElsewhere = { workspaceId, botId: stranger.id, conversationId: strangersTask.id };
-		// The channel's bot asked from the other bot's task, and the other bot from the channel.
-		const askedFromTask = await aCollaboration({
+		by = { botId: writer.id, conversationId: planning.id };
+		botElsewhere = { botId: stranger.id, conversationId: strangersThread.id };
+		// The project's bot asked from the other bot's thread, and the other bot from the project.
+		const askedFromThread = await aCollaboration({
 			workspaceId,
-			from: strangersTask.id,
+			from: strangersThread.id,
 			askingBotId: stranger.id,
 			collaboratorBotId: writer.id,
-			title: "Asked from the task",
+			title: "Asked from the thread",
 		});
-		const askedFromChannel = await aCollaboration({
+		const askedFromProject = await aCollaboration({
 			workspaceId,
-			from: mainChat.id,
+			from: planning.id,
 			askingBotId: writer.id,
 			collaboratorBotId: stranger.id,
-			title: "Asked from the channel",
+			title: "Asked from the project",
 		});
-		writerAskedFromTask = { workspaceId, botId: writer.id, conversationId: askedFromTask.id };
-		strangerAskedFromChannel = {
-			workspaceId,
-			botId: stranger.id,
-			conversationId: askedFromChannel.id,
-		};
+		writerAskedFromThread = { botId: writer.id, conversationId: askedFromThread.id };
+		strangerAskedFromProject = { botId: stranger.id, conversationId: askedFromProject.id };
 	});
 
-	it("keeps every version of a document a bot writes, for people in its channel to read", async () => {
+	it("keeps every version of a document a bot writes, for people in its project to read", async () => {
 		const { service } = await authoring();
 		const made = await runOnPostgres(
 			service.create(by, {
@@ -435,7 +435,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		).toMatchObject({ _tag: "FileContentTooLarge", maxCharacters: MAX_FILE_CONTENT_CHARACTERS });
 	});
 
-	it("hides a channel's files from people outside it and from bots outside it", async () => {
+	it("hides a project's files from people outside it and from bots outside it", async () => {
 		const { service, failureOf } = await authoring();
 		const made = await runOnPostgres(
 			service.create(by, { kind: "document", title: "Private", content: "# Private" }),
@@ -450,7 +450,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		});
 	});
 
-	it("lets an admin delete a channel's file with its versions, and refuses its members", async () => {
+	it("lets an admin delete a project's file with its versions, and refuses its members", async () => {
 		const { service } = await authoring();
 		const made = await runOnPostgres(
 			service.create(by, { kind: "document", title: "Draft", content: "# One" }),
@@ -463,14 +463,14 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		await as(adminId).remove(at);
 
 		await expect(as(memberId).get(at)).rejects.toMatchObject({ _tag: "ResourceHidden" });
-		expect(await as(memberId).listInChannel({ channelId })).toEqual([]);
+		expect(await as(memberId).listInProject({ projectId })).toEqual([]);
 		const versionsLeft = await onDatabase((db) =>
 			db.select().from(fileVersion).where(eq(fileVersion.fileId, made.id)),
 		);
 		expect(versionsLeft).toEqual([]);
 	});
 
-	it("shows the files a bot made in its tasks to whoever reaches the bot, and to nobody else", async () => {
+	it("shows the files a bot made in its threads to whoever reaches the bot, and to nobody else", async () => {
 		const { service } = await authoring();
 		await onDatabase((db) =>
 			db.update(bot).set({ visibility: "private" }).where(eq(bot.id, botElsewhere.botId)),
@@ -489,10 +489,10 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 				_tag: "ResourceHidden",
 			});
 		}
-		await expect(as(memberId).listInChannel({ channelId })).resolves.toEqual([]);
+		await expect(as(memberId).listInProject({ projectId })).resolves.toEqual([]);
 	});
 
-	it("lists the files sent on a channel's messages beside those bots wrote, and only those sent", async () => {
+	it("lists the files sent on a project's messages beside those bots wrote, and only those sent", async () => {
 		const { service } = await authoring();
 		const written = await runOnPostgres(
 			service.create(by, { kind: "document", title: "Plan", content: "# Plan" }),
@@ -561,15 +561,15 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			);
 		};
 		const chart = await attachTo(by.conversationId, by.botId, "chart.csv");
-		// Attached in a collaboration opened from the channel, where only the bots read it.
+		// Attached in a collaboration opened from the project, where only the bots read it.
 		await attachTo(
-			strangerAskedFromChannel.conversationId,
-			strangerAskedFromChannel.botId,
+			strangerAskedFromProject.conversationId,
+			strangerAskedFromProject.botId,
 			"aside.csv",
 		);
 
 		const as = await servedOnPostgresAs(Files.Service, Files.layer);
-		const listed = await as(memberId).listInChannel({ channelId });
+		const listed = await as(memberId).listInProject({ projectId });
 
 		expect(listed.map(({ id }) => id).sort()).toEqual([written.id, sent.id, chart.id].sort());
 		expect(listed.find(({ id }) => id === sent.id)).toMatchObject({
@@ -590,35 +590,37 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 
 	it("keeps a bot's files with the conversation it made them in, wherever else it works", async () => {
 		const { service, failureOf } = await authoring();
-		const inChannel = await runOnPostgres(
-			service.create(by, { kind: "document", title: "Channel plan", content: "# Plan" }),
+		const inProject = await runOnPostgres(
+			service.create(by, { kind: "document", title: "Project plan", content: "# Plan" }),
 		);
-		const forTheTask = await runOnPostgres(
-			service.create(writerAskedFromTask, { kind: "document", title: "Answer", content: "# A" }),
+		const forTheThread = await runOnPostgres(
+			service.create(writerAskedFromThread, { kind: "document", title: "Answer", content: "# A" }),
 		);
-		const forTheChannel = await runOnPostgres(
-			service.create(strangerAskedFromChannel, { kind: "document", title: "Help", content: "# H" }),
+		const forTheProject = await runOnPostgres(
+			service.create(strangerAskedFromProject, { kind: "document", title: "Help", content: "# H" }),
 		);
 		const ids = (summaries: { id: string }[]) => summaries.map(({ id }) => id).sort();
 
-		// Asked from another bot's task, the channel's bot can't bring the channel's files.
-		expect(await failureOf(service.read(writerAskedFromTask, inChannel.id))).toMatchObject({
+		// Asked from another bot's thread, the project's bot can't bring the project's files.
+		expect(await failureOf(service.read(writerAskedFromThread, inProject.id))).toMatchObject({
 			_tag: "FileNotFound",
 		});
-		expect(ids(await runOnPostgres(service.list(writerAskedFromTask)))).toEqual([forTheTask.id]);
-		// What it made there belongs to the task that asked, and the channel sees what it asked for.
-		expect(ids(await runOnPostgres(service.list(botElsewhere)))).toEqual([forTheTask.id]);
+		expect(ids(await runOnPostgres(service.list(writerAskedFromThread)))).toEqual([
+			forTheThread.id,
+		]);
+		// What it made there belongs to the thread that asked, and the project sees what it asked for.
+		expect(ids(await runOnPostgres(service.list(botElsewhere)))).toEqual([forTheThread.id]);
 		expect(ids(await runOnPostgres(service.list(by)))).toEqual(
-			[inChannel.id, forTheChannel.id].sort(),
+			[inProject.id, forTheProject.id].sort(),
 		);
 
 		const as = await servedOnPostgresAs(Files.Service, Files.layer);
-		expect(ids(await as(memberId).listInChannel({ channelId }))).toEqual(
-			[inChannel.id, forTheChannel.id].sort(),
+		expect(ids(await as(memberId).listInProject({ projectId }))).toEqual(
+			[inProject.id, forTheProject.id].sort(),
 		);
 		expect(ids(await as(memberId).listForBot({ botId: by.botId }))).toEqual([]);
 		expect(ids(await as(memberId).listForBot({ botId: botElsewhere.botId }))).toEqual([
-			forTheTask.id,
+			forTheThread.id,
 		]);
 	});
 });

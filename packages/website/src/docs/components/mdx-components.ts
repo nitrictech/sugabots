@@ -2,13 +2,13 @@ import type { MDXComponents } from "mdx/types";
 import { ApprovalPlayground } from "@/docs/components/approval-playground";
 import { Careful, Tip } from "@/docs/components/bot-aside";
 import { BuiltInTools } from "@/docs/components/built-in-tools";
-import { ChannelMap } from "@/docs/components/channel-map";
 import { Chat, Say } from "@/docs/components/chat-demo";
 import { CompactionDemo } from "@/docs/components/compaction-demo";
+import { ProjectMap } from "@/docs/components/project-map";
 import { proseComponents } from "@/docs/components/prose";
 import { ProviderGrid } from "@/docs/components/provider-grid";
 import { RoleMatrix } from "@/docs/components/role-matrix";
-import { ScheduleBuilder } from "@/docs/components/schedule-builder";
+import { RoutineBuilder } from "@/docs/components/routine-builder";
 import { Steps } from "@/docs/components/steps";
 import { WhoReplies } from "@/docs/components/who-replies";
 
@@ -18,13 +18,13 @@ export const docsComponents: MDXComponents = {
 	ApprovalPlayground,
 	BuiltInTools,
 	Careful,
-	ChannelMap,
+	ProjectMap,
 	Chat,
 	CompactionDemo,
 	ProviderGrid,
 	RoleMatrix,
 	Say,
-	ScheduleBuilder,
+	RoutineBuilder,
 	Steps,
 	Tip,
 	WhoReplies,

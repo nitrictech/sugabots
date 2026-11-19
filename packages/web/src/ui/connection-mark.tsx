@@ -1,4 +1,5 @@
 import { connectionLetters } from "@sugabots/contracts";
+import type { LucideIcon } from "lucide-react";
 
 /**
  * A connection's mark: the service's own logo for the catalog entries we have
@@ -7,7 +8,9 @@ import { connectionLetters } from "@sugabots/contracts";
  * colours is drawn as published, on a neutral tile so the colours read. The
  * paths are the brands' published marks as Simple Icons (CC0) carries them,
  * kept here so a settings page loads nothing from anyone else. A mark a brand
- * draws in several colours goes in `colourMarks`, as published.
+ * draws in several colours goes in `colourMarks`, as published. `icon` puts
+ * an icon on the neutral tile instead, for a step that reaches no connection,
+ * such as a computer asking to reach a host.
  */
 /** `xs` is for a mark inline in a line of text, where a tile would tower over it. */
 const sizes = {
@@ -23,14 +26,26 @@ export function ConnectionMark({
 	presetId,
 	name,
 	size = "default",
+	icon: Icon,
 }: {
 	presetId?: string;
 	name: string;
 	size?: keyof typeof sizes;
+	icon?: LucideIcon;
 }) {
 	const glyph = presetId ? marks[presetId] : undefined;
 	const colour = presetId ? colourMarks[presetId] : undefined;
 	const { box, glyph: glyphSize, letters } = sizes[size];
+	if (Icon) {
+		return (
+			<span
+				aria-hidden
+				className={`grid shrink-0 place-items-center bg-border-strong text-foreground ${box}`}
+			>
+				<Icon className={glyphSize} strokeWidth={2} />
+			</span>
+		);
+	}
 	if (colour) {
 		return (
 			<span

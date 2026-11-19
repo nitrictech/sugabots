@@ -1,7 +1,6 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
-	botComputerDiskSchema,
 	computerAccessSchema,
 	computerHostSchema,
 	computerNetworkSettingsSchema,
@@ -11,6 +10,7 @@ import {
 	computerTemplateSchema,
 	newComputerHostSchema,
 	newComputerProviderSchema,
+	projectComputerDiskSchema,
 } from "../../computer-providers.ts";
 import { uuidSchema } from "../../uuid.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
@@ -66,10 +66,10 @@ export class ComputerProvidersApi extends HttpApiGroup.make("computerProviders")
 			success: computerProviderTestResultSchema,
 			error: refused,
 		}),
-		/** How full the disks of the computers of the bots the person can see are, of those measured. */
+		/** How full the disks of the computers of the projects the person reaches are, of those measured. */
 		HttpApiEndpoint.get("disks", disks, {
 			params: workspace,
-			success: Schema.Array(botComputerDiskSchema),
+			success: Schema.Array(projectComputerDiskSchema),
 			error: refused,
 		}),
 		HttpApiEndpoint.get("network", network, {

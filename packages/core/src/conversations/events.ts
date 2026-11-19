@@ -71,6 +71,17 @@ export type ConversationEvent = Data.TaggedEnum<{
 		/** Where the compaction the turn read from kept history from, if it read one. */
 		readonly readKeptFrom: string | null;
 	};
+	/**
+	 * The bot's optional turn ended with nothing to say, so it stayed silent:
+	 * its empty reply `messageId` was taken back, and it reacted 👀 to the
+	 * message it read instead.
+	 */
+	TurnStayedSilent: {
+		readonly conversationId: string;
+		readonly workspaceId: string;
+		readonly turnId: string;
+		readonly botId: string;
+	};
 	/** The turn parked until people decide the tool approvals it asked for. */
 	TurnSuspended: {
 		readonly conversationId: string;
@@ -151,8 +162,8 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly readThrough: Date;
 		readonly readAt: Date;
 	};
-	/** Somebody started the task `conversationId` with a bot. */
-	TaskStarted: {
+	/** Somebody started the bot's thread `conversationId`. */
+	ThreadStarted: {
 		readonly workspaceId: string;
 		readonly conversationId: string;
 	};
@@ -160,14 +171,14 @@ export type ConversationEvent = Data.TaggedEnum<{
 	 * A bot started the conversation `conversationId` for the person it was answering,
 	 * with the bot `hostBotId`, whose first message is the brief it works from.
 	 */
-	BriefedTaskStarted: {
+	BriefedThreadStarted: {
 		readonly workspaceId: string;
 		readonly conversationId: string;
 		readonly hostBotId: string;
 		readonly briefMessageId: string;
 	};
-	/** Somebody started, renamed or archived the channel's conversation `conversationId`. */
-	ChannelConversationChanged: {
+	/** Somebody started, renamed or archived the project's thread `conversationId`. */
+	ProjectThreadChanged: {
 		readonly workspaceId: string;
 		readonly conversationId: string;
 	};

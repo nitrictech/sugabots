@@ -3,17 +3,17 @@ import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
 import { useSession } from "@/lib/session.ts";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { rootRoute } from "./root.tsx";
-import { optionalString, validateInviteSearch } from "./search.ts";
+import { optionalString } from "./search.ts";
 
 const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
 const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
 const ResetPassword = lazyNamed(
-	// Only this export: the module's other screen would otherwise decide the props.
 	() => import("@/screens/ResetPassword.tsx").then(({ ResetPassword }) => ({ ResetPassword })),
 	"ResetPassword",
 );
 
 interface LoginSearch {
+	/** The invitation to open once signed in. */
 	invite?: string;
 	/** Set on the way back from a password reset. */
 	passwordChanged?: boolean;
@@ -25,7 +25,7 @@ export const loginRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/login",
 	validateSearch: (search: Record<string, unknown>): LoginSearch => ({
-		...validateInviteSearch(search),
+		invite: optionalString(search.invite),
 		passwordChanged: search.passwordChanged === true ? true : undefined,
 		returnTo: isAppPath(search.returnTo) ? search.returnTo : undefined,
 	}),

@@ -57,7 +57,7 @@ export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (
 					automations.create(params, payload).pipe(asSessionUser, asHttpError(automationErrors)),
 				)
 				.handle("previewSchedule", ({ params, payload }) =>
-					automations.previewSchedule({ botId: params.botId, ...payload }).pipe(
+					automations.previewSchedule({ projectId: params.projectId, ...payload }).pipe(
 						Effect.map((dates) => dates.map((date) => date.toISOString())),
 						asSessionUser,
 						asHttpError(automationErrors),
@@ -122,10 +122,11 @@ function isJson(contentType: string | undefined): boolean {
 const automationErrors = {
 	...refusals,
 	InvalidRunCursor: BadRequest,
-	InvalidAutomationSchedule: BadRequest,
+	InvalidRoutineSchedule: BadRequest,
 	AutomationDeliveryIdTooLong: BadRequest,
 	AutomationNameTaken: Conflict,
 	AutomationNotFound: NotFound,
+	AutomationProjectHasNoLead: Conflict,
 	AutomationRepositoryNotConnected: BadRequest,
 	AutomationTriggerConflict: Conflict,
 	AutomationTriggerKindChanged: BadRequest,

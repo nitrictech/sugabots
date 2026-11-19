@@ -12,7 +12,7 @@ import { Automations } from "./automations/automations.ts";
 import { BotAutomations } from "./automations/bot-automations.ts";
 import { AutomationSettlement } from "./automations/settlement.ts";
 import { AutomationWorkAdmission } from "./automations/work-admission.ts";
-import { BotTasks } from "./chats/bot-tasks.ts";
+import { BotThreads } from "./chats/bot-threads.ts";
 import { ChatFiles } from "./chats/chat-files.ts";
 import { ChatView } from "./chats/chat-view.ts";
 import { Chats } from "./chats/chats.ts";
@@ -43,13 +43,13 @@ const services = Layer.mergeAll(
 	Automations.connectionEventsLayer,
 	// The turn's steps read it from here, for the automation tools.
 	BotAutomations.layer,
-	// The turn's steps read it from here, for start_task.
-	BotTasks.layer,
+	// The turn's steps read it from here, for start_thread.
+	BotThreads.layer,
 	// The turn's steps read it from here, for a Personal Assistant's tools.
 	AssistantGuide.layer,
 	// The turn's steps read it from here, for save_instructions.
 	BotAdministration.layer,
-	// Moving the workspace's zone moves its automations' schedules, through the repository that emits.
+	// Moving the workspace's zone moves its automations' routines, through the repository that emits.
 	WorkspaceTimeZone.layer,
 	AutomationRunner.layer,
 	Summaries.layer,

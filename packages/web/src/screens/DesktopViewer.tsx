@@ -2,59 +2,61 @@ import type RFB from "@novnc/novnc";
 import type { Bot } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Keyboard, Monitor, X } from "lucide-react";
+import { Keyboard, Monitor } from "lucide-react";
 import { type FormEvent, type Ref, type RefObject, useEffect, useRef, useState } from "react";
 import { apiBaseUrl } from "@/lib/api-url.ts";
-import { useComputerAccess } from "@/lib/computer-providers.ts";
+import { useComputerAccess, useComputerGap } from "@/lib/computer-providers.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
-import { botSettingsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
+import {
+	OwnerLink,
+	ownerName,
+	type ResourceOwner,
+	resourcePermissions,
+} from "@/lib/resource-owner.tsx";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Stage, StageMark } from "@/shell/Stage.tsx";
-import { BACK_BUTTON } from "@/ui/back-button.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
+import { CloseButton } from "@/ui/close-button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { LiveDot } from "@/ui/live-dot.tsx";
 
 /**
- * A bot's computer opened beside its chat, live: where the browser it
- * drives is shown. Opening it starts the desktop, and the computer if it was
- * paused, so the first connection can take a few seconds; it comes over a
- * WebSocket the API relays from the computer. The person watches until they
- * take over, if the bot lets them use its desktop, and can hand control back.
- * Without a computer, because the workspace has none set up or the bot does
- * not use one, it says so and where to change that.
+ * A bot's or a project's computer opened beside one of its threads, live:
+ * where the browser `bot` drives is shown. Opening it starts the desktop, and
+ * the computer if it was paused, so the first connection can take a few
+ * seconds; it comes over a WebSocket the API relays from the computer. The
+ * person watches until they take over, if they may use the desktop, and can
+ * hand control back. Without a computer, because the workspace has none set
+ * up or the bot does not use one, it says so and where to change that.
  */
 export function DesktopStage({
 	conversationId,
+	owner,
 	bot,
 	mayUse,
 	onClose,
 }: {
 	conversationId: string;
+	/** Whose computer it is: a bot's, or a project's. */
+	owner: ResourceOwner;
+	/** The bot at work on it: the bot itself, or a project's lead bot. */
 	bot: Bot;
-	/** Whether the person may use the bot's desktop, and so may take over. */
+	/** Whether the person may use the desktop, and so may take over. */
 	mayUse: boolean;
 	onClose: () => void;
 }) {
 	const access = useComputerAccess();
-	const computers = access.data;
+	const missing = useComputerGap(owner);
 	const may = useWorkspacePermissions();
-	const backToChat = useBackToHere("Chat");
+	const backToThread = useBackToHere("Thread");
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	// For a phone's own view, which covers everything; a wider screen's `Stage` has its own.
 	const phoneKeys = usePanelKeys<HTMLElement>(onClose);
-	// What stands between the bot and a computer, if anything: the workspace has none, or the bot doesn't use one.
-	const missing =
-		computers === undefined
-			? undefined
-			: !computers.enabled
-				? "workspace"
-				: !bot.usesComputer
-					? "bot"
-					: null;
+	const title = `${ownerName(owner)}'s computer`;
 	// What the computer shows: its screen, or why there is none.
 	const content = (
 		<>
@@ -69,7 +71,7 @@ export function DesktopStage({
 									from="/$workspace"
 									to="./settings/$section"
 									params={{ section: "computers" }}
-									state={backToChat}
+									state={backToThread}
 									className={buttonStyles({ size: "sm" })}
 								>
 									Set up computers
@@ -81,12 +83,20 @@ export function DesktopStage({
 					)}
 				</EmptyState>
 			) : missing === "bot" ? (
-				<EmptyState icon={<Monitor strokeWidth={1.75} />} title={`${bot.name} has no computer`}>
+				<EmptyState
+					icon={<Monitor strokeWidth={1.75} />}
+					title={`${ownerName(owner)} has no computer`}
+				>
 					Give it one in its settings, so it can run commands, open websites and edit files.{" "}
-					{bot.permissions.update && (
-						<Link {...botSettingsLink(bot)} state={backToChat} className="text-link underline">
-							Open {bot.name}'s settings.
-						</Link>
+					{resourcePermissions(owner).openSettings && (
+						<OwnerLink
+							owner={owner}
+							to={{ page: "computer" }}
+							state={backToThread}
+							className="text-link underline"
+						>
+							Open {ownerName(owner)}'s computer settings.
+						</OwnerLink>
 					)}
 				</EmptyState>
 			) : missing === null ? (
@@ -102,14 +112,12 @@ export function DesktopStage({
 	if (phone) {
 		return (
 			<section
-				aria-label={`${bot.name}'s computer`}
+				aria-label={title}
 				{...phoneKeys}
 				className="fixed inset-0 outline-none z-50 flex flex-col bg-black pt-safe-or-3 pb-safe-or-4"
 			>
 				<div className="shrink-0 px-4">
-					<button type="button" aria-label="Close" onClick={onClose} className={BACK_BUTTON}>
-						<X aria-hidden size={20} strokeWidth={2.25} />
-					</button>
+					<CloseButton onClick={onClose} />
 				</div>
 				<div className="flex min-h-0 flex-1 flex-col pt-3">{content}</div>
 			</section>
@@ -117,13 +125,13 @@ export function DesktopStage({
 	}
 	return (
 		<Stage
-			label={`${bot.name}'s computer`}
+			label={title}
 			icon={
 				<StageMark>
 					<Monitor strokeWidth={2} />
 				</StageMark>
 			}
-			title={`${bot.name}'s computer`}
+			title={title}
 			byline={
 				missing === undefined ? undefined : (
 					<span className="flex items-center gap-1.5">
@@ -263,10 +271,7 @@ export function LiveDesktopCard({
 				/>
 			</div>
 			<p className="m-0 flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-				<span aria-hidden className="relative flex size-2">
-					<span className="absolute inline-flex size-full animate-ping rounded-full bg-bot-mono opacity-60 motion-reduce:animate-none" />
-					<span className="relative inline-flex size-2 rounded-full bg-bot-mono" />
-				</span>
+				<LiveDot />
 				{botName} is using its browser
 			</p>
 		</article>

@@ -63,7 +63,7 @@ const messageFileSummarySchema = Schema.Struct({
 });
 export type MessageFileSummary = typeof messageFileSummarySchema.Type;
 
-/** A file in a channel's or a bot's Files: one a bot wrote, or one sent on a message. */
+/** A file in a project's or a bot's Files: one a bot wrote, or one sent on a message. */
 export const fileSummarySchema = Schema.Union([writtenFileSummarySchema, messageFileSummarySchema]);
 export type FileSummary = typeof fileSummarySchema.Type;
 

@@ -2,7 +2,8 @@ import type { ChatMessageItem, Message } from "@sugabots/contracts";
 import { chatItemCreatedAt } from "@/lib/chats.ts";
 import { startsNewDay } from "./conversation-layout.ts";
 
-type ChatActivityItem = Extract<ChatMessageItem, { kind: "run" | "automation_paused" }>;
+/** An automation's run, or its pausing itself, which a chat draws as a row of its own. */
+type AutomationItem = Extract<ChatMessageItem, { kind: "run" | "automation_paused" }>;
 
 /** A message in a chat, as its items carry it. */
 export type ChatMessage = Extract<ChatMessageItem, { kind: "message" }>["message"];
@@ -10,7 +11,7 @@ export type ChatMessage = Extract<ChatMessageItem, { kind: "message" }>["message
 /** A stretch of a chat as it is drawn; see `chatGroupsOf`. */
 export type ChatGroup = { key: string; at: string; separated: boolean } & (
 	| { kind: "messages"; messages: ChatMessage[] }
-	| { kind: "activity"; item: ChatActivityItem }
+	| { kind: "run"; item: AutomationItem }
 );
 
 /**
@@ -68,9 +69,9 @@ export function chatItemRevision(item: ChatMessageItem | undefined): string {
 }
 
 /**
- * The chat's items as they are drawn: runs of messages together, so one
- * author's messages in a row read as a run, and each collaboration or automation
- * row on its own. A new day starts a new group behind a separator.
+ * The chat's items as they are drawn: messages together, so one author's
+ * messages in a row read as a run of them, and each automation's run or pause
+ * on its own. A new day starts a new group behind a separator.
  */
 export function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean): ChatGroup[] {
 	const groups: ChatGroup[] = [];
@@ -95,7 +96,7 @@ export function chatGroupsOf(items: readonly ChatMessageItem[], byRun: boolean):
 			});
 			continue;
 		}
-		groups.push({ kind: "activity", key: item.id, at, separated, item });
+		groups.push({ kind: "run", key: item.id, at, separated, item });
 	}
 	return groups;
 }

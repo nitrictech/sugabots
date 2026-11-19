@@ -1,47 +1,42 @@
-import type {
-	Channel,
-	ConversationDetails,
-	PersonParticipant,
-	SessionUser,
-} from "@sugabots/contracts";
-import { type ConversationPlaceKind, directPeopleTitle, isOneToOne } from "@/lib/chats.ts";
-import { AutomationsCrumb } from "@/shell/BotCrumb.tsx";
+import type { ConversationDetails, PersonParticipant, SessionUser } from "@sugabots/contracts";
+import { directPeopleTitle, isOneToOne } from "@/lib/chats.ts";
+import { AutomationsCrumb, ProjectCrumb } from "@/shell/BotCrumb.tsx";
 import { DirectPeopleAvatar } from "@/shell/DirectMessages.tsx";
 import {
+	AutomationFace,
 	type BackTo,
 	ChatHeader,
 	type ChatPlace,
 	type DoneToggle,
 	type HeaderPlace,
-	PeopleChatHeader,
 	PHONE_FACE_SIZE_PX,
+	PlainChatHeader,
 } from "./ChatHeader.tsx";
-import { type ChannelConversationToChange, ChatMenu } from "./ChatMenu.tsx";
+import type { AnyConversationPlace } from "./conversation-place.ts";
 import { DirectMembersButton } from "./DirectMembers.tsx";
+import { ProjectThreadMenu, type ProjectThreadToChange } from "./ProjectThreadMenu.tsx";
 
 /**
- * The bar across the top of a conversation, as its kind has it: a task's, with
- * its bot and who is in it; an automation's feed's, under its bot's automations;
- * a channel's main chat's or thread's, with its menu; or a direct message's,
- * with whom it is with.
+ * The bar across the top of a conversation, as its kind has it: a bot's thread's,
+ * with its bot and who is in it; an automation's feed's, under its bot's
+ * automations; a project's thread's, under its project, with its menu; or a
+ * direct message's, with whom it is with. All but the feed's sit over the chat
+ * while `overChat`.
  */
 export function ConversationHeader({
-	conversation,
-	channel,
+	conversationPlace,
 	details,
 	conversationId,
 	user,
 	place,
 	detailsAvailable,
-	channelConversationName,
-	channelConversationToChange,
+	projectThreadName,
+	projectThreadToChange,
 	done,
 	overChat,
 	onOpenDesktop,
 }: {
-	conversation: ConversationPlaceKind;
-	/** The channel it is in; null for a bot's task or a direct message. */
-	channel: Channel | null;
+	conversationPlace: AnyConversationPlace;
 	/** The conversation once loaded. */
 	details: ConversationDetails | undefined;
 	conversationId: string;
@@ -49,76 +44,84 @@ export function ConversationHeader({
 	place: ChatPlace;
 	/** Whether Details may open beside the chat: not while something is open large there. */
 	detailsAvailable: boolean;
-	/** What a channel's conversation is called, as its channel lists it. */
-	channelConversationName: string;
-	/** Renaming and archiving a channel's conversation, for whoever may change the channel. */
-	channelConversationToChange: ChannelConversationToChange | undefined;
-	/** Whether a task is done, and how to change that; absent for any other conversation. */
+	/** What a project's thread is called, as its project lists it. */
+	projectThreadName: string;
+	/** Renaming and archiving a project's thread, for whoever may change the project. */
+	projectThreadToChange: ProjectThreadToChange | undefined;
+	/** Whether a thread is done, and how to change that; absent for any other conversation. */
 	done: DoneToggle | undefined;
-	/** Over a bot's task, which scrolls up under it, rather than a bar above it. */
+	/** Over the chat, which scrolls up under it, rather than a bar above it. */
 	overChat: boolean;
 	onOpenDesktop: () => void;
 }) {
-	const title = details?.conversation.title;
 	const headerPlace = headerPlaceOf(place, {
-		back: backOf(conversation, channel),
+		back: backOf(conversationPlace),
 		detailsAvailable,
 	});
-	if (conversation.kind === "botConversation" && details?.automation) {
+	if (conversationPlace.project) {
+		const { project } = conversationPlace;
 		return (
-			<PeopleChatHeader
+			<PlainChatHeader
+				{...headerPlace}
+				overChat={overChat}
+				cards
+				title={projectThreadName}
+				crumbs={<ProjectCrumb project={project} />}
+				within={project.name}
+				done={done}
+				menu={projectThreadToChange && <ProjectThreadMenu {...projectThreadToChange} />}
+			/>
+		);
+	}
+	const { conversation } = conversationPlace;
+	if (conversation.kind === "directMessage") {
+		return (
+			<PlainChatHeader
+				{...headerPlace}
+				overChat={overChat}
+				// Nothing opens beside a direct message: who is in a group drops down from its people's count.
+				details={undefined}
+				title={directPeopleTitle(conversation)}
+				face={<DirectPeopleAvatar {...conversation} size={PHONE_FACE_SIZE_PX} />}
+				detail={
+					isOneToOne(conversation) ? undefined : (
+						<DirectMembersButton direct={conversation} user={user} />
+					)
+				}
+			/>
+		);
+	}
+	if (details?.automation) {
+		return (
+			<PlainChatHeader
 				{...headerPlace}
 				title={details.conversation.title}
-				mark="automation"
-				crumbs={<AutomationsCrumb bot={conversation.bot} />}
-			/>
-		);
-	}
-	if (conversation.kind === "botConversation") {
-		return (
-			<ChatHeader
-				{...headerPlace}
-				bot={conversation.bot}
-				overChat={overChat}
-				title={title}
-				done={done}
-				people={details?.participants.filter(
-					(participant): participant is PersonParticipant => participant.kind === "person",
-				)}
-				conversationId={conversationId}
-				onOpenDesktop={onOpenDesktop}
-			/>
-		);
-	}
-	if (conversation.kind === "channelConversation") {
-		return (
-			<PeopleChatHeader
-				{...headerPlace}
-				title={channelConversationName}
-				menu={channelConversationToChange && <ChatMenu {...channelConversationToChange} />}
+				face={<AutomationFace />}
+				crumbs={<AutomationsCrumb owner={{ bot: conversation.bot }} />}
 			/>
 		);
 	}
 	return (
-		<PeopleChatHeader
+		<ChatHeader
 			{...headerPlace}
-			// Nothing opens beside a direct message: who is in a group drops down from its members' count.
-			details={undefined}
-			title={directPeopleTitle(conversation)}
-			face={<DirectPeopleAvatar {...conversation} size={PHONE_FACE_SIZE_PX} />}
-			detail={
-				isOneToOne(conversation) ? undefined : (
-					<DirectMembersButton direct={conversation} user={user} />
-				)
-			}
+			bot={conversation.bot}
+			overChat={overChat}
+			title={details?.conversation.title}
+			done={done}
+			people={details?.participants.filter(
+				(participant): participant is PersonParticipant => participant.kind === "person",
+			)}
+			conversationId={conversationId}
+			onOpenDesktop={onOpenDesktop}
 		/>
 	);
 }
 
-/** Where Back returns to from a conversation: its bot, its channel, or the direct messages. */
-function backOf(conversation: ConversationPlaceKind, channel: Channel | null): BackTo {
-	if (conversation.kind === "botConversation") return { to: "bot", bot: conversation.bot };
-	if (channel) return { to: "channel", channel };
+/** Where Back returns to from a conversation: its project, its bot, or the direct messages. */
+function backOf(conversationPlace: AnyConversationPlace): BackTo {
+	if (conversationPlace.project) return { to: "project", project: conversationPlace.project };
+	const { conversation } = conversationPlace;
+	if (conversation.kind === "botThread") return { to: "bot", bot: conversation.bot };
 	return { to: "directMessages" };
 }
 

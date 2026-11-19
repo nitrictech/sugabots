@@ -27,7 +27,7 @@ body:
       label: Steps to reproduce
       description: The smallest set of steps that shows the bug.
       placeholder: |
-        1. Open a channel and start a conversation with a bot
+        1. Open a project and start a conversation with a bot
         2. Ask it to ...
         3. See ...
     validations:

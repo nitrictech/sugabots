@@ -44,19 +44,19 @@ BEGIN
 		);
 	END LOOP;
 END $$;--> statement-breakpoint
--- The triggers that put every owner and admin in every channel, and the lock
+-- The triggers that make every owner and admin a project member, and the lock
 -- they share, read the tables by their old names, so they are made again.
 DROP TRIGGER "shared_pod_administrators" ON "channel";--> statement-breakpoint
 DROP TRIGGER "administrator_shared_pods" ON "workspace_member";--> statement-breakpoint
 DROP FUNCTION add_administrators_to_new_shared_pod();--> statement-breakpoint
 DROP FUNCTION add_new_administrator_to_shared_pods();--> statement-breakpoint
 DROP FUNCTION lock_pod_membership(uuid);--> statement-breakpoint
--- Serialises every write that decides whether an administrator is in a channel. Without it, a channel made while somebody is promoted is missed by both: each insert runs before the other commits.
+-- Serialises every write that decides whether an administrator is a project member. Without it, a project made while somebody is promoted is missed by both: each insert runs before the other commits.
 CREATE FUNCTION lock_channel_membership(workspace uuid) RETURNS void
 LANGUAGE sql AS $$
 	SELECT pg_advisory_xact_lock(hashtext('channel_membership:' || workspace::text));
 $$;--> statement-breakpoint
--- The owner and admins are members of every channel, so `channel_member` is the whole list of who is in a channel.
+-- The owner and admins are members of every project, so `channel_member` is the whole list of a project's people.
 CREATE FUNCTION add_administrators_to_new_channel() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -72,7 +72,7 @@ $$;--> statement-breakpoint
 CREATE TRIGGER channel_administrators
 AFTER INSERT ON "channel"
 FOR EACH ROW EXECUTE FUNCTION add_administrators_to_new_channel();--> statement-breakpoint
--- Only adds: somebody demoted keeps the channels they are in, and leaves them one at a time.
+-- Only adds: somebody demoted stays in their projects, and leaves them one at a time.
 CREATE FUNCTION add_new_administrator_to_channels() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -89,7 +89,7 @@ CREATE TRIGGER administrator_channels
 AFTER INSERT OR UPDATE OF "role" ON "workspace_member"
 FOR EACH ROW WHEN (NEW."role" IN ('owner', 'admin'))
 EXECUTE FUNCTION add_new_administrator_to_channels();--> statement-breakpoint
--- The event a changed channel sends kept for clients that reconnect, by its new name.
+-- The `pod.updated` events kept for clients that reconnect, renamed `channel.updated`.
 UPDATE "event" SET "type" = 'channel.updated', "payload" = jsonb_set("payload", '{type}', '"channel.updated"')
 WHERE "type" = 'pod.updated';
 --> statement-breakpoint

@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 import type { ToolSet } from "ai";
 import { Effect, Exit, Layer, Scope, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BotComputers } from "../../computers/bot-computers.ts";
 import { ComputerCredentials } from "../../computers/computer-credentials.ts";
 import { ComputerProviderRepository } from "../../computers/computer-provider-repository.ts";
 import { Computers } from "../../computers/computers.ts";
+import { ProjectComputers } from "../../computers/project-computers.ts";
 import { recordingIds, removeWorkVolumes } from "../../computers/testing.ts";
 import {
 	allowedHost,
@@ -19,6 +19,7 @@ import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing
 import { ConversationFiles } from "../../files/conversation-files.ts";
 import { Egress } from "../../providers/network/egress.ts";
 import { unimplemented } from "../../testing.ts";
+import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { seedConversation } from "../seed.test-support.ts";
 import { ComputerTools } from "./computer.ts";
 
@@ -34,17 +35,19 @@ const SLOW = 180_000;
 
 describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox", () => {
 	let computerTools: ComputerTools.Interface;
-	let botComputers: BotComputers.Interface;
+	let projectComputers: ProjectComputers.Interface;
 	let workspaceId: string;
 	let ownerId: string;
 	const scope = Effect.runSync(Scope.make());
 	let botId: string;
+	/** The bot's default project, whose computer the turns use. */
+	let projectId: string;
 	const idsHandedOut = new Set<string>();
 
 	beforeAll(async () => {
-		[computerTools, botComputers] = await runOnPostgres(
-			Effect.all([ComputerTools.Service, BotComputers.Service]).pipe(
-				Effect.provide(Layer.merge(ComputerTools.layer, BotComputers.layer)),
+		[computerTools, projectComputers] = await runOnPostgres(
+			Effect.all([ComputerTools.Service, ProjectComputers.Service]).pipe(
+				Effect.provide(Layer.merge(ComputerTools.layer, ProjectComputers.layer)),
 				Effect.provide(ComputerCredentials.none),
 				Effect.provide(recordingIds(idsHandedOut)),
 				// Registries are asked what an image's tag names, as in production.
@@ -70,7 +73,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 			db.insert(workspaceMember).values({ workspaceId: space.id, userId: owner.id }),
 		);
 		workspaceId = space.id;
-		// A bot's computer is recorded against the bot, so the bot has to exist.
+		// A bot's computer is its default project's, which comes with the bot.
 		const [bot] = await onDatabase((db) =>
 			db
 				.insert(botTable)
@@ -86,6 +89,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 		);
 		if (!bot) throw new Error("fixture");
 		botId = bot.id;
+		projectId = await runOnPostgres(defaultProjectOf(bot.id));
 		const providers = await runOnPostgres(
 			Effect.provide(ComputerProviderRepository.Service, ComputerProviderRepository.layer),
 		);
@@ -114,7 +118,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 			Effect.provide(ComputerProviderRepository.Service, ComputerProviderRepository.layer),
 		);
 		const provider = await runOnPostgres(providers.enabled(workspaceId));
-		if (provider) await runOnPostgres(botComputers.destroyAllMadeBy(workspaceId, provider));
+		if (provider) await runOnPostgres(projectComputers.destroyAllMadeBy(workspaceId, provider));
 		await closeDatabase();
 		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
@@ -129,6 +133,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 			Scope.provide(scope)(
 				computerTools.forTurn({
 					workspaceId,
+					projectId,
 					usesComputer: true,
 					turnId,
 					conversationId,
@@ -198,11 +203,11 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 					.returning(),
 			);
 			if (!host) throw new Error("fixture");
-			const newTask = (title: string) =>
+			const newThread = (title: string) =>
 				onDatabase((db) =>
-					seedConversation(db, { workspaceId, kind: "task", botId: host.id, title }),
+					seedConversation(db, { workspaceId, kind: "project_thread", botId: host.id, title }),
 				);
-			const where = await newTask("Pictures");
+			const where = await newThread("Pictures");
 			const [sent] = await onDatabase((db) =>
 				db
 					.insert(message)
@@ -260,7 +265,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 			expect(await copy()).toMatchObject({ path, alreadyCopied: false });
 			expect(await run(tools, `sha256sum ${path} | cut -d' ' -f1`)).toBe(hash);
 
-			const elsewhere = await toolsFor("turn-10", (await newTask("Other")).id, host.id);
+			const elsewhere = await toolsFor("turn-10", (await newThread("Other")).id, host.id);
 			expect(await call(elsewhere, "copy_file_to_computer", { file: uploaded.id })).toMatchObject({
 				status: "failed",
 			});
@@ -343,7 +348,7 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 			expect([await reaches("github.com"), await reaches("example.com")]).toEqual([true, false]);
 
 			await onDatabase((db) => db.insert(allowedHost).values({ workspaceId, host: "example.com" }));
-			await runOnPostgres(botComputers.applyNetwork({ workspaceId }));
+			await runOnPostgres(projectComputers.applyNetwork({ workspaceId }));
 
 			expect(await reaches("example.com")).toBe(true);
 		},

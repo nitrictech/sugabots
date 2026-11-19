@@ -1,20 +1,19 @@
-import type { ChatHistoryEntry, Participant, Run } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
+import { Popover } from "@base-ui/react/popover";
+import type { BotParticipant, ChatHistoryEntry, Run } from "@sugabots/contracts";
 import { Braces, ChevronLeft, ExternalLink } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
-import { useBot } from "@/lib/bots.ts";
-import { chatFileUrl } from "@/lib/chat-files.ts";
 import { useConversationEvents, useConversationNotices } from "@/lib/conversation-events.ts";
+import { conversationFileUrl } from "@/lib/conversation-files.ts";
 import { useConversation } from "@/lib/conversations.ts";
-import { automationFeedLink } from "@/lib/links.ts";
+import { OwnerLink, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { PopoverContent } from "@/ui/popover.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { FailedRunMessage } from "./AutomationRun.tsx";
-import type { ItemConversationKind } from "./ChatActivityRow.tsx";
 import { type BackTo, HeaderBack } from "./ChatHeader.tsx";
 import { ChatSidebar } from "./ChatSidebar.tsx";
 import { ConversationMessages } from "./ConversationMessages.tsx";
@@ -22,7 +21,8 @@ import { ConversationNotices } from "./ConversationNotices.tsx";
 import { findAnsweringFace } from "./conversation-layout.ts";
 import { mentionableIn } from "./mentions.tsx";
 
-type BotParticipant = Extract<Participant, { kind: "bot" }>;
+/** The kinds of conversation that open from a line in a thread: a collaboration, or an automation's run. */
+type ItemConversationKind = ChatHistoryEntry["kind"];
 
 /**
  * Where an item's panel is shown: as the sidebar beside the chat, which closes,
@@ -38,6 +38,7 @@ type ItemFrame =
 export function ItemPanel({
 	conversationId,
 	chatBotId,
+	owner,
 	itemConversationId,
 	entry,
 	history,
@@ -47,10 +48,12 @@ export function ItemPanel({
 }: {
 	conversationId: string;
 	/**
-	 * The bot whose task this opened from, which a collaboration draws on the
-	 * right; undefined in a channel, where it is drawn from the bot it is with.
+	 * The bot whose thread this opened from, which a collaboration draws on the
+	 * right; undefined in a project, where it is drawn from the bot it is with.
 	 */
 	chatBotId: string | undefined;
+	/** Whose the thread it opened from is, whose automation a run's settings are among; none for a direct message. */
+	owner?: ResourceOwner;
 	itemConversationId: string;
 	entry?: ChatHistoryEntry;
 	history: ChatHistoryEntry[];
@@ -59,7 +62,7 @@ export function ItemPanel({
 	onOpenFile?: (fileId: string) => void;
 }) {
 	const query = useConversation(itemConversationId);
-	const authorLinkOf = useAuthorLinks();
+	const authorLinkOf = useAuthorLinks("Thread");
 	useConversationEvents(itemConversationId);
 	const notices = useConversationNotices(itemConversationId);
 	const heading = useRef<HTMLHeadingElement>(null);
@@ -125,7 +128,7 @@ export function ItemPanel({
 		subheading: type === "collaboration" ? other && `${mine?.name} and ${other.name}` : undefined,
 		headingRef: heading,
 		actions: type === "run" && automationRun && (
-			<AutomationHeaderActions execution={automationRun} />
+			<AutomationHeaderActions run={automationRun} owner={owner} />
 		),
 	};
 	const body = query.isPending ? (
@@ -146,14 +149,15 @@ export function ItemPanel({
 	) : (
 		<>
 			{parentAutomation && (
-				<button
-					type="button"
+				<Button
+					variant="link"
+					size="text"
+					className="mx-4.5 mt-3 gap-1 self-start"
 					onClick={() => onOpenItem(parentAutomation.conversationId)}
-					className="focus-ring mx-4.5 mt-3 inline-flex items-center gap-1 self-start rounded-md font-medium text-link text-xs"
 				>
 					<ChevronLeft aria-hidden size={14} />
 					Back to automation
-				</button>
+				</Button>
 			)}
 			<div
 				ref={timeline}
@@ -179,11 +183,15 @@ export function ItemPanel({
 						{query.isLoadingOlder ? "Loading…" : "Load older messages"}
 					</Button>
 				)}
-				{type === "run" && automationRun?.state === "failed" && (
-					<FailedRunMessage execution={automationRun} bot={host} />
+				{type === "run" && automationRun?.state === "failed" && details.conversation.projectId && (
+					<FailedRunMessage
+						run={automationRun}
+						projectId={details.conversation.projectId}
+						bot={host}
+					/>
 				)}
 				<ConversationMessages
-					fileUrlOf={(fileId) => chatFileUrl(conversationId, fileId)}
+					fileUrlOf={(fileId) => conversationFileUrl(conversationId, fileId)}
 					messages={shownMessages}
 					answeringFace={findAnsweringFace(shownMessages, true)}
 					host={host}
@@ -192,6 +200,7 @@ export function ItemPanel({
 					participants={mentionableIn(details)}
 					members={details.members}
 					conversationKind={details.conversation.kind}
+					projectId={details.conversation.projectId}
 					onOpenItem={onOpenItem}
 					onOpenFile={onOpenFile}
 					approvalCapabilities={details.capabilities}
@@ -204,7 +213,7 @@ export function ItemPanel({
 				<p className="m-0 shrink-0 border-border border-t px-4.5 py-3 text-xs text-subtle-foreground leading-normal">
 					Bots talk here on their own.
 					{/* A message to the asked bot in its own chat starts other work, which never reaches this. */}
-					{!askedOfChatBot && ` To weigh in, message ${mine.name} in the main chat.`}
+					{!askedOfChatBot && ` To weigh in, message ${mine.name} in the thread it came from.`}
 				</p>
 			)}
 		</>
@@ -273,51 +282,58 @@ function ItemPage({
 	);
 }
 
-function AutomationHeaderActions({ execution }: { execution: Run }) {
-	const backToChat = useBackToHere("Chat");
-	const bot = useBot(execution.botId);
+/**
+ * At the right of a run's page: what its webhook was sent, or the GitHub
+ * event that started it, and the way to its automation's settings.
+ */
+function AutomationHeaderActions({ run, owner }: { run: Run; owner: ResourceOwner | undefined }) {
+	const backToRun = useBackToHere("Thread");
 	return (
 		<>
-			{execution.trigger.kind === "webhook" && (
-				<details className="group relative">
-					<IconButton
-						label="View webhook payload"
-						variant="bar"
-						render={<summary />}
-						className="list-none [&::-webkit-details-marker]:hidden"
-					>
-						<Braces aria-hidden size={15} strokeWidth={2.4} />
-					</IconButton>
-					{/* Hangs from the sidebar's top right corner, so it opens leftwards. */}
-					<div className="absolute right-0 z-20 mt-2 w-header-popover overflow-hidden rounded-panel bg-panel text-left shadow-dialog">
-						{execution.trigger.idempotencyKey && (
+			{run.trigger.kind === "webhook" && (
+				<Popover.Root>
+					<Popover.Trigger
+						render={
+							<IconButton label="View webhook payload" variant="bar">
+								<Braces aria-hidden size={15} strokeWidth={2.4} />
+							</IconButton>
+						}
+					/>
+					<PopoverContent align="end" className="w-header-popover overflow-hidden text-left">
+						{run.trigger.idempotencyKey && (
 							<div className="flex items-baseline gap-2 border-border border-b px-4 py-2.5 text-xs">
 								<span className="text-muted-foreground">Idempotency key</span>
 								<code className="truncate font-mono text-foreground">
-									{execution.trigger.idempotencyKey}
+									{run.trigger.idempotencyKey}
 								</code>
 							</div>
 						)}
 						<pre className="m-0 max-h-64 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs text-soft-foreground leading-relaxed">
-							{JSON.stringify(execution.trigger.payload, null, 2)}
+							{JSON.stringify(run.trigger.payload, null, 2)}
 						</pre>
-					</div>
-				</details>
+					</PopoverContent>
+				</Popover.Root>
 			)}
-			{execution.trigger.kind === "github" && (
+			{run.trigger.kind === "github" && (
 				<IconButton
 					label="Open what started it"
 					variant="bar"
-					render={<a href={execution.trigger.url} target="_blank" rel="noreferrer" />}
+					render={<a href={run.trigger.url} target="_blank" rel="noreferrer" />}
 				>
 					<ExternalLink aria-hidden size={15} strokeWidth={2.4} />
 				</IconButton>
 			)}
-			{bot && (
+			{owner && (
 				<IconButton
 					label="Automation settings"
 					variant="bar"
-					render={<Link {...automationFeedLink(bot, execution.automationId)} state={backToChat} />}
+					render={
+						<OwnerLink
+							owner={owner}
+							to={{ page: "automation", automationId: run.automationId }}
+							state={backToRun}
+						/>
+					}
 				>
 					<SettingsIcon />
 				</IconButton>

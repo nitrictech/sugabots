@@ -2,7 +2,7 @@ import type {
 	AnsweredApproval,
 	ApprovalInbox,
 	ApprovalRequest,
-	Channel,
+	Project,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
@@ -57,7 +57,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 	const { call, bot } = request;
 	const { look, appName, action } = useApprovalApp(request);
 	const review = useReviewToolCall(request.conversationId);
-	const { channel, askedIn } = useAskedIn(request);
+	const { project, askedIn } = useAskedIn(request);
 	const fields = fieldsOf(call.input) ?? [];
 	// A phone answers with two wide buttons, as Approvals does.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
@@ -128,7 +128,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 					<span className="flex-1 max-md:hidden" />
 					<RequestConversationLink
 						request={request}
-						channel={channel}
+						project={project}
 						className="focus-ring rounded-sm font-medium text-xs text-link max-md:self-center max-md:py-2 max-md:text-sm"
 					/>
 				</div>
@@ -175,23 +175,23 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * Open conversation: the conversation a request was asked in, with the run or
- * collaboration it came from open beside it. A channel's conversation links
- * once `channel` is known; a request outside any conversation has none.
+ * collaboration it came from open beside it. A project's thread links
+ * once `project` is known; a request outside any conversation has none.
  */
 export function RequestConversationLink({
 	request,
-	channel,
+	project,
 	className,
 }: {
 	request: ApprovalRequest;
-	/** The channel it was asked in, as `useAskedIn` finds it. */
-	channel: Channel | undefined;
+	/** The project it was asked in, as `useAskedIn` finds it. */
+	project: Project | undefined;
 	className: string;
 }) {
-	if (!request.rootConversationId || (request.channelId !== null && !channel)) return null;
+	if (!request.rootConversationId || (request.projectId !== null && !project)) return null;
 	return (
 		<ConversationLink
-			channel={channel ?? null}
+			project={project ?? null}
 			conversationId={request.rootConversationId}
 			search={
 				request.conversationId === request.rootConversationId

@@ -13,12 +13,13 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
+import { linearHandler } from "@/shell/story-fixtures.ts";
 import { client } from "@/test-client.ts";
 import { ConversationMessages } from "./ConversationMessages.tsx";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const CHANNEL = "0199a3a0-0000-7000-8000-0000000000b1";
+const PROJECT = "0199a3a0-0000-7000-8000-0000000000b1";
 const CONVERSATION = "0199a3a0-0000-7000-8000-0000000000b2";
 
 const host: BotParticipant = {
@@ -77,7 +78,7 @@ function connection(handle: string, name: string, url: string): Connection {
 	return {
 		id: `0199a3a0-0000-7000-8000-00000000${handle.length}aa1`,
 		workspaceId: "0199a3a0-0000-7000-8000-0000000000a1",
-		botId: CHANNEL,
+		projectId: PROJECT,
 		name,
 		handle,
 		url,
@@ -97,15 +98,24 @@ function connection(handle: string, name: string, url: string): Connection {
 	};
 }
 
-/** Someone else in the channel, whom a person's `@here` or `@channel` would notify. */
+/** Someone else in the project, whom a person's `@here` or `@channel` would notify. */
 const podmate = testPerson({ id: "0199a3a0-0000-7000-8000-0000000000d1", name: "Jay Park" });
 
 /** Renders the conversation, and returns `update` to redraw it as a live one would. */
 function show(
 	messages: Message[],
-	over: { canApprove?: boolean; participants?: BotParticipant[] } = {},
+	over: {
+		canApprove?: boolean;
+		participants?: BotParticipant[];
+		onOpenItem?: (conversationId: string) => void;
+	} = {},
 ) {
 	const queryClient = createQueryClient();
+	// The roster the sidebar loads, which says where the host's connections are.
+	queryClient.setQueryData(
+		["bots", linearHandler.workspaceId],
+		[{ ...linearHandler, id: host.id, defaultProjectId: PROJECT }],
+	);
 	const conversation = (shown: Message[], participants = over.participants ?? [host]) => (
 		<QueryClientProvider client={queryClient}>
 			<ConversationMessages
@@ -115,8 +125,8 @@ function show(
 				isRunning={false}
 				participants={participants}
 				members={[podmate]}
-				conversationKind="task"
-				onOpenItem={() => undefined}
+				conversationKind="project_thread"
+				onOpenItem={over.onOpenItem ?? (() => undefined)}
 				dividers={false}
 				approvalCapabilities={{ approveToolCalls: over.canApprove ?? true }}
 			/>
@@ -207,7 +217,7 @@ describe("what people and bots write", () => {
 			reply([{ type: "text", text: "Checked. @channel it is fine." }]),
 		]);
 
-		const chips = await screen.findAllByText(/^@(here|channel)$/, { selector: "span" });
+		const chips = await screen.findAllByText(/^(@here|@channel)$/, { selector: "span" });
 
 		// The bot's `@channel` is not among them.
 		expect(chips.map((chip) => chip.textContent)).toEqual(["@here", "@channel"]);
@@ -233,15 +243,16 @@ describe("a finished reply that used tools", () => {
 		expect(screen.queryByText("Search issues")).toBeNull();
 	});
 
-	it("lists each call when its line is opened", async () => {
+	it("lists each app it used when its line is opened, and each call when an app's is", async () => {
 		show([answered]);
 
 		const line = await screen.findByRole("button", { name: /Used Sentry and Linear/ });
 		fireEvent.click(line);
 
 		expect(line.getAttribute("aria-expanded")).toBe("true");
-		expect(screen.getAllByText("Search issues")).toHaveLength(3);
 		expect(screen.getByText("List issues")).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: /^Used Sentry for .*3 steps/ }));
+		expect(screen.getAllByText("Search issues")).toHaveLength(3);
 	});
 });
 
@@ -309,22 +320,26 @@ describe("a reply that opens by asking another bot", () => {
 				: [{ type: "text" as const, text: `Sentry Scout found ${answer}.` }]),
 		]);
 
-	it("puts the collaboration under the words that led to it, as a side line", async () => {
+	it("puts the collaboration under the bot that asked, as a card", async () => {
 		show([asked("answered", "41 events")], { participants: [host, helper] });
 
-		const line = await screen.findByRole("button", {
-			name: `Open Collaboration: ${host.name} and ${helper.name}, Done`,
+		const card = await screen.findByRole("region", {
+			name: `${host.name} asked ${helper.name} for help`,
 		});
 		const name = screen.getByText(host.name, { selector: "span" });
-		expect(name.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(name.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 
-	it.each(["waiting", "pending"] as const)("says it is working while %s", async (status) => {
-		show([asked(status)], { participants: [host, helper] });
+	it("opens the collaboration beside the chat from its card", async () => {
+		const onOpenItem = vi.fn();
+		show([asked("answered", "41 events")], { participants: [host, helper], onOpenItem });
 
-		await screen.findByRole("button", {
-			name: `Open Collaboration: ${host.name} and ${helper.name}, Working`,
-		});
+		fireEvent.click(
+			await screen.findByRole("button", {
+				name: `Open Collaboration: ${host.name} and ${helper.name}`,
+			}),
+		);
+		expect(onOpenItem).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-0000000000c3");
 	});
 });
 
@@ -358,7 +373,7 @@ describe("a reply that wrote nothing but used tools", () => {
 describe("a reply still being written", () => {
 	const answer: MessagePart = { type: "text", text: "Here are the 2 issues in Cycle 33." };
 
-	it("shows its words as they come, and moves them to what it is using once a call follows them", async () => {
+	it("shows its words as they come, and moves them to its work line once a call follows them", async () => {
 		const search = toolCall("sentry__search_issues", {
 			status: "running",
 			output: null,
@@ -371,8 +386,9 @@ describe("a reply still being written", () => {
 		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
 
 		update([reply([{ type: "text", text: "Let me look" }, search], { status: "streaming" })]);
-		expect(screen.getByRole("article").textContent).not.toContain("Let me look");
-		expect(await screen.findByRole("button", { name: /Using Sentry/ })).toBeDefined();
+		expect(await screen.findByRole("button", { name: /Working for/ })).toBeDefined();
+		const narration = screen.getByText("Let me look");
+		expect(narration.closest("[data-slot=trace-collapsible-content]")).not.toBeNull();
 
 		update([reply([{ ...search, status: "completed", finishedAt: search.startedAt }, answer])]);
 		expect(screen.queryByRole("status")).toBeNull();
@@ -442,7 +458,7 @@ describe("a reply still being written", () => {
 			),
 		]);
 
-		await screen.findByRole("button", { name: /Using Linear/ });
+		await screen.findByRole("button", { name: /Working for/ });
 		expect(screen.getByRole("status", { name: "Linear Handler is typing" })).toBeDefined();
 		const card = screen.getByRole("region", { name: "Approval request: Create issue in Linear" });
 		expect(within(card).queryByRole("button", { name: /^Allow/ })).toBeNull();
@@ -460,13 +476,13 @@ describe("a write that needs approving", () => {
 	});
 	const asking = reply([{ type: "text", text: "I want to open an issue." }, pending]);
 
-	it("stops the reply, says so on its tool line, and shows what it would send", async () => {
+	it("stops the reply, says so on its work line, and shows what it would send", async () => {
 		show([asking]);
 
 		const card = await screen.findByRole("region", {
 			name: "Approval request: Create issue in Linear",
 		});
-		expect(screen.getByRole("button", { name: /Waiting on Linear approval/ })).toBeDefined();
+		expect(screen.getByText("Waiting for approval")).toBeDefined();
 		expect(within(card).getByText("Linear Handler wants to use Linear")).toBeDefined();
 		expect(within(card).getByText("Team")).toBeDefined();
 		expect(within(card).getByText("Platform")).toBeDefined();

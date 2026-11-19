@@ -1,7 +1,7 @@
 import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
-import { BotComputerSetup } from "@sugabots/core/computers/bot-computer-setup";
 import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
 import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
+import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { asSessionUser } from "../../auth/middleware.ts";
@@ -15,7 +15,7 @@ export const computerProviderRoutes = HttpApiBuilder.group(
 		Effect.gen(function* () {
 			const setup = yield* ComputerProviderSetup.Service;
 			const network = yield* ComputerNetwork.Service;
-			const botComputers = yield* BotComputerSetup.Service;
+			const projectComputers = yield* ProjectComputerSetup.Service;
 			return handlers
 				.handle("list", ({ params }) =>
 					setup.list(params.workspace).pipe(asSessionUser, asHttpError(computerProviderErrors)),
@@ -68,7 +68,7 @@ export const computerProviderRoutes = HttpApiBuilder.group(
 						.pipe(asSessionUser, asHttpError(computerProviderErrors)),
 				)
 				.handle("disks", ({ params }) =>
-					botComputers.disks(params.workspace).pipe(asSessionUser, asHttpError(refusals)),
+					projectComputers.disks(params.workspace).pipe(asSessionUser, asHttpError(refusals)),
 				)
 				.handle("network", ({ params }) =>
 					network.settings(params.workspace).pipe(asSessionUser, asHttpError(refusals)),

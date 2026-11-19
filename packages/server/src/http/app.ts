@@ -18,9 +18,7 @@ import { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
 import { approvalRoutes } from "../routes/approvals/routes.ts";
 import { automationRoutes } from "../routes/automations/routes.ts";
-import { botComputerRoutes } from "../routes/bot-computer/routes.ts";
 import { botRoutes } from "../routes/bots/routes.ts";
-import { channelRoutes } from "../routes/channels/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { computerProviderRoutes } from "../routes/computer-providers/routes.ts";
 import { connectionRoutes } from "../routes/connections/routes.ts";
@@ -32,6 +30,8 @@ import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
 import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
 import { notificationRoutes } from "../routes/notifications/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
+import { projectComputerRoutes } from "../routes/project-computer/routes.ts";
+import { projectRoutes } from "../routes/projects/routes.ts";
 import { referralRoutes } from "../routes/referrals/routes.ts";
 import { searchProviderRoutes } from "../routes/search-providers/routes.ts";
 import { systemRoutes } from "../routes/system/routes.ts";
@@ -83,13 +83,13 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				workspaceRoutes,
 				eventRoutes,
 				onboardingRoutes,
-				channelRoutes,
+				projectRoutes,
 				systemBotRoutes,
 				modelTrialRoutes,
 				modelProviderRoutes,
 				searchProviderRoutes,
 				computerProviderRoutes,
-				botComputerRoutes,
+				projectComputerRoutes,
 				gitHubConnectionRoutes,
 				gitHubWebhookRoutes,
 				connectionRoutes,

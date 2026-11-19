@@ -10,17 +10,20 @@ import type { ReactNode } from "react";
 export function EmptyState({
 	title,
 	icon,
+	page = false,
 	children,
 	className,
 }: {
 	title: ReactNode;
+	/** Standing in for a whole page, such as one whose address names nothing: held at least 320px tall. */
+	page?: boolean;
 	/** A mark of what would be here, on a tile above the title. */
 	icon?: ReactNode;
 	children?: ReactNode;
 	className?: string;
 }) {
 	return (
-		<div className={cn("grid flex-1 place-items-center p-6", className)}>
+		<div className={cn("grid flex-1 place-items-center p-6", page && "min-h-80", className)}>
 			<div className="flex max-w-100 flex-col items-center gap-2.5 text-center">
 				{icon && (
 					<span

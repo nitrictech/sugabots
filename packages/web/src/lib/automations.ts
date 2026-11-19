@@ -16,9 +16,11 @@ import {
 } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
+import { formatClockTime } from "@/lib/list-time.ts";
+import { automationStartsLabel } from "@/lib/routine-schedule.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 
-/** Every automation query starts with this, so one change refreshes the workspace list and each bot's. */
+/** Every automation query starts with this, so one change refreshes the workspace list and each project's. */
 const AUTOMATIONS_KEY = "automations";
 
 /**
@@ -46,17 +48,24 @@ const RECENT_RUN_COUNT = 5;
 /** How often the runs are read again while one has not ended, so its status stays current. */
 const RUN_POLL_MS = 3_000;
 
+/** A runs query's `refetchInterval`: every `RUN_POLL_MS` while one of its runs is queued or running. */
+function pollWhileRunning(query: { state: { data?: { items: readonly Run[] } } }): number | false {
+	return query.state.data?.items.some((run) => run.state === "queued" || run.state === "running")
+		? RUN_POLL_MS
+		: false;
+}
+
 /**
  * An automation's latest runs, newest first, read again while one is queued or
  * running. Nothing is asked while `enabled` is false, as for somebody who
  * manages a bot's automations without reaching the bot, whom the API refuses.
  */
 export function useRecentRuns({
-	botId,
+	projectId,
 	automationId,
 	enabled = true,
 }: {
-	botId: string;
+	projectId: string;
 	automationId: string;
 	enabled?: boolean;
 }) {
@@ -66,41 +75,35 @@ export function useRecentRuns({
 		queryFn: ({ signal }) =>
 			Effect.runPromise(
 				client.api.automations.runs({
-					params: { botId, automationId },
+					params: { projectId, automationId },
 					query: { limit: RECENT_RUN_COUNT },
 				}),
 				{ signal },
 			),
-		refetchInterval: (query) =>
-			query.state.data?.items.some((run) => run.state === "queued" || run.state === "running")
-				? RUN_POLL_MS
-				: false,
+		refetchInterval: pollWhileRunning,
 	});
 }
 
-/** How many of each automation's latest runs a bot's sidebar lists among its tasks. */
+/** How many of each automation's latest runs a bot's sidebar lists among its threads. */
 const SIDEBAR_RUN_COUNT = 10;
 
 /**
- * The latest runs of a bot's automations, newest first, each automation's read
+ * The latest runs of a project's automations, newest first, each automation's read
  * again while one of its runs is queued or running.
  */
-export function useBotRuns(botId: string, automationIds: readonly string[]): Run[] {
+export function useProjectRuns(projectId: string, automationIds: readonly string[]): Run[] {
 	const results = useQueries({
 		queries: automationIds.map((automationId) => ({
 			queryKey: [AUTOMATIONS_KEY, "runs", automationId, "sidebar"],
 			queryFn: ({ signal }: { signal: AbortSignal }) =>
 				Effect.runPromise(
 					client.api.automations.runs({
-						params: { botId, automationId },
+						params: { projectId, automationId },
 						query: { limit: SIDEBAR_RUN_COUNT },
 					}),
 					{ signal },
 				),
-			refetchInterval: (query: { state: { data?: { items: readonly Run[] } } }) =>
-				query.state.data?.items.some((run) => run.state === "queued" || run.state === "running")
-					? RUN_POLL_MS
-					: false,
+			refetchInterval: pollWhileRunning,
 		})),
 	});
 	return results
@@ -108,13 +111,13 @@ export function useBotRuns(botId: string, automationIds: readonly string[]): Run
 		.toSorted((a, b) => Date.parse(b.acceptedAt) - Date.parse(a.acceptedAt));
 }
 
-/** The bot `botId`'s automations in full; nothing is asked while it is undefined. */
-export function useAutomations(botId: string | undefined) {
+/** The project `projectId`'s automations in full, as a bot's default project holds its own; nothing is asked while it is undefined. */
+export function useAutomations(projectId: string | undefined) {
 	return useQuery({
-		queryKey: [AUTOMATIONS_KEY, "bot", botId],
-		queryFn: botId
+		queryKey: [AUTOMATIONS_KEY, "project", projectId],
+		queryFn: projectId
 			? ({ signal }) =>
-					Effect.runPromise(client.api.automations.list({ params: { botId } }), { signal })
+					Effect.runPromise(client.api.automations.list({ params: { projectId } }), { signal })
 			: skipToken,
 	});
 }
@@ -122,9 +125,9 @@ export function useAutomations(botId: string | undefined) {
 /** Webhook secrets, by trigger, kept out of `AUTOMATIONS_KEY` so refreshing the lists doesn't read them again. */
 const SECRET_KEY = "automation-secret";
 
-/** One of an automation's triggers, through the bot the automation belongs to. */
+/** One of an automation's triggers, through the project the automation belongs to. */
 export interface TriggerAddress {
-	botId: string;
+	projectId: string;
 	automationId: string;
 	triggerId: string;
 }
@@ -146,14 +149,14 @@ export function useAutomationSecret({
 	});
 }
 
-/** Each change names the bot its automation belongs to, since automations are addressed through their bot. */
+/** Each change names the project its automation belongs to, since automations are addressed through their project. */
 export function useAutomationActions() {
 	const queries = useQueryClient();
 	const refresh = () =>
 		Promise.all([
 			queries.invalidateQueries({ queryKey: [AUTOMATIONS_KEY] }),
 			// A bot's list holds its automations, by name and how they stand.
-			queries.invalidateQueries({ queryKey: ["bot-tasks"] }),
+			queries.invalidateQueries({ queryKey: ["bot-threads"] }),
 		]);
 	const keepSecret = (triggerId: string, current: AutomationCurrentSecret) =>
 		queries.setQueryData([SECRET_KEY, triggerId], current);
@@ -173,33 +176,35 @@ export function useAutomationActions() {
 
 	return {
 		create: useMutation({
-			mutationFn: ({ botId, json }: { botId: string; json: NewAutomation }) =>
-				Effect.runPromise(automations.create({ params: { botId }, payload: json })),
+			mutationFn: ({ projectId, json }: { projectId: string; json: NewAutomation }) =>
+				Effect.runPromise(automations.create({ params: { projectId }, payload: json })),
 			onSuccess: written,
 		}),
 		update: useMutation({
 			mutationFn: ({
-				botId,
+				projectId,
 				automationId,
 				json,
 			}: {
-				botId: string;
+				projectId: string;
 				automationId: string;
 				json: AutomationUpdate;
 			}) =>
-				Effect.runPromise(automations.update({ params: { botId, automationId }, payload: json })),
+				Effect.runPromise(
+					automations.update({ params: { projectId, automationId }, payload: json }),
+				),
 			onSuccess: written,
 		}),
 		remove: useMutation({
-			mutationFn: ({ botId, automationId }: { botId: string; automationId: string }) =>
-				Effect.runPromise(automations.remove({ params: { botId, automationId } })),
+			mutationFn: ({ projectId, automationId }: { projectId: string; automationId: string }) =>
+				Effect.runPromise(automations.remove({ params: { projectId, automationId } })),
 			onSuccess: refresh,
 		}),
 		run: useMutation({
-			mutationFn: ({ botId, automationId }: { botId: string; automationId: string }) =>
+			mutationFn: ({ projectId, automationId }: { projectId: string; automationId: string }) =>
 				Effect.runPromise(
 					automations.run({
-						params: { botId, automationId },
+						params: { projectId, automationId },
 						payload: { requestId: crypto.randomUUID() },
 					}),
 				),
@@ -207,20 +212,21 @@ export function useAutomationActions() {
 		}),
 		addTrigger: useMutation({
 			mutationFn: ({
-				botId,
+				projectId,
 				automationId,
 				json,
 			}: {
-				botId: string;
+				projectId: string;
 				automationId: string;
 				json: AutomationTriggerInput;
 			}) =>
 				Effect.runPromise(
 					// The generated client splits a union payload into one request type
 					// per member, which a request holding the whole union does not satisfy.
-					automations.addTrigger({ params: { botId, automationId }, payload: json } as Parameters<
-						typeof automations.addTrigger
-					>[0]),
+					automations.addTrigger({
+						params: { projectId, automationId },
+						payload: json,
+					} as Parameters<typeof automations.addTrigger>[0]),
 				),
 			onSuccess: written,
 		}),
@@ -250,4 +256,40 @@ export function useAutomationActions() {
 				keepSecret(triggerId, secret === null ? { kind: "none" } : { kind: "set", secret }),
 		}),
 	};
+}
+
+/** When the automation's routines run it next, in words: "Today at 14:00", "Tomorrow at 7:00", "Mon at 9:00"; none without a routine. */
+export function nextRunAt(automation: Automation, now = new Date()): string | undefined {
+	const [next] = automation.triggers
+		.flatMap((trigger) =>
+			trigger.kind === "routine" && trigger.nextScheduledAt ? [trigger.nextScheduledAt] : [],
+		)
+		.sort();
+	if (!next) return undefined;
+	const at = new Date(next);
+	const daysAhead = Math.round(
+		(new Date(at).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 86_400_000,
+	);
+	const day =
+		daysAhead <= 0
+			? "Today"
+			: daysAhead === 1
+				? "Tomorrow"
+				: daysAhead < 7
+					? at.toLocaleDateString(undefined, { weekday: "short" })
+					: at.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+	return `${day} at ${formatClockTime(at)}`;
+}
+
+/** When the automation runs next, in words: its routines' soonest time, or what starts it, if anything does. */
+export function nextRunWords(automation: Automation): string | undefined {
+	const next = nextRunAt(automation);
+	if (next) return `Next run ${next.replace(/^(Today|Tomorrow)/, (day) => day.toLowerCase())}`;
+	if (
+		automation.triggers.length > 0 &&
+		automation.triggers.every(({ kind }) => kind === "webhook")
+	) {
+		return "Runs when its address is called";
+	}
+	return automationStartsLabel(automation);
 }

@@ -7,13 +7,15 @@ import type {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { nextRunWords } from "@/lib/automation-schedule.ts";
-import { useAutomations, useRecentRuns } from "@/lib/automations.ts";
+import { nextRunWords, useAutomations, useRecentRuns } from "@/lib/automations.ts";
 import { useAutomationControls } from "@/lib/chats.ts";
-import { botSettingsPageLink } from "@/lib/links.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
+import { useOwnerOfProject } from "@/lib/owner-of-project.ts";
+import { ownerLinkOptions } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
+import { LabelledRule } from "@/ui/labelled-rule.tsx";
+import { TypingDots } from "@/ui/typing-dots.tsx";
 import { formatDay } from "./conversation-layout.ts";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 
@@ -69,28 +71,13 @@ export function outcomeOf(
 	return "running";
 }
 
-/**
- * How a run went, or that its automation is paused, as a dot and a word. With
- * `onOpen`, it opens the run, with the work behind its result.
- */
-export function RunStatus({ outcome, onOpen }: { outcome: RunOutcome; onOpen?: () => void }) {
-	const content = (
-		<>
+/** How a run went, or that its automation is paused, as a dot and a word. */
+export function RunStatus({ outcome }: { outcome: RunOutcome }) {
+	return (
+		<span className="inline-flex items-center gap-1.5 text-muted-foreground text-xs">
 			<span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", OUTCOME_DOT[outcome])} />
 			{OUTCOME_LABEL[outcome]}
-		</>
-	);
-	const className = "inline-flex items-center gap-1.5 text-muted-foreground text-xs";
-	if (!onOpen) return <span className={className}>{content}</span>;
-	return (
-		<button
-			type="button"
-			onClick={onOpen}
-			aria-label={`${OUTCOME_LABEL[outcome]}. Open the run`}
-			className={cn(className, "focus-ring rounded-sm hover:text-foreground")}
-		>
-			{content}
-		</button>
+		</span>
 	);
 }
 
@@ -99,7 +86,7 @@ export function RunDivider({ at }: { at: string }) {
 	const day = formatDay(new Date(at));
 	const words =
 		day === "Today" ? "Run today" : day === "Yesterday" ? "Run yesterday" : `Run on ${day}`;
-	return <Divider>{words}</Divider>;
+	return <LabelledRule className="pt-4 pb-1.5">{words}</LabelledRule>;
 }
 
 /** The line at the foot of an automation's feed saying when it runs next. Nothing while it loads. */
@@ -108,20 +95,10 @@ export function NextRunDivider({
 }: {
 	automation: NonNullable<ConversationDetails["automation"]>;
 }) {
-	const full = useAutomations(automation.botId).data?.find((one) => one.id === automation.id);
+	const full = useAutomations(automation.projectId).data?.find((one) => one.id === automation.id);
 	const words = automation.state === "paused" ? "Paused" : full && nextRunWords(full);
 	if (!words) return null;
-	return <Divider>{words}</Divider>;
-}
-
-function Divider({ children }: { children: string }) {
-	return (
-		<div className="flex items-center gap-3 px-5 pt-4 pb-1.5">
-			<span aria-hidden className="h-px flex-1 bg-border" />
-			<span className="whitespace-nowrap text-subtle-foreground text-xs">{children}</span>
-			<span aria-hidden className="h-px flex-1 bg-border" />
-		</div>
-	);
+	return <LabelledRule className="pt-4 pb-1.5">{words}</LabelledRule>;
 }
 
 /**
@@ -142,7 +119,7 @@ export function RunMessage({
 }: {
 	item: RunItem;
 	bot: BotParticipant;
-	automation: Pick<NonNullable<ConversationDetails["automation"]>, "id" | "botId">;
+	automation: Pick<NonNullable<ConversationDetails["automation"]>, "id" | "projectId">;
 	conversationId: string;
 	/** The newest failure while the automation is still failing, which may be retried. */
 	latest: boolean;
@@ -150,6 +127,7 @@ export function RunMessage({
 	mentionable: Participant[];
 }) {
 	const controls = useAutomationControls(conversationId, automation);
+	const owner = useOwnerOfProject(automation.projectId);
 	const outcome = outcomeOf(item.state, false);
 	const report = item.state === "completed" ? item.report : null;
 	return (
@@ -176,11 +154,7 @@ export function RunMessage({
 						<MessageMarkdown text={report} mentionable={mentionable} writer="bot" />
 					</div>
 				) : outcome === "nothingToReport" ? null : outcome === "running" ? (
-					<span aria-hidden className="typing-dots typing-dots-small mt-2 text-muted-foreground">
-						<i />
-						<i />
-						<i />
-					</span>
+					<TypingDots className="mt-2 text-muted-foreground" />
 				) : (
 					<p className="m-0 text-sm text-body-foreground leading-normal">
 						{item.error ??
@@ -192,12 +166,14 @@ export function RunMessage({
 						<Button size="sm" disabled={controls.pending} onClick={() => void controls.runAgain()}>
 							Retry
 						</Button>
-						<Link
-							{...botSettingsPageLink(bot, "connections")}
-							className={buttonStyles({ variant: "secondary", size: "sm" })}
-						>
-							Fix connection
-						</Link>
+						{owner && (
+							<Link
+								{...ownerLinkOptions(owner, { page: "connections" })}
+								className={buttonStyles({ variant: "secondary", size: "sm" })}
+							>
+								Fix connection
+							</Link>
+						)}
 					</div>
 				)}
 			</div>
@@ -210,29 +186,38 @@ export function RunMessage({
  * feed: its bot's message saying why, offering to run it again while it is
  * the automation's latest run.
  */
-export function FailedRunMessage({ execution, bot }: { execution: Run; bot: BotParticipant }) {
-	const automation = { id: execution.automationId, botId: execution.botId };
+export function FailedRunMessage({
+	run,
+	projectId,
+	bot,
+}: {
+	run: Run;
+	/** The project the automation belongs to, whose run it is. */
+	projectId: string;
+	bot: BotParticipant;
+}) {
+	const automation = { id: run.automationId, projectId };
 	const latestRun = useRecentRuns({
-		botId: execution.botId,
-		automationId: execution.automationId,
+		projectId,
+		automationId: run.automationId,
 	}).data?.items[0];
 	return (
 		<RunMessage
 			item={{
 				kind: "run",
-				id: execution.id,
-				conversationId: execution.conversationId,
-				automationName: execution.automationName,
-				triggerKind: execution.trigger.kind,
-				state: execution.state,
-				error: execution.error,
+				id: run.id,
+				conversationId: run.conversationId,
+				automationName: run.automationName,
+				triggerKind: run.trigger.kind,
+				state: run.state,
+				error: run.error,
 				report: null,
-				createdAt: execution.acceptedAt,
+				createdAt: run.acceptedAt,
 			}}
 			bot={bot}
 			automation={automation}
-			conversationId={execution.rootConversationId}
-			latest={latestRun?.id === execution.id}
+			conversationId={run.rootConversationId}
+			latest={latestRun?.id === run.id}
 			mentionable={[]}
 		/>
 	);

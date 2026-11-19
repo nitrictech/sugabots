@@ -28,7 +28,7 @@ export interface Screenshot {
 	title: string;
 	description: string;
 	/**
-	 * A 16:10 capture of the app, as WebP at 2240×1400: `/screenshots/main-chat.webp`.
+	 * A 16:10 capture of the app, as WebP at 2240×1400: `/screenshots/project-thread.webp`.
 	 * `bun run capture screenshots` makes them all; Computers needs the image from `bun run build:computer`.
 	 */
 	image?: string;
@@ -38,41 +38,42 @@ export interface Screenshot {
 
 export const screenshots: readonly [Screenshot, ...Screenshot[]] = [
 	{
-		title: "Channels",
+		title: "Projects",
 		description:
-			"Each project gets a channel, where people and bots share its main chat and threads, and reply and react the same way.",
-		image: "/screenshots/main-chat.webp",
-		shows: "A channel's main chat with two people and a bot",
+			"Each piece of work gets a project, where people and bots share its threads, and reply and react the same way.",
+		image: "/screenshots/project-thread.webp",
+		shows: "A project's thread with two people and a bot",
 	},
 	{
 		title: "Automations",
-		description: "Scheduled work posts where the whole team sees it, not to one person’s inbox.",
+		description: "Automations run on routines or triggers, each run in a thread of the project.",
 		image: "/screenshots/automations.webp",
 		shows: "Automations",
 	},
 	{
 		title: "Computers",
-		description: "Each bot runs code in its own isolated environment, never on your machine.",
+		description: "A project’s bots run code on its own computer, never on your machine.",
 		image: "/screenshots/computers.webp",
 		shows: "The computer viewer",
 	},
 	{
 		title: "Files",
-		description: "What people upload and bots make is kept for the team, ready to open and review.",
+		description:
+			"What people upload and bots make is kept in the project, ready to open and review.",
 		image: "/screenshots/files.webp",
 		shows: "The files viewer",
 	},
 	{
 		title: "Usage",
-		description: "See what every bot, model and team costs, day by day.",
+		description: "See what every bot and model costs, day by day.",
 		image: "/screenshots/usage.webp",
 		shows: "The Usage page",
 	},
 	{
 		title: "Connect any MCP server",
 		description:
-			"Plug in Linear, Notion or anything else once for the whole team. Bots ask before each tool call, or run freely.",
+			"Connect a project to Linear, Notion or any MCP server; its bots use them in its threads. Bots ask before each tool call, or run freely.",
 		image: "/screenshots/mcp-connections.webp",
-		shows: "A team’s connections to MCP servers",
+		shows: "A project’s connections to MCP servers",
 	},
 ];

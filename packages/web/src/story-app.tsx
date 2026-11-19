@@ -1,18 +1,17 @@
 import type {
 	Bot,
-	Channel,
-	ChannelConversation,
-	ChatListItem,
 	ChatMessageItem,
 	ConversationActivity,
 	ConversationDetails,
 	DirectMessageListItem,
+	ListedThread,
 	Message,
 	ModelProvider,
 	NotificationSettings,
+	Project,
+	ProjectThread,
 	SessionUser,
 	SystemBot,
-	Task,
 	WorkspacePermissions,
 	WorkspaceRole,
 } from "@sugabots/contracts";
@@ -29,7 +28,7 @@ import { useEffect, useState } from "react";
 import { chatItemCreatedAt } from "@/lib/chats.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
-import { channelsWithBots, storyBots as fixtureBots } from "@/shell/story-fixtures.ts";
+import { storyBots as fixtureBots, projectsWithBots } from "@/shell/story-fixtures.ts";
 
 /*
  * The whole app, for a story: the real routes at an address, answered by
@@ -50,53 +49,59 @@ export const storyUser: SessionUser = {
 	image: null,
 } as SessionUser;
 
-const firstChannel = channelsWithBots[0]?.channel as Channel;
+const firstProject = projectsWithBots[0]?.project as Project;
 
 export const storyWorkspace = {
-	id: firstChannel.workspaceId,
+	id: firstProject.workspaceId,
 	name: "Nitric",
 	slug: "nitric",
 	timeZone: "UTC",
 	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 
-/** Every channel, and every bot. */
-export const storyChannels: Channel[] = channelsWithBots.map(({ channel }) => channel);
+/** Every project, and every bot. */
+export const storyProjects: Project[] = projectsWithBots.map(({ project }) => project);
 export const storyBots: Bot[] = [...fixtureBots];
 
-/** The bots added to each channel, by the channel's id. */
-const botsInChannel = new Map(channelsWithBots.map(({ channel, bots }) => [channel.id, bots]));
+/** The bots added to each project, by the project's id. */
+const botsInProject = new Map(projectsWithBots.map(({ project, bots }) => [project.id, bots]));
 
-/** One task per bot, by the bot's id. */
-export function storyTaskFor(bot: Bot): Task {
+/** The id of a bot's default project in the stories, where its threads are. */
+function storyDefaultProjectOf(bot: Bot): string {
+	return `0199a3a0-0000-7000-8000-00000000d${bot.id.slice(-3)}`;
+}
+
+/** One thread per bot, by the bot's id. */
+export function storyThreadFor(bot: Bot): ProjectThread {
 	const suffix = bot.id.slice(-4);
 	return {
-		kind: "task",
+		kind: "project_thread",
 		id: `0199a3a0-0000-7000-8000-00000000c${suffix.slice(1)}`,
 		workspaceId: bot.workspaceId,
+		projectId: storyDefaultProjectOf(bot),
 		botId: bot.id,
 		title: `Working with ${bot.name}`,
+		archivedAt: null,
 		doneAt: null,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
 	};
 }
 
-/** Another task with `bot`, apart from its first. */
-export function storyConversationFor(bot: Bot): Task {
+/** Another thread with `bot`, apart from its first. */
+export function storyConversationFor(bot: Bot): ProjectThread {
 	const suffix = bot.id.slice(-4);
 	return {
-		...storyTaskFor(bot),
+		...storyThreadFor(bot),
 		id: `0199a3a0-0000-7000-8000-00000000d${suffix.slice(1)}`,
 		title: `Conversation with ${bot.name}`,
 	};
 }
 
-/** `bot`'s first task as its list shows it. */
-function storyTaskItem(bot: Bot): ChatListItem {
+/** A project's thread as its list shows it, with nothing new in it. */
+export function storyListedThread(thread: ProjectThread): ListedThread {
 	return {
-		bot,
-		conversation: storyTaskFor(bot),
+		conversation: thread,
 		lastMessage: null,
 		participants: [],
 		messageCount: 1,
@@ -128,7 +133,7 @@ const systemBots: SystemBot[] = (["summarise", "compact"] as const).map((key) =>
 }));
 
 const NO_PERMISSIONS: WorkspacePermissions = {
-	createChannels: false,
+	createProjects: false,
 	createBots: false,
 	updateWorkspace: false,
 	manageProviders: false,
@@ -143,7 +148,7 @@ const NO_PERMISSIONS: WorkspacePermissions = {
 /** What each role may do in the workspace, as the API's grant tables decide it. */
 const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 	owner: {
-		createChannels: true,
+		createProjects: true,
 		createBots: true,
 		updateWorkspace: true,
 		manageProviders: true,
@@ -155,7 +160,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 		deleteWorkspace: true,
 	},
 	admin: {
-		createChannels: true,
+		createProjects: true,
 		createBots: true,
 		updateWorkspace: true,
 		manageProviders: true,
@@ -170,9 +175,9 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 	viewer: NO_PERMISSIONS,
 };
 
-/** What a bot's first task holds: its messages, and who is in it. */
+/** What a bot's first thread holds: its messages, and who is in it. */
 export function storyChatDetails(bot: Bot, messages: Message[] = []): ConversationDetails {
-	const chat = storyTaskFor(bot);
+	const chat = storyThreadFor(bot);
 	const participant = {
 		kind: "bot" as const,
 		id: bot.id,
@@ -187,10 +192,10 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): Conversati
 		conversation: {
 			id: chat.id,
 			workspaceId: bot.workspaceId,
-			channelId: null,
+			projectId: storyDefaultProjectOf(bot),
 			botId: bot.id,
 			rootConversationId: chat.id,
-			kind: "task",
+			kind: "project_thread",
 			title: chat.title,
 			status: "done",
 			parentConversationId: null,
@@ -202,7 +207,7 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): Conversati
 		capabilities: { approveToolCalls: true },
 		automationRun: null,
 		participants: [person, participant],
-		channelBots: [participant],
+		projectBots: [participant],
 		members: [],
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -211,40 +216,41 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): Conversati
 	};
 }
 
-/** A channel's main chat, by the channel's id. */
-export function storyChannelConversationFor(channel: Channel): ChannelConversation {
+/** A project's one thread in the stories, Planning, by the project's id. */
+export function storyProjectThreadFor(project: Project): ProjectThread {
 	return {
-		kind: "channel_conversation",
-		id: `0199a3a0-0000-7000-8000-00000000c9${channel.id.slice(-2)}`,
-		workspaceId: channel.workspaceId,
-		channelId: channel.id,
-		title: "General",
-		main: true,
+		kind: "project_thread",
+		id: `0199a3a0-0000-7000-8000-00000000c9${project.id.slice(-2)}`,
+		workspaceId: project.workspaceId,
+		projectId: project.id,
+		botId: null,
+		title: "Planning",
 		archivedAt: null,
+		doneAt: null,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
 	};
 }
 
-/** What a channel's main chat holds: its messages, and the channel's people and bots to mention. */
-export function storyChannelConversationDetails(
-	channel: Channel,
+/** What a project's thread holds: its messages, and the project's people and bots to mention. */
+export function storyProjectThreadDetails(
+	project: Project,
 	bots: Bot[],
 	messages: Message[] = [],
 ): ConversationDetails {
-	const chat = storyChannelConversationFor(channel);
+	const chat = storyProjectThreadFor(project);
 	const person = testPerson({ id: storyUser.id, name: storyUser.name });
 	return {
 		conversation: {
 			id: chat.id,
 			workspaceId: chat.workspaceId,
-			channelId: chat.channelId,
+			projectId: chat.projectId,
 			botId: null,
 			title: chat.title,
 			createdAt: chat.createdAt,
 			updatedAt: chat.updatedAt,
 			rootConversationId: chat.id,
-			kind: "channel_conversation",
+			kind: "project_thread",
 			status: "done",
 			parentConversationId: null,
 			startedById: storyUser.id,
@@ -253,8 +259,8 @@ export function storyChannelConversationDetails(
 		capabilities: { approveToolCalls: true },
 		automationRun: null,
 		participants: [person],
-		channelBots: bots
-			.filter((bot) => botsInChannel.get(channel.id)?.some((one) => one.id === bot.id))
+		projectBots: bots
+			.filter((bot) => botsInProject.get(project.id)?.some((one) => one.id === bot.id))
 			.map((bot) => ({
 				kind: "bot" as const,
 				id: bot.id,
@@ -274,7 +280,7 @@ export function storyChannelConversationDetails(
 
 /** What a chat's sidebar shows: a summary. */
 export function storyChatActivity(bot: Bot, messages: Message[] = []): ConversationActivity {
-	const chat = storyTaskFor(bot);
+	const chat = storyThreadFor(bot);
 	return {
 		summary: {
 			content: `${bot.name} has been keeping things moving.`,
@@ -294,12 +300,12 @@ function quietStream() {
 
 interface StoryAppData {
 	role?: WorkspaceRole;
-	channels?: Channel[];
+	projects?: Project[];
 	bots?: Bot[];
-	/** Messages in each bot's first task, by the bot's id. */
+	/** Messages in each bot's first thread, by the bot's id. */
 	messages?: Record<string, Message[]>;
-	/** Messages in each channel's main chat, by the channel's id. */
-	channelConversationMessages?: Record<string, Message[]>;
+	/** Messages in each project's thread, by the project's id. */
+	projectThreadMessages?: Record<string, Message[]>;
 	providers?: ModelProvider[];
 	models?: (typeof storyModel)[];
 	/** The viewer's referral link, where the installation signs people up by referral. */
@@ -320,9 +326,9 @@ const noNotificationChoices: NotificationSettings = {
 	quietHours: null,
 	turnFailures: true,
 	automationRuns: "failures",
-	channels: {},
+	projects: {},
 	bots: {},
-	mutedUntil: { channels: {}, bots: {} },
+	mutedUntil: { projects: {}, bots: {} },
 };
 
 /**
@@ -331,14 +337,14 @@ const noNotificationChoices: NotificationSettings = {
  * something else.
  */
 export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
-	const channels = data.channels ?? storyChannels;
+	const projects = data.projects ?? storyProjects;
 	const bots = data.bots ?? storyBots;
 	const messages = data.messages ?? {};
 	const botById = (id: string) => bots.find((bot) => bot.id === id);
 	const botForConversation = (conversationId: string) =>
-		bots.find((bot) => storyTaskFor(bot).id === conversationId);
-	const channelForChat = (conversationId: string) =>
-		channels.find((channel) => storyChannelConversationFor(channel).id === conversationId);
+		bots.find((bot) => storyThreadFor(bot).id === conversationId);
+	const projectForChat = (conversationId: string) =>
+		projects.find((project) => storyProjectThreadFor(project).id === conversationId);
 	const directMessages = data.directMessages ?? [];
 	// A copy, so what a story sends stays in that story.
 	const directMessageMessages = { ...data.directMessageMessages };
@@ -387,7 +393,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				permissions: PERMISSIONS_BY_ROLE[data.role ?? "owner"],
 			}),
 		),
-		http.get(api("/workspaces/:workspace/channels"), () => HttpResponse.json(channels)),
+		http.get(api("/workspaces/:workspace/projects"), () => HttpResponse.json(projects)),
 		http.get(api("/workspaces/:workspace/bots"), () => HttpResponse.json(bots)),
 		http.get(api("/workspaces/:workspace/model-providers/models"), () => {
 			const models = data.models ?? [storyModel];
@@ -405,8 +411,8 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/workspaces/:workspace/chats/approvals"), () =>
 			HttpResponse.json({ waiting: [], answered: [] }),
 		),
-		http.get(api("/workspaces/:workspace/chats/channel-markers"), () =>
-			HttpResponse.json({ channels: {}, bots: {} }),
+		http.get(api("/workspaces/:workspace/chats/project-markers"), () =>
+			HttpResponse.json({ projects: {}, bots: {} }),
 		),
 		http.post(
 			api("/conversations/:conversationId/read"),
@@ -414,32 +420,30 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		),
 		http.post(api("/items/:conversationId/read"), () => new HttpResponse(null, { status: 204 })),
 		http.get(api("/workspaces/:workspace/chats"), ({ request }) => {
-			// By the channel's id or its slug, as the API takes it.
-			const named = new URL(request.url).searchParams.get("channel");
-			const channel = channels.find((one) => one.id === named || one.slug === named);
+			// By the project's id or its slug, as the API takes it.
+			const named = new URL(request.url).searchParams.get("project");
+			const project = projects.find((one) => one.id === named || one.slug === named);
 			return HttpResponse.json({
-				chats: channel
-					? [{ conversation: storyChannelConversationFor(channel), unreadMessages: 0 }]
-					: [],
+				chats: project ? [storyListedThread(storyProjectThreadFor(project))] : [],
 			});
 		}),
-		http.get(api("/bots/:botId/tasks"), ({ params }) => {
+		http.get(api("/bots/:botId/threads"), ({ params }) => {
 			const bot = botById(String(params.botId));
-			return HttpResponse.json({ tasks: bot ? [storyTaskItem(bot)] : [], automations: [] });
-		}),
-		http.post(api("/workspaces/:workspace/channels/:channelId/chat"), ({ params }) => {
-			const channel = channels.find((one) => one.id === params.channelId);
-			return channel
-				? HttpResponse.json(storyChannelConversationFor(channel))
-				: new HttpResponse(null, { status: 404 });
+			if (!bot) return new HttpResponse(null, { status: 404 });
+			return HttpResponse.json({
+				bot,
+				threads: [storyListedThread(storyThreadFor(bot))],
+				automations: [],
+				summary: null,
+			});
 		}),
 		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
 			const bot = botForConversation(String(params.conversationId));
-			const channel = channelForChat(String(params.conversationId));
+			const project = projectForChat(String(params.conversationId));
 			const said = bot
 				? messages[bot.id]
-				: channel
-					? data.channelConversationMessages?.[channel.id]
+				: project
+					? data.projectThreadMessages?.[project.id]
 					: undefined;
 			return HttpResponse.json({
 				items: (said ?? [])
@@ -463,14 +467,10 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				: new HttpResponse(null, { status: 404 });
 		}),
 		http.get(api("/conversations/:conversationId"), ({ params }) => {
-			const channel = channelForChat(String(params.conversationId));
-			if (channel) {
+			const project = projectForChat(String(params.conversationId));
+			if (project) {
 				return HttpResponse.json(
-					storyChannelConversationDetails(
-						channel,
-						bots,
-						data.channelConversationMessages?.[channel.id],
-					),
+					storyProjectThreadDetails(project, bots, data.projectThreadMessages?.[project.id]),
 				);
 			}
 			const bot = botForConversation(String(params.conversationId));
@@ -478,12 +478,12 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				? HttpResponse.json(storyChatDetails(bot, messages[bot.id]))
 				: new HttpResponse(null, { status: 404 });
 		}),
-		http.get(api("/bots/:botId/connections"), () => HttpResponse.json([])),
+		http.get(api("/projects/:projectId/connections"), () => HttpResponse.json([])),
 		// No computers in the example workspace, so the bot's Computer section stays hidden.
-		http.get(api("/bots/:botId/computer"), () =>
+		http.get(api("/projects/:projectId/computer"), () =>
 			HttpResponse.json({ computer: { kind: "none" }, providerEnabled: false, canManage: false }),
 		),
-		http.get(api("/channels/:channelId/members"), () =>
+		http.get(api("/projects/:projectId/members"), () =>
 			HttpResponse.json([
 				{
 					userId: storyUser.id,
@@ -495,15 +495,15 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				},
 			]),
 		),
-		http.get(api("/bots/:botId/automations"), () => HttpResponse.json([])),
+		http.get(api("/projects/:projectId/automations"), () => HttpResponse.json([])),
 		// No computers set up, unless a story says otherwise.
 		http.get(api("/workspaces/:workspace/computer-providers/access"), () =>
 			HttpResponse.json({ enabled: false }),
 		),
-		http.get(api("/bots/:botId/automations/:automationId/triggers/:triggerId/secret"), () =>
+		http.get(api("/projects/:projectId/automations/:automationId/triggers/:triggerId/secret"), () =>
 			HttpResponse.json({ kind: "set", secret: "whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u" }),
 		),
-		http.get(api("/bots/:botId/automations/:automationId/runs"), () =>
+		http.get(api("/projects/:projectId/automations/:automationId/runs"), () =>
 			HttpResponse.json({ items: [], nextCursor: null }),
 		),
 	];
@@ -583,7 +583,7 @@ function storyDirectMessageDetails(
 		conversation: {
 			id: conversation.id,
 			workspaceId: conversation.workspaceId,
-			channelId: null,
+			projectId: null,
 			botId: null,
 			rootConversationId: conversation.id,
 			kind: conversation.kind,
@@ -598,7 +598,7 @@ function storyDirectMessageDetails(
 		capabilities: { approveToolCalls: true },
 		automationRun: null,
 		participants: people,
-		channelBots: [],
+		projectBots: [],
 		members: people,
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -615,10 +615,10 @@ function storyDirectMessageDetails(
 export function connectionHandlers(connections: readonly TestConnection[]): RequestHandler[] {
 	const byId = (connectionId: unknown) => connections.find((one) => one.id === connectionId);
 	return [
-		http.get(api("/bots/:botId/connections"), () =>
+		http.get(api("/projects/:projectId/connections"), () =>
 			HttpResponse.json(connections.map(listedConnection)),
 		),
-		http.get(api("/bots/:botId/connections/:connectionId"), ({ params }) => {
+		http.get(api("/projects/:projectId/connections/:connectionId"), ({ params }) => {
 			const found = byId(params.connectionId);
 			return found
 				? HttpResponse.json(connectionWithTools(found))
@@ -647,7 +647,7 @@ export function StoryApp({ path, user = storyUser }: { path: string; user?: Sess
 	);
 }
 
-/** Where a bot's first task is. */
+/** Where a bot's first thread is. */
 export function chatPath(bot: Bot): string {
-	return `/${storyWorkspace.slug}/bots/${bot.handle}/tasks/${storyTaskFor(bot).id}`;
+	return `/${storyWorkspace.slug}/bots/${bot.handle}/threads/${storyThreadFor(bot).id}`;
 }

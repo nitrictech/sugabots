@@ -21,11 +21,11 @@ const colours = {
 		"border-border bg-background in-data-landing:border-landing-line in-data-landing:bg-landing-page",
 	waitlist: cn(
 		callToAction({ variant: "quiet", size: "small" }),
-		"text-foreground hover:bg-muted hover:text-foreground in-data-landing:text-landing-button-text in-data-landing:hover:bg-landing-bubble in-data-landing:hover:text-white",
+		"text-foreground hover:bg-muted hover:text-foreground in-data-landing:text-landing-button-text in-data-landing:hover:bg-landing-bubble in-data-landing:hover:text-landing-text-strong",
 	),
 	menuWaitlist: cn(
 		callToAction({ variant: "secondary" }),
-		"border-input text-foreground hover:border-ring hover:text-foreground in-data-landing:border-landing-control in-data-landing:text-landing-button-text in-data-landing:hover:border-landing-control-hover in-data-landing:hover:text-white",
+		"border-input text-foreground hover:border-ring hover:text-foreground in-data-landing:border-landing-control in-data-landing:text-landing-button-text in-data-landing:hover:border-landing-control-hover in-data-landing:hover:text-landing-text-strong",
 	),
 };
 

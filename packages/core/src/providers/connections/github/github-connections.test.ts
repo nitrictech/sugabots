@@ -15,7 +15,7 @@ import {
 	reachingGitHub,
 	standInGitHub,
 	WEBHOOK_SECRET,
-	workspaceWithChannel,
+	workspaceWithProject,
 } from "./github.test-support.ts";
 import { GitHubApps } from "./github-app.ts";
 import { GitHubConnections } from "./github-connections.ts";
@@ -169,7 +169,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	);
 	let connections: GitHubConnections.Interface;
 	let gitHubApps: GitHubApps.Interface;
-	let fixture: Awaited<ReturnType<typeof workspaceWithChannel>>;
+	let fixture: Awaited<ReturnType<typeof workspaceWithProject>>;
 	let connectionId: string;
 
 	beforeAll(async () => {
@@ -179,46 +179,46 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 				Effect.provide(reachingGitHub(github.fetch, "https://sugabots.example.com")),
 			),
 		);
-		fixture = await workspaceWithChannel("Connections");
+		fixture = await workspaceWithProject("Connections");
 		connectionId = await installedConnection(gitHubApps, fixture);
 	});
 
 	afterAll(closeDatabase);
 
 	const as = (userId: string) => onPostgresAs(userId)(connections);
-	const bot = () => ({ workspaceId: fixture.workspaceId, botId: fixture.botId });
+	const project = () => ({ workspaceId: fixture.workspaceId, projectId: fixture.projectId });
 
 	it("lists what the app reaches, for someone who manages the bot's connections", async () => {
-		const { botId, adminId, memberId } = fixture;
+		const { projectId, adminId, memberId } = fixture;
 
-		await expect(as(memberId).reachableRepositories({ botId, connectionId })).rejects.toMatchObject(
-			{ _tag: "ActionForbidden" },
-		);
-		expect(await as(adminId).reachableRepositories({ botId, connectionId })).toEqual([
+		await expect(
+			as(memberId).reachableRepositories({ projectId, connectionId }),
+		).rejects.toMatchObject({ _tag: "ActionForbidden" });
+		expect(await as(adminId).reachableRepositories({ projectId, connectionId })).toEqual([
 			{ repository: "acme/web", private: true },
 			{ repository: "acme/infra", private: false },
 		]);
 	});
 
 	it("adds a repository the app reaches, as GitHub writes it, for someone who manages the bot's connections", async () => {
-		const { botId, adminId, memberId } = fixture;
+		const { projectId, adminId, memberId } = fixture;
 
 		await expect(
-			as(memberId).addRepository({ botId, connectionId, repository: "acme/web" }),
+			as(memberId).addRepository({ projectId, connectionId, repository: "acme/web" }),
 		).rejects.toMatchObject({ _tag: "ActionForbidden" });
 		await expect(
-			as(adminId).addRepository({ botId, connectionId, repository: "acme-labs/lab" }),
+			as(adminId).addRepository({ projectId, connectionId, repository: "acme-labs/lab" }),
 		).rejects.toMatchObject({ _tag: "RepositoryUnreachable" });
-		await as(adminId).addRepository({ botId, connectionId, repository: "ACME/Web" });
+		await as(adminId).addRepository({ projectId, connectionId, repository: "ACME/Web" });
 
-		expect(await as(memberId).repositories({ botId, connectionId })).toMatchObject({
+		expect(await as(memberId).repositories({ projectId, connectionId })).toMatchObject({
 			account: "acme",
 			repositories: [{ repository: "acme/web", addedByName: "Ada" }],
 		});
 	});
 
 	it("signs the computer in to read only the connection's repositories, with git, as its account", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 		github.asked.length = 0;
 
@@ -241,7 +241,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("changes a pull request from a bot's own branch, and no one else's", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 		github.asked.length = 0;
 		const change = {
@@ -276,7 +276,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("labels and closes anyone's issue, but changes the words only of the app's own, and of a pull request only its labels and assignees", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 		github.asked.length = 0;
 		type Change = Parameters<Connected["updateIssue"]>[0];
@@ -316,7 +316,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("replies to a comment on code in its thread, through the comment that starts it", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 
 		const replied = await runOnPostgres(
@@ -335,7 +335,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("reads a long thread's first and newest comments, saying some between were left out", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 
 		const read = await runOnPostgres(
@@ -355,7 +355,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("searches issues unless asked for pull requests, which GitHub requires it to say", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 		github.asked.length = 0;
 		const search = (query: string) =>
@@ -378,7 +378,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("tells a repository the installation no longer reaches apart from a permission it lacks", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 		lostRepositories = true;
 		try {
@@ -393,7 +393,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("edits and deletes the app's own comments, and no one else's", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 		github.asked.length = 0;
 		const comment = { repository: "acme/web", kind: "comment" as const };
@@ -415,7 +415,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("says what the app must be granted when its installation hasn't been", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 		grantsIssues = false;
 		try {
@@ -430,7 +430,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("reads the end of a job's log from where GitHub keeps it, without sending the token there", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 		github.asked.length = 0;
 
@@ -442,7 +442,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("gives only the end of a long job's log, in whole lines", async () => {
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const connected = await runOnPostgres(connections.forProject(project()));
 		if (!connected) throw new Error("Not connected");
 
 		const read = await runOnPostgres(connected.jobLog({ repository: "acme/web", jobId: 10 }));
@@ -454,20 +454,20 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("adds a repository and removes one, each a change of the connection's configuration", async () => {
-		const { botId, adminId } = fixture;
-		const connected = await runOnPostgres(connections.forBot(bot()));
+		const { projectId, adminId } = fixture;
+		const connected = await runOnPostgres(connections.forProject(project()));
 
 		const added = await as(adminId).addRepository({
-			botId,
+			projectId,
 			connectionId,
 			repository: "acme/infra",
 		});
 		const left = await as(adminId).removeRepository({
-			botId,
+			projectId,
 			connectionId,
 			repository: "acme/web",
 		});
-		const after = await runOnPostgres(connections.forBot(bot()));
+		const after = await runOnPostgres(connections.forProject(project()));
 
 		expect(added.repositories.map((one) => one.repository)).toEqual(["acme/infra", "acme/web"]);
 		expect(left.repositories.map((one) => one.repository)).toEqual(["acme/infra"]);
@@ -477,19 +477,19 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("keeps a repository GitHub renames, by its id", async () => {
-		const renaming = await workspaceWithChannel("Renaming");
-		const { botId, adminId } = renaming;
+		const renaming = await workspaceWithProject("Renaming");
+		const { projectId, adminId } = renaming;
 		const renamedId = await installedConnection(gitHubApps, renaming);
-		await as(adminId).addRepository({ botId, connectionId: renamedId, repository: "acme/web" });
+		await as(adminId).addRepository({ projectId, connectionId: renamedId, repository: "acme/web" });
 		renamed = true;
 		try {
 			const listed = await as(adminId).addRepository({
-				botId,
+				projectId,
 				connectionId: renamedId,
 				repository: "acme/infra",
 			});
 			const connected = await runOnPostgres(
-				connections.forBot({ workspaceId: renaming.workspaceId, botId }),
+				connections.forProject({ workspaceId: renaming.workspaceId, projectId }),
 			);
 			github.asked.length = 0;
 			await runOnPostgres(connected?.readToken() ?? Effect.void);
@@ -506,10 +506,10 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("refuses to choose repositories before the connection's app is installed", async () => {
-		const pending = await workspaceWithChannel("Pending");
+		const pending = await workspaceWithProject("Pending");
 		const { connectionId: pendingId } = await madeConnection(gitHubApps, pending);
 		const asAdmin = as(pending.adminId);
-		const which = { botId: pending.botId, connectionId: pendingId };
+		const which = { projectId: pending.projectId, connectionId: pendingId };
 
 		await expect(asAdmin.reachableRepositories(which)).rejects.toMatchObject({
 			_tag: "GitHubAppNotInstalled",
@@ -524,10 +524,10 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connections, against Postgres
 	});
 
 	it("refuses another bot's connection", async () => {
-		const other = await workspaceWithChannel("Other");
+		const other = await workspaceWithProject("Other");
 
 		await expect(
-			as(other.adminId).repositories({ botId: other.botId, connectionId }),
+			as(other.adminId).repositories({ projectId: other.projectId, connectionId }),
 		).rejects.toMatchObject({ _tag: "NotGitHubConnection" });
 	});
 

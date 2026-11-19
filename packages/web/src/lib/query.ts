@@ -12,9 +12,9 @@ import { QueryClient } from "@tanstack/react-query";
  * - **No retry on a failure the API meant.** A 404 or a 403 is an answer, not a
  *   network blip; retrying it three times only delays showing the person what
  *   happened. Anything else — a dropped connection, a 500 — is retried once.
- * - **`staleTime` of thirty seconds.** Lists like the sidebar's channels change
+ * - **`staleTime` of thirty seconds.** Lists like the sidebar's projects change
  *   rarely and are read on every navigation. Once the workspace stream carries
- *   `channel.changed` (NIT-1792 adds the first of these), invalidation replaces
+ *   `project.changed` (NIT-1792 adds the first of these), invalidation replaces
  *   the guess and this can go to `Infinity`.
  */
 export function createQueryClient(): QueryClient {

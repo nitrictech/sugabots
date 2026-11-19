@@ -38,7 +38,7 @@ const jay = person(2, "Jay Young", "jay@nitric.io", "admin");
 const mara = person(3, "Mara Kent", "mara@nitric.io", "member");
 const sam = person(4, "Sam Park", "sam@nitric.io", "viewer");
 
-const inChannel = (member: typeof rowan) => ({
+const inProject = (member: typeof rowan) => ({
 	userId: member.user.id,
 	name: member.user.name,
 	email: member.user.email,
@@ -71,18 +71,18 @@ function SettingsPreview({ children }: { children: ReactNode }) {
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 		});
-		// What a member's page reads besides the roster: the channels, their bots and who is in each.
+		// What a member's page reads besides the roster: the projects, their bots and who is in each.
 		client.setQueryData(["workspaces"], [workspace]);
-		client.setQueryData(["channels", workspace.id], [revenue, engineering]);
+		client.setQueryData(["projects", workspace.id], [revenue, engineering]);
 		client.setQueryData(
 			["bots", workspace.id],
 			[growthDesk, accountManager, leadResearcher, linearHandler, oncall],
 		);
 		client.setQueryData(
-			["channel-members", revenue.id],
-			[inChannel(rowan), inChannel(jay), inChannel(mara)],
+			["project-members", revenue.id],
+			[inProject(rowan), inProject(jay), inProject(mara)],
 		);
-		client.setQueryData(["channel-members", engineering.id], [inChannel(rowan), inChannel(sam)]);
+		client.setQueryData(["project-members", engineering.id], [inProject(rowan), inProject(sam)]);
 		return client;
 	});
 	useEffect(() => () => queryClient.clear(), [queryClient]);
@@ -153,13 +153,13 @@ export const Inviting = meta.story({
 
 		await expect(within(dialog).getByLabelText("Email addresses")).toBeInTheDocument();
 		await expect(
-			within(dialog).getByText("Makes bots and channels, and works with the public bots."),
+			within(dialog).getByText("Makes bots and projects, and works with the public bots."),
 		).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Send" })).toBeDisabled();
 	},
 });
 
-/** Somebody else's page: their role, the channels they are in, when they joined, and removing them. */
+/** Somebody else's page: their role, the projects they are in, when they joined, and removing them. */
 export const Person = meta.story({
 	args: { selectedMemberId: mara.id },
 	play: async ({ canvas }) => {

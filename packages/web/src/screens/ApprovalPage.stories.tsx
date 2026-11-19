@@ -8,7 +8,7 @@ import { HttpResponse, http } from "msw";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyTaskFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyThreadFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * One approval request in full, beside the Approvals list: what it would do,
@@ -49,9 +49,9 @@ function request(
 			face: growthDesk.face,
 			shape: "circle",
 		},
-		channelId: revenue.id,
-		conversationId: storyTaskFor(growthDesk).id,
-		rootConversationId: storyTaskFor(growthDesk).id,
+		projectId: revenue.id,
+		conversationId: storyThreadFor(growthDesk).id,
+		rootConversationId: storyThreadFor(growthDesk).id,
 	};
 }
 

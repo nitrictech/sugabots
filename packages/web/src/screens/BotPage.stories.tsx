@@ -10,26 +10,27 @@ import {
 	connectionHandlers,
 	StoryApp,
 	storyBots,
-	storyChannelConversationDetails,
-	storyChannelConversationFor,
-	storyChannels,
 	storyChatDetails,
-	storyTaskFor,
+	storyListedThread,
+	storyProjects,
+	storyProjectThreadDetails,
+	storyProjectThreadFor,
+	storyThreadFor,
 	storyUser,
 	storyWorkspace,
 } from "../story-app.tsx";
 
 /*
- * A bot's chat as the app shows it: the sidebar with the channel's conversations and bots beside it, the
- * header across the top, and the task with its composer. On a phone the chat
+ * A bot's thread as the app shows it: the sidebar with the projects' threads and bots beside it, the
+ * header across the top, and the thread with its composer. On a phone the chat
  * takes the screen, under a compact header with Back to the list.
  */
 
 function said(id: string, by: "you" | "bot", text: string, at: string): Message {
-	const task = storyTaskFor(growthDesk).id;
+	const thread = storyThreadFor(growthDesk).id;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000005${id}`,
-		conversationId: task,
+		conversationId: thread,
 		author:
 			by === "you"
 				? testPerson({ id: storyUser.id, name: storyUser.name })
@@ -82,13 +83,15 @@ const meta = preview.meta({
 	render: () => <StoryApp path={chatPath(growthDesk)} />,
 });
 
-/** A bot's task beside the sidebar, headed by the bot's name, with no Mark done in its header. */
+/** A bot's thread beside the sidebar, headed by its title after its bot, with Mark done in its header. */
 export const Conversation = meta.story({
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(await within(log).findByText(/Drafted both/)).toBeInTheDocument();
-		await expect(canvas.getByRole("heading", { name: growthDesk.name, level: 1 })).toBeVisible();
-		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
+		await expect(
+			await canvas.findByRole("heading", { name: `Working with ${growthDesk.name}`, level: 1 }),
+		).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Mark done" })).toBeVisible();
 	},
 });
 
@@ -97,7 +100,7 @@ function expiredConnection(n: number, name: string, url: string): TestConnection
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000007${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		botId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: "0199a3a0-0000-7000-8000-00000000b071",
 		name,
 		handle: name.toLowerCase(),
 		url,
@@ -162,7 +165,7 @@ export const SignInsExpired = meta.story({
 		await expect(await canvas.findByText("3 connections' sign-ins expired.")).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Open connections" })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/settings/channels/${revenue.slug}/connections`,
+			`/${storyWorkspace.slug}/settings/projects/${revenue.slug}/connections`,
 		);
 	},
 });
@@ -195,10 +198,10 @@ export const SignInExpiredForSomeoneWhoCannotSignIn = meta.story({
 			...connectionHandlers([expiredLinear]),
 			...appHandlers({
 				messages: { [growthDesk.id]: conversation },
-				channels: storyChannels.map((channel) =>
-					channel.id === revenue.id
-						? { ...channel, permissions: { ...channel.permissions, manageConnections: false } }
-						: channel,
+				projects: storyProjects.map((project) =>
+					project.id === revenue.id
+						? { ...project, permissions: { ...project.permissions, manageConnections: false } }
+						: project,
 				),
 			}),
 		);
@@ -227,22 +230,22 @@ export const SignInExpiredOnAPhone = meta.story({
 	},
 });
 
-/** A channel opened from the sidebar opens its chat. */
-export const ChannelOpensTopChat = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
+/** A project opened from the sidebar opens its newest thread. */
+export const ProjectOpensNewestThread = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await canvas.findByRole("log", { name: "Chat messages" });
-		await expect(canvas.getByRole("heading", { name: "General", level: 1 })).toBeInTheDocument();
+		await expect(canvas.getByRole("heading", { name: "Planning", level: 1 })).toBeInTheDocument();
 		const list = canvas.getByRole("group", { name: "Revenue" });
-		await expect(within(list).getByRole("link", { name: /^General/ })).toHaveAttribute(
+		await expect(within(list).getByRole("link", { name: /^Planning/ })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
 	},
 });
 
-/** The channel's people, writing to each other: a chat with no bot in it, addressed to the channel. */
-const channelConversation: Message[] = [
+/** The project's people, writing to each other: a thread with no bot in it, addressed to the project. */
+const projectThread: Message[] = [
 	{
 		...said(
 			"21",
@@ -250,37 +253,37 @@ const channelConversation: Message[] = [
 			"Northwind signed. Thanks for the push, everyone.",
 			"2026-09-18T06:12:00.000Z",
 		),
-		conversationId: storyChannelConversationFor(revenue).id,
+		conversationId: storyProjectThreadFor(revenue).id,
 	},
 	{
 		...said("22", "you", "Drinks on Friday?", "2026-09-18T06:13:00.000Z"),
-		conversationId: storyChannelConversationFor(revenue).id,
+		conversationId: storyProjectThreadFor(revenue).id,
 		author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Jay Young" }),
 	},
 ];
 
 /**
- * A channel's conversation: everyone in the channel, no bot, and a composer addressed to the
- * channel; its Details hold who is in it and its files.
+ * A project's thread: everyone in the project, no bot, and a composer addressed to the
+ * project; its Details hold who is in it and its files.
  */
-export const ChannelConversation = meta.story({
+export const ProjectThread = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...appHandlers({ channelConversationMessages: { [revenue.id]: channelConversation } }));
+		msw.use(...appHandlers({ projectThreadMessages: { [revenue.id]: projectThread } }));
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(await within(log).findByText(/Drinks on Friday/)).toBeInTheDocument();
-		await expect(canvas.getByRole("heading", { name: "General", level: 1 })).toBeInTheDocument();
-		await expect(canvas.getByRole("textbox", { name: "Message General" })).toBeInTheDocument();
+		await expect(canvas.getByRole("heading", { name: "Planning", level: 1 })).toBeInTheDocument();
+		await expect(canvas.getByRole("textbox", { name: "Message Planning" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Details" })).toBeInTheDocument();
 	},
 });
 
-/** An automation's result, posted by its bot in the channel's conversation. */
+/** An automation's result, posted by its bot in the project's thread. */
 const automationResult: Message = {
 	...said("23", "bot", "Six of the overnight leads replied.", "2026-09-18T06:14:00.000Z"),
-	conversationId: storyChannelConversationFor(revenue).id,
+	conversationId: storyProjectThreadFor(revenue).id,
 	automationResultOf: {
 		runId: "0199a3a0-0000-7000-8000-0000000005e1",
 		conversationId: "0199a3a0-0000-7000-8000-0000000005e2",
@@ -289,16 +292,16 @@ const automationResult: Message = {
 	},
 };
 
-/** An automation's result in the channel's conversation says which automation it is from. */
-export const ChannelConversationAutomationResult = meta.story({
+/** An automation's result in the project's thread says which automation it is from. */
+export const ProjectThreadAutomationResult = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			...appHandlers({
-				channelConversationMessages: { [revenue.id]: [...channelConversation, automationResult] },
+				projectThreadMessages: { [revenue.id]: [...projectThread, automationResult] },
 			}),
 		);
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		const result = (await within(log).findByText(/overnight leads replied/)).closest("article");
@@ -309,13 +312,13 @@ export const ChannelConversationAutomationResult = meta.story({
 	},
 });
 
-/** A channel's conversation before anyone has written in it opens on the channel: who is in it, and what it is for. */
-export const ChannelConversationEmpty = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
+/** A project's thread before anyone has written in it opens on the project: who is in it, and what it is for. */
+export const ProjectThreadEmpty = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(
-			await within(log).findByRole("heading", { name: "General", level: 2 }),
+			await within(log).findByRole("heading", { name: "Planning", level: 2 }),
 		).toBeVisible();
 		await expect(within(log).getByText(/This is the start of/)).toBeVisible();
 	},
@@ -340,7 +343,7 @@ function failingAutomationHandlers() {
 		},
 		automation: {
 			id: failingAutomation.id,
-			botId: growthDesk.id,
+			projectId: growthDesk.defaultProjectId,
 			state: "paused" as const,
 			failed: true,
 			pausedAfterFailures: true,
@@ -351,7 +354,7 @@ function failingAutomationHandlers() {
 		id,
 		conversationId: id,
 		automationName: "Overnight outbound",
-		triggerKind: "schedule",
+		triggerKind: "routine",
 		state: "failed",
 		error: "Gmail refused the connection: the token has expired.",
 		report: null,
@@ -378,7 +381,7 @@ function failingAutomationHandlers() {
 }
 
 const failingAutomationFeed = () => (
-	<StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/${failingAutomation.feed}`} />
+	<StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}/${failingAutomation.feed}`} />
 );
 
 /**
@@ -411,25 +414,24 @@ export const FailingAutomation = meta.story({
 });
 
 const pricingChat = {
-	...storyChannelConversationFor(revenue),
+	...storyProjectThreadFor(revenue),
 	id: "0199a3a0-0000-7000-8000-00000000c9f1",
 	title: "Pricing",
-	main: false,
 };
 
 /**
- * A channel's other chat goes by its own name, listed under its first, and offers
- * whoever runs the channel a way to rename or archive it.
+ * A project's thread goes by its own name, listed with the project's other
+ * threads, and offers whoever runs the project a way to rename or archive it.
  */
 export const NamedChat = meta.story({
 	beforeEach({ msw }) {
-		const details = storyChannelConversationDetails(revenue, storyBots);
+		const details = storyProjectThreadDetails(revenue, storyBots);
 		msw.use(
 			http.get(`${API}/workspaces/:workspace/chats`, () =>
 				HttpResponse.json({
 					chats: [
-						{ conversation: storyChannelConversationFor(revenue), unreadMessages: 0 },
-						{ conversation: pricingChat, unreadMessages: 0 },
+						storyListedThread(storyProjectThreadFor(revenue)),
+						storyListedThread(pricingChat),
 					],
 				}),
 			),
@@ -451,7 +453,7 @@ export const NamedChat = meta.story({
 		);
 	},
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}/${pricingChat.id}`} />
+		<StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}/${pricingChat.id}`} />
 	),
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Pricing", level: 1 })).toBeVisible();
@@ -467,13 +469,17 @@ export const NamedChat = meta.story({
 	},
 });
 
-/** On a phone the channel's conversation takes the screen, with Back to the channel's list. */
-export const ChannelConversationOnAPhone = meta.story({
+/** On a phone the project's thread takes the screen, with Back to the project's list. */
+export const ProjectThreadOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	beforeEach({ msw }) {
-		msw.use(...appHandlers({ channelConversationMessages: { [revenue.id]: channelConversation } }));
+		msw.use(...appHandlers({ projectThreadMessages: { [revenue.id]: projectThread } }));
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
+	render: () => (
+		<StoryApp
+			path={`/${storyWorkspace.slug}/projects/${revenue.slug}/${storyProjectThreadFor(revenue).id}`}
+		/>
+	),
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("link", { name: `Back to ${revenue.name}` }),
@@ -481,17 +487,20 @@ export const ChannelConversationOnAPhone = meta.story({
 	},
 });
 
-/** On a phone the sidebar is the page, so a channel stays open on it rather than on a chat. */
-export const ChannelOnAPhone = meta.story({
+/** On a phone a project opens on its threads to pick from, rather than on one of them. */
+export const ProjectOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/channels/${revenue.slug}`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: growthDesk.name })).toBeVisible();
+		await expect(
+			await canvas.findByRole("heading", { name: revenue.name, level: 1 }),
+		).toBeVisible();
+		await expect(await canvas.findByRole("link", { name: /^Planning/ })).toBeVisible();
 		await expect(canvas.queryByRole("log", { name: "Chat messages" })).toBeNull();
 	},
 });
 
-/** On a phone: the task alone, with Back to the bot it is with. */
+/** On a phone: the thread alone, with Back to the bot it is with. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
@@ -783,13 +792,13 @@ const collaboration: ConversationDetails = {
 	conversation: {
 		id: collaborationId,
 		workspaceId: growthDesk.workspaceId,
-		channelId: null,
+		projectId: null,
 		botId: linearHandler.id,
-		rootConversationId: storyTaskFor(growthDesk).id,
+		rootConversationId: storyThreadFor(growthDesk).id,
 		kind: "collaboration",
 		title: "Check Sentry and open an issue if nothing is tracked",
 		status: "done",
-		parentConversationId: storyTaskFor(growthDesk).id,
+		parentConversationId: storyThreadFor(growthDesk).id,
 		startedById: storyUser.id,
 		doneAt: null,
 		createdAt: "2026-09-18T06:03:00.000Z",
@@ -798,7 +807,7 @@ const collaboration: ConversationDetails = {
 	capabilities: { approveToolCalls: true },
 	automationRun: null,
 	participants: [asked, asker],
-	channelBots: [asker, asked],
+	projectBots: [asker, asked],
 	members: [],
 	olderMessagesCursor: null,
 	queuedSince: null,
@@ -957,7 +966,7 @@ export const ComputerInUseOnAPhone = meta.story({
 
 const pricing = {
 	id: "0199a3a0-0000-7000-8000-0000000005f1",
-	channelId: revenue.id,
+	projectId: revenue.id,
 	kind: "document",
 	title: "Competitor pricing",
 	version: 1,
@@ -1003,7 +1012,7 @@ const madePricing: Message = {
 };
 
 const fileHandlers = () => {
-	const files = `${import.meta.env.VITE_API_URL}/channels/:channelId/files/:fileId`;
+	const files = `${import.meta.env.VITE_API_URL}/projects/:projectId/files/:fileId`;
 	const shown = {
 		...pricing,
 		content: pricingContent,

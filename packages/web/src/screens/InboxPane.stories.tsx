@@ -12,19 +12,19 @@ import {
 	appHandlers,
 	StoryApp,
 	storyChatDetails,
-	storyTaskFor,
+	storyThreadFor,
 	storyWorkspace,
 } from "@/story-app.tsx";
 
 /*
  * What Inbox opens beside its list: a message in its chat, jumped to and
  * pointed out, or an automation run as a page of its own. Neither is the chat's
- * own page, so there are no Details, and Open task goes there.
+ * own page, so there are no Details, and Open thread goes there.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
 
-const chat = storyTaskFor(growthDesk);
+const chat = storyThreadFor(growthDesk);
 const bot = {
 	kind: "bot" as const,
 	id: growthDesk.id,
@@ -71,7 +71,7 @@ const runEntry: ChatHistoryEntry = {
 		runId: EXECUTION,
 		automationId: AUTOMATION,
 		automationName: "Overnight outbound",
-		triggerKind: "schedule",
+		triggerKind: "routine",
 		triggeredAt: "2026-09-18T06:00:00.000Z",
 	},
 	latestActivityAt: "2026-09-18T06:02:00.000Z",
@@ -95,7 +95,7 @@ const run: ConversationDetails = {
 		automationName: "Overnight outbound",
 		instructions: "Queue the overnight leads and draft replies to anyone who answered.",
 		trigger: {
-			kind: "schedule",
+			kind: "routine",
 			scheduledAt: "2026-09-18T06:00:00.000Z",
 			acceptedAt: "2026-09-18T06:00:00.000Z",
 		},
@@ -141,12 +141,12 @@ const opened = (search: string) =>
 export const MessageJumpedTo = meta.story({
 	render: () => <StoryApp path={opened(`message=${mention.id}`)} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: "Open task" })).toBeInTheDocument();
+		await expect(await canvas.findByRole("link", { name: "Open thread" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
 	},
 });
 
-/** An automation run opened as a page of its own, with Back to Inbox on a phone and Open task. */
+/** An automation run opened as a page of its own, with Back to Inbox on a phone and Open thread. */
 export const RunPage = meta.story({
 	render: () => <StoryApp path={opened(`itemPage=${RUN}`)} />,
 	play: async ({ canvas }) => {
@@ -154,6 +154,6 @@ export const RunPage = meta.story({
 			await canvas.findByRole("heading", { name: "Overnight outbound" }),
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("log", { name: "Chat messages" })).toBeNull();
-		await expect(canvas.getByRole("link", { name: "Open task" })).toBeInTheDocument();
+		await expect(canvas.getByRole("link", { name: "Open thread" })).toBeInTheDocument();
 	},
 });

@@ -1,7 +1,7 @@
 import type { ToolCallPart } from "@sugabots/contracts";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
-import { refreshFilesAfter } from "./files.ts";
+import { fileKey, filesKey, refreshFilesAfter } from "./files.ts";
 
 const call = (tool: string, status: ToolCallPart["status"]): ToolCallPart => ({
 	type: "tool_call",
@@ -17,11 +17,11 @@ const call = (tool: string, status: ToolCallPart["status"]): ToolCallPart => ({
 	finishedAt: null,
 });
 
-/** A cache holding a channel's list and one version of a file, both fresh. */
+/** A cache holding a project's list and one version of a file, both fresh. */
 function cacheWithFiles() {
 	const queries = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-	queries.setQueryData(["files", "channel"], []);
-	queries.setQueryData(["files", "channel", "file", 2], {});
+	queries.setQueryData(filesKey({ kind: "project", projectId: "a-project" }), []);
+	queries.setQueryData(fileKey("a-file", 2), {});
 	const stale = () =>
 		queries
 			.getQueryCache()

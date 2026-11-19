@@ -1,4 +1,4 @@
--- Every bot starts with a new computer, so the pods' computers are destroyed at
+-- Every bot starts with a new computer, so each `pod`'s computer is destroyed at
 -- their providers first, by `destroy-pod-computers` run against this database
 -- before upgrading. A `sandbox` row is the only way anything finds a machine at
 -- its provider, so this stops while any is left rather than lose them.
@@ -25,12 +25,13 @@ ALTER TABLE "connection" ADD COLUMN "agent_id" uuid;--> statement-breakpoint
 ALTER TABLE "sandbox" ADD COLUMN "agent_id" uuid;--> statement-breakpoint
 ALTER TABLE "sandbox_agent_allowed_host" ADD CONSTRAINT "sandbox_agent_allowed_host_added_by_id_user_id_fkey" FOREIGN KEY ("added_by_id") REFERENCES "user"("id") ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE "sandbox_agent_allowed_host" ADD CONSTRAINT "sandbox_agent_allowed_host_agent_workspace_fkey" FOREIGN KEY ("agent_id","workspace_id") REFERENCES "agent"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
--- Each connection goes to one bot of its pod, which keeps its id, so tool calls
--- and GitHub triggers still name it: the oldest bot whose automations trigger
--- on it, or else the pod's oldest bot. Never a Personal Assistant: Sugabots
--- manages it, so it has no automations for a GitHub app to start, and a pod's
--- other bots are the ones whose calls name the connection. A pod whose only bot
--- is its Personal Assistant keeps no original; the assistant gets a copy below.
+-- Each connection goes to one bot of its `pod`, which keeps its id, so tool
+-- calls and GitHub triggers still name it: the oldest bot whose automations
+-- trigger on it, or else the `pod`'s oldest bot. Never a Personal Assistant:
+-- Sugabots manages it, so it has no automations for a GitHub app to start, and
+-- the other bots are the ones whose calls name the connection. A `pod` whose
+-- only bot is its Personal Assistant keeps no original; the assistant gets a
+-- copy below.
 WITH "keeper" AS (
 	SELECT DISTINCT ON ("connection"."id") "connection"."id" AS "connection_id", "agent"."id" AS "agent_id"
 	FROM "connection"
@@ -49,7 +50,7 @@ WITH "keeper" AS (
 UPDATE "connection" SET "agent_id" = "keeper"."agent_id"
 FROM "keeper" WHERE "connection"."id" = "keeper"."connection_id";--> statement-breakpoint
 -- A GitHub connection is its own GitHub App, so it went to that one bot. The
--- pod's other bots' automations that it started can't be started by it any
+-- other bots' automations that it started can't be started by it any
 -- more, so they're paused, showing as paused rather than silently never running,
 -- until their bot has its own GitHub app and someone points the trigger at it.
 UPDATE "routine" SET "state" = 'paused'
@@ -60,12 +61,12 @@ WHERE "state" = 'enabled' AND EXISTS (
 		AND "routine_trigger"."kind" = 'github'
 		AND "connection"."agent_id" IS DISTINCT FROM "routine"."agent_id"
 );--> statement-breakpoint
--- A paused automation's schedules have no next time.
+-- A paused automation's routines have no next time.
 UPDATE "routine_trigger" SET "next_scheduled_at" = NULL
 FROM "routine"
 WHERE "routine"."id" = "routine_trigger"."routine_id" AND "routine"."state" = 'paused'
 	AND "routine_trigger"."next_scheduled_at" IS NOT NULL;--> statement-breakpoint
--- The pod's other bots get copies of its MCP and HTTP connections. A GitHub
+-- The `pod`'s other bots get copies of its MCP and HTTP connections. A GitHub
 -- connection is its own GitHub App, which can't be copied: they set up their own.
 INSERT INTO "connection" (
 	"workspace_id", "pod_id", "agent_id", "name", "handle", "kind", "url", "settings",
@@ -140,7 +141,7 @@ WHERE "id" IN (SELECT "id" FROM "stranded");--> statement-breakpoint
 -- Copied OAuth tokens would refresh each other away, so every OAuth connection
 -- signs in again, the kept one too.
 UPDATE "connection" SET "oauth_encrypted" = NULL, "oauth_state" = NULL WHERE "auth_kind" = 'oauth';--> statement-breakpoint
--- A pod with no bots leaves its connections nobody to belong to.
+-- A `pod` with no bots leaves its connections nobody to belong to.
 DELETE FROM "connection" WHERE "agent_id" IS NULL;--> statement-breakpoint
 INSERT INTO "sandbox_agent_allowed_host" ("workspace_id", "agent_id", "host", "added_by_id", "created_at")
 SELECT "host"."workspace_id", "agent"."id", "host"."host", "host"."added_by_id", "host"."created_at"

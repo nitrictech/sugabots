@@ -28,8 +28,7 @@ const ID = "0199a3a0-0000-7000-8000-000000000001";
 
 describe("conversation contracts", () => {
 	it.each([
-		"task",
-		"channel_conversation",
+		"project_thread",
 		"direct_message",
 		"collaboration",
 		"run",
@@ -61,7 +60,7 @@ describe("conversation contracts", () => {
 		const conversation = {
 			id: ID,
 			workspaceId: ID,
-			channelId: ID,
+			projectId: ID,
 			botId: ID,
 			title: "Release notes",
 			status: "done",
@@ -106,7 +105,7 @@ describe("conversation contracts", () => {
 		const conversation = {
 			id: ID,
 			workspaceId: ID,
-			channelId: ID,
+			projectId: ID,
 			botId: ID,
 			title: "Release notes",
 			status: "running",

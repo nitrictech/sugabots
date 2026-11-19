@@ -33,8 +33,13 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { bot, channel, user, workspace } from "../workspaces/sql.ts";
+import { bot, project, user, workspace } from "../workspaces/sql.ts";
 
+/**
+ * Work a project's lead bot does on its own, in the project, on its computer
+ * and with its connections, started by its routines and triggers. A bot's own
+ * automations are its default project's.
+ */
 export const automation = pgTable(
 	"automation",
 	{
@@ -42,7 +47,7 @@ export const automation = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		botId: uuid("bot_id").notNull(),
+		projectId: uuid("project_id").notNull(),
 		name: text("name").notNull(),
 		instructions: text("instructions").notNull(),
 		state: text("state").$type<AutomationState>().notNull().default("enabled"),
@@ -52,39 +57,35 @@ export const automation = pgTable(
 		 */
 		pausedAfterFailuresAt: timestamp("paused_after_failures_at", { withTimezone: true }),
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
-		/** Set when the automation's own bot made it, at `createdById`'s request. */
-		createdByBotId: uuid("created_by_bot_id"),
+		/** Set when a bot working in the project made it, at `createdById`'s request. */
+		createdByBotId: uuid("created_by_bot_id").references(() => bot.id, { onDelete: "set null" }),
 		deletedAt: timestamp("deleted_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		foreignKey({
-			columns: [table.botId, table.workspaceId],
-			foreignColumns: [bot.id, bot.workspaceId],
-			name: "automation_bot_workspace_fkey",
+			columns: [table.projectId, table.workspaceId],
+			foreignColumns: [project.id, project.workspaceId],
+			name: "automation_project_workspace_fkey",
 		}).onDelete("cascade"),
 		check("automation_state_valid", sql`${table.state} in ('enabled', 'paused')`),
 		check(
 			"automation_paused_after_failures_valid",
 			sql`${table.pausedAfterFailuresAt} is null or ${table.state} = 'paused'`,
 		),
-		check(
-			"automation_created_by_bot_valid",
-			sql`${table.createdByBotId} is null or ${table.createdByBotId} = ${table.botId}`,
-		),
-		uniqueIndex("automation_bot_name_idx")
-			.on(table.botId, table.name)
+		uniqueIndex("automation_project_name_idx")
+			.on(table.projectId, table.name)
 			.where(sql`${table.deletedAt} is null`),
 		uniqueIndex("automation_id_workspace_id_idx").on(table.id, table.workspaceId),
 	],
 );
 
 /**
- * One of the things that start an automation; an automation may have several, of any
+ * A routine or trigger that starts an automation; an automation may have several, of any
  * kinds, or none and run only when someone runs it. `settings` holds what
  * each kind is, with the kind; a webhook keeps its secret in its own column,
- * and a schedule its next time, while its automation is enabled.
+ * and a routine its next time, while its automation is enabled.
  */
 export const automationTrigger = pgTable(
 	"automation_trigger",
@@ -105,7 +106,7 @@ export const automationTrigger = pgTable(
 		 * kept sealed. It still admits callers until the secret is replaced.
 		 */
 		secretDigest: text("secret_digest"),
-		/** When a schedule next runs its automation; null while the automation is paused. */
+		/** When a routine next runs its automation; null while the automation is paused. */
 		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
@@ -126,8 +127,8 @@ export const automationTrigger = pgTable(
 			sql`${table.secretDigest} is null or ${table.settings}->'auth'->>'kind' = 'bearer'`,
 		),
 		check(
-			"automation_trigger_schedule_valid",
-			sql`${table.kind} = 'schedule' or ${table.nextScheduledAt} is null`,
+			"automation_trigger_routine_valid",
+			sql`${table.kind} = 'routine' or ${table.nextScheduledAt} is null`,
 		),
 		index("automation_trigger_automation_idx").on(table.automationId, table.createdAt),
 		index("automation_trigger_due_idx")
@@ -137,22 +138,21 @@ export const automationTrigger = pgTable(
 );
 
 /**
- * The kinds of conversation people open and post in: a task with a bot, a
- * channel's main chat or thread, an automation's feed, and a direct message
- * between people. The others are opened from one of these.
+ * The kinds of conversation people open and post in: a project's thread (a
+ * bot's threads being its default project's), an automation's feed, and a
+ * direct message between people. The others are opened from one of these.
  */
 export const OPENABLE_CONVERSATION_KINDS = [
-	"task",
-	"channel_conversation",
+	"project_thread",
 	"automation_feed",
 	"direct_message",
 ] as const satisfies readonly ConversationKind[];
 
 /**
- * A main chat, thread, task, direct message, collaboration, automation run,
- * automation feed or system bot's conversation: what every kind has. What
+ * A project's thread, a direct message, a collaboration, an automation run or
+ * feed, or a system bot's conversation: what every kind has. What
  * makes each kind what it is lives in the kind's own table, keyed by the same
- * id (`task`, `channel_conversation`, `direct_message`, `collaboration`,
+ * id (`project_thread`, `direct_message`, `collaboration`,
  * `run`, `automation_feed`, `system_conversation`), and `placedConversation`
  * reads them back together.
  *
@@ -161,7 +161,7 @@ export const OPENABLE_CONVERSATION_KINDS = [
  * `conversation_has_kind_row` trigger refuses, at commit, a conversation left
  * without one, and deleting a kind row deletes its conversation.
  *
- * Deleting a conversation, by any route including its workspace's, channel's
+ * Deleting a conversation, by any route including its workspace's, project's
  * or bot's cascade, queues its blobs for deletion: see `blob_deletion`.
  */
 export const conversation = pgTable(
@@ -179,7 +179,7 @@ export const conversation = pgTable(
 	(table) => [
 		check(
 			"conversation_kind_valid",
-			sql`${table.kind} in ('task', 'channel_conversation', 'direct_message', 'collaboration', 'run', 'automation_feed', 'system')`,
+			sql`${table.kind} in ('project_thread', 'direct_message', 'collaboration', 'run', 'automation_feed', 'system')`,
 		),
 		// What each kind table points at, so a kind row only names a conversation of its kind.
 		uniqueIndex("conversation_id_kind_idx").on(table.id, table.kind),
@@ -207,66 +207,37 @@ const conversationOfKind = (
 		name,
 	}).onDelete("cascade");
 
-/** A conversation with one bot about one piece of work, which can be marked done. */
-export const task = pgTable(
-	"task",
+/**
+ * One of a project's threads: a project is made of its threads and has no
+ * chat of its own. A bot's threads are its default project's.
+ */
+export const projectThread = pgTable(
+	"project_thread",
 	{
 		conversationId: uuid("conversation_id").primaryKey(),
-		kind: kindOf("task"),
+		kind: kindOf("project_thread"),
 		workspaceId: uuid("workspace_id").notNull(),
-		botId: uuid("bot_id").notNull(),
-		startedById: uuid("started_by_id").references(() => user.id, { onDelete: "restrict" }),
-		/** When somebody marked the task done, until it is reopened. */
-		doneAt: timestamp("done_at", { withTimezone: true }),
-	},
-	(table) => [
-		conversationOfKind(table, "task_conversation_fkey"),
-		foreignKey({
-			columns: [table.botId, table.workspaceId],
-			foreignColumns: [bot.id, bot.workspaceId],
-			name: "task_bot_workspace_fkey",
-		}).onDelete("cascade"),
-		index("task_bot_idx").on(table.botId),
-	],
-);
-
-/** A channel's main chat, or one of its threads. */
-export const channelConversation = pgTable(
-	"channel_conversation",
-	{
-		conversationId: uuid("conversation_id").primaryKey(),
-		kind: kindOf("channel_conversation"),
-		workspaceId: uuid("workspace_id").notNull(),
-		channelId: uuid("channel_id").notNull(),
-		/**
-		 * Whether it is the channel's main chat, named for the channel, which
-		 * every channel has once opened and which is never archived.
-		 */
-		main: boolean("main").notNull().default(false),
-		/** When somebody archived the thread, which hides it from the channel's list. */
+		projectId: uuid("project_id").notNull(),
+		/** When somebody archived the thread, which hides it from the project's list. */
 		archivedAt: timestamp("archived_at", { withTimezone: true }),
-		/** Who started it; null on a main chat opened by a bot's work rather than a person. */
+		/** When somebody marked the thread done, until something new is posted in it or it is reopened. */
+		doneAt: timestamp("done_at", { withTimezone: true }),
+		/** Who started it; null on a thread from before every thread was started by a person. */
 		startedById: uuid("started_by_id").references(() => user.id, { onDelete: "restrict" }),
 	},
 	(table) => [
-		conversationOfKind(table, "channel_conversation_conversation_fkey"),
+		conversationOfKind(table, "project_thread_conversation_fkey"),
 		foreignKey({
-			columns: [table.channelId, table.workspaceId],
-			foreignColumns: [channel.id, channel.workspaceId],
-			name: "channel_conversation_channel_workspace_fkey",
+			columns: [table.projectId, table.workspaceId],
+			foreignColumns: [project.id, project.workspaceId],
+			name: "project_thread_project_workspace_fkey",
 		}).onDelete("cascade"),
-		index("channel_conversation_channel_idx").on(table.channelId),
-		check(
-			"channel_conversation_archived_valid",
-			sql`${table.archivedAt} is null or not ${table.main}`,
-		),
-		// One main chat per channel.
-		uniqueIndex("channel_conversation_main_idx").on(table.channelId).where(sql`${table.main}`),
+		index("project_thread_project_idx").on(table.projectId),
 	],
 );
 
 /**
- * A conversation between two or more people, in no channel and with no bots:
+ * A conversation between two or more people, in no project and with no bots:
  * its members alone reach it (see `directMessageMember`).
  */
 export const directMessage = pgTable(
@@ -290,14 +261,16 @@ export const directMessage = pgTable(
 	],
 );
 
-/** An automation's own conversation, where each of its runs posts its result. */
+/**
+ * An automation's own conversation, where each of its runs posts its result.
+ * It is in the automation's project, and its lead bot answers there.
+ */
 export const automationFeed = pgTable(
 	"automation_feed",
 	{
 		conversationId: uuid("conversation_id").primaryKey(),
 		kind: kindOf("automation_feed"),
 		workspaceId: uuid("workspace_id").notNull(),
-		/** The automation, whose bot the feed is with. */
 		automationId: uuid("automation_id").notNull(),
 	},
 	(table) => [
@@ -344,16 +317,22 @@ export const systemConversation = pgTable(
 	],
 );
 
+/**
+ * One time an automation ran, in its own conversation. An automation is
+ * deleted by marking it so, keeping its runs; only deleting its project
+ * deletes it, and its runs with it.
+ */
 export const automationRun = pgTable(
 	"run",
 	{
 		id: primaryKey(),
 		automationId: uuid("automation_id")
 			.notNull()
-			.references(() => automation.id, { onDelete: "restrict" }),
+			.references(() => automation.id, { onDelete: "cascade" }),
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
+		/** The bot that did the run: its project's lead bot when it was started. */
 		botId: uuid("bot_id").notNull(),
 		/** The run's own conversation, where its bot works. */
 		conversationId: uuid("conversation_id").notNull(),
@@ -385,7 +364,7 @@ export const automationRun = pgTable(
 			columns: [table.automationId, table.workspaceId],
 			foreignColumns: [automation.id, automation.workspaceId],
 			name: "run_automation_workspace_fkey",
-		}).onDelete("restrict"),
+		}).onDelete("cascade"),
 		conversationOfKind(table, "run_conversation_fkey"),
 		check(
 			"run_trigger_valid",
@@ -485,6 +464,8 @@ export const conversationParticipant = pgTable(
 
 /**
  * Why a bot was given a turn: a person mentioned it or replied to it, it was the default,
+ * it leads a project whose thread got a message mentioning only people (`optional`: it
+ * may stay silent),
  * it was asked to collaborate, an automation ran, a collaboration it stopped
  * waiting on ended, it opened its setup interview, or a bot started its conversation
  * for a person and briefed it.
@@ -493,8 +474,9 @@ export type TurnReason =
 	| "mention"
 	| "reply"
 	| "default"
+	| "optional"
 	| "collaboration"
-	// An automation ran. Turns and the turn workflow's payload store it, so it keeps its old name.
+	// An automation ran, whatever started it. Turns and the turn workflow's payload store the value, so it stays as it is.
 	| "routine"
 	| "resume"
 	| "interview"
@@ -610,7 +592,11 @@ export const message = pgTable(
 	],
 );
 
-/** One person's emoji reaction to a message. A person adds each emoji at most once. */
+/**
+ * One emoji reaction to a message, by a person or by a bot. Each adds each
+ * emoji at most once. A bot reacts only with 👀, to a message it read on an
+ * optional turn and chose not to answer.
+ */
 export const messageReaction = pgTable(
 	"message_reaction",
 	{
@@ -618,18 +604,19 @@ export const messageReaction = pgTable(
 		messageId: uuid("message_id")
 			.notNull()
 			.references(() => message.id, { onDelete: "cascade" }),
-		userId: uuid("user_id")
-			.notNull()
-			.references(() => user.id, { onDelete: "cascade" }),
+		userId: uuid("user_id").references(() => user.id, { onDelete: "cascade" }),
+		botId: uuid("bot_id").references(() => bot.id, { onDelete: "cascade" }),
 		emoji: text("emoji").notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
-		uniqueIndex("message_reaction_message_user_emoji_idx").on(
-			table.messageId,
-			table.userId,
-			table.emoji,
-		),
+		check("message_reaction_one_reactor", sql`num_nonnulls(${table.userId}, ${table.botId}) = 1`),
+		uniqueIndex("message_reaction_message_user_emoji_idx")
+			.on(table.messageId, table.userId, table.emoji)
+			.where(sql`${table.userId} is not null`),
+		uniqueIndex("message_reaction_message_bot_emoji_idx")
+			.on(table.messageId, table.botId, table.emoji)
+			.where(sql`${table.botId} is not null`),
 	],
 );
 
@@ -778,7 +765,7 @@ export const conversationSummary = pgTable("summary", {
 
 /**
  * What a bot has been doing lately, at a glance: written by the Summariser
- * from the summaries of the bot's newest tasks and automation feeds, each
+ * from the summaries of the bot's newest threads and automation feeds, each
  * time one of them is summarised. People who reach the bot read it on its
  * page, and their Personal Assistant reads it to know what the bot is up to.
  */
@@ -852,16 +839,16 @@ export const placedConversation = pgView("placed_conversation", {
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
 	/**
-	 * The bot it is with: a task's, the collaborator, a run's or a feed's
-	 * automation's bot, or the system bot. Null on a channel's conversation
-	 * and a direct message, which are people's.
+	 * The bot it is with: the bot whose default project a thread, an
+	 * automation's feed or a run is in, the collaborator, or the system bot.
+	 * Null in a project people made and on a direct message.
 	 */
 	botId: uuid("bot_id"),
-	/** On a channel's conversation: its channel. */
-	channelId: uuid("channel_id"),
+	/** The project a thread, an automation's feed or a run is in: the automation's. */
+	projectId: uuid("project_id"),
 	/**
-	 * The conversation people open that it is in: its own id on a task, a
-	 * channel's conversation, a direct message and an automation's feed; the
+	 * The conversation people open that it is in: its own id on a project's
+	 * thread, a direct message and an automation's feed; the
 	 * one it hangs under on a collaboration; the automation's feed on a run.
 	 * Null on a system bot's conversation, which serves one rather than
 	 * belonging to one.
@@ -869,19 +856,18 @@ export const placedConversation = pgView("placed_conversation", {
 	rootConversationId: uuid("root_conversation_id"),
 	/** What it was opened under: the asking conversation of a collaboration, the served one of a system bot's. */
 	parentConversationId: uuid("parent_conversation_id"),
-	/** Who started a task, channel conversation or direct message. */
+	/** Who started a project's thread or a direct message. */
 	startedById: uuid("started_by_id"),
 	systemBotKey: text("system_bot_key").$type<SystemBotKey>(),
 	doneAt: timestamp("done_at", { withTimezone: true }),
 	/** On an automation's feed: the automation. */
 	automationId: uuid("automation_id"),
-	main: boolean("main").notNull(),
 	archivedAt: timestamp("archived_at", { withTimezone: true }),
 	directKey: text("direct_key"),
 }).as(sql`select
 	c.id, c.workspace_id, c.kind, c.title, c.created_at, c.updated_at,
-	coalesce(t.bot_id, co.collaborator_bot_id, r.bot_id, fa.bot_id, sc.bot_id) as bot_id,
-	cc.channel_id,
+	coalesce(p.default_of_bot_id, co.collaborator_bot_id, sc.bot_id) as bot_id,
+	p.id as project_id,
 	case c.kind
 		when 'collaboration' then co.root_conversation_id
 		when 'run' then rf.conversation_id
@@ -889,22 +875,21 @@ export const placedConversation = pgView("placed_conversation", {
 		else c.id
 	end as root_conversation_id,
 	coalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,
-	coalesce(t.started_by_id, cc.started_by_id, dm.started_by_id) as started_by_id,
+	coalesce(cc.started_by_id, dm.started_by_id) as started_by_id,
 	sc.system_bot_key,
-	t.done_at,
+	cc.done_at,
 	f.automation_id,
-	coalesce(cc.main, false) as main,
 	cc.archived_at,
 	dm.direct_key
 from ${conversation} c
-left join ${task} t on t.conversation_id = c.id
-left join ${channelConversation} cc on cc.conversation_id = c.id
+left join ${projectThread} cc on cc.conversation_id = c.id
 left join ${directMessage} dm on dm.conversation_id = c.id
 left join ${collaboration} co on co.conversation_id = c.id
 left join ${automationRun} r on r.conversation_id = c.id
 left join ${automationFeed} rf on rf.automation_id = r.automation_id
 left join ${automationFeed} f on f.conversation_id = c.id
-left join ${automation} fa on fa.id = f.automation_id
+left join ${automation} a on a.id = coalesce(r.automation_id, f.automation_id)
+left join ${project} p on p.id = coalesce(cc.project_id, a.project_id)
 left join ${systemConversation} sc on sc.conversation_id = c.id`);
 
 export type ConversationRow = typeof conversation.$inferSelect;

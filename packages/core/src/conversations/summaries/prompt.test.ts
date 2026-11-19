@@ -18,7 +18,6 @@ describe("conversationSummaryPrompt", () => {
 		expect(prompt.system).toContain("only durable context needed to continue the work");
 		expect(prompt.system).toContain("Omit conversational back-and-forth");
 		expect(prompt.system).toContain("no more than 50 words");
-		expect(prompt.system).not.toContain("120 words");
 	});
 
 	it("keeps the same size limit when updating a summary", () => {

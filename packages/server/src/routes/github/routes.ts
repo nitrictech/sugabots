@@ -17,7 +17,7 @@ const connectionErrors = {
 	GitHubAppNotInstalled: BadRequest,
 	GitHubRequestFailed: BadRequest,
 	NotGitHubConnection: NotFound,
-	BotHasGitHubConnection: Conflict,
+	ProjectHasGitHubConnection: Conflict,
 	RepositoryUnreachable: BadRequest,
 };
 
@@ -27,7 +27,7 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 	(handlers) =>
 		Effect.gen(function* () {
 			// GitHub's callbacks redirect on to GitHub's next page, or back to
-			// `GITHUB_SETUP_RETURN_PATH` under the web app with the bot's ids and,
+			// `GITHUB_SETUP_RETURN_PATH` under the web app with the project's ids and,
 			// when setup stopped, why; the web app turns those into its own page.
 			const { webAppUrl } = yield* Installation.Service;
 			const gitHubApps = yield* GitHubApps.Service;
@@ -38,9 +38,10 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 				}
 				const back = new URL(webAppUrl);
 				back.pathname = `${back.pathname.replace(/\/$/, "")}${GITHUB_SETUP_RETURN_PATH}`;
-				if (outcome.bot) {
-					back.searchParams.set("workspace", outcome.bot.workspaceId);
-					back.searchParams.set("bot", outcome.bot.botId);
+				if (outcome.at) {
+					back.searchParams.set("workspace", outcome.at.workspaceId);
+					back.searchParams.set("project", outcome.at.projectId);
+					if (outcome.at.botId) back.searchParams.set("bot", outcome.at.botId);
 				}
 				if (outcome.kind === "done") back.searchParams.set("connection", outcome.connectionId);
 				if (outcome.kind === "failed") back.searchParams.set("github_error", outcome.failure);
@@ -53,7 +54,7 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 			return handlers
 				.handle("start", ({ params, payload }) =>
 					gitHubApps
-						.start({ botId: params.botId, organization: payload.organization })
+						.start({ projectId: params.projectId, organization: payload.organization })
 						.pipe(asSessionUser, asHttpError(connectionErrors)),
 				)
 				.handle("installUrl", ({ params }) =>

@@ -1,4 +1,4 @@
-import { type CollaborationPart, FILE_WRITING_TOOLS, START_TASK_TOOL } from "@sugabots/contracts";
+import { type CollaborationPart, FILE_WRITING_TOOLS, START_THREAD_TOOL } from "@sugabots/contracts";
 import { docPages } from "@sugabots/docs";
 import { userText } from "@sugabots/errors";
 import type { Tool, ToolSet } from "ai";
@@ -11,7 +11,7 @@ import { botSettingsPath } from "../../installation/web-app-paths.ts";
 import type { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import type { AssistantGuide } from "../assistant/assistant-guide.ts";
 import type { BotAutomations } from "../automations/bot-automations.ts";
-import type { BotTasks } from "../chats/bot-tasks.ts";
+import type { BotThreads } from "../chats/bot-threads.ts";
 import { SEARCH_HISTORY_TOOL } from "../repository/message-text.ts";
 import { WORKSPACE_GUIDE_TOOL, workspaceGuideTool } from "../tools/assistant/tool.ts";
 import {
@@ -39,7 +39,7 @@ import {
 import { READ_DOCS_TOOL, readDocsTool } from "../tools/read-docs/tool.ts";
 import { SAVE_INSTRUCTIONS_TOOL, saveInstructionsTool } from "../tools/save-instructions/tool.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
-import { startTaskTool } from "../tools/start-task/tool.ts";
+import { startThreadTool } from "../tools/start-thread/tool.ts";
 import { buildCatalog, type CatalogEntry } from "../tools/tool-search/catalog.ts";
 import { CALL_TOOL, callToolTool, TOOL_SEARCH, toolSearchTool } from "../tools/tool-search/tool.ts";
 import { WORKSPACE_ACCESS_TOOL, workspaceAccessTool } from "../tools/workspace-access/tool.ts";
@@ -56,8 +56,11 @@ import type { ToolCallRepository } from "./tool-calls/repository.ts";
  *
  * Four kinds. The collaboration tool `collaborate` reaches other bots
  * and leave their own records. The built-in tools do work for the bot, the
- * computer tools work in the bot's computer, and the connection tools do work
- * at a server the workspace configured; every call to any of them is recorded
+ * computer tools work in the computer of the project the turn works in (see
+ * `TurnContext.projectId`), and the connection tools do work at a server one
+ * of the turn's connections reaches: the project's and the bot's own, the
+ * project's winning when both have a connection with the same handle. Every
+ * call to any of them is recorded
  * as a `tool_call` part of the reply (`calls/`).
  * Connection tools, and the built-in tools a bot needs only now and then,
  * such as `read_docs` and `workspace_access`, are in the catalog: reached
@@ -91,10 +94,10 @@ interface ToolDependencies {
 	bots: Pick<BotAdministration.Interface, "update">;
 	/** Where the web app is served, for links to its pages. */
 	webAppUrl: string;
-	/** The bot's own automations, read and changed for the person it is answering. */
+	/** The automations of the project the turn works in, read and changed for the person it is answering. */
 	automations: BotAutomations.Interface;
-	/** Tasks the bot starts, and marks done, for the person it is answering. */
-	tasks: Pick<BotTasks.Interface, "start" | "markDone">;
+	/** Threads the bot starts, and marks done, for the person it is answering. */
+	threads: Pick<BotThreads.Interface, "start" | "markDone">;
 	/** For a tool that watches for something else to happen. */
 	bus: Pick<EventBus.Interface, "subscribe">;
 	/** Runs a service's Effect from inside the SDK's promise-shaped tool call. */
@@ -229,7 +232,6 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 	}
 	const writing = fileTools({
 		by: {
-			workspaceId: prepared.context.conversation.workspaceId,
 			botId: prepared.context.bot.id,
 			conversationId: prepared.context.conversation.id,
 		},
@@ -268,10 +270,11 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		recording,
 	);
 	// Sugabots manages a Personal Assistant, which has no automations of its own.
-	if (prepared.context.bot.assistantOf === null) {
+	const { projectId } = prepared.context;
+	if (prepared.context.bot.assistantOf === null && projectId !== null) {
 		const automationsOff = prepared.context.bot.disabledTools.includes(AUTOMATIONS_KEY);
 		const ownAutomations = automationTools({
-			bot: { botId: prepared.context.bot.id, askedBy: prepared.context.askedBy },
+			bot: { botId: prepared.context.bot.id, projectId, askedBy: prepared.context.askedBy },
 			timeZone: prepared.context.workspaceTimeZone,
 			automations: deps.automations,
 			run: deps.run,
@@ -285,24 +288,24 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 					});
 		}
 	}
-	const askedBot: BotTasks.Bot = {
+	const askedBot: BotThreads.Bot = {
 		botId: prepared.context.bot.id,
 		workspaceId: prepared.context.conversation.workspaceId,
 		askedBy: prepared.context.askedBy,
 	};
 	// Offered only when a person asked: a turn answering a bot, a brief or an
-	// automation could only be refused, and a briefed bot starting tasks of its
+	// automation could only be refused, and a briefed bot starting threads of its
 	// own would let bots brief each other without end. A Personal Assistant's
 	// is among its requests, which wait for its person to allow them.
 	if (prepared.context.askedBy && !deps.assistant) {
-		tools[START_TASK_TOOL] = recorded(
-			START_TASK_TOOL,
-			startTaskTool({ bot: askedBot, tasks: deps.tasks, run: deps.run }),
+		tools[START_THREAD_TOOL] = recorded(
+			START_THREAD_TOOL,
+			startThreadTool({ bot: askedBot, threads: deps.threads, run: deps.run }),
 			{ ...recording, mutating: true },
 		);
 	}
-	// Only a task is ever done; a channel's conversation or an automation's feed is not.
-	if (prepared.context.conversation.kind === "task") {
+	// Only a thread is ever done; an automation's feed is not.
+	if (prepared.context.conversation.kind === "project_thread") {
 		tools[MARK_DONE_TOOL] = recorded(
 			MARK_DONE_TOOL,
 			markDoneTool({
@@ -311,7 +314,7 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 					askedBy: prepared.context.askedBy ?? prepared.context.startedFor,
 				},
 				conversationId: prepared.context.conversation.id,
-				tasks: deps.tasks,
+				threads: deps.threads,
 				run: deps.run,
 			}),
 			{ ...recording, mutating: true },

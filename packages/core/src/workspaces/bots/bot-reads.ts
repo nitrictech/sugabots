@@ -5,7 +5,7 @@ import { reachesBotFor } from "../../authorization/access.ts";
 import { type Actor, managesEveryBot } from "../../authorization/permissions.ts";
 import { query } from "../../database/database.ts";
 import { bot, pinnedBot } from "../../database/schema.ts";
-import { personFacingBotRow, toBot } from "./bot.ts";
+import { defaultProjectIdOf, personFacingBotRow, pinnedBy, toBot } from "./bot.ts";
 import { SYSTEM_BOTS } from "./system-bots.ts";
 
 /**
@@ -16,9 +16,12 @@ import { SYSTEM_BOTS } from "./system-bots.ts";
 export const visiblePersonFacingBots = (workspaceId: string, actor: Actor) =>
 	query((db) =>
 		db
-			.select({ bot, pinnedAt: pinnedBot.createdAt })
+			.select({
+				bot,
+				pinned: pinnedBy(bot.id, actor.userId),
+				defaultProjectId: defaultProjectIdOf(bot.id),
+			})
 			.from(bot)
-			.leftJoin(pinnedBot, and(eq(pinnedBot.botId, bot.id), eq(pinnedBot.userId, actor.userId)))
 			.where(
 				and(
 					eq(bot.workspaceId, workspaceId),
@@ -33,10 +36,27 @@ export const visiblePersonFacingBots = (workspaceId: string, actor: Actor) =>
 		Effect.map((rows): Bot[] =>
 			rows.flatMap((row) => {
 				const bot = personFacingBotRow(row.bot);
-				return bot ? [toBot(bot, { actor, pinned: row.pinnedAt !== null })] : [];
+				return bot
+					? [
+							toBot(
+								{ ...bot, defaultProjectId: row.defaultProjectId },
+								{ actor, pinned: row.pinned },
+							),
+						]
+					: [];
 			}),
 		),
 	);
+
+/** Whether the person `userId` pinned the bot `botId`. */
+export const isPinnedBy = (botId: string, userId: string) =>
+	query((db) =>
+		db
+			.select({ botId: pinnedBot.botId })
+			.from(pinnedBot)
+			.where(and(eq(pinnedBot.botId, botId), eq(pinnedBot.userId, userId)))
+			.limit(1),
+	).pipe(Effect.map((rows) => rows.length > 0));
 
 /**
  * Every system bot the product defines, with the model the workspace chose

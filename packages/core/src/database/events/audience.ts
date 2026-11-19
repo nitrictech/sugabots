@@ -5,7 +5,7 @@ import type { StreamEvent } from "@sugabots/contracts";
 /**
  * Who may hear an event on a workspace's stream. Every member of the
  * workspace listens there, but an event about a conversation is only for the
- * people who reach it: a channel's conversation by those in the channel, a
+ * people who reach it: a project's thread by those in the project, a
  * bot's by those who reach the bot, and a direct message by those in it.
  * Which rides along in the stored event, under the field below, and the
  * stream reads it and takes it off before delivering.

@@ -1,12 +1,24 @@
 import type { Bot } from "@sugabots/contracts";
+import { cn } from "cn";
 import { Monitor } from "lucide-react";
-import { useComputerAccess } from "@/lib/computer-providers.ts";
+import { useComputerGap } from "@/lib/computer-providers.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
-import { HeaderButton } from "./HeaderButton.tsx";
+import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
+import { LiveDot } from "@/ui/live-dot.tsx";
 
 /**
- * The bot's computer, for the top of its chat: always there, so it opens to
- * say how to get one when the workspace or the bot has none.
+ * The container a chat's header is, which `ChatComputer` measures to know
+ * whether its name fits beside its icon.
+ */
+export const CHAT_HEADER_CONTAINER = "@container/chat-header";
+
+/**
+ * The way into the bot's computer desktop from the top of its thread, there
+ * at any time, so it opens to say how to get one when the workspace or the
+ * bot has none. While the bot is using the desktop it says so in the bot's
+ * colour, with a pulse, so people notice there's something to watch.
+ * Otherwise it is its icon, with its name beside it while the header is wide
+ * enough; on a phone, only the icon, round on glass.
  */
 export function ChatComputer({
 	bot,
@@ -18,51 +30,34 @@ export function ChatComputer({
 	conversationId: string;
 	onOpen: () => void;
 }) {
-	const computersOn = useComputerAccess().data?.enabled === true;
+	const hasComputer = useComputerGap({ bot }) === null;
 	const inUse = useDesktopInUse(conversationId, bot.id);
+	if (hasComputer && inUse) {
+		return (
+			<button
+				type="button"
+				onClick={onOpen}
+				aria-label={`${bot.name} is using the computer. Open its desktop`}
+				className="focus-ring flex h-8 shrink-0 items-center gap-2 rounded-md bg-bot-tint px-3 font-medium text-bot-text text-xs transition-colors max-md:h-11 max-md:rounded-full max-md:px-3.5"
+			>
+				<LiveDot />
+				<span className="max-md:hidden">Computer in use</span>
+				<Monitor aria-hidden size={17} strokeWidth={2} className="md:hidden" />
+			</button>
+		);
+	}
 	return (
-		<ComputerButton
-			botName={bot.name}
-			inUse={bot.usesComputer && computersOn && inUse}
-			onOpen={onOpen}
-		/>
-	);
-}
-
-/**
- * The way into a bot's computer desktop from the top of its chat, there at
- * any time. While the bot is using the desktop it says so in the bot's
- * colour, with a pulse, so people notice there's something to watch.
- */
-export function ComputerButton({
-	botName,
-	inUse,
-	onOpen,
-}: {
-	botName: string;
-	/** Whether the bot is using the desktop right now. */
-	inUse: boolean;
-	onOpen: () => void;
-}) {
-	return inUse ? (
-		<button
-			type="button"
-			onClick={onOpen}
-			aria-label={`${botName} is using the computer. Open its desktop`}
-			className="focus-ring flex h-8 shrink-0 items-center gap-2 rounded-md bg-bot-tint px-3 font-medium text-bot-text text-xs transition-colors max-md:h-11 max-md:rounded-full max-md:px-3.5"
-		>
-			<span aria-hidden className="relative flex size-2">
-				<span className="absolute inline-flex size-full animate-ping rounded-full bg-bot-mono opacity-60 motion-reduce:animate-none" />
-				<span className="relative inline-flex size-2 rounded-full bg-bot-mono" />
-			</span>
-			<span className="max-md:hidden">Computer in use</span>
-			<Monitor aria-hidden size={17} strokeWidth={2} className="md:hidden" />
-		</button>
-	) : (
-		<HeaderButton
+		<IconButton
 			label="Computer"
-			icon={<Monitor size={16} strokeWidth={1.75} />}
+			variant="bar"
 			onClick={onOpen}
-		/>
+			className={cn(
+				"text-muted-foreground hover:text-foreground md:@2xl/chat-header:flex md:@2xl/chat-header:w-auto md:@2xl/chat-header:gap-1.5 md:@2xl/chat-header:px-2.5",
+				FLOATING_ON_PHONE,
+			)}
+		>
+			<Monitor size={16} strokeWidth={1.75} />
+			<span className="hidden font-medium text-xs md:@2xl/chat-header:inline">Computer</span>
+		</IconButton>
 	);
 }

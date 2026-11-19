@@ -5,16 +5,16 @@ import { Button } from "@/ui/button.tsx";
 import type { ChatLogPosition } from "./chat-log-position.ts";
 
 /**
- * The scrolling log of a chat's messages, anchored to its foot, so a short
- * chat sits just above the composer. Above `children`, a way to load older
- * messages while there are any, and `intro` once there are none.
+ * The scrolling log of a chat's messages, in a centred column of reading
+ * width, anchored to its foot, so a short chat sits just above the composer.
+ * Above `children`, a way to load older messages while there are any, and
+ * `intro` once there are none.
  */
 export function ChatLog({
 	position,
 	messages,
 	intro,
 	columnRef,
-	centred = false,
 	underHeader = false,
 	children,
 }: {
@@ -30,8 +30,6 @@ export function ChatLog({
 	intro: ReactNode;
 	/** The column the messages are in, which a header over them is measured against. */
 	columnRef?: Ref<HTMLDivElement>;
-	/** A centred column of reading width, as a bot's task has, rather than the whole width. */
-	centred?: boolean;
 	/** Whether the header sits over the log from a tablet up, so the first message starts clear of it. */
 	underHeader?: boolean;
 	children: ReactNode;
@@ -50,8 +48,7 @@ export function ChatLog({
 			<div
 				ref={columnRef}
 				className={cn(
-					"flex min-h-full w-full flex-col justify-end",
-					centred && "mx-auto max-w-200",
+					"mx-auto flex min-h-full w-full max-w-200 flex-col justify-end",
 					!position.settledAtLatest && "max-md:invisible",
 				)}
 			>

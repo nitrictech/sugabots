@@ -11,6 +11,9 @@ import { cn } from "cn";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { modelName } from "@/lib/model-providers.ts";
+import { countOf } from "@/lib/name-list.ts";
+import { projectPalettes } from "@/lib/project-looks.ts";
 import { PROVIDER_HUES } from "@/lib/provider-hues.ts";
 import {
 	dateIn,
@@ -25,12 +28,12 @@ import {
 } from "@/lib/usage.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { channelPalettes } from "@/shell/ChannelTile.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SETTINGS_CARD, SettingsGroup, SettingsPage } from "@/ui/settings-page.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
+import { LetterTile } from "./letter-tile.tsx";
 import { ProviderTile } from "./ProviderSettings.tsx";
 
 /**
@@ -345,7 +348,7 @@ function providerColors(models: readonly ModelUsage[]): (model: ModelUsage) => s
 	const order = [...new Set(models.map(providerOf))];
 	return (model) => {
 		const hue = PROVIDER_HUES[order.indexOf(providerOf(model)) % PROVIDER_HUES.length] ?? "blue";
-		return channelPalettes[hue].swatch;
+		return projectPalettes[hue].swatch;
 	};
 }
 
@@ -354,7 +357,7 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 	// Each is its own person's, so they are shown together, never one by one.
 	const personalAssistants: Line = {
 		key: "personal-assistants",
-		icon: <LetterTile name="Personal Assistants" />,
+		icon: <FacelessTile name="Personal Assistants" />,
 		label: "Personal Assistants",
 		sub: PERSONAL_ASSISTANTS_WORK,
 		color: NEUTRAL_BAR,
@@ -362,7 +365,7 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 	};
 	const systemBots: Line = {
 		key: "system-bots",
-		icon: <LetterTile name="System bots" />,
+		icon: <FacelessTile name="System bots" />,
 		label: "System bots",
 		sub: SYSTEM_BOTS_WORK,
 		color: NEUTRAL_BAR,
@@ -388,7 +391,7 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 		case "model": {
 			const colorOf = providerColors(usage.models);
 			return usage.models.map((model) => {
-				const label = model.displayName ?? model.model;
+				const label = modelName({ displayName: model.displayName, modelId: model.model });
 				const providerName =
 					model.providerName ??
 					(model.preset ? providerPreset(model.preset).name : "Removed provider");
@@ -420,16 +423,14 @@ function BotIcon({
 	return color ? (
 		<BotAvatar color={color} face={face ?? undefined} shape={shape ?? "circle"} size={24} />
 	) : (
-		<LetterTile name={name ?? "Deleted bot"} />
+		<FacelessTile name={name ?? "Deleted bot"} />
 	);
 }
 
-/** The first letter of `name` on a square, for what has no face of its own. */
-function LetterTile({ name }: { name: string }) {
+/** A letter tile as small as the bots' faces beside it, for a line with no face of its own. */
+function FacelessTile({ name }: { name: string }) {
 	return (
-		<span className="grid size-6 place-items-center rounded-sm bg-chip font-semibold text-2xs text-muted-foreground">
-			{name.trim().charAt(0).toUpperCase()}
-		</span>
+		<LetterTile name={name} className="size-6 border-0 bg-chip text-2xs text-muted-foreground" />
 	);
 }
 
@@ -437,6 +438,6 @@ function footnote(unpricedRequests: number): string {
 	const unpriced =
 		unpricedRequests === 0
 			? ""
-			: ` ${unpricedRequests} ${unpricedRequests === 1 ? "request" : "requests"} couldn't be priced and ${unpricedRequests === 1 ? "isn't" : "aren't"} included.`;
+			: ` ${countOf(unpricedRequests, "request", "requests")} couldn't be priced and ${unpricedRequests === 1 ? "isn't" : "aren't"} included.`;
 	return `Estimated from each provider's published prices.${unpriced} Your provider bills you directly.`;
 }

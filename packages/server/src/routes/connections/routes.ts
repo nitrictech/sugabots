@@ -12,7 +12,7 @@ import { asHttpError, refusals } from "../../http/errors.ts";
 export const connectionRoutes = HttpApiBuilder.group(ServerApi, "connections", (handlers) =>
 	Effect.gen(function* () {
 		// A sign-in's callback redirects to `CONNECTION_SIGN_IN_RETURN_PATH`
-		// under the web app with the bot's ids and, when it did not finish, the
+		// under the web app with the project's ids and, when it did not finish, the
 		// code saying why, and the web app turns those into its own page and words.
 		const { webAppUrl } = yield* Installation.Service;
 		const connections = yield* ConnectionSetup.Service;
@@ -70,9 +70,10 @@ export const connectionRoutes = HttpApiBuilder.group(ServerApi, "connections", (
 						.pipe(asSessionUser, asHttpError(connectionErrors));
 					const back = new URL(webAppUrl);
 					back.pathname = `${back.pathname.replace(/\/$/, "")}${CONNECTION_SIGN_IN_RETURN_PATH}`;
-					if (outcome.bot) {
-						back.searchParams.set("workspace", outcome.bot.workspaceId);
-						back.searchParams.set("bot", outcome.bot.botId);
+					if (outcome.at) {
+						back.searchParams.set("workspace", outcome.at.workspaceId);
+						back.searchParams.set("project", outcome.at.projectId);
+						if (outcome.at.botId) back.searchParams.set("bot", outcome.at.botId);
 					}
 					if ("failure" in outcome) {
 						back.searchParams.set("oauth_error", outcome.failure);

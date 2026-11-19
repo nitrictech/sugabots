@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import type { AcceptedRun } from "@sugabots/contracts";
 import { handleFromName, MAX_AUTOMATION_TRIGGERS } from "@sugabots/contracts";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -17,6 +17,9 @@ import {
 	connection,
 	conversation,
 	message,
+	placedConversation,
+	project,
+	projectBot,
 	toolCall,
 	turn,
 	user,
@@ -53,7 +56,13 @@ import {
 import { AutomationRunner } from "./automation-runner.ts";
 import { Automations } from "./automations.ts";
 import { AutomationSettlement } from "./settlement.ts";
-import { anAutomationOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
+import {
+	anAutomationOwner,
+	defaultProjectOf,
+	finishTurnsIn,
+	releaseRun,
+	startRunning,
+} from "./testing.ts";
 import type { Delivery } from "./webhook-auth.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", async () => {
@@ -86,6 +95,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		payload,
 	});
 	let botId: string;
+	let ownProjectId: string;
+	let projectId: string;
 	let userId: string;
 	/** Makes the bot private, so only its creator reaches it. */
 	const makePrivate = (id: string) =>
@@ -96,7 +107,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		if (!trigger) throw new Error("The automation has no trigger");
 		const made = defined.secrets.find((secret) => secret.triggerId === trigger.id);
 		return {
-			addressed: { botId, automationId: defined.automation.id, triggerId: trigger.id },
+			addressed: {
+				projectId: ownProjectId,
+				automationId: defined.automation.id,
+				triggerId: trigger.id,
+			},
 			secret: made?.secret ?? null,
 		};
 	};
@@ -108,7 +123,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				Effect.provide(TestClock.layer()),
 			),
 		);
-	/** Makes each of the automation's schedules due at `at`. */
+	/** Makes each of the automation's routines due at `at`. */
 	const makeDue = (automationId: string, at: Date) =>
 		onDatabase((db) =>
 			db
@@ -131,7 +146,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, botId, userId } = await anAutomationOwner());
+		({ workspaceId, botId, userId, ownProjectId, projectId } = await anAutomationOwner());
 		automations = automationsAs(userId);
 		view = onPostgresAs(userId)(Context.get(conversations, Automations.Service));
 	});
@@ -140,7 +155,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	// not from going with its workspace.
 	it("goes, runs and all, with its workspace", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: `Doomed ${crypto.randomUUID()}`,
 				instructions: "Report.",
@@ -148,7 +163,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			},
 		);
 		await automations.run({
-			botId,
+			projectId: ownProjectId,
 			automationId: created.automation.id,
 			requestId: crypto.randomUUID(),
 		});
@@ -190,9 +205,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				.returning(),
 		);
 		if (!helper) throw new Error("Could not create the joined bot");
+		const helperProjectId = await defaultProjectOf(helper.id);
 		const webhook = { kind: "webhook" as const };
 		await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Unreached",
 				instructions: "On a private bot this member did not make.",
@@ -200,7 +216,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			},
 		);
 		const later = await automations.create(
-			{ botId: helper.id },
+			{ projectId: helperProjectId },
 			{
 				name: "Weekly report",
 				instructions: "Summarise the week.",
@@ -208,7 +224,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			},
 		);
 		const sooner = await automations.create(
-			{ botId: helper.id },
+			{ projectId: helperProjectId },
 			{
 				name: "Morning brief",
 				instructions: "Plan the day.",
@@ -216,14 +232,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			},
 		);
 		const removed = await automations.create(
-			{ botId: helper.id },
+			{ projectId: helperProjectId },
 			{
 				name: "Removed",
 				instructions: "Gone.",
 				triggers: [webhook],
 			},
 		);
-		await automations.remove({ botId: helper.id, automationId: removed.automation.id });
+		await automations.remove({ projectId: helperProjectId, automationId: removed.automation.id });
 
 		const listed = await onPostgresAs(member.id)(
 			Context.get(conversations, Automations.Service),
@@ -236,15 +252,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(listed[0]?.bot).toMatchObject({ id: helper.id, name: "Joined Bot", color: "sky" });
 	});
 
-	it("creates scoped scheduled and webhook automations, and admits a webhook's callers by its secret", async () => {
+	it("creates scoped automations started by a routine or a webhook, and admits a webhook's callers by its secret", async () => {
 		const scheduled = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Weekday briefing",
 				instructions: "Summarise the overnight changes.",
 				triggers: [
 					{
-						kind: "schedule",
+						kind: "routine",
 						schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
 						timezone: "Australia/Sydney",
 					},
@@ -253,11 +269,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		);
 		expect(scheduled.secrets).toEqual([]);
 		expect(scheduled.automation.triggers).toMatchObject([
-			{ kind: "schedule", nextScheduledAt: expect.any(String) },
+			{ kind: "routine", nextScheduledAt: expect.any(String) },
 		]);
 
 		const webhook = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Incoming alert",
 				instructions: "Investigate the alert.",
@@ -306,13 +322,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(
 			await webhooks.accept({ triggerId: "not-a-uuid", delivery: bearerDelivery(rotatedSecret) }),
 		).toBeUndefined();
-		expect(await view.list({ botId })).toHaveLength(2);
+		expect(await view.list({ projectId: ownProjectId })).toHaveLength(2);
 	});
 
 	it("runs only the calls meeting a webhook's filter, which a later write keeps unless it brings another", async () => {
 		const filter = [{ path: "data.labels.name", oneOf: ["10x"] }];
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Labelled issues",
 				instructions: "Pick up the issue.",
@@ -340,7 +356,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("answers a call with the wrong secret the same whether or not its filter would turn it away", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Filtered and secret",
 				instructions: "Handle it.",
@@ -358,7 +374,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 	it("checks a signing automation's callers by signature, with the secret its sender made", async () => {
 		const linearSecret = "lin_wh_9f2c1e5a7b3d4f60";
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Linear issues",
 				instructions: "Triage the issue.",
@@ -392,7 +408,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("keeps a webhook's secret whatever its auth becomes", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Signups",
 				instructions: "Look up the account.",
@@ -430,7 +446,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		).toMatchObject({ kind: "run" });
 	});
 
-	it("keeps a schedule picked by its parts, and works out when it runs next", async () => {
+	it("keeps a routine picked by its parts, and works out when it runs next", async () => {
 		const schedule = {
 			repeat: "weekly" as const,
 			every: 2,
@@ -439,18 +455,18 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			startsOn: "2026-10-05",
 		};
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Fortnightly",
 				instructions: "Review the fortnight.",
-				triggers: [{ kind: "schedule", schedule, timezone: "Australia/Sydney" }],
+				triggers: [{ kind: "routine", schedule, timezone: "Australia/Sydney" }],
 			},
 		);
 
 		expect(created.automation.triggers).toEqual([
 			{
 				id: expect.any(String),
-				kind: "schedule",
+				kind: "routine",
 				schedule,
 				timezone: "Australia/Sydney",
 				nextScheduledAt: expect.any(String),
@@ -462,19 +478,19 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				.from(automationTrigger)
 				.where(eq(automationTrigger.automationId, created.automation.id)),
 		);
-		expect(stored?.settings).toEqual({ kind: "schedule", schedule, timezone: "Australia/Sydney" });
+		expect(stored?.settings).toEqual({ kind: "routine", schedule, timezone: "Australia/Sydney" });
 		expect(stored?.nextScheduledAt?.getTime()).toBeGreaterThan(Date.now());
 	});
 
-	it("swaps an automation's schedule for a webhook, and back", async () => {
+	it("swaps an automation's routine for a webhook, and back", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Switching",
 				instructions: "Handle it.",
 				triggers: [
 					{
-						kind: "schedule",
+						kind: "routine",
 						schedule: { repeat: "cron", expression: "0 9 * * *" },
 						timezone: "UTC",
 					},
@@ -482,7 +498,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			},
 		);
 		const schedule = firstTriggerOf(created).addressed;
-		const addressed = { botId, automationId: created.automation.id };
+		const addressed = { projectId: ownProjectId, automationId: created.automation.id };
 
 		const withWebhook = await automations.addTrigger(addressed, { kind: "webhook" });
 		const webhook = withWebhook.automation.triggers.find((trigger) => trigger.kind === "webhook");
@@ -499,14 +515,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		).toEqual(["webhook"]);
 
 		const scheduled = await automations.addTrigger(addressed, {
-			kind: "schedule",
+			kind: "routine",
 			schedule: { repeat: "cron", expression: "0 10 * * *" },
 			timezone: "UTC",
 		});
 		await automations.removeTrigger({ ...addressed, triggerId: webhook?.id ?? "" });
 		expect((await automations.get(addressed)).triggers).toEqual([
 			expect.objectContaining({
-				kind: "schedule",
+				kind: "routine",
 				schedule: { repeat: "cron", expression: "0 10 * * *" },
 				nextScheduledAt: expect.any(String),
 			}),
@@ -516,7 +532,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("runs a webhook left without a secret for whoever calls its address, until one is set", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Open intake",
 				instructions: "Handle it.",
@@ -560,7 +576,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("takes a sender's secret however short, and a made-up one only when hard to guess", async () => {
 		const linear = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Linear issues",
 				instructions: "Triage it.",
@@ -571,7 +587,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 		await expect(
 			automations.create(
-				{ botId },
+				{ projectId: ownProjectId },
 				{
 					name: "Signed alerts",
 					instructions: "Handle input.",
@@ -587,7 +603,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		).rejects.toThrow(WebhookSecretTooShort);
 
 		const bearer = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Alerts",
 				instructions: "Handle input.",
@@ -610,7 +626,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		async ({ auth, deliveryIdHeader }) => {
 			await expect(
 				automations.create(
-					{ botId },
+					{ projectId: ownProjectId },
 					{
 						name: "Incoming",
 						instructions: "Handle it.",
@@ -619,7 +635,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				),
 			).rejects.toThrow(WebhookDeliveryIdHeaderRejected);
 			const created = await automations.create(
-				{ botId },
+				{ projectId: ownProjectId },
 				{
 					name: "Incoming",
 					instructions: "Handle it.",
@@ -637,7 +653,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("refuses an auth change that makes the saved delivery header carry the API key", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Incoming",
 				instructions: "Handle it.",
@@ -654,7 +670,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("dedupes a generic webhook's retries by the delivery id header it is set to", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Sentry alerts",
 				instructions: "Triage the alert.",
@@ -695,7 +711,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("keeps automatic deduplication when an existing webhook is edited", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{ name: "Old alerts", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
 		const { addressed, secret } = firstTriggerOf(created);
@@ -725,7 +741,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("still admits a bearer secret hashed before secrets were sealed", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{ name: "Old alerts", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
 		const { triggerId } = firstTriggerOf(created).addressed;
@@ -752,7 +768,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("refuses a wrong webhook secret without waiting on the automation's other triggers", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{ name: "Busy", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
 		let release = () => {};
@@ -788,7 +804,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("keeps a secret replaced while its webhook is being edited", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{ name: "Alerts", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
 		const { addressed } = firstTriggerOf(created);
@@ -834,7 +850,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		// Called directly, with no route in front: what a new entry point that
 		// forgot to check would reach.
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{ name: "Nightly", instructions: "Run nightly.", triggers: [{ kind: "webhook" }] },
 		);
 		const [member, viewer] = await onDatabase((db) =>
@@ -853,7 +869,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				{ workspaceId, userId: viewer.id, role: "viewer" },
 			]),
 		);
-		const automation = { botId, automationId: created.automation.id };
+		const automation = { projectId: ownProjectId, automationId: created.automation.id };
 
 		await expect(
 			automationsAs(viewer.id).run({ ...automation, requestId: crypto.randomUUID() }),
@@ -867,27 +883,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect((await view.listRuns(automation))?.items).toEqual([]);
 	});
 
-	it("hides a system bot from an automation", async () => {
-		const suffix = crypto.randomUUID();
-		const [systemBot] = await onDatabase((db) =>
-			db
-				.insert(bot)
-				.values({
-					workspaceId,
-					name: `Summariser ${suffix}`,
-					handle: handleFromName(`Summariser ${suffix}`),
-					color: "rose",
-					face: "pill",
-					model: "test/model",
-					createdById: userId,
-					systemBotKey: "summarise",
-				})
-				.returning(),
-		);
-		if (!systemBot) throw new Error("Could not create system bot");
+	it("hides a project nobody can find", async () => {
 		await expect(
 			automations.create(
-				{ botId: systemBot.id },
+				{ projectId: crypto.randomUUID() },
 				{
 					name: "Forbidden",
 					instructions: "Should not run.",
@@ -897,16 +896,64 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		).rejects.toThrow(ResourceHidden);
 	});
 
+	it("is run by its project's lead bot, in the project, and not while the project has none", async () => {
+		const created = await automations.create(
+			{ projectId },
+			{ name: "Project report", instructions: "Report.", triggers: [] },
+		);
+		const run = () =>
+			automations.run({
+				projectId,
+				automationId: created.automation.id,
+				requestId: crypto.randomUUID(),
+			});
+		await expect(run()).rejects.toMatchObject({ _tag: "AutomationProjectHasNoLead" });
+
+		await onDatabase((db) => db.insert(projectBot).values({ workspaceId, projectId, botId }));
+		await onDatabase((db) =>
+			db.update(project).set({ leadBotId: botId }).where(eq(project.id, projectId)),
+		);
+		const accepted = await run();
+
+		const [execution] = await onDatabase((db) =>
+			db.select().from(automationRun).where(eq(automationRun.id, accepted.runId)),
+		);
+		expect(execution?.botId).toBe(botId);
+		const [listed] = (await view.listRuns({ projectId, automationId: created.automation.id }))
+			.items;
+		const placed = await onDatabase((db) =>
+			db
+				.select({ kind: placedConversation.kind, projectId: placedConversation.projectId })
+				.from(placedConversation)
+				.where(
+					inArray(placedConversation.id, [
+						accepted.conversationId,
+						listed?.rootConversationId ?? accepted.conversationId,
+					]),
+				),
+		);
+		expect(placed).toEqual(
+			expect.arrayContaining([
+				{ kind: "run", projectId },
+				{ kind: "automation_feed", projectId },
+			]),
+		);
+	});
+
 	it("accepts a manual trigger once and keeps instructions as an execution snapshot", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Check reports",
 				instructions: "Use the original instructions.",
 				triggers: [{ kind: "webhook" }],
 			},
 		);
-		const input = { botId, automationId: created.automation.id, requestId: crypto.randomUUID() };
+		const input = {
+			projectId: ownProjectId,
+			automationId: created.automation.id,
+			requestId: crypto.randomUUID(),
+		};
 		const [first, retried] = await Promise.all([automations.run(input), automations.run(input)]);
 		const original = first.duplicate ? retried : first;
 		const duplicate = first.duplicate ? first : retried;
@@ -923,19 +970,20 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		).toHaveLength(1);
 
 		await automations.update(
-			{ botId, automationId: created.automation.id },
+			{ projectId: ownProjectId, automationId: created.automation.id },
 			{
 				instructions: "Use changed instructions.",
 			},
 		);
 		const [execution] =
-			(await view.listRuns({ botId, automationId: created.automation.id }))?.items ?? [];
+			(await view.listRuns({ projectId: ownProjectId, automationId: created.automation.id }))
+				?.items ?? [];
 		expect(execution?.instructions).toBe("Use the original instructions.");
 	});
 
 	it("bounds execution titles derived from maximum-length automation names", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "R".repeat(80),
 				instructions: "Keep the title valid.",
@@ -944,7 +992,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await automations.run({
-			botId,
+			projectId: ownProjectId,
 			automationId: created.automation.id,
 			requestId,
 		});
@@ -956,7 +1004,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("rejects reuse of a trigger identity with different data", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Webhook",
 				instructions: "Handle input.",
@@ -974,7 +1022,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("runs an automation's runs in order while allowing a separate automation to run", async () => {
 		const firstAutomation = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "First queue",
 				instructions: "Run in order.",
@@ -982,7 +1030,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			},
 		);
 		const secondAutomation = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Second queue",
 				instructions: "Run independently.",
@@ -996,7 +1044,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			secondAutomation.automation.id,
 		]) {
 			const requestId = crypto.randomUUID();
-			accepted.push(await automations.run({ botId, automationId, requestId }));
+			accepted.push(await automations.run({ projectId: ownProjectId, automationId, requestId }));
 		}
 		const first = await startRunning(runner, firstAutomation.automation.id);
 		const second = await startRunning(runner, secondAutomation.automation.id);
@@ -1028,15 +1076,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(queued).toHaveLength(0);
 	});
 
-	it("accepts only the latest missed scheduled occurrence and advances into the future", async () => {
+	it("accepts only the latest missed occurrence of a routine and advances into the future", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Quarter hourly",
 				instructions: "Check recent activity.",
 				triggers: [
 					{
-						kind: "schedule",
+						kind: "routine",
 						schedule: { repeat: "cron", expression: "*/15 * * * *" },
 						timezone: "UTC",
 					},
@@ -1048,9 +1096,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		const accepted = await processDueAt(now);
 		expect(accepted?.duplicate).toBe(false);
 		const [execution] =
-			(await view.listRuns({ botId, automationId: created.automation.id }))?.items ?? [];
+			(await view.listRuns({ projectId: ownProjectId, automationId: created.automation.id }))
+				?.items ?? [];
 		expect(execution?.trigger).toMatchObject({
-			kind: "schedule",
+			kind: "routine",
 			scheduledAt: "2026-09-18T12:30:00.000Z",
 		});
 		expect(await nextTimesOf(created.automation.id)).toEqual([
@@ -1059,20 +1108,20 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(await processDueAt(now)).toBeUndefined();
 	});
 
-	it("runs each of an automation's schedules as it falls due", async () => {
+	it("runs each of an automation's routines as it falls due", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "On the hour and half past",
 				instructions: "Check recent activity.",
 				triggers: [
 					{
-						kind: "schedule",
+						kind: "routine",
 						schedule: { repeat: "cron", expression: "0 * * * *" },
 						timezone: "UTC",
 					},
 					{
-						kind: "schedule",
+						kind: "routine",
 						schedule: { repeat: "cron", expression: "30 * * * *" },
 						timezone: "UTC",
 					},
@@ -1089,9 +1138,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(first?.duplicate).toBe(false);
 		expect(second?.duplicate).toBe(false);
 		expect(second?.runId).not.toBe(first?.runId);
-		const runs = (await view.listRuns({ botId, automationId: created.automation.id })).items;
+		const runs = (
+			await view.listRuns({ projectId: ownProjectId, automationId: created.automation.id })
+		).items;
 		const scheduledTimes = runs.map((run) =>
-			run.trigger.kind === "schedule" ? run.trigger.scheduledAt : run.trigger.kind,
+			run.trigger.kind === "routine" ? run.trigger.scheduledAt : run.trigger.kind,
 		);
 		expect(scheduledTimes.sort()).toEqual(["2026-09-18T12:00:00.000Z", "2026-09-18T12:30:00.000Z"]);
 		expect(await nextTimesOf(created.automation.id)).toEqual(
@@ -1103,14 +1154,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(await processDueAt(now)).toBeUndefined();
 	});
 
-	it("starts a run for each schedule due at the same time, not one for both", async () => {
+	it("starts a run for each routine due at the same time, not one for both", async () => {
 		const quarterHourly = {
-			kind: "schedule" as const,
+			kind: "routine" as const,
 			schedule: { repeat: "cron" as const, expression: "*/15 * * * *" },
 			timezone: "UTC",
 		};
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Twice over",
 				instructions: "Check recent activity.",
@@ -1125,27 +1176,29 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 		expect([first?.duplicate, second?.duplicate]).toEqual([false, false]);
 		expect(second?.runId).not.toBe(first?.runId);
-		const runs = (await view.listRuns({ botId, automationId: created.automation.id })).items;
+		const runs = (
+			await view.listRuns({ projectId: ownProjectId, automationId: created.automation.id })
+		).items;
 		expect(runs.map((run) => run.trigger)).toMatchObject([
-			{ kind: "schedule", scheduledAt: "2026-09-18T12:30:00.000Z" },
-			{ kind: "schedule", scheduledAt: "2026-09-18T12:30:00.000Z" },
+			{ kind: "routine", scheduledAt: "2026-09-18T12:30:00.000Z" },
+			{ kind: "routine", scheduledAt: "2026-09-18T12:30:00.000Z" },
 		]);
 	});
 
-	it("pauses every schedule of a paused automation, and schedules each again once it is enabled", async () => {
+	it("pauses every routine of a paused automation, and sets when each runs next once it is enabled", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Morning and evening",
 				instructions: "Check recent activity.",
 				triggers: [
 					{
-						kind: "schedule",
+						kind: "routine",
 						schedule: { repeat: "cron", expression: "0 9 * * *" },
 						timezone: "UTC",
 					},
 					{
-						kind: "schedule",
+						kind: "routine",
 						schedule: { repeat: "cron", expression: "0 17 * * *" },
 						timezone: "UTC",
 					},
@@ -1153,10 +1206,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				],
 			},
 		);
-		const addressed = { botId, automationId: created.automation.id };
+		const addressed = { projectId: ownProjectId, automationId: created.automation.id };
 		const nextTimes = (defined: Automations.Defined) =>
 			defined.automation.triggers.flatMap((trigger) =>
-				trigger.kind === "schedule" ? [trigger.nextScheduledAt] : [],
+				trigger.kind === "routine" ? [trigger.nextScheduledAt] : [],
 			);
 
 		const paused = await automations.update(addressed, { state: "paused" });
@@ -1174,7 +1227,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("keeps each webhook of an automation to its own secret, and its own deliveries", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Two senders",
 				instructions: "Handle input.",
@@ -1205,13 +1258,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("keeps a trigger to its kind", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Scheduled",
 				instructions: "Handle it.",
 				triggers: [
 					{
-						kind: "schedule",
+						kind: "routine",
 						schedule: { repeat: "cron", expression: "0 9 * * *" },
 						timezone: "UTC",
 					},
@@ -1228,7 +1281,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("refuses a delivery to a webhook once it is removed from its automation", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{ name: "Short-lived", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
 		const { addressed, secret } = firstTriggerOf(created);
@@ -1246,7 +1299,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("runs an automation without triggers only when someone runs it", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{ name: "On request", instructions: "Handle it.", triggers: [] },
 		);
 		expect(created).toEqual({
@@ -1255,7 +1308,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		});
 
 		const accepted = await automations.run({
-			botId,
+			projectId: ownProjectId,
 			automationId: created.automation.id,
 			requestId: crypto.randomUUID(),
 		});
@@ -1269,7 +1322,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 	it("takes no more triggers than an automation may have", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Crowded",
 				instructions: "Handle it.",
@@ -1281,13 +1334,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		);
 
 		await expect(
-			automations.addTrigger({ botId, automationId: created.automation.id }, { kind: "webhook" }),
+			automations.addTrigger(
+				{ projectId: ownProjectId, automationId: created.automation.id },
+				{ kind: "webhook" },
+			),
 		).rejects.toThrow(TooManyAutomationTriggers);
 	});
 
 	it("pages execution history with opaque cursors", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Paged runs",
 				instructions: "Run repeatedly.",
@@ -1296,11 +1352,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		);
 		for (let index = 0; index < 3; index += 1) {
 			const requestId = crypto.randomUUID();
-			await automations.run({ botId, automationId: created.automation.id, requestId });
+			await automations.run({
+				projectId: ownProjectId,
+				automationId: created.automation.id,
+				requestId,
+			});
 		}
 
 		const first = await view.listRuns(
-			{ botId, automationId: created.automation.id },
+			{ projectId: ownProjectId, automationId: created.automation.id },
 			{
 				limit: 2,
 			},
@@ -1309,7 +1369,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(first?.nextCursor).toEqual(expect.any(String));
 		if (!first?.nextCursor) throw new Error("First execution page has no cursor");
 		const second = await view.listRuns(
-			{ botId, automationId: created.automation.id },
+			{ projectId: ownProjectId, automationId: created.automation.id },
 			{
 				limit: 2,
 				cursor: first.nextCursor,
@@ -1320,7 +1380,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(second?.items[0]?.id).not.toBe(first?.items[1]?.id);
 		await expect(
 			view.listRuns(
-				{ botId, automationId: created.automation.id },
+				{ projectId: ownProjectId, automationId: created.automation.id },
 				{
 					limit: 2,
 					cursor: "not-a-cursor",
@@ -1346,10 +1406,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		};
 		const anAutomationWithARun = async () => {
 			const created = await automations.create(
-				{ botId },
+				{ projectId: ownProjectId },
 				{ name: "Reached", instructions: "Run.", triggers: [{ kind: "webhook" }] },
 			);
-			const automation = { botId, automationId: created.automation.id };
+			const automation = { projectId: ownProjectId, automationId: created.automation.id };
 			await automations.run({ ...automation, requestId: crypto.randomUUID() });
 			return automation;
 		};
@@ -1362,7 +1422,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 			expect((await admin.listRuns(automation)).items).toHaveLength(1);
 			expect(await admin.get(automation)).toMatchObject({ id: automation.automationId });
-			expect(await admin.list({ botId })).toHaveLength(1);
+			expect(await admin.list({ projectId: ownProjectId })).toHaveLength(1);
 		});
 
 		it("hides a private bot's automation and its history from a member who did not make it", async () => {
@@ -1372,7 +1432,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 
 			await expect(outsider.listRuns(automation)).rejects.toThrow(ResourceHidden);
 			await expect(outsider.get(automation)).rejects.toThrow(ResourceHidden);
-			await expect(outsider.list({ botId })).rejects.toThrow(ResourceHidden);
+			await expect(outsider.list({ projectId: ownProjectId })).rejects.toThrow(ResourceHidden);
 		});
 
 		it("refuses a member the approval an automation's run asks for, which only an administrator gives", async () => {
@@ -1473,7 +1533,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				.insert(connection)
 				.values({
 					workspaceId,
-					botId: prepared.context.bot.id,
+					projectId: prepared.context.projectId ?? "",
 					name: `Linear ${crypto.randomUUID()}`,
 					handle: `linear-${crypto.randomUUID().slice(0, 8)}`,
 					url: "https://linear.example.com/mcp",

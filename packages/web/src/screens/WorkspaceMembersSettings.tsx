@@ -2,22 +2,24 @@ import {
 	ASSIGNABLE_WORKSPACE_ROLES,
 	type AssignableWorkspaceRole,
 	administersWorkspace,
-	type Channel,
 	INVITE_LIFETIME_DAYS,
+	type Project,
 	workspaceRoleDescription,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
-import {
-	useChannelBots,
-	useChannelMembers,
-	useChannels,
-	usePlaceChannelMember,
-} from "@/lib/channels.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { formatTimeAfterVerb } from "@/lib/list-time.ts";
+import { countOf } from "@/lib/name-list.ts";
+import { projectHeadcount } from "@/lib/project-headcount.ts";
+import {
+	usePlaceProjectMember,
+	useProjectBots,
+	useProjectMembers,
+	useProjects,
+} from "@/lib/projects.ts";
 import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import {
 	useCancelWorkspaceInvitation,
@@ -29,7 +31,7 @@ import {
 	useWorkspaceInvitations,
 	useWorkspaceMembers,
 } from "@/lib/workspace.ts";
-import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
+import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
@@ -58,7 +60,7 @@ import { Toggle } from "@/ui/toggle.tsx";
 
 /**
  * The people in a workspace and the invitations still out, each person a
- * click into their own page: their role, the channels they are in, and removing
+ * click into their own page: their role, the projects they are in, and removing
  * them. Whoever may manage members gets the controls, over administrators
  * only when they may manage those too; everybody else reads the same pages
  * without them. The API decides either way.
@@ -88,11 +90,9 @@ export function WorkspaceMembersSettings({
 		const member = members.data?.find((one) => one.id === selectedMemberId);
 		if (!member) {
 			return (
-				<div className="grid min-h-80 place-items-center p-6">
-					<EmptyState title="No such person here">
-						They may have left the workspace, or been removed from it.
-					</EmptyState>
-				</div>
+				<EmptyState page title="No such person here">
+					They may have left the workspace, or been removed from it.
+				</EmptyState>
 			);
 		}
 		return (
@@ -149,7 +149,7 @@ function Roster({
 	return (
 		<SettingsPage
 			title="People"
-			description="Everyone in the workspace. Add them to channels to work together there."
+			description="Everyone in the workspace. Add them to projects to work together there."
 			headerAction={
 				canManage && (
 					<SettingsAddButton onClick={() => setInviting(true)}>Invite people</SettingsAddButton>
@@ -281,12 +281,9 @@ function invitationTimes(invitation: { sentAt: string; expiresAt: string }, now:
 function expiryText(leftMs: number): string {
 	if (leftMs <= 0) return "expired";
 	if (leftMs < HOUR_MS) return "expires in under an hour";
-	if (leftMs < DAY_MS) {
-		const hours = Math.floor(leftMs / HOUR_MS);
-		return hours === 1 ? "expires in 1 hour" : `expires in ${hours} hours`;
-	}
-	const days = Math.floor(leftMs / DAY_MS);
-	return days === 1 ? "expires in 1 day" : `expires in ${days} days`;
+	if (leftMs < DAY_MS)
+		return `expires in ${countOf(Math.floor(leftMs / HOUR_MS), "hour", "hours")}`;
+	return `expires in ${countOf(Math.floor(leftMs / DAY_MS), "day", "days")}`;
 }
 
 function MemberPage({
@@ -308,7 +305,7 @@ function MemberPage({
 	const remove = useRemoveWorkspaceMember(workspaceId);
 	const leave = useLeaveWorkspace(workspaceId);
 	const transfer = useTransferWorkspaceOwnership(workspaceId);
-	const channels = useChannels();
+	const projects = useProjects();
 	const router = useRouter();
 	const { leaveForPage } = useLeave();
 	const [confirming, setConfirming] = useState(false);
@@ -319,8 +316,8 @@ function MemberPage({
 	});
 	const role = member.role;
 	const isOwner = role === "owner";
-	const listedChannels =
-		channels.data?.filter((channel) => channel.isMember || channel.visibility === "public") ?? [];
+	const listedProjects =
+		projects.data?.filter((project) => project.isMember || project.visibility === "public") ?? [];
 	// Your own role is not yours to change: demoting yourself takes away the
 	// control you would need to undo it. Leaving stays, behind a confirmation.
 	// The owner's role and place change only by their handing ownership on.
@@ -387,19 +384,19 @@ function MemberPage({
 					</div>
 				)}
 			</SettingsGroup>
-			{listedChannels.length > 0 && (
+			{listedProjects.length > 0 && (
 				<SettingsGroup
-					label="Channels"
+					label="Projects"
 					note={
 						administersWorkspace(role)
-							? "Administrators are in every channel."
-							: "The channels they are in, and the public ones they could join."
+							? "Administrators are in every project."
+							: "The projects they are in, and the public ones they could join."
 					}
 				>
-					{listedChannels.map((channel) => (
-						<ChannelMembershipRow
-							key={channel.id}
-							channel={channel}
+					{listedProjects.map((project) => (
+						<ProjectMembershipRow
+							key={project.id}
+							project={project}
 							userId={member.user.id}
 							name={member.user.name}
 							canManage={canManage && !administersWorkspace(role)}
@@ -430,8 +427,8 @@ function MemberPage({
 					label={isYou ? "Leave workspace" : "Remove from workspace"}
 					description={
 						isYou
-							? "You lose access to every channel and bot in the workspace."
-							: "They lose access to every channel and bot straight away."
+							? "You lose access to every project and bot in the workspace."
+							: "They lose access to every project and bot straight away."
 					}
 					action={isYou ? "Leave" : "Remove"}
 					onClick={() => setConfirming(true)}
@@ -458,8 +455,8 @@ function MemberPage({
 				title={isYou ? "Leave this workspace?" : `Remove ${member.user.name}?`}
 				description={
 					isYou
-						? "You leave every channel in it, and your Personal Assistant and its tasks are deleted. Getting back in means somebody inviting you again."
-						: "They leave this workspace and every channel in it, and their Personal Assistant and its tasks are deleted. Channels and bots they made stay."
+						? "You leave every project in it, and your Personal Assistant and its threads are deleted. Getting back in means somebody inviting you again."
+						: "They leave this workspace and every project in it, and their Personal Assistant and its threads are deleted. Projects and bots they made stay."
 				}
 				confirmLabel={isYou ? "Leave" : "Remove"}
 				pending={ending.isPending}
@@ -478,37 +475,33 @@ function joinedDate(joinedAt: string): string {
 	});
 }
 
-/** One channel, with whether this person is on its roster and a switch to change that. */
-function ChannelMembershipRow({
-	channel,
+/** One project, with whether this person is on its roster and a switch to change that. */
+function ProjectMembershipRow({
+	project,
 	userId,
 	name,
 	canManage,
 }: {
-	channel: Channel;
+	project: Project;
 	userId: string;
 	name: string;
 	canManage: boolean;
 }) {
-	const members = useChannelMembers(channel.id);
-	const place = usePlaceChannelMember(channel.id);
-	const bots = useChannelBots(channel.id).data ?? [];
-	const people = members.data?.length;
-	const inChannel = members.data?.some((member) => member.userId === userId) ?? false;
-	const counts = [
-		`${bots.length} ${bots.length === 1 ? "bot" : "bots"}`,
-		people !== undefined ? `${people} ${people === 1 ? "person" : "people"}` : undefined,
-	].filter(Boolean);
+	const members = useProjectMembers(project.id);
+	const place = usePlaceProjectMember(project.id);
+	const bots = useProjectBots(project.id).data ?? [];
+	const inProject = members.data?.some((member) => member.userId === userId) ?? false;
+	const headcount = projectHeadcount({ people: members.data?.length, bots: bots.length });
 
 	return (
 		<SettingsRow
-			icon={<ChannelInitial channel={channel} className="size-7 rounded-sm text-xs" />}
-			label={channel.name}
-			sub={place.error ? failureMessage(place.error) : counts.join(", ")}
+			icon={<ProjectInitial project={project} className="size-7 rounded-sm text-xs" />}
+			label={project.name}
+			sub={place.error ? failureMessage(place.error) : headcount}
 			trailing={
 				<Toggle
-					label={`${name} is in ${channel.name}`}
-					checked={inChannel}
+					label={`${name} is in ${project.name}`}
+					checked={inProject}
 					disabled={!canManage || members.isPending || place.isPending}
 					onChange={(member) => place.mutate({ userId, member })}
 				/>

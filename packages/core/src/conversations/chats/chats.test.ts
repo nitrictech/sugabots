@@ -14,15 +14,15 @@ import { EventStore } from "../../database/events/store.ts";
 import {
 	automationRun,
 	bot,
-	channel,
-	channelBot,
-	channelMember,
 	conversationParticipant,
 	event,
 	laneRequest,
 	message,
 	messageReaction,
 	placedConversation,
+	project,
+	projectBot,
+	projectMember,
 	toolCall,
 	turn,
 	user,
@@ -53,7 +53,7 @@ import {
 	TurnExecution,
 } from "../turns/testing.ts";
 import { Turns } from "../turns/turns.ts";
-import { BotTasks } from "./bot-tasks.ts";
+import { BotThreads } from "./bot-threads.ts";
 import { ChatFiles } from "./chat-files.ts";
 import { ChatView } from "./chat-view.ts";
 import { Chats } from "./chats.ts";
@@ -68,8 +68,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	/** As an administrator, who may define and run the bots' automations. */
 	let automations: Promised<Automations.Interface>;
 	let workspaceId: string;
-	let channelId: string;
+	let projectId: string;
 	let botId: string;
+	/** The host bot's default project, which holds its automations. */
+	let botProjectId: string;
 	let recipientBotId: string;
 	let userId: string;
 	let administratorId: string;
@@ -79,31 +81,33 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	/**
-	 * A task the member started with `taskBotId`, written straight to the
+	 * A thread the member started with `threadBotId`, written straight to the
 	 * database, so it holds no message and nobody has been asked to answer.
 	 */
-	const aTask = async (taskBotId = botId) => {
+	const aThread = async (threadBotId = botId) => {
 		const { id } = await onDatabase((db) =>
 			seedConversation(db, {
 				workspaceId,
-				kind: "task",
-				botId: taskBotId,
-				title: "Task",
+				kind: "project_thread",
+				botId: threadBotId,
+				title: "Thread",
 				startedById: userId,
 			}),
 		);
 		await onDatabase((db) =>
 			db.insert(conversationParticipant).values([
 				{ conversationId: id, userId },
-				{ conversationId: id, botId: taskBotId },
+				{ conversationId: id, botId: threadBotId },
 			]),
 		);
 		return { id };
 	};
 
-	/** The bot's task `conversationId` as the member's list of the bot's tasks shows it. */
-	const listedTask = async (conversationId: string, taskBotId = botId) =>
-		(await view.botTasks(taskBotId)).tasks.find((item) => item.conversation.id === conversationId);
+	/** The bot's thread `conversationId` as the member's list of the bot's threads shows it. */
+	const listedThread = async (conversationId: string, threadBotId = botId) =>
+		(await view.botThreads(threadBotId)).threads.find(
+			(item) => item.conversation.id === conversationId,
+		);
 
 	beforeEach(async () => {
 		const suffix = crypto.randomUUID();
@@ -137,18 +141,18 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		automations = onPostgresAs(administrator.id)(Context.get(conversations, Automations.Service));
 		const [room] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId,
-					name: "Chat channel",
+					name: "Chat project",
 					slug: `chat-${suffix}`,
 					createdById: userId,
 				})
 				.returning(),
 		);
-		if (!room) throw new Error("Could not create chat test channel");
-		channelId = room.id;
-		await onDatabase((db) => db.insert(channelMember).values({ workspaceId, channelId, userId }));
+		if (!room) throw new Error("Could not create chat test project");
+		projectId = room.id;
+		await onDatabase((db) => db.insert(projectMember).values({ workspaceId, projectId, userId }));
 		const [host, recipient] = await onDatabase((db) =>
 			db
 				.insert(bot)
@@ -177,20 +181,25 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		if (!host || !recipient) throw new Error("Could not create chat test bots");
 		botId = host.id;
 		recipientBotId = recipient.id;
-		// Both bots are in the channel, so either may be asked in its chats.
+		const [own] = await onDatabase((db) =>
+			db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, botId)),
+		);
+		if (!own) throw new Error("The host bot has no default project");
+		botProjectId = own.id;
+		// Both bots are in the project, so either may be asked in its chats.
 		await onDatabase((db) =>
-			db.insert(channelBot).values([
-				{ workspaceId, channelId, botId },
-				{ workspaceId, channelId, botId: recipientBotId },
+			db.insert(projectBot).values([
+				{ workspaceId, projectId, botId },
+				{ workspaceId, projectId, botId: recipientBotId },
 			]),
 		);
 	});
 
-	it("shows a private bot's task to its creator, and to nobody else", async () => {
+	it("shows a private bot's thread to its creator, and to nobody else", async () => {
 		await onDatabase((db) =>
 			db.update(bot).set({ visibility: "private" }).where(eq(bot.id, botId)),
 		);
-		const opened = await aTask();
+		const opened = await aThread();
 		const [otherMember, stranger] = await onDatabase((db) =>
 			db
 				.insert(user)
@@ -220,7 +229,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 	});
 
-	it("refuses a task with a private bot to anyone but its creator", async () => {
+	it("refuses a thread with a private bot to anyone but its creator", async () => {
 		await onDatabase((db) =>
 			db
 				.update(bot)
@@ -229,12 +238,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 
 		await expect(
-			chats.startTask({ botId, messageId: crypto.randomUUID(), content: "Hello?" }),
+			chats.startThread({ botId, messageId: crypto.randomUUID(), content: "Hello?" }),
 		).rejects.toMatchObject({ _tag: "ResourceHidden" });
-		await expect(view.botTasks(botId)).rejects.toMatchObject({ _tag: "ResourceHidden" });
+		await expect(view.botThreads(botId)).rejects.toMatchObject({ _tag: "ResourceHidden" });
 	});
 
-	it("starts a task with the bot from its first message, which the bot answers, once", async () => {
+	it("starts a thread with the bot from its first message, which the bot answers, once", async () => {
 		const messageId = crypto.randomUUID();
 		const input = {
 			botId,
@@ -242,7 +251,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			content: "\n  Budget   review is Friday\nand bring the numbers",
 		};
 
-		const started = await chats.startTask(input);
+		const started = await chats.startThread(input);
 
 		expect(started.conversation).toMatchObject({
 			botId,
@@ -253,14 +262,15 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			conversationId: started.conversation.id,
 		});
 		expect(await runOnPostgres(runningTurns(started.conversation.id))).toHaveLength(1);
-		expect((await chats.startTask(input)).conversation.id).toBe(started.conversation.id);
+		expect((await chats.startThread(input)).conversation.id).toBe(started.conversation.id);
 		expect((await view.messages(started.conversation.id))?.items.map((item) => item.kind)).toEqual([
 			"message",
 		]);
 		expect((await view.history(started.conversation.id))?.items).toHaveLength(0);
-		expect((await view.botTasks(botId)).tasks).toEqual([
+		const listed = await view.botThreads(botId);
+		expect(listed.bot).toMatchObject({ id: botId });
+		expect(listed.threads).toEqual([
 			{
-				bot: expect.objectContaining({ id: botId }),
 				conversation: expect.objectContaining({ id: started.conversation.id }),
 				lastMessage: expect.objectContaining({ authorUserId: userId }),
 				participants: expect.any(Array),
@@ -273,24 +283,24 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		]);
 	});
 
-	it("returns the one task to sends of its first message made at once", async () => {
+	it("returns the one thread to sends of its first message made at once", async () => {
 		const input = { botId, messageId: crypto.randomUUID(), content: "Plan the offsite" };
 
-		const [first, retry] = await Promise.all([chats.startTask(input), chats.startTask(input)]);
+		const [first, retry] = await Promise.all([chats.startThread(input), chats.startThread(input)]);
 
 		expect(retry.conversation.id).toBe(first.conversation.id);
-		expect((await view.botTasks(botId)).tasks).toHaveLength(1);
+		expect((await view.botThreads(botId)).threads).toHaveLength(1);
 	});
 
-	it("gives the task's bot the message the task was started with", async () => {
+	it("gives the thread's bot the message the thread was started with", async () => {
 		const messageId = crypto.randomUUID();
-		const started = await chats.startTask({
+		const started = await chats.startThread({
 			botId,
 			messageId,
 			content: "Can you check the renewal numbers?",
 		});
 		const [run] = await runOnPostgres(runningTurns(started.conversation.id));
-		if (!run) throw new Error("The task's bot was not asked");
+		if (!run) throw new Error("The thread's bot was not asked");
 
 		const prepared = await prepareRunnable(
 			onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
@@ -303,8 +313,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(prepared.context.askedBy).toBe(userId);
 	});
 
-	describe("tasks a bot starts for the person it is answering", () => {
-		const botTasks = () => onPostgres(Context.get(conversations, BotTasks.Service));
+	describe("threads a bot starts for the person it is answering", () => {
+		const botThreads = () => onPostgres(Context.get(conversations, BotThreads.Service));
 		const handleOf = async (id: string) => {
 			const [row] = await onDatabase((db) =>
 				db.select({ handle: bot.handle }).from(bot).where(eq(bot.id, id)),
@@ -314,7 +324,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		};
 
 		it("starts it with the bot asked for, briefed by the starting bot, and asks that bot to work", async () => {
-			const started = await botTasks().start(
+			const started = await botThreads().start(
 				{ botId, workspaceId, askedBy: userId },
 				{
 					title: "March refunds",
@@ -342,7 +352,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 			expect(participants).toHaveLength(2);
 			const [run] = await runOnPostgres(runningTurns(started.id));
-			if (!run) throw new Error("The task's bot was not asked");
+			if (!run) throw new Error("The thread's bot was not asked");
 
 			const prepared = await prepareRunnable(
 				onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
@@ -350,7 +360,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 
 			expect(prepared.context.bot.id).toBe(recipientBotId);
-			// A bot wrote its brief, so it acts for the person only to mark the task done.
+			// A bot wrote its brief, so it acts for the person only to mark the thread done.
 			expect(prepared.context.askedBy).toBeNull();
 			expect(prepared.context.startedFor).toBe(userId);
 			expect(prepared.context.messages).toEqual([
@@ -362,13 +372,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("starts it with the starting bot itself when no other bot is named", async () => {
-			const started = await botTasks().start(
+			const started = await botThreads().start(
 				{ botId, workspaceId, askedBy: userId },
 				{ title: "Follow-up", brief: "Draft the follow-up email." },
 			);
 			expect(started).toEqual({ id: expect.any(String), title: "Follow-up" });
 			const [run] = await runOnPostgres(runningTurns(started.id));
-			if (!run) throw new Error("The task's bot was not asked");
+			if (!run) throw new Error("The thread's bot was not asked");
 
 			const prepared = await prepareRunnable(
 				onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare }),
@@ -380,12 +390,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(prepared.context.startedFor).toBe(userId);
 		});
 
-		it("marks the task it is in done for the person who asked, but never a channel's conversation", async () => {
-			const channelConversation = await chats.openMainChat({
-				workspace: workspaceId,
-				channelId,
-			});
-			const { conversation: opened } = await chats.startTask({
+		it("marks the thread it is in done for the person who asked, a project's thread too", async () => {
+			const projectThread = await chats.startNamedThread({ projectId, name: "General" });
+			const { conversation: opened } = await chats.startThread({
 				botId,
 				messageId: crypto.randomUUID(),
 				content: "Can you check the renewal numbers?",
@@ -401,18 +408,17 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				return row?.doneAt ?? null;
 			};
 
-			await botTasks().markDone(bot, opened.id);
+			await botThreads().markDone(bot, opened.id);
+			await botThreads().markDone(bot, projectThread.id);
 
 			expect(await doneAt(opened.id)).toBeInstanceOf(Date);
-			await expect(botTasks().markDone(bot, channelConversation.id)).rejects.toMatchObject({
-				_tag: "NotATask",
-			});
-			await expect(botTasks().markDone({ ...bot, askedBy: null }, opened.id)).rejects.toMatchObject(
-				{ _tag: "NobodyAsked" },
-			);
+			expect(await doneAt(projectThread.id)).toBeInstanceOf(Date);
+			await expect(
+				botThreads().markDone({ ...bot, askedBy: null }, opened.id),
+			).rejects.toMatchObject({ _tag: "NobodyAsked" });
 		});
 
-		it("refuses when nobody asked, no bot has the handle, or the person can't reach the bot or task", async () => {
+		it("refuses when nobody asked, no bot has the handle, or the person can't reach the bot or thread", async () => {
 			const [otherMember] = await onDatabase((db) =>
 				db
 					.insert(user)
@@ -423,38 +429,38 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await onDatabase((db) =>
 				db.insert(workspaceMember).values({ workspaceId, userId: otherMember.id, role: "member" }),
 			);
-			// Private to the member the chats are with, so the other member reaches neither it nor its tasks.
+			// Private to the member the chats are with, so the other member reaches neither it nor its threads.
 			await onDatabase((db) =>
 				db.update(bot).set({ visibility: "private" }).where(eq(bot.id, recipientBotId)),
 			);
 			const brief = { title: "Elsewhere", brief: "Do it." };
 
 			await expect(
-				botTasks().start({ botId, workspaceId, askedBy: null }, brief),
+				botThreads().start({ botId, workspaceId, askedBy: null }, brief),
 			).rejects.toMatchObject({ _tag: "NobodyAsked" });
 			await expect(
-				botTasks().start(
+				botThreads().start(
 					{ botId, workspaceId, askedBy: userId },
 					{ ...brief, withHandle: "@nobody-here" },
 				),
 			).rejects.toMatchObject({ _tag: "NoBotWithHandle" });
 			await expect(
-				botTasks().start(
+				botThreads().start(
 					{ botId, workspaceId, askedBy: otherMember.id },
 					{ ...brief, withHandle: `@${await handleOf(recipientBotId)}` },
 				),
 			).rejects.toMatchObject({ _tag: "HostUnavailable" });
-			const { conversation: opened } = await chats.startTask({
+			const { conversation: opened } = await chats.startThread({
 				botId: recipientBotId,
 				messageId: crypto.randomUUID(),
 				content: "Can you check the renewal numbers?",
 			});
 			await expect(
-				botTasks().markDone(
+				botThreads().markDone(
 					{ botId: recipientBotId, workspaceId, askedBy: otherMember.id },
 					opened.id,
 				),
-			).rejects.toMatchObject({ _tag: "TaskHiddenFromAsker" });
+			).rejects.toMatchObject({ _tag: "ThreadHiddenFromAsker" });
 		});
 	});
 
@@ -462,24 +468,23 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		const [quiet, ran] = await Promise.all(
 			["Weekly digest", "Overnight review"].map((name) =>
 				automations.create(
-					{ botId },
+					{ projectId: botProjectId },
 					{ name, instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 				),
 			),
 		);
 		if (!quiet || !ran) throw new Error("Could not create the automations");
 		const accepted = await automations.run({
-			botId,
+			projectId: botProjectId,
 			automationId: ran.automation.id,
 			requestId: crypto.randomUUID(),
 		});
 
-		const listed = (await view.botTasks(botId)).automations;
+		const listed = (await view.botThreads(botId)).automations;
 
 		expect(listed).toEqual([
 			expect.objectContaining({
 				automation: expect.objectContaining({ id: ran.automation.id, name: "Overnight review" }),
-				bot: expect.objectContaining({ id: botId }),
 				conversation: expect.objectContaining({ title: "Overnight review" }),
 			}),
 			expect.objectContaining({
@@ -504,11 +509,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("marks an automation whose run failed until the person opens it after the run ends", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: botProjectId },
 			{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 		);
 		const accepted = await automations.run({
-			botId,
+			projectId: botProjectId,
 			automationId: created.automation.id,
 			requestId: crypto.randomUUID(),
 		});
@@ -530,8 +535,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				.where(eq(automationRun.id, accepted.runId)),
 		);
 		const failed = async () => ({
-			listed: (await view.botTasks(botId)).automations[0]?.automation.failed,
-			counted: (await view.channelMarkers(workspaceId)).bots[botId]?.failedAutomations ?? 0,
+			listed: (await view.botThreads(botId)).automations[0]?.automation.failed,
+			counted: (await view.projectMarkers(workspaceId)).bots[botId]?.failedAutomations ?? 0,
 		});
 
 		expect(await failed()).toEqual({ listed: true, counted: 1 });
@@ -539,13 +544,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(await failed()).toEqual({ listed: false, counted: 0 });
 	});
 
-	it("marks a task done, and reopens it when somebody writes in it", async () => {
-		const { conversation: current } = await chats.startTask({
+	it("marks a thread done, and reopens it when somebody writes in it", async () => {
+		const { conversation: current } = await chats.startThread({
 			botId,
 			messageId: crypto.randomUUID(),
 			content: "Can you check the renewal numbers?",
 		});
-		const doneAt = async () => (await listedTask(current.id))?.conversation.doneAt;
+		const doneAt = async () => (await listedThread(current.id))?.conversation.doneAt;
 
 		await chats.setDone({ conversationId: current.id, done: true });
 		expect(await doneAt()).toEqual(expect.any(String));
@@ -559,8 +564,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("says when a message the person has not read mentions them", async () => {
-		const current = await aTask();
-		const mentioned = async () => (await listedTask(current.id))?.mentionsYou;
+		const current = await aThread();
+		const mentioned = async () => (await listedThread(current.id))?.mentionsYou;
 		expect(await mentioned()).toBe(false);
 
 		await onDatabase((db) =>
@@ -580,7 +585,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("says when a message the person has not read mentions everyone", async () => {
-		const current = await aTask();
+		const current = await aThread();
 
 		await onDatabase((db) =>
 			db.insert(message).values({
@@ -593,11 +598,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			}),
 		);
 
-		expect((await listedTask(current.id))?.mentionsYou).toBe(true);
+		expect((await listedThread(current.id))?.mentionsYou).toBe(true);
 	});
 
 	it("does not say a bot's @channel mentions the person", async () => {
-		const current = await aTask();
+		const current = await aThread();
 
 		await onDatabase((db) =>
 			db.insert(message).values({
@@ -610,33 +615,51 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			}),
 		);
 
-		expect((await listedTask(current.id))?.mentionsYou).toBe(false);
+		expect((await listedThread(current.id))?.mentionsYou).toBe(false);
 	});
 
-	it("refuses to mark a channel's main chat done", async () => {
-		const channelConversation = await chats.openMainChat({
-			workspace: workspaceId,
-			channelId,
-		});
+	it("marks a project's thread done, and reopens it", async () => {
+		const projectThread = await chats.startNamedThread({ projectId, name: "General" });
+		const doneAt = async () =>
+			(
+				await onDatabase((db) =>
+					db
+						.select({ doneAt: placedConversation.doneAt })
+						.from(placedConversation)
+						.where(eq(placedConversation.id, projectThread.id)),
+				)
+			)[0]?.doneAt ?? null;
 
-		await expect(
-			chats.setDone({ conversationId: channelConversation.id, done: true }),
-		).rejects.toMatchObject({
-			_tag: "ResourceHidden",
-		});
+		await chats.setDone({ conversationId: projectThread.id, done: true });
+		expect(await doneAt()).toBeInstanceOf(Date);
+		await chats.setDone({ conversationId: projectThread.id, done: false });
+		expect(await doneAt()).toBeNull();
 	});
 
-	it("lists a channel by its slug as by its id, as an address names it", async () => {
-		const byId = await view.list({ workspace: workspaceId, channel: channelId });
+	it("lists a project by its slug as by its id, as an address names it", async () => {
+		const byId = await view.list({ workspace: workspaceId, project: projectId });
 		const [room] = await onDatabase((db) =>
-			db.select({ slug: channel.slug }).from(channel).where(eq(channel.id, channelId)),
+			db.select({ slug: project.slug }).from(project).where(eq(project.id, projectId)),
 		);
 
-		expect(await view.list({ workspace: workspaceId, channel: room?.slug ?? "" })).toEqual(byId);
+		expect(await view.list({ workspace: workspaceId, project: room?.slug ?? "" })).toEqual(byId);
 	});
 
-	it("previews a bot's reply as the list of its tasks shows it, without the words before a tool call", async () => {
-		const { conversation: current } = await chats.startTask({
+	it("lists a bot's default project by its id, but never by its placeholder slug", async () => {
+		const [defaultProject] = await onDatabase((db) =>
+			db.select({ slug: project.slug }).from(project).where(eq(project.id, botProjectId)),
+		);
+
+		await expect(
+			view.list({ workspace: workspaceId, project: botProjectId }),
+		).resolves.toBeDefined();
+		await expect(
+			view.list({ workspace: workspaceId, project: defaultProject?.slug ?? "" }),
+		).rejects.toMatchObject({ _tag: "ResourceHidden" });
+	});
+
+	it("previews a bot's reply as the list of its threads shows it, without the words before a tool call", async () => {
+		const { conversation: current } = await chats.startThread({
 			botId,
 			messageId: crypto.randomUUID(),
 			content: "Can you try again?",
@@ -657,7 +680,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			}),
 		);
 
-		expect((await listedTask(current.id))?.lastMessage?.preview).toBe("I'm still getting denied.");
+		expect((await listedThread(current.id))?.lastMessage?.preview).toBe(
+			"I'm still getting denied.",
+		);
 	});
 
 	describe("unread and waiting chats", () => {
@@ -680,11 +705,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			if (!written) throw new Error("fixture");
 			return written;
 		};
-		/** The host's one task, as the list of its tasks shows it. */
-		const hostRow = async () => (await view.botTasks(botId)).tasks[0];
+		/** The host's one thread, as the list of its threads shows it. */
+		const hostRow = async () => (await view.botThreads(botId)).threads[0];
 
 		it("counts what a bot writes after the person last read the chat", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			await chats.post({
 				conversationId: current.id,
 				messageId: crypto.randomUUID(),
@@ -705,7 +730,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("stops counting what came before the person's own reply", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			await botWrites(current.id, "Hello!", -2);
 			await botWrites(current.id, "Anything else?", -1);
 			expect(await hostRow()).toMatchObject({ unreadMessages: 2 });
@@ -719,7 +744,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("keeps a reply that finishes after the chat was read unread", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			await chats.post({
 				conversationId: current.id,
 				messageId: crypto.randomUUID(),
@@ -757,7 +782,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("keeps a reply unread that began before something the person read while it was written", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			await chats.post({
 				conversationId: current.id,
 				messageId: crypto.randomUUID(),
@@ -799,7 +824,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			const conversationView = onPostgresAs(userId)(
 				Context.get(conversations, ConversationView.Service),
 			);
-			const current = await aTask();
+			const current = await aThread();
 			const reply = await botWrites(current.id, "Hello!", 1);
 			const readsAnnounced = async () =>
 				(
@@ -831,9 +856,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("adds up each bot's unread messages for the rail", async () => {
-			const current = await aTask();
-			const other = await aTask(recipientBotId);
-			expect(await view.channelMarkers(workspaceId)).toEqual({ channels: {}, bots: {} });
+			const current = await aThread();
+			const other = await aThread(recipientBotId);
+			expect(await view.projectMarkers(workspaceId)).toEqual({ projects: {}, bots: {} });
 
 			await botWrites(current.id, "Hello!");
 			await botWrites(current.id, "Are you there?", 1);
@@ -848,8 +873,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				}),
 			);
 
-			expect(await view.channelMarkers(workspaceId)).toEqual({
-				channels: {},
+			expect(await view.projectMarkers(workspaceId)).toEqual({
+				projects: {},
 				bots: {
 					[botId]: { unreadMessages: 2, needsApproval: false, failedAutomations: 0 },
 					[recipientBotId]: { unreadMessages: 1, needsApproval: false, failedAutomations: 0 },
@@ -858,7 +883,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("marks a chat waiting on a tool call the person may decide", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			await chats.post({
 				conversationId: current.id,
 				messageId: crypto.randomUUID(),
@@ -895,18 +920,25 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 
 			// An automation run elsewhere, so an approval outside any run must not be taken for one.
+			const [recipientProject] = await onDatabase((db) =>
+				db
+					.select({ id: project.id })
+					.from(project)
+					.where(eq(project.defaultOfBotId, recipientBotId)),
+			);
+			if (!recipientProject) throw new Error("The recipient bot has no default project");
 			const elsewhere = await automations.create(
-				{ botId: recipientBotId },
+				{ projectId: recipientProject.id },
 				{ name: "Elsewhere", instructions: "Run somewhere else.", triggers: [{ kind: "webhook" }] },
 			);
 			await automations.run({
-				botId: recipientBotId,
+				projectId: recipientProject.id,
 				automationId: elsewhere.automation.id,
 				requestId: crypto.randomUUID(),
 			});
 
 			expect(await hostRow()).toMatchObject({ needsApproval: true });
-			expect((await view.channelMarkers(workspaceId)).bots[botId]).toEqual({
+			expect((await view.projectMarkers(workspaceId)).bots[botId]).toEqual({
 				unreadMessages: 0,
 				needsApproval: true,
 				failedAutomations: 0,
@@ -914,10 +946,10 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 	});
 
-	it("lists a channel the person is in, and hides one they are not", async () => {
+	it("lists a project the person is in, and hides one they are not", async () => {
 		const [unjoined] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId,
 					name: "Elsewhere",
@@ -927,14 +959,14 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				})
 				.returning(),
 		);
-		if (!unjoined) throw new Error("Could not create the channel");
+		if (!unjoined) throw new Error("Could not create the project");
 
-		await expect(view.list({ workspace: workspaceId, channel: unjoined.id })).rejects.toMatchObject(
+		await expect(view.list({ workspace: workspaceId, project: unjoined.id })).rejects.toMatchObject(
 			{
 				_tag: "ResourceHidden",
 			},
 		);
-		expect(await view.list({ workspace: workspaceId, channel: channelId })).toEqual({ chats: [] });
+		expect(await view.list({ workspace: workspaceId, project: projectId })).toEqual({ chats: [] });
 	});
 
 	describe("the interview a new bot starts with its creator", () => {
@@ -946,7 +978,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					.where(eq(bot.id, botId)),
 			);
 
-		it("starts once, in a task named for the bot, without posting a message for the creator", async () => {
+		it("starts once, in a thread named for the bot, without posting a message for the creator", async () => {
 			await interviewDue();
 			const opened = await chats.startInterview(botId);
 			if (!opened) throw new Error("The interview did not start");
@@ -1015,8 +1047,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect(await runOnPostgres(runningTurns(opened.id))).toHaveLength(1);
 		});
 
-		it("does not start for a bot that already has a task", async () => {
-			await aTask();
+		it("does not start for a bot that already has a thread", async () => {
+			await aThread();
 			await interviewDue();
 
 			expect(await chats.startInterview(botId)).toBeNull();
@@ -1032,19 +1064,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 	});
 
-	it("opens one main chat per channel, where a bot named in a message answers in it, and no bot otherwise", async () => {
-		const input = { workspace: workspaceId, channelId };
-		const [first, again] = await Promise.all([
-			chats.openMainChat(input),
-			chats.openMainChat(input),
-		]);
-		expect(again.id).toBe(first.id);
-		expect(first).toMatchObject({
-			kind: "channel_conversation",
-			channelId,
-			main: true,
-			title: "General",
-		});
+	it("starts a thread in a project, where a bot named in a message answers in it, and no bot otherwise", async () => {
+		const first = await chats.startNamedThread({ projectId, name: "Pricing" });
+		expect(first).toMatchObject({ kind: "project_thread", projectId, title: "Pricing" });
 		const [host] = await onDatabase((db) =>
 			db.select({ handle: bot.handle }).from(bot).where(eq(bot.id, botId)),
 		);
@@ -1068,36 +1090,31 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		]);
 	});
 
-	it("lets a person in a channel decide the computer requests of the bots they made, and only theirs", async () => {
-		await onDatabase((db) =>
-			db.update(bot).set({ createdById: administratorId }).where(eq(bot.id, recipientBotId)),
-		);
-		const chat = await chats.openMainChat({ workspace: workspaceId, channelId });
+	it("lets those who manage a project, and nobody else in it, decide its computer's requests, whichever bot asks", async () => {
+		const chat = await chats.startNamedThread({ projectId, name: "General" });
 		await onDatabase((db) =>
 			db.insert(conversationParticipant).values([
 				{ conversationId: chat.id, botId },
 				{ conversationId: chat.id, botId: recipientBotId },
 			]),
 		);
-		const conversationView = onPostgresAs(userId)(
-			Context.get(conversations, ConversationView.Service),
-		);
+		const deciders = (personId: string) =>
+			onPostgresAs(personId)(Context.get(conversations, ConversationView.Service))
+				.get(chat.id)
+				.then((details) => details.capabilities?.approveComputerRequestsOf);
 
-		expect((await conversationView.get(chat.id)).capabilities?.approveComputerRequestsOf).toEqual([
-			botId,
-		]);
+		// The member made the bot, but the computer is the project's.
+		expect(await deciders(userId)).toEqual([]);
+		expect(await deciders(administratorId)).toEqual([botId, recipientBotId]);
 	});
 
-	it("asks the bot a message in the channel's main chat replies to, though it names nobody", async () => {
-		const channelConversation = await chats.openMainChat({
-			workspace: workspaceId,
-			channelId,
-		});
+	it("asks the bot a message in a project's thread replies to, though it names nobody", async () => {
+		const projectThread = await chats.startNamedThread({ projectId, name: "General" });
 		const [answer] = await onDatabase((db) =>
 			db
 				.insert(message)
 				.values({
-					conversationId: channelConversation.id,
+					conversationId: projectThread.id,
 					authorBotId: botId,
 					kind: "text",
 					status: "complete",
@@ -1109,41 +1126,44 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		if (!answer) throw new Error("The bot's message was not written");
 
 		await chats.post({
-			conversationId: channelConversation.id,
+			conversationId: projectThread.id,
 			messageId: crypto.randomUUID(),
 			content: "Do you have saved automations?",
 			replyTo: answer.id,
 		});
 
-		expect(await runOnPostgres(runningTurns(channelConversation.id))).toEqual([
+		expect(await runOnPostgres(runningTurns(projectThread.id))).toEqual([
 			expect.objectContaining({ request: expect.objectContaining({ botId, reason: "reply" }) }),
 		]);
 	});
 
-	it("keeps a bot out of its task for a message to a person in it, but not for a handle that is nobody's", async () => {
-		const channel = await aTask();
+	it("lets a bot decline a message in its thread to a person in it, but answer a handle that is nobody's", async () => {
+		const thread = await aThread();
 
 		await chats.post({
-			conversationId: channel.id,
+			conversationId: thread.id,
 			messageId: crypto.randomUUID(),
 			content: "@chat-member can you look at this?",
 		});
 
-		expect(await runOnPostgres(runningTurns(channel.id))).toHaveLength(0);
+		expect(await runOnPostgres(runningTurns(thread.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ botId, reason: "optional" }) }),
+		]);
 
+		const another = await aThread();
 		await chats.post({
-			conversationId: channel.id,
+			conversationId: another.id,
 			messageId: crypto.randomUUID(),
 			content: "Please raise this with @Backlog Manager, high priority.",
 		});
 
-		expect(await runOnPostgres(runningTurns(channel.id))).toEqual([
+		expect(await runOnPostgres(runningTurns(another.id))).toEqual([
 			expect.objectContaining({ request: expect.objectContaining({ botId, reason: "default" }) }),
 		]);
 	});
 
-	it("keeps a bot out of its task for a message to someone who left the workspace but is still in the task", async () => {
-		const channel = await aTask();
+	it("lets a bot decline a message in its thread to someone who left the workspace but is still in the thread", async () => {
+		const thread = await aThread();
 		const [former] = await onDatabase((db) =>
 			db
 				.insert(user)
@@ -1152,26 +1172,83 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		if (!former) throw new Error("Could not create the former member");
 		await onDatabase((db) =>
-			db.insert(conversationParticipant).values({ conversationId: channel.id, userId: former.id }),
+			db.insert(conversationParticipant).values({ conversationId: thread.id, userId: former.id }),
 		);
 
 		await chats.post({
-			conversationId: channel.id,
+			conversationId: thread.id,
 			messageId: crypto.randomUUID(),
 			content: "@former-member are you still around?",
 		});
 
-		expect(await runOnPostgres(runningTurns(channel.id))).toHaveLength(0);
+		expect(await runOnPostgres(runningTurns(thread.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ botId, reason: "optional" }) }),
+		]);
 	});
 
-	it("lists a channel's main chat with what the person has not read in it, and counts that on the rail", async () => {
-		const channelConversation = await chats.openMainChat({
-			workspace: workspaceId,
-			channelId,
+	it("starts a thread in a project from its first message, which its lead bot answers, once", async () => {
+		await onDatabase((db) =>
+			db.update(project).set({ leadBotId: botId }).where(eq(project.id, projectId)),
+		);
+		const input = {
+			projectId,
+			messageId: crypto.randomUUID(),
+			content: "Plan the launch\nby Friday",
+		};
+
+		const started = await chats.startProjectThread(input);
+
+		expect(started.conversation).toMatchObject({
+			projectId,
+			botId: null,
+			title: "Plan the launch by Friday",
 		});
+		expect(started.message).toMatchObject({ id: input.messageId });
+		expect(await runOnPostgres(runningTurns(started.conversation.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ botId }) }),
+		]);
+		expect((await chats.startProjectThread(input)).conversation.id).toBe(started.conversation.id);
+		await expect(chats.startThread({ botId, ...input })).rejects.toMatchObject({
+			_tag: "MessageIdConflict",
+		});
+	});
+
+	it("starts a thread in a bot's default project with the bot in it, from the bot or the project", async () => {
+		const participantsOf = (conversationId: string) =>
+			onDatabase((db) =>
+				db
+					.select({ userId: conversationParticipant.userId, botId: conversationParticipant.botId })
+					.from(conversationParticipant)
+					.where(eq(conversationParticipant.conversationId, conversationId)),
+			);
+		const fromBot = await chats.startThread({
+			botId,
+			messageId: crypto.randomUUID(),
+			content: "From the bot",
+		});
+		const fromProject = await chats.startProjectThread({
+			projectId: botProjectId,
+			messageId: crypto.randomUUID(),
+			content: "From its project",
+		});
+		const named = await chats.startNamedThread({ projectId: botProjectId, name: "Named" });
+
+		const expected = [
+			{ userId, botId: null },
+			{ userId: null, botId },
+		];
+		expect(await participantsOf(fromBot.conversation.id)).toEqual(expect.arrayContaining(expected));
+		expect(await participantsOf(fromProject.conversation.id)).toEqual(
+			expect.arrayContaining(expected),
+		);
+		expect(await participantsOf(named.id)).toEqual(expect.arrayContaining(expected));
+	});
+
+	it("lists a project's thread with what the person has not read in it, and counts that on the rail", async () => {
+		const projectThread = await chats.startNamedThread({ projectId, name: "General" });
 		await onDatabase((db) =>
 			db.insert(message).values({
-				conversationId: channelConversation.id,
+				conversationId: projectThread.id,
 				authorUserId: administratorId,
 				kind: "text",
 				status: "complete",
@@ -1180,54 +1257,63 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			}),
 		);
 
-		expect((await view.list({ workspace: workspaceId, channel: channelId }))?.chats).toEqual([
+		expect((await view.list({ workspace: workspaceId, project: projectId }))?.chats).toEqual([
 			{
-				conversation: expect.objectContaining({ id: channelConversation.id, main: true }),
+				conversation: expect.objectContaining({ id: projectThread.id }),
+				lastMessage: expect.objectContaining({ preview: "Lunch?", authorUserId: administratorId }),
+				participants: [expect.objectContaining({ kind: "person", id: administratorId })],
+				messageCount: 1,
+				waitingOn: null,
 				unreadMessages: 1,
+				needsApproval: false,
+				mentionsYou: false,
 			},
 		]);
-		expect(await view.channelMarkers(workspaceId)).toEqual({
-			channels: { [channelId]: { unreadMessages: 1, needsApproval: false } },
+		expect(await view.projectMarkers(workspaceId)).toEqual({
+			projects: { [projectId]: { unreadMessages: 1, needsApproval: false } },
 			bots: {},
 		});
 	});
 
-	it("lists the channel's main chat and threads, the main chat first, and hides a thread once archived", async () => {
-		const first = await chats.openMainChat({ workspace: workspaceId, channelId });
-		const pricing = await chats.startChat({ channelId, name: "Pricing" });
-		const launch = await chats.startChat({ channelId, name: "Launch" });
+	it("lists the project's threads, the most recent activity first, and hides any thread once archived", async () => {
+		const general = await chats.startNamedThread({ projectId, name: "General" });
+		const pricing = await chats.startNamedThread({ projectId, name: "Pricing" });
+		const launch = await chats.startNamedThread({ projectId, name: "Launch" });
 
 		const listed = async () =>
-			(await view.list({ workspace: workspaceId, channel: channelId }))?.chats.map(
+			(await view.list({ workspace: workspaceId, project: projectId }))?.chats.map(
 				({ conversation }) => conversation.title,
 			);
-		expect(await listed()).toEqual([first.title, "Pricing", "Launch"]);
+		expect(await listed()).toEqual(["Launch", "Pricing", "General"]);
 
-		// Changing a chat is for whoever may change the channel.
+		await chats.post({
+			conversationId: general.id,
+			messageId: crypto.randomUUID(),
+			content: "Morning, all.",
+		});
+		expect(await listed()).toEqual(["General", "Launch", "Pricing"]);
+
+		// Changing a thread is for whoever may change the project.
 		const administering = onPostgresAs(administratorId)(Context.get(conversations, Chats.Service));
-		await administering.changeChat({ conversationId: pricing.id, change: { name: "Prices" } });
-		await administering.changeChat({ conversationId: launch.id, change: { archived: true } });
-		// The first chat can be renamed, but stays.
-		await administering.changeChat({ conversationId: first.id, change: { name: "Everyone" } });
-		await expect(
-			administering.changeChat({ conversationId: first.id, change: { archived: true } }),
-		).rejects.toMatchObject({ _tag: "FirstChatNotArchivable" });
+		await administering.changeThread({ conversationId: pricing.id, change: { name: "Prices" } });
+		await administering.changeThread({ conversationId: launch.id, change: { archived: true } });
+		await administering.changeThread({ conversationId: general.id, change: { archived: true } });
 
-		expect(await listed()).toEqual(["Everyone", "Prices"]);
+		expect(await listed()).toEqual(["Prices"]);
 	});
 
-	it("leaves renaming and archiving a channel's thread to whoever may change the channel", async () => {
-		const pricing = await chats.startChat({ channelId, name: "Pricing" });
+	it("leaves renaming and archiving a project's thread to whoever may change the project", async () => {
+		const pricing = await chats.startNamedThread({ projectId, name: "Pricing" });
 
-		// The member the chats are with may start one, but not change the channel.
+		// The member the chats are with may start one, but not change the project.
 		await expect(
-			chats.changeChat({ conversationId: pricing.id, change: { archived: true } }),
+			chats.changeThread({ conversationId: pricing.id, change: { archived: true } }),
 		).rejects.toMatchObject({ _tag: "ActionForbidden" });
 	});
 
 	it("refuses a message to a bot with no model, and saves nothing", async () => {
 		await onDatabase((db) => db.update(bot).set({ model: null }).where(eq(bot.id, botId)));
-		const current = await aTask();
+		const current = await aThread();
 		const messageId = crypto.randomUUID();
 
 		await expect(
@@ -1244,7 +1330,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("retries the same message without creating another message or turn", async () => {
-		const current = await aTask();
+		const current = await aThread();
 		const send = {
 			conversationId: current.id,
 			messageId: crypto.randomUUID(),
@@ -1271,8 +1357,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("quotes the message a reply answers, but only one in the same chat", async () => {
-		const current = await aTask();
-		const elsewhere = await aTask(recipientBotId);
+		const current = await aThread();
+		const elsewhere = await aThread(recipientBotId);
 		const asked = await chats.post({
 			conversationId: current.id,
 			messageId: crypto.randomUUID(),
@@ -1311,7 +1397,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("lets people react to a message once per emoji, announcing each change", async () => {
 		const reactions = onPostgresAs(userId)(Context.get(conversations, Reactions.Service));
-		const current = await aTask();
+		const current = await aThread();
 		const asked = await chats.post({
 			conversationId: current.id,
 			messageId: crypto.randomUUID(),
@@ -1362,7 +1448,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("refuses a reaction to a reply still being written, and a new emoji past the limit", async () => {
 		const reactions = onPostgresAs(userId)(Context.get(conversations, Reactions.Service));
-		const current = await aTask();
+		const current = await aThread();
 		const asked = await chats.post({
 			conversationId: current.id,
 			messageId: crypto.randomUUID(),
@@ -1403,7 +1489,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		const conversationView = onPostgresAs(userId)(
 			Context.get(conversations, ConversationView.Service),
 		);
-		const current = await aTask();
+		const current = await aThread();
 		const post = (content: string) =>
 			chats.post({ conversationId: current.id, messageId: crypto.randomUUID(), content });
 		const changesAnnounced = async () =>
@@ -1433,7 +1519,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			Context.get(conversations, ConversationView.Service),
 		);
 		const turns = Context.get(conversations, Turns.Service);
-		const current = await aTask();
+		const current = await aThread();
 		const asked = await chats.post({
 			conversationId: current.id,
 			messageId: crypto.randomUUID(),
@@ -1461,9 +1547,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(Date.parse(queuedSince ?? "")).toBeLessThanOrEqual(Date.parse(later.createdAt));
 	});
 
-	it("announces a person's message before the bot it brings into the task", async () => {
-		const current = await aTask();
-		// The task's bot has not joined it yet, so the message brings it in.
+	it("announces a person's message before the bot it brings into the thread", async () => {
+		const current = await aThread();
+		// The thread's bot has not joined it yet, so the message brings it in.
 		await onDatabase((db) =>
 			db
 				.delete(conversationParticipant)
@@ -1496,7 +1582,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("lists automation runs in the automation's feed", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: botProjectId },
 			{
 				name: "Overnight review",
 				instructions: "Review overnight changes.",
@@ -1505,7 +1591,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await automations.run({
-			botId,
+			projectId: botProjectId,
 			automationId: created.automation.id,
 			requestId,
 		});
@@ -1528,7 +1614,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("paginates interleaved messages and automation runs in an automation's feed without gaps", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: botProjectId },
 			{
 				name: "Overnight review",
 				instructions: "Review overnight changes.",
@@ -1537,7 +1623,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await automations.run({
-			botId,
+			projectId: botProjectId,
 			automationId: created.automation.id,
 			requestId,
 		});
@@ -1592,8 +1678,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		expect(secondPage?.nextCursor).toBeNull();
 	});
 
-	it("shows a collaboration in the asking task", async () => {
-		const initiatorChat = await aTask();
+	it("shows a collaboration in the asking thread", async () => {
+		const initiatorChat = await aThread();
 		const trigger = await chats.post({
 			conversationId: initiatorChat.id,
 			messageId: crypto.randomUUID(),
@@ -1666,7 +1752,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 	it("reports each history conversation's own status, participants, and automation run", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: botProjectId },
 			{
 				name: "Overnight review",
 				instructions: "Review overnight changes.",
@@ -1675,7 +1761,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await automations.run({
-			botId,
+			projectId: botProjectId,
 			automationId: created.automation.id,
 			requestId,
 		});
@@ -1961,7 +2047,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		};
 
 		it("lists a call waiting on the person's decision, then among the answered once decided", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			const callId = await askForApproval(current.id);
 
 			expect(await view.approvals(workspaceId)).toEqual({
@@ -1969,7 +2055,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					expect.objectContaining({
 						call: expect.objectContaining({ id: callId, tool: "linear__create_issue" }),
 						bot: expect.objectContaining({ id: botId }),
-						channelId: null,
+						projectId: null,
 						conversationId: current.id,
 						rootConversationId: current.id,
 					}),
@@ -2011,13 +2097,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await onDatabase((db) =>
 				db.update(bot).set({ createdById: administratorId }).where(eq(bot.id, botId)),
 			);
-			const current = await aTask();
+			const current = await aThread();
 			const created = await automations.create(
-				{ botId },
+				{ projectId: botProjectId },
 				{ name: "Overnight filing", instructions: "File it.", triggers: [{ kind: "webhook" }] },
 			);
 			const run = await automations.run({
-				botId,
+				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
 			});
@@ -2067,7 +2153,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			await onDatabase((db) =>
 				db.update(bot).set({ createdById: administratorId }).where(eq(bot.id, botId)),
 			);
-			const current = await aTask();
+			const current = await aThread();
 			await askForApproval(current.id, "request_network_access");
 			const callId = await askForApproval(current.id);
 
@@ -2077,7 +2163,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("lists what the person has not read, and keeps what mentions them once read", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			const news = await botWrites(current.id, "The deploy finished.", 1);
 			const mention = await botWrites(current.id, "@chat-member can you check it?", 2);
 
@@ -2100,7 +2186,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("does not take an email address for a mention", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			await chats.markRead(current.id);
 			await botWrites(current.id, "Mail it to ops@chat-member.example", 1);
 
@@ -2111,11 +2197,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		it("lists an automation run in the person's chats, with the start of what it said", async () => {
 			const created = await automations.create(
-				{ botId },
+				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const accepted = await automations.run({
-				botId,
+				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
 			});
@@ -2130,7 +2216,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					triggerKind: "manual",
 					bot: expect.objectContaining({ id: botId }),
 					preview: "Two PRs merged. The release branch is green.",
-					rootConversationId: (await view.botTasks(botId)).automations[0]?.conversation?.id,
+					rootConversationId: (await view.botThreads(botId)).automations[0]?.conversation?.id,
 					mentionsYou: false,
 					unread: true,
 				}),
@@ -2139,12 +2225,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		it("counts an automation run unread only once it posted a result or failed", async () => {
 			const created = await automations.create(
-				{ botId },
+				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const runAutomation = () =>
 				automations.run({
-					botId,
+					projectId: botProjectId,
 					automationId: created.automation.id,
 					requestId: crypto.randomUUID(),
 				});
@@ -2178,16 +2264,16 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		it("shows what an automation run said in the automation's feed", async () => {
 			const created = await automations.create(
-				{ botId },
+				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const accepted = await automations.run({
-				botId,
+				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
 			});
 			await botWrites(accepted.conversationId, "Two PRs merged.\nThe release branch is green.", 1);
-			const feed = (await view.botTasks(botId)).automations[0]?.conversation;
+			const feed = (await view.botThreads(botId)).automations[0]?.conversation;
 
 			expect((await view.messages(feed?.id ?? ""))?.items).toEqual([
 				expect.objectContaining({
@@ -2200,11 +2286,11 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		it("makes a run opened while it ran news again once it posts its result", async () => {
 			const created = await automations.create(
-				{ botId },
+				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const run = await automations.run({
-				botId,
+				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
 			});
@@ -2221,27 +2307,24 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			);
 		});
 
-		it("leaves a result posted in a channel's conversation as well to mention the person there", async () => {
+		it("leaves a result posted in a project's thread as well to mention the person there", async () => {
 			const created = await automations.create(
-				{ botId },
+				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const run = await automations.run({
-				botId,
+				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
 			});
 			const content = "@chat-member the deploy needs your sign-off.";
 			await runPosts(run, content);
-			const channelConversation = await chats.openMainChat({
-				workspace: workspaceId,
-				channelId,
-			});
+			const projectThread = await chats.startNamedThread({ projectId, name: "General" });
 			const [inChat] = await onDatabase((db) =>
 				db
 					.insert(message)
 					.values({
-						conversationId: channelConversation.id,
+						conversationId: projectThread.id,
 						authorBotId: botId,
 						runId: run.runId,
 						kind: "text",
@@ -2262,7 +2345,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("lists a collaboration in the person's chats", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			const asked = await collaborate(current.id, current.id);
 
 			expect((await view.inbox(workspaceId)).items).toContainEqual(
@@ -2290,7 +2373,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 					.set({ visibility: "private", createdById: administratorId })
 					.where(eq(bot.id, recipientBotId)),
 			);
-			const current = await aTask();
+			const current = await aThread();
 			const asked = await collaborate(current.id, current.id);
 			const callId = await askForApproval(asked, "linear__create_issue", recipientBotId);
 			const adminView = onPostgresAs(administratorId)(Context.get(conversations, ChatView.Service));
@@ -2313,7 +2396,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				}),
 			]);
 
-			// The administrator made the asked bot, but does not reach the member's task.
+			// The administrator made the asked bot, but does not reach the member's thread.
 			expect((await adminView.inbox(workspaceId)).items).not.toContainEqual(
 				expect.objectContaining({ conversationId: asked }),
 			);
@@ -2321,7 +2404,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("reads a collaboration with the conversation it was asked in", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			const asked = await collaborate(current.id, current.id);
 
 			await chats.markRead(current.id);
@@ -2343,12 +2426,12 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		it("reads only the automation run opened, leaving the automation's other runs unread", async () => {
 			const created = await automations.create(
-				{ botId },
+				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const runAutomation = () =>
 				automations.run({
-					botId,
+					projectId: botProjectId,
 					automationId: created.automation.id,
 					requestId: crypto.randomUUID(),
 				});
@@ -2366,7 +2449,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("reads only the collaboration opened, leaving the conversation's others unread", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			const earlier = await collaborate(current.id, current.id);
 			const opened = await collaborate(current.id, current.id);
 			const later = await collaborate(current.id, current.id);
@@ -2380,7 +2463,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("leaves what was written in the conversation before the item unread", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			const before = await botWrites(current.id, "The launch plan is ready", -60);
 			const opened = await collaborate(current.id, current.id);
 
@@ -2393,7 +2476,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("refuses a conversation that is not an automation run or collaboration", async () => {
-			const current = await aTask();
+			const current = await aThread();
 
 			await expect(chats.markItemRead(current.id)).rejects.toMatchObject({
 				_tag: "ResourceHidden",
@@ -2401,13 +2484,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		it("counts an automation run and a collaboration caught up with once the person writes after them", async () => {
-			const current = await aTask();
+			const current = await aThread();
 			const created = await automations.create(
-				{ botId },
+				{ projectId: botProjectId },
 				{ name: "Overnight review", instructions: "Review it.", triggers: [{ kind: "webhook" }] },
 			);
 			const run = await automations.run({
-				botId,
+				projectId: botProjectId,
 				automationId: created.automation.id,
 				requestId: crypto.randomUUID(),
 			});
@@ -2453,7 +2536,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	describe("sending files", () => {
 		/** The chat, with the member's uploads to it. */
 		async function aChatWithFiles() {
-			const { id: conversationId } = await aTask();
+			const { id: conversationId } = await aThread();
 			const files = onPostgresAs(userId)(Context.get(conversations, ChatFiles.Service));
 			const upload = (name: string) =>
 				files.upload({
@@ -2558,7 +2641,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("keeps an uploaded file as the type it was given, or else the type its name suggests", async () => {
-		const { id: conversationId } = await aTask();
+		const { id: conversationId } = await aThread();
 		const files = onPostgresAs(userId)(Context.get(conversations, ChatFiles.Service));
 		const upload = (name: string, type: string | undefined) =>
 			files.upload({

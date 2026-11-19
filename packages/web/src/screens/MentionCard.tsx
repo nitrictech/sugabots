@@ -9,6 +9,7 @@ import { useBot } from "@/lib/bots.ts";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { PopoverContent } from "@/ui/popover.tsx";
 import type { GroupMention, MentionTarget } from "./mentions.tsx";
 
 /**
@@ -40,36 +41,26 @@ export function MentionCard({
 			{"trigger" in opensFrom && (
 				<Popover.Trigger nativeButton={false} render={opensFrom.trigger} />
 			)}
-			<Popover.Portal>
-				<Popover.Positioner
-					anchor={chip?.chip}
-					side="bottom"
-					align="start"
-					sideOffset={6}
-					collisionPadding={16}
-					className="isolate z-50 outline-none"
-				>
-					<Popover.Popup
-						finalFocus={chip ? false : undefined}
-						onKeyDown={(event) => {
-							if (event.key !== "Escape") return;
-							// Handled, so the panel around the chat leaves it to the card.
-							event.preventDefault();
-							onOpenChange(false);
-							chip?.returnFocus();
-						}}
-						className="w-72 origin-(--transform-origin) rounded-lg border border-border-strong bg-panel p-3 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95"
-					>
-						{target.kind === "group" ? (
-							<GroupCard group={target} />
-						) : target.kind === "bot" ? (
-							<BotCard bot={target} />
-						) : (
-							<PersonCard person={target} />
-						)}
-					</Popover.Popup>
-				</Popover.Positioner>
-			</Popover.Portal>
+			<PopoverContent
+				anchor={chip?.chip}
+				finalFocus={chip ? false : undefined}
+				onKeyDown={(event) => {
+					if (event.key !== "Escape") return;
+					// Handled, so the panel around the chat leaves it to the card.
+					event.preventDefault();
+					onOpenChange(false);
+					chip?.returnFocus();
+				}}
+				className="w-72 p-3"
+			>
+				{target.kind === "group" ? (
+					<GroupCard group={target} />
+				) : target.kind === "bot" ? (
+					<BotCard bot={target} />
+				) : (
+					<PersonCard person={target} />
+				)}
+			</PopoverContent>
 		</Popover.Root>
 	);
 }

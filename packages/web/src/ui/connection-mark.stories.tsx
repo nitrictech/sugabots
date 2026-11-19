@@ -1,3 +1,4 @@
+import { Globe } from "lucide-react";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { ConnectionMark } from "./connection-mark.tsx";
@@ -14,7 +15,7 @@ const meta = preview.meta({
 /** Every size, from inline in a line of text to a connection page's heading. */
 export const Sizes = meta.story({
 	render: (args) => (
-		<div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+		<div className="flex items-center gap-3.5">
 			{SIZES.map((size) => (
 				<ConnectionMark key={size} {...args} size={size} />
 			))}
@@ -28,7 +29,7 @@ export const Sizes = meta.story({
 /** The catalog entries with a logo, each in its brand colour on a tint of it. */
 export const Logos = meta.story({
 	render: () => (
-		<div style={{ display: "flex", gap: 14 }}>
+		<div className="flex gap-3.5">
 			{["linear", "stripe", "notion", "sentry", "jira"].map((id) => (
 				<ConnectionMark key={id} presetId={id} name={id} size="tile" />
 			))}
@@ -42,7 +43,7 @@ export const Logos = meta.story({
 /** Anything else: its letters on a neutral tile. */
 export const Lettered = meta.story({
 	render: () => (
-		<div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+		<div className="flex items-center gap-3.5">
 			{SIZES.map((size) => (
 				<ConnectionMark key={size} name="Team wiki" size={size} />
 			))}
@@ -51,5 +52,20 @@ export const Lettered = meta.story({
 	play: async ({ canvasElement }) => {
 		await expect(canvasElement.querySelectorAll("svg")).toHaveLength(0);
 		await expect(canvasElement.textContent).toContain("TW");
+	},
+});
+
+/** A step that reaches no connection, such as a computer asking to reach a host: an icon on the neutral tile. */
+export const WithAnIcon = meta.story({
+	render: () => (
+		<div className="flex items-center gap-3.5">
+			{SIZES.map((size) => (
+				<ConnectionMark key={size} name="Network request" icon={Globe} size={size} />
+			))}
+		</div>
+	),
+	play: async ({ canvasElement }) => {
+		await expect(canvasElement.querySelectorAll("svg")).toHaveLength(SIZES.length);
+		await expect(canvasElement.textContent).not.toContain("NR");
 	},
 });

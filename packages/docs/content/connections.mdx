@@ -1,25 +1,41 @@
 ---
 title: Connections
-description: Plug apps like Linear and Notion into a bot, so it can work with them.
+description: Plug apps like Linear and Notion into a bot or a project, so its bots can work with them.
 ---
 
-A connection links one bot to an app through the
+A connection links a [project](/docs/projects) to an app through the
 [Model Context Protocol](https://modelcontextprotocol.io) (MCP). Once it's
-connected, the bot can use the app's tools, with the
+connected, the project's bots can use the app's tools, with the
 [approval](/docs/tools-and-approvals#tools-from-connections) you choose. A
-connection can also be an [HTTP endpoint](#http-endpoints): a web API the bot
-sends requests to, or the bot's own [GitHub app](#github).
+connection can also be an [HTTP endpoint](#http-endpoints): a web API bots
+send requests to, or the project's own [GitHub app](#github).
 
-Each connection belongs to one bot. Another bot that needs the same app gets a
-connection of its own, or [asks this one for help](/docs/conversations#bots-asking-bots).
+Each connection belongs to one project. A bot's own connections are those of
+its hidden default project, where its own threads are, so a bot has
+connections just as a project does.
 
-A bot's creator, the owner and admins add and manage its connections. Anyone
-who can talk to the bot can see which ones it has. You can also add connections
-to your own [Personal Assistant](/docs/bots#your-personal-assistant).
+## Which connections a bot uses
+
+A bot working in a project's thread uses the project's connections and its
+own. When both have a connection with the same name, the project's is the one
+it uses. In its own threads, a bot uses just its own. When a bot
+[asks another for help](/docs/conversations#bots-asking-bots), the other bot
+works with its own connections.
+
+## Who manages them
+
+Whoever may change a project adds and manages its connections, signs them in
+and chooses their tools' approvals: in a project people made, the owner and
+admins. Everyone in the project can see which connections it has.
+
+A bot's own connections are managed by its creator, the owner and admins, and
+anyone who can talk to the bot can see them. You can also add connections to
+your own [Personal Assistant](/docs/bots#your-personal-assistant).
 
 ## Add one
 
 Open the bot's settings, find **Connections**, and choose **Add connection**.
+A project's connections are managed the same way.
 
 ### Apps that sign in with one click
 
@@ -51,7 +67,7 @@ Choose **Something else**, then **Connect by URL**, and fill in:
 
 Once Sugabots has found a connection's tools, each one starts at an
 [approval](/docs/tools-and-approvals#tools-from-connections) that suits it, and
-you can change it from the bot's settings.
+you can change it from the connection's settings.
 
 ## HTTP endpoints
 
@@ -85,18 +101,23 @@ API, so a wrong secret shows up only when a bot first uses it.
 
 ## GitHub
 
-Each bot can have its own **GitHub app**, made for it and installed on one
-GitHub account or organisation:
+Each project, and so each bot, can have its own **GitHub app**, made for it
+and installed on one GitHub account or organisation:
 
 1. Choose **GitHub** under **Add connection**. Name an **Organization** to own
    the app, or leave it empty to own it yourself, and choose **Make on GitHub**.
-2. Choose **Install on GitHub**, and install the app on the account the bot
-   works on.
+2. Choose **Install on GitHub**, and install the app on the account its bots
+   work on.
 3. Choose **Add repository** to pick the repositories it works on, from those
    the installation reaches.
 
-Its [automations](/docs/automations) can then start on GitHub events. A bot has
-at most one GitHub app.
+The project's [automations](/docs/automations) can then start on GitHub
+events, and its [computer](/docs/projects#computer) is signed in to read those repositories.
+A project has at most one GitHub app, since its computer can be signed in to
+only one account there. A bot working in a project's thread uses the project's
+GitHub app; when the project has none, it uses its own, but the project's
+computer isn't signed in to that app's repositories, so only public ones can be
+cloned there.
 
 ## Look after it
 
@@ -112,7 +133,7 @@ all.
 
 <Careful title="Disconnecting">
 
-The bot loses its tools straight away. Adding it again means signing in
+Its bots lose its tools straight away. Adding it again means signing in
 or entering its details again.
 
 </Careful>

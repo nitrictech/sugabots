@@ -10,14 +10,14 @@ import {
 	connectionHandlers,
 	StoryApp,
 	storyBots,
-	storyChannels,
 	storyModel,
+	storyProjects,
 } from "../story-app.tsx";
 
 /*
- * Bots in settings: every bot, beside the open
- * one's contact card. Model and Instructions open on pages of their own in
- * the same place; on a phone the card covers the list, with Back to it.
+ * A bot's settings, opened from Bots: its contact card, with its profile,
+ * model and instructions edited in place, its tools, connections and
+ * automations, and on a phone Back to the list.
  *
  * Handlers a story adds with `msw.use` are tried before the meta's, so each
  * story answers only what it is about.
@@ -70,7 +70,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		botId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: "0199a3a0-0000-7000-8000-00000000b071",
 		name,
 		handle,
 		url,
@@ -90,7 +90,7 @@ function connection(
 	};
 }
 
-const channelTools: TestConnection[] = [
+const projectTools: TestConnection[] = [
 	connection(1, "HubSpot", "hubspot", "https://mcp.hubspot.com/mcp", [
 		{ name: "search_contacts", description: "Find contacts", readOnly: true, destructive: false },
 		{ name: "update_deal", description: "Change a deal", readOnly: false, destructive: false },
@@ -111,7 +111,7 @@ function automation(
 	return {
 		id,
 		workspaceId: growthDesk.workspaceId,
-		botId: growthDesk.id,
+		projectId: growthDesk.defaultProjectId,
 		name,
 		instructions: "Work the overnight replies and tell me what needs me.",
 		triggers: automationTriggers(id, trigger),
@@ -128,7 +128,7 @@ const automations: Automation[] = [
 		1,
 		"Overnight outbound",
 		{
-			kind: "schedule",
+			kind: "routine",
 			schedule: { repeat: "cron", expression: "0 6 * * *" },
 			timezone: "UTC",
 			nextScheduledAt: null,
@@ -159,7 +159,7 @@ export const ContactCard = meta.story({
 		const trail = canvas.getByRole("navigation", { name: "Breadcrumb" });
 		await expect(within(trail).getByRole("link", { name: "Bots" })).toBeInTheDocument();
 		await expect(canvas.getByRole("heading", { name: "Built-in tools" })).toBeInTheDocument();
-		await expect(canvas.getByRole("heading", { name: /^Inherited from / })).toBeInTheDocument();
+		await expect(canvas.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
 		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(growthDesk.name);
 		await expect(canvas.getByRole("textbox", { name: "Description" })).toBeInTheDocument();
 		// No computers are set up for the workspace, so the bot's is off and can't be turned on.
@@ -213,10 +213,10 @@ function memberHandlers() {
 		models,
 		bots,
 		role: "member",
-		channels: storyChannels.map((channel) => ({
-			...channel,
+		projects: storyProjects.map((project) => ({
+			...project,
 			permissions: {
-				...channel.permissions,
+				...project.permissions,
 				createBots: false,
 				updateBots: false,
 				deleteBots: false,
@@ -242,10 +242,9 @@ export const MemberModelPage = meta.story({
 	},
 });
 
-/** The Instructions page: the bot's instructions, counted against their limit. */
+/** The bot's instructions, on its card, counted against their limit. */
 export const InstructionsPage = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: /^Instructions/ }));
 		await expect(await canvas.findByLabelText("Instructions")).toBeInTheDocument();
 		await expect(canvas.getByText(/of 20,000 characters/)).toBeInTheDocument();
 	},
@@ -255,8 +254,8 @@ export const InstructionsPage = meta.story({
 export const ToolsAndAutomations = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			...connectionHandlers(channelTools),
-			http.get(`${API}/bots/:botId/automations`, () => HttpResponse.json(automations)),
+			...connectionHandlers(projectTools),
+			http.get(`${API}/projects/:projectId/automations`, () => HttpResponse.json(automations)),
 		);
 	},
 	play: async ({ canvas }) => {

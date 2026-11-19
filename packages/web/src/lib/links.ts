@@ -1,9 +1,9 @@
-import type { Bot, Channel, Connection } from "@sugabots/contracts";
+import type { Bot, Connection, Project } from "@sugabots/contracts";
 import { linkOptions } from "@tanstack/react-router";
-import type { BotSettingsPage, ChannelSettingsPage } from "@/lib/workspace-settings.ts";
+import type { BotSettingsPage, ProjectSettingsPage } from "@/lib/workspace-settings.ts";
 
 /*
- * Where a channel or a bot lives in the workspace being looked at.
+ * Where a project or a bot lives in the workspace being looked at.
  *
  * Built from the records rather than from loose params, so no caller assembles
  * an address by hand and the address can change here alone. Each result spreads
@@ -13,11 +13,8 @@ import type { BotSettingsPage, ChannelSettingsPage } from "@/lib/workspace-setti
  * themselves, and links by fixed key or conversation id are written in place.
  */
 
-type ChannelRef = Pick<Channel, "slug">;
+type ProjectRef = Pick<Project, "slug">;
 type BotRef = Pick<Bot, "handle">;
-
-/** Where a conversation, or a list of files, belongs: a channel, or a bot. */
-export type Owner = { channel: ChannelRef } | { bot: BotRef };
 
 /** What is new across the workspace. */
 export function inboxLink() {
@@ -36,7 +33,7 @@ export function newDirectMessageLink() {
 
 /**
  * One direct message, by its conversation's id, jumped to `message` when one
- * is given. The address names no channel, as a direct message between people
+ * is given. The address names no project, as a direct message between people
  * is in none.
  */
 export function directMessageLink(conversationId: string, search: { message?: string } = {}) {
@@ -48,9 +45,9 @@ export function directMessageLink(conversationId: string, search: { message?: st
 	});
 }
 
-/** Every channel the person could open or join. */
-export function channelsLink() {
-	return linkOptions({ from: "/$workspace", to: "./channels" });
+/** Every project the person could open or join. */
+export function projectsLink() {
+	return linkOptions({ from: "/$workspace", to: "./projects" });
 }
 
 /** Every bot the person reaches. */
@@ -58,34 +55,40 @@ export function botsLink() {
 	return linkOptions({ from: "/$workspace", to: "./bots" });
 }
 
-/** A channel, which opens its main chat. */
-export function channelLink(channel: ChannelRef) {
+/** A project, which opens its newest thread, or says it has none yet. */
+export function projectLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./channels/$channel",
-		params: { channel: channel.slug },
+		to: "./projects/$project",
+		params: { project: project.slug },
 	});
 }
 
-/** A bot's own page, where a task with it starts. */
+/** A bot's own page, where a thread with it starts. */
 export function botLink(bot: BotRef) {
 	return linkOptions({ from: "/$workspace", to: "./bots/$bot", params: { bot: bot.handle } });
 }
 
-/** Starting a task with a bot, from its first message. */
-export function newTaskLink(bot: BotRef) {
-	return linkOptions({ from: "/$workspace", to: "./bots/$bot/new", params: { bot: bot.handle } });
-}
-
-function channelFilesLink(channel: ChannelRef) {
+/** Starting a thread in a project, from its first message. */
+export function projectNewThreadLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./channels/$channel/files",
-		params: { channel: channel.slug },
+		to: "./projects/$project/new",
+		params: { project: project.slug },
 	});
 }
 
-function botFilesLink(bot: BotRef) {
+/** A project's files. */
+export function projectFilesLink(project: ProjectRef) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./projects/$project/files",
+		params: { project: project.slug },
+	});
+}
+
+/** A bot's files: its default project's. */
+export function botFilesLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/files",
@@ -93,23 +96,22 @@ function botFilesLink(bot: BotRef) {
 	});
 }
 
-/** The files of a channel or a bot. */
-export function filesLink(owner: { channel: ChannelRef }): ReturnType<typeof channelFilesLink>;
-export function filesLink(owner: { bot: BotRef }): ReturnType<typeof botFilesLink>;
-export function filesLink(owner: Owner) {
-	return "channel" in owner ? channelFilesLink(owner.channel) : botFilesLink(owner.bot);
-}
-
-function channelFileLink(channel: ChannelRef, fileId: string, search: { version?: number }) {
+/** One of a project's files, at `version` when one is given. */
+export function projectFileLink(
+	project: ProjectRef,
+	fileId: string,
+	search: { version?: number } = {},
+) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./channels/$channel/files/$file",
-		params: { channel: channel.slug, file: fileId },
+		to: "./projects/$project/files/$file",
+		params: { project: project.slug, file: fileId },
 		search,
 	});
 }
 
-function botFileLink(bot: BotRef, fileId: string, search: { version?: number }) {
+/** One of a bot's files, at `version` when one is given. */
+export function botFileLink(bot: BotRef, fileId: string, search: { version?: number } = {}) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/files/$file",
@@ -118,43 +120,26 @@ function botFileLink(bot: BotRef, fileId: string, search: { version?: number }) 
 	});
 }
 
-/** One file of a channel or a bot, at `version` when one is given. */
-export function fileLink(
-	owner: { channel: ChannelRef },
-	fileId: string,
-	search?: { version?: number },
-): ReturnType<typeof channelFileLink>;
-export function fileLink(
-	owner: { bot: BotRef },
-	fileId: string,
-	search?: { version?: number },
-): ReturnType<typeof botFileLink>;
-export function fileLink(owner: Owner, fileId: string, search: { version?: number } = {}) {
-	return "channel" in owner
-		? channelFileLink(owner.channel, fileId, search)
-		: botFileLink(owner.bot, fileId, search);
-}
-
-export function channelSettingsLink(channel: ChannelRef) {
+export function projectSettingsLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/channels/$channel",
-		params: { channel: channel.slug },
+		to: "./settings/projects/$project",
+		params: { project: project.slug },
 	});
 }
 
-/** One of a channel's settings pages, General being the channel's own address. */
-export function channelSettingsPageLink(channel: ChannelRef, page: ChannelSettingsPage) {
-	if (page === "general") return channelSettingsLink(channel);
+/** One of a project's settings pages, General being the project's own address. */
+export function projectSettingsPageLink(project: ProjectRef, page: ProjectSettingsPage) {
+	if (page === "general") return projectSettingsLink(project);
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/channels/$channel/$page",
-		params: { channel: channel.slug, page },
+		to: "./settings/projects/$project/$page",
+		params: { project: project.slug, page },
 	});
 }
 
 /** A bot's automations, listed as a page of their own. */
-export function automationsLink(bot: BotRef) {
+export function botAutomationsLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/automations",
@@ -163,7 +148,7 @@ export function automationsLink(bot: BotRef) {
 }
 
 /** An automation being made, as a page under its bot's automations. */
-export function newAutomationLink(bot: BotRef) {
+export function botNewAutomationLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/automations/new",
@@ -176,7 +161,7 @@ export function newAutomationLink(bot: BotRef) {
  * is opened first when it has none yet. With `itemPage`, one of its runs, by
  * the run's conversation, is the page instead.
  */
-export function automationFeedLink(
+export function botAutomationFeedLink(
 	bot: BotRef,
 	automationId: string,
 	search: { itemPage?: string } = {},
@@ -189,12 +174,56 @@ export function automationFeedLink(
 	});
 }
 
+/** A project's automations, listed as a page of their own. */
+export function projectAutomationsLink(project: ProjectRef) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./projects/$project/automations",
+		params: { project: project.slug },
+	});
+}
+
+/** An automation being made, as a page under its project's automations. */
+export function projectNewAutomationLink(project: ProjectRef) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./projects/$project/automations/new",
+		params: { project: project.slug },
+	});
+}
+
+/** One of a project's automations, as `botAutomationFeedLink` is a bot's. */
+export function projectAutomationFeedLink(
+	project: ProjectRef,
+	automationId: string,
+	search: { itemPage?: string } = {},
+) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./projects/$project/automations/$automation",
+		params: { project: project.slug, automation: automationId },
+		search,
+	});
+}
+
 /** A connection's own page, under its bot's settings. */
-export function connectionSettingsLink(bot: BotRef, connection: Pick<Connection, "id">) {
+export function botConnectionSettingsLink(bot: BotRef, connection: Pick<Connection, "id">) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./settings/bots/$bot/connections/$connection",
 		params: { bot: bot.handle, connection: connection.id },
+	});
+}
+
+/** A connection's own page, under its project's settings. */
+export function projectConnectionSettingsLink(
+	project: ProjectRef,
+	connection: Pick<Connection, "id">,
+) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./settings/projects/$project/connections/$connection",
+		params: { project: project.slug, connection: connection.id },
 	});
 }
 
@@ -222,64 +251,63 @@ export function inboxMessageLink(rootConversationId: string, messageId: string) 
 export interface ConversationLinkSearch {
 	item?: string;
 	file?: string;
-	tasks?: TasksTab;
 }
 
-function channelConversationLink(
-	channel: ChannelRef,
+function projectThreadLink(
+	project: ProjectRef,
 	conversationId: string,
 	search: ConversationLinkSearch,
 ) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./channels/$channel/$conversation",
-		params: { channel: channel.slug, conversation: conversationId },
+		to: "./projects/$project/$conversation",
+		params: { project: project.slug, conversation: conversationId },
 		search,
 	});
 }
 
-function taskLink(bot: BotRef, conversationId: string, search: ConversationLinkSearch) {
+function botThreadLink(bot: BotRef, conversationId: string, search: ConversationLinkSearch) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./bots/$bot/tasks/$conversation",
+		to: "./bots/$bot/threads/$conversation",
 		params: { bot: bot.handle, conversation: conversationId },
 		search,
 	});
 }
 
 /**
- * A bot's task by its conversation's id alone, for a caller that does not know
+ * A bot's thread by its conversation's id alone, for a caller that does not know
  * which bot it belongs to; the route finds the bot and goes on to its address.
  */
-export function taskByIdLink(conversationId: string, search: ConversationLinkSearch = {}) {
+export function threadByIdLink(conversationId: string, search: ConversationLinkSearch = {}) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./tasks/$conversation",
+		to: "./threads/$conversation",
 		params: { conversation: conversationId },
 		search,
 	});
 }
 
 /**
- * A conversation where it belongs: a channel's main chat or thread, or a
- * bot's task, with `item` open beside it, or `file` open large. Called
+ * A conversation where it belongs: a project's thread, or a
+ * bot's thread, with `item` open beside it, or `file` open large. Called
  * with either, it is either; a caller holding one or the other branches.
  */
 export function conversationLink(
-	place: { channel: ChannelRef; conversationId: string },
+	place: { project: ProjectRef; conversationId: string },
 	search?: ConversationLinkSearch,
-): ReturnType<typeof channelConversationLink>;
+): ReturnType<typeof projectThreadLink>;
 export function conversationLink(
 	place: { bot: BotRef; conversationId: string },
 	search?: ConversationLinkSearch,
-): ReturnType<typeof taskLink>;
+): ReturnType<typeof botThreadLink>;
 export function conversationLink(
-	place: Owner & { conversationId: string },
+	place: { project: ProjectRef; conversationId: string } | { bot: BotRef; conversationId: string },
 	search: ConversationLinkSearch = {},
 ) {
-	return "channel" in place
-		? channelConversationLink(place.channel, place.conversationId, search)
-		: taskLink(place.bot, place.conversationId, search);
+	return "project" in place
+		? projectThreadLink(place.project, place.conversationId, search)
+		: botThreadLink(place.bot, place.conversationId, search);
 }
 
 export function botSettingsLink(bot: BotRef) {
@@ -308,6 +336,3 @@ export function memberSettingsLink(membership: { id: string }) {
 		params: { member: membership.id },
 	});
 }
-
-/** Which of a bot's tasks are open beside a task: those still going, or those done. */
-export type TasksTab = "open" | "done";

@@ -85,6 +85,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 	};
 	let workspaceId: string;
 	let botId: string;
+	let ownProjectId: string;
 	let userId: string;
 
 	afterAll(async () => {
@@ -93,14 +94,14 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 	beforeEach(async () => {
 		delivered = [];
-		({ workspaceId, botId, userId } = await anAutomationOwner());
+		({ workspaceId, botId, userId, ownProjectId } = await anAutomationOwner());
 		automations = onPostgresAs(userId)(Context.get(conversations, Automations.Service));
 	});
 
 	/** An automation with one accepted manual trigger, whose run has started and asked for its turn. */
 	async function aRunningRun() {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: `Settlement ${crypto.randomUUID()}`,
 				instructions: "Complete the delegated work.",
@@ -109,7 +110,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await automations.run({
-			botId,
+			projectId: ownProjectId,
 			automationId: created.automation.id,
 			requestId,
 		});
@@ -333,7 +334,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 	it("fails a run whose workflow failed at once, while its turn still runs, so the next run can start", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Failing run",
 				instructions: "Do the work.",
@@ -344,7 +345,11 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		for (let run = 0; run < 2; run++) {
 			const requestId = crypto.randomUUID();
 			accepted.push(
-				await automations.run({ botId, automationId: created.automation.id, requestId }),
+				await automations.run({
+					projectId: ownProjectId,
+					automationId: created.automation.id,
+					requestId,
+				}),
 			);
 		}
 		const first = await startRunning(runner, created.automation.id);
@@ -363,7 +368,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 	it("fails a run whose workflow failed before starting it", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: "Never started",
 				instructions: "Do the work.",
@@ -372,7 +377,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		);
 		const requestId = crypto.randomUUID();
 		const accepted = await automations.run({
-			botId,
+			projectId: ownProjectId,
 			automationId: created.automation.id,
 			requestId,
 		});
@@ -888,7 +893,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 
 	it("pauses an automation after two failed runs in a row, and running it again turns it back on", async () => {
 		const created = await automations.create(
-			{ botId },
+			{ projectId: ownProjectId },
 			{
 				name: `Failing ${crypto.randomUUID()}`,
 				instructions: "Try it.",
@@ -898,7 +903,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const automationId = created.automation.id;
 		const failOnce = async () => {
 			const accepted = await automations.run({
-				botId,
+				projectId: ownProjectId,
 				automationId,
 				requestId: crypto.randomUUID(),
 			});
@@ -927,7 +932,11 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		await failOnce();
 		expect(await standing()).toEqual({ state: "paused", pausedAfterFailuresAt: expect.any(Date) });
 
-		await automations.run({ botId, automationId, requestId: crypto.randomUUID() });
+		await automations.run({
+			projectId: ownProjectId,
+			automationId,
+			requestId: crypto.randomUUID(),
+		});
 		expect(await standing()).toEqual({ state: "enabled", pausedAfterFailuresAt: null });
 	});
 

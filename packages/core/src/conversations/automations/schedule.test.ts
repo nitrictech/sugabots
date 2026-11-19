@@ -2,12 +2,12 @@ import type { CalendarSchedule } from "@sugabots/contracts";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-	InvalidAutomationSchedule,
+	InvalidRoutineSchedule,
 	latestMissedAndNextOccurrence,
 	upcomingOccurrences,
 } from "./schedule.ts";
 
-describe("Automation schedules", () => {
+describe("Routine schedules", () => {
 	it("calculates minute-precision occurrences in the selected timezone", async () => {
 		const dates = await Effect.runPromise(
 			upcomingOccurrences(
@@ -28,7 +28,7 @@ describe("Automation schedules", () => {
 			Effect.runPromise(
 				upcomingOccurrences({ repeat: "cron", expression: "0 0 9 * * 1-5" }, "UTC", new Date()),
 			),
-		).rejects.toThrow(InvalidAutomationSchedule);
+		).rejects.toThrow(InvalidRoutineSchedule);
 		await expect(
 			Effect.runPromise(
 				upcomingOccurrences(
@@ -37,7 +37,7 @@ describe("Automation schedules", () => {
 					new Date(),
 				),
 			),
-		).rejects.toThrow(InvalidAutomationSchedule);
+		).rejects.toThrow(InvalidRoutineSchedule);
 	});
 
 	it("selects only the latest missed occurrence after downtime", async () => {
@@ -53,7 +53,7 @@ describe("Automation schedules", () => {
 	});
 });
 
-describe("Automation schedules picked by their parts", () => {
+describe("Routine schedules picked by their parts", () => {
 	const upcoming = (schedule: CalendarSchedule, timezone: string, from: string, count = 3) =>
 		Effect.runPromise(upcomingOccurrences(schedule, timezone, new Date(from), count)).then(
 			(dates) => dates.map((date) => date.toISOString()),

@@ -24,7 +24,9 @@ import {
 	usePrepareComputerTemplate,
 } from "@/lib/computer-providers.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { botSettingsLink, botSettingsPageLink } from "@/lib/links.ts";
+import { botSettingsLink } from "@/lib/links.ts";
+import { useProjects } from "@/lib/projects.ts";
+import { ownerLink, ownerName, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -36,22 +38,21 @@ import {
 	SettingsGroup,
 	SettingsRadioMark,
 	SettingsRow,
-	SettingsRowIcon,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { DiskMeter, DiskPercent, diskSummary } from "./ComputerDisk.tsx";
 import { ComputerNetworkSection } from "./ComputerNetworkSettings.tsx";
+import { LetterTile } from "./letter-tile.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
 /*
- * The workspace's computers, experimental: a switch for whether bots get a
- * Linux computer per bot to run commands on, which provider makes those
- * computers, that provider's account, what the computers may reach, the bots
- * using one, and how full each bot's computer's disk is. A workspace may keep
- * a provider configured for each preset; the switch enables the chosen one,
- * which disables any other. Code calls a computer a computer; people read
- * "computer".
+ * The workspace's computers, experimental: a switch for whether each project
+ * gets a Linux computer its bots run commands on, a bot's being its default
+ * project's, which provider makes those computers, that provider's account,
+ * what the computers may reach, the bots using one, and how full each
+ * computer's disk is. A workspace may keep a provider configured for each
+ * preset; the switch enables the chosen one, which disables any other.
  */
 
 const networkModes: readonly { value: ComputerNetworkMode; label: string }[] = [
@@ -122,7 +123,7 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 			<SettingsGroup
 				note={
 					ready && enabled && enabled.preset !== chosen
-						? `Turning this on moves computers from ${enabled.name} to ${preset.name}. Each bot gets a new one, without the old one's files.`
+						? `Turning this on moves computers from ${enabled.name} to ${preset.name}. Each project and bot gets a new one, without the old one's files.`
 						: undefined
 				}
 			>
@@ -130,7 +131,7 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 					label={<span className="font-medium">Bots can use a computer</span>}
 					sub={
 						ready
-							? "Each bot gets its own private computer"
+							? "Each project and each bot gets its own private computer"
 							: `${preset.name} needs an API key first. Add it below.`
 					}
 					trailing={
@@ -196,7 +197,7 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 				}
 			/>
 			<BotsUsingAComputer />
-			<BotDisks />
+			<ProjectDisks />
 		</>
 	);
 }
@@ -208,7 +209,7 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
  */
 function BotsUsingAComputer() {
 	const { bots } = useBots();
-	const using = (bots ?? []).filter((bot) => bot.usesComputer && bot.systemBotKey === null);
+	const using = (bots ?? []).filter((bot) => bot.usesComputer);
 	if (!bots) return null;
 	return (
 		<SettingsGroup
@@ -232,39 +233,44 @@ function BotsUsingAComputer() {
 }
 
 /**
- * How full each bot's computer's disk was when last measured, fullest first,
- * each opening the bot's Computer page, which shows what fills it. Hidden
- * until one has been measured.
+ * How full each project's computer's disk was when last measured, fullest
+ * first, named by the project or, for a bot's default project, the bot, each
+ * opening its Computer page, which shows what fills it. Hidden until one has
+ * been measured.
  */
-function BotDisks() {
+function ProjectDisks() {
 	const { data: disks } = useComputerDisks();
 	const { bots } = useBots();
-	const botById = new Map(bots?.map((bot) => [bot.id, bot]));
+	const { data: projects } = useProjects();
+	const ownerByProject = new Map<string, ResourceOwner>([
+		...(projects ?? []).map((project) => [project.id, { project }] as const),
+		...(bots ?? []).map((bot) => [bot.defaultProjectId, { bot }] as const),
+	]);
 	const measured = (disks ?? [])
-		.flatMap(({ botId, disk }) => {
-			const bot = botById.get(botId);
-			return bot ? [{ bot, disk }] : [];
+		.flatMap(({ projectId, disk }) => {
+			const owner = ownerByProject.get(projectId);
+			return owner ? [{ projectId, owner, disk }] : [];
 		})
 		.toSorted((a, b) => computerDiskShare(b.disk) - computerDiskShare(a.disk));
 	if (measured.length === 0) return null;
 	return (
 		<SettingsGroup
-			label="Disk use by bot"
-			note="Measured every few minutes while each computer is on. Once a bot's disk fills, its commands fail."
+			label="Disk use"
+			note="Measured every few minutes while each computer is on. Once a computer's disk fills, its commands fail."
 		>
-			{measured.map(({ bot, disk }) => (
+			{measured.map(({ projectId, owner, disk }) => (
 				<SettingsRow
-					key={bot.id}
-					label={bot.name}
+					key={projectId}
+					label={ownerName(owner)}
 					sub={
 						<>
-							<DiskMeter disk={disk} label={`${bot.name} disk used`} />
+							<DiskMeter disk={disk} label={`${ownerName(owner)} disk used`} />
 							{diskSummary(disk)}
 						</>
 					}
 					trailing={<DiskPercent disk={disk} />}
 					chevron
-					render={<Link {...botSettingsPageLink(bot, "computer")} />}
+					render={ownerLink(owner, { page: "computer" })}
 				/>
 			))}
 		</SettingsGroup>
@@ -298,7 +304,7 @@ function ProviderChoice({
 							onChange={() => onChoose(candidate.id)}
 							className="sr-only"
 						/>
-						<SettingsRowIcon>{candidate.name.charAt(0)}</SettingsRowIcon>
+						<LetterTile name={candidate.name} />
 						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
 							<span className="truncate font-medium text-sm text-foreground">
 								{candidate.name}
@@ -459,7 +465,7 @@ function ProviderSettings({
 				open={removingKey}
 				onOpenChange={setRemovingKey}
 				title={`Remove the ${preset.name} key?`}
-				description="Bots stop getting computers from this provider until another key is added."
+				description="Projects and bots stop getting computers from this provider until another key is added."
 				confirmLabel="Remove"
 				pending={pending}
 				onDelete={async () => {
@@ -476,7 +482,7 @@ function ProviderSettings({
 				title={`Remove ${preset.name}?`}
 				description={
 					removeError ??
-					"Every bot's computer at this provider is destroyed, with its files, including work that wasn't pushed."
+					"Every computer at this provider is destroyed, with its files, including work that wasn't pushed."
 				}
 				confirmLabel="Remove"
 				pending={pending}
@@ -518,7 +524,7 @@ function TemplateRow({ providerId }: { providerId: string }) {
 					: template.error
 						? failureMessage(template.error)
 						: state === "ready"
-							? "Ready. Rebuilding takes Sugabots' latest image, which bots' computers move to when upgraded."
+							? "Ready. Rebuilding takes Sugabots' latest image, which computers move to when upgraded."
 							: state === "building"
 								? "Building in your E2B account. This takes a few minutes."
 								: state === "failed"
@@ -547,8 +553,8 @@ function networkSummary(settings: ComputerProviderSettings): string {
 
 function hint(preset: ComputerProviderPresetId): string {
 	return preset === "opensandbox"
-		? "The server's own API key, from its configuration. Leave the image empty to use the default. A new size takes effect when a bot's computer is reset; on Kubernetes, one too big for any node never starts."
-		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a bot's computer is reset.";
+		? "The server's own API key, from its configuration. Leave the image empty to use the default. A new size takes effect when a computer is reset; on Kubernetes, one too big for any node never starts."
+		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a computer is reset.";
 }
 
 /** A number typed into a row, or undefined when the row was emptied. */

@@ -126,7 +126,7 @@ function setMessageReactions(
 		details ? { ...details, messages: details.messages.map(withReactions) } : details,
 	);
 	queries.setQueriesData<InfiniteData<ChatMessagesPage | undefined>>(
-		{ queryKey: ["chat-messages"] },
+		{ queryKey: ["conversation-messages"] },
 		(data) =>
 			data && {
 				...data,
@@ -169,5 +169,5 @@ function withoutReaction(
 				? { ...reaction, people: reaction.people.filter(({ id }) => id !== userId) }
 				: reaction,
 		)
-		.filter((reaction) => reaction.people.length > 0);
+		.filter((reaction) => reaction.people.length > 0 || (reaction.bots?.length ?? 0) > 0);
 }

@@ -1,30 +1,33 @@
 export * as DesktopViewer from "./viewer.ts";
 
 import { userText } from "@sugabots/errors";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Context, Deferred, Duration, Effect, Layer, type Scope } from "effect";
-import type { AuthorizationDenied } from "../../../authorization/access.ts";
+import { type AuthorizationDenied, computerProjectIdOf } from "../../../authorization/access.ts";
 import { Authorization } from "../../../authorization/authorization.ts";
 import type { CurrentActor } from "../../../authorization/current-actor.ts";
 import { Visibility } from "../../../authorization/visibility.ts";
-import { BotComputers } from "../../../computers/bot-computers.ts";
 import { ComputerProviderRepository } from "../../../computers/computer-provider-repository.ts";
 import type { Computers } from "../../../computers/computers.ts";
+import { ProjectComputers } from "../../../computers/project-computers.ts";
 import { query, serviceOperations } from "../../../database/database.ts";
-import { conversationParticipant } from "../../../database/schema.ts";
+import { conversationParticipant, placedConversation } from "../../../database/schema.ts";
 import { Ids } from "../../../ids/ids.ts";
 import { placeOf } from "../computer/tools.ts";
 import { DesktopUnavailable, startDesktop } from "./browser.ts";
 
 /**
  * A bot's desktop in a conversation, opened by a person to watch and use: where
- * the browser it drives is shown. Anyone who can read the conversation and see the
- * bot may open it, while the bot takes part in the conversation and uses a
- * computer. Those holding `computer.desktop.use` may click and type on it
- * too; anyone else only watches. Opening it uses the bot's computer as a turn
- * would, resuming it, or making it if the bot has none, and starts the
- * desktop if it isn't running; the computer stays awake while it is open,
- * and while the person may still see it as it was opened for them.
+ * the browser it drives is shown, on the computer the bot works on there, the
+ * conversation's project's (in a collaboration, the bot's own default
+ * project's). Anyone who can read the conversation, see the bot and see that
+ * computer may open it, while the bot takes part in the conversation and uses
+ * computers. Those holding `computer.desktop.use` in the computer's project
+ * may click and type on it too; anyone else only watches. Opening it uses the
+ * computer as a turn would, resuming it, or making it if the project has
+ * none, and starts the desktop if it isn't running; the computer stays awake
+ * while it is open, and while the person may still see it as it was opened
+ * for them.
  */
 export interface Interface {
 	/**
@@ -65,7 +68,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const visibility = yield* Visibility.Service;
 	const authorization = yield* Authorization.Service;
-	const botComputers = yield* BotComputers.Service;
+	const projectComputers = yield* ProjectComputers.Service;
 	const providers = yield* ComputerProviderRepository.Service;
 	const ids = yield* Ids.Service;
 	const operation = yield* serviceOperations<Interface>("DesktopViewer");
@@ -91,44 +94,82 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map((rows) => rows.length > 0));
 
 	/**
+	 * The project whose computer the bot works on in the conversation: the
+	 * conversation's, or in a collaboration the bot's own default project, as a
+	 * turn's is chosen.
+	 */
+	const computerProjectOf = (conversationId: string, botId: string) =>
+		operation(
+			"open",
+			query((db) =>
+				db
+					.select({ id: computerProjectIdOf(placedConversation, sql`${botId}::uuid`) })
+					.from(placedConversation)
+					.where(eq(placedConversation.id, conversationId))
+					.limit(1),
+			),
+		).pipe(Effect.map(([row]) => row?.id ?? undefined));
+
+	/**
+	 * The actor's standing towards the bot and the project whose computer it
+	 * works on in the conversation, when they may see its desktop there.
+	 */
+	const desktopStanding = (conversationId: string, botId: string) =>
+		Effect.gen(function* () {
+			const { conversation } = yield* visibility.conversationStanding(conversationId);
+			const { bot } = yield* authorization.bot(botId, "bot.read");
+			if (!(yield* takesPart(conversation, botId))) {
+				return yield* new DesktopUnavailable({ reason: NOT_IN_THIS_CONVERSATION });
+			}
+			const projectId = yield* computerProjectOf(conversation.id, botId);
+			if (projectId === undefined) {
+				return yield* new DesktopUnavailable({ reason: NO_COMPUTER });
+			}
+			const computerProject = yield* authorization.project(projectId, "computer.read");
+			return { conversation, bot, computerProject };
+		});
+
+	/**
 	 * Whether the actor may still see the bot's desktop in the conversation as
 	 * `open` let them, clicking and typing on it when `controls`.
 	 */
 	const stillAllowed = (input: { conversationId: string; botId: string; controls: boolean }) =>
 		Effect.gen(function* () {
-			const { conversation } = yield* visibility.conversationStanding(input.conversationId);
-			const { bot, may } = yield* authorization.bot(input.botId, "bot.read");
-			if (!bot.usesComputer || !(yield* takesPart(conversation, input.botId))) return false;
-			return !input.controls || may("computer.desktop.use");
+			const { bot, computerProject } = yield* desktopStanding(input.conversationId, input.botId);
+			if (!bot.usesComputer) return false;
+			return !input.controls || computerProject.may("computer.desktop.use");
 		}).pipe(
 			Effect.catchTags({
 				ResourceHidden: () => Effect.succeed(false),
 				ActionForbidden: () => Effect.succeed(false),
+				DesktopUnavailable: () => Effect.succeed(false),
 			}),
 		);
 
 	return Service.of({
 		open: ({ conversationId, botId }) =>
 			Effect.gen(function* () {
-				const { conversation } = yield* visibility.conversationStanding(conversationId);
-				const { bot, may } = yield* authorization.bot(botId, "bot.read");
-				if (!(yield* takesPart(conversation, botId))) {
-					return yield* new DesktopUnavailable({ reason: NOT_IN_THIS_CONVERSATION });
-				}
+				const { conversation, bot, computerProject } = yield* desktopStanding(
+					conversationId,
+					botId,
+				);
 				// The UI hides the desktop then too, but this is what stops a request
 				// from making a computer for a bot that a computer manager kept off.
 				if (!bot.usesComputer) return yield* new DesktopUnavailable({ reason: NO_COMPUTER });
-				const owner = { workspaceId: conversation.workspaceId, botId };
+				const owner = {
+					workspaceId: conversation.workspaceId,
+					projectId: computerProject.project.id,
+				};
 				const provider = yield* providers.enabled(owner.workspaceId);
 				if (!provider) return yield* new DesktopUnavailable({ reason: COMPUTERS_OFF });
-				const holder: BotComputers.Holder = { kind: "viewer", id: yield* ids.random };
-				yield* Effect.addFinalizer(() => botComputers.release(holder));
-				const { computer } = yield* botComputers.open(owner, provider, holder);
+				const holder: ProjectComputers.Holder = { kind: "viewer", id: yield* ids.random };
+				yield* Effect.addFinalizer(() => projectComputers.release(holder));
+				const { computer } = yield* projectComputers.open(owner, provider, holder);
 				const turn = { conversationId, botId, color: bot.color };
 				const desktop = yield* startDesktop(computer, placeOf(turn), turn);
 				// The watch server ignores input, so a viewer's mouse and keys never
 				// reach the desktop, whatever their client sends.
-				const controls = may("computer.desktop.use");
+				const controls = computerProject.may("computer.desktop.use");
 				const server = controls ? desktop.control : desktop.watch;
 				const lost = yield* Deferred.make<void>();
 				yield* Effect.forkScoped(
@@ -139,10 +180,10 @@ export const make = Effect.gen(function* () {
 					),
 				);
 				yield* Effect.forkScoped(
-					botComputers
+					projectComputers
 						.renew(holder)
 						.pipe(
-							Effect.delay(BotComputers.LEASE_RENEWAL),
+							Effect.delay(ProjectComputers.LEASE_RENEWAL),
 							Effect.forever,
 							Effect.raceFirst(Deferred.await(lost)),
 						),
@@ -162,7 +203,7 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Visibility.layer,
 		Authorization.layer,
-		BotComputers.layer,
+		ProjectComputers.layer,
 		ComputerProviderRepository.layer,
 	]),
 );

@@ -15,7 +15,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, updatedStamp } from "../database/sql.ts";
-import { bot, channel, user } from "../workspaces/sql.ts";
+import { bot, project, user } from "../workspaces/sql.ts";
 
 const notificationLevel = (name: string) => text(name).$type<NotificationLevel>();
 
@@ -49,7 +49,7 @@ export const notificationSettings = pgTable(
 );
 
 /**
- * What a person chose for one channel or one bot: a level, in place of the one
+ * What a person chose for one project or one bot: a level, in place of the one
  * above it, a mute until `mutedUntil`, or both.
  */
 export const notificationOverride = pgTable(
@@ -59,7 +59,7 @@ export const notificationOverride = pgTable(
 		userId: uuid("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
-		channelId: uuid("channel_id").references(() => channel.id, { onDelete: "cascade" }),
+		projectId: uuid("project_id").references(() => project.id, { onDelete: "cascade" }),
 		botId: uuid("bot_id").references(() => bot.id, { onDelete: "cascade" }),
 		level: notificationLevel("level"),
 		mutedUntil: timestamp("muted_until", { withTimezone: true }),
@@ -73,11 +73,11 @@ export const notificationOverride = pgTable(
 		),
 		check(
 			"notification_override_one_place",
-			sql`num_nonnulls(${table.channelId}, ${table.botId}) = 1`,
+			sql`num_nonnulls(${table.projectId}, ${table.botId}) = 1`,
 		),
-		uniqueIndex("notification_override_channel_idx")
-			.on(table.userId, table.channelId)
-			.where(sql`${table.channelId} is not null`),
+		uniqueIndex("notification_override_project_idx")
+			.on(table.userId, table.projectId)
+			.where(sql`${table.projectId} is not null`),
 		uniqueIndex("notification_override_bot_idx")
 			.on(table.userId, table.botId)
 			.where(sql`${table.botId} is not null`),

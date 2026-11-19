@@ -1,31 +1,50 @@
 ---
 title: Automations
-description: Work a bot does on its own, on a schedule or whenever something calls it.
+description: Work a project's lead bot does on its own, on its routines or whenever something calls it.
 ---
 
-An automation is work for one bot: "every weekday at 8, sort the inbox" or "when
-the shop gets an order, draft a thank-you". The bot does it without being asked,
-and posts what it found in the automation's own conversation.
+An automation is work a project's [lead bot](/docs/projects) does on its own:
+"every weekday at 8, sort the inbox" or "when the shop gets an order, draft a
+thank-you". The lead bot does it without being asked, in a thread of the
+project, on the project's computer and with the project's
+[connections](/docs/connections) as well as its own. It posts what it found in
+the automation's own conversation, in the project.
 
-Each bot's automations are in its **Automations**. Its creator, the owner and
-admins make and change them, and switch them on or off. Anyone who can talk to
-the bot can see them and, except viewers, choose **Run now**.
+A bot's own automations are those of its hidden default project, which it
+leads, so they run on its own computer with its own connections. They're in the
+bot's **Automations**.
+
+Whoever may change the project makes and changes its automations, and switches
+them on or off: for a bot's own, its creator, the owner and admins; for a
+project people made, the owner and admins. Anyone in the project, or who can
+talk to the bot, can see them and, except viewers, choose **Run now**.
+
+## Who runs it
+
+Each run is done by the project's lead bot when it starts. Choose another lead,
+and the next run is that bot's. A project from before projects had leads may
+have none yet: until someone chooses one, its automations don't run, **Run now**
+says so, and a routine that falls due is skipped to its next time.
 
 ## Make an automation
 
 Choose **New automation**, then fill in:
 
-- **Instructions**: what to do each time, written like you'd ask in a task.
-- **Triggers**: what starts it. Choose **Add trigger** for each one: a
-  **Schedule**, a **Webhook**, or **GitHub** when the bot has a
-  [GitHub app](/docs/connections). An automation can have several, such as two
-  schedules and a webhook, and one with none runs only when someone chooses
-  **Run now**.
+- **Instructions**: what to do each time, written like you'd ask in a thread.
+- **Routines**: when it runs on a timetable. Choose **Add routine** for each
+  one.
+- **Triggers**: events that start it. Choose **Add trigger** for each one: a
+  **Webhook**, or **GitHub** when the project has a
+  [GitHub app](/docs/connections).
+
+An automation can have several of each, such as two routines and a webhook, and
+one with none runs only when someone chooses **Run now**.
 
 ## Where the result goes
 
 When a run finishes, the bot's last reply is posted in the automation's
-conversation, where anyone who can see the bot can answer it and carry on. Any
+conversation, where anyone in the project can answer it and carry on; there, the
+lead bot answers. Any
 file it wrote during the run is shown under that reply, at the version the run
 left it at. The bot is told its last reply goes there, so it writes that reply
 for you: a morning check-in, the week's sales, a reminder.
@@ -38,34 +57,37 @@ When there's nothing worth telling anyone, such as an order that needed no
 thank-you, the bot posts nothing, and the run shows it had nothing to report.
 You can still open the run to see what it did.
 
-## On a schedule
+## Routines
 
-Repeat **Every day**, on **Weekdays**, or **Weekly** on the days you pick, at a
-time of your choosing. Have a go:
+A routine repeats **Daily**, **Weekly** or **Monthly**, every day, week or month or
+every few: weekly on the days you pick, such as Monday to Friday, and monthly on
+one day of the month or its last day. On each of those days it runs at one time
+of your choosing, or at several. Have a go:
 
-<ScheduleBuilder />
+<RoutineBuilder />
 
-A schedule uses the timezone of whoever created the automation, or the
+A routine uses the timezone of whoever created the automation, or the
 workspace's when a bot set it up. If Sugabots was down when a run was due, it
 does one catch-up run rather than all the missed ones, and an automation never
 runs twice at the same time.
 
 ## Ask the bot
 
-Its creator, the owner and admins can also ask a bot in a task: "check in with
-me every morning at 9" or "move the inbox sweep to 10". It sets up, changes or
-pauses its own schedules, in the workspace's timezone, and links to the
-automation in its reply. Once an automation has more than one trigger, its
-schedule is changed in settings. Anyone who can talk to the bot can ask what
-automations it has. Webhooks, and deleting an automation, stay in its
-**Automations**.
+Whoever manages a project's automations can also ask a bot in one of its
+threads: "check in with me every morning at 9" or "move the inbox sweep to 10".
+In its own threads, that's the bot's own automations; in a project's thread, the
+project's, which the project's lead bot runs. It sets up, changes or pauses
+their routines, in the workspace's timezone, and links to the automation in its
+reply. Once an automation has more than one routine or trigger, its routine is
+changed in settings. Anyone in the project can ask what automations it has.
+Webhooks, and deleting an automation, stay in **Automations**.
 
 Turn **Manage its automations** off in a bot's **Tools** to stop it.
 
 ## When something calls it
 
 A **Webhook** trigger runs its automation whenever its address is called, so other apps can set
-a bot to work. Each webhook has an address and a secret of its own; open it from the
+the project's lead bot to work. Each webhook has an address and a secret of its own; open it from the
 automation's **Triggers** to see them. The secret stays hidden until **Show**.
 
 <Careful title="Changing the secret">
@@ -187,9 +209,9 @@ and let the bot spot the repeat from the alert itself.
 
 ## Runs
 
-Each run has a task of its own with everything the bot did, and shows in the
+Each run has a thread of its own with everything the bot did, and shows in the
 automation's conversation as a line like "Morning inbox sweep ran". A posted
 result links back to its run, under the message. A run that fails or is
 stopped posts nothing; its line says what happened. If a run needs an
-[approval](/docs/tools-and-approvals), only the bot's creator, the owner or an
-admin can answer it.
+[approval](/docs/tools-and-approvals), only whoever manages the project's
+automations can answer it: for a bot's own, its creator, the owner or an admin.

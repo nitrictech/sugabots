@@ -77,7 +77,7 @@ INSERT INTO "file_version" ("id", "file_id", "file_kind", "number", "content_typ
 SELECT "artifact_version"."id", "artifact_version"."artifact_id", "artifact"."kind", "artifact_version"."number",
 	"artifact_version"."content_type", "artifact_version"."size", "artifact_version"."author_agent_id", "artifact_version"."created_at"
 FROM "artifact_version" JOIN "artifact" ON "artifact"."id" = "artifact_version"."artifact_id";--> statement-breakpoint
--- Dropping a table deletes no rows, so no blob is queued here: every blob now belongs to a `file`.
+-- Dropping the old tables fires none of their DELETE triggers, so no blob is queued for deletion here: the copied `file` rows keep every blob.
 DROP TABLE "artifact_version";--> statement-breakpoint
 DROP TABLE "artifact";--> statement-breakpoint
 DROP TABLE "thread_file";--> statement-breakpoint

@@ -40,9 +40,9 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 
 /**
- * Right-clicking `children`, a channel's or a bot's row in the sidebar, offers
+ * Right-clicking `children`, a project's or a bot's row in the sidebar, offers
  * what it notifies the person about, muting it among them, and, under More
- * options, muting it for a while, as Slack's channel menu does. Until
+ * options, muting it for a while. Until
  * `settings` load, right-clicking does nothing; `children` stays the same
  * element either way, so the row isn't remounted when they arrive.
  */
@@ -70,7 +70,7 @@ export function NotificationsContextMenu({
 }
 
 /**
- * Slack's More options: muting the place for one of its durations or, while
+ * More options: muting the place for one of its durations or, while
  * it is muted for a while, unmuting it, then the way to every notification
  * setting. A place that notifies of nothing anyway has no durations to offer.
  */
@@ -132,7 +132,7 @@ function MoreOptions({
 	);
 }
 
-/** A bell struck through, after the name of a channel or bot the person muted, for good or for a while. */
+/** A bell struck through, after the name of a project or bot the person muted, for good or for a while. */
 export function MutedMark({
 	settings,
 	place,

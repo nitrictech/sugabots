@@ -212,7 +212,7 @@ function Preview({
 		client.setQueryData(["workspace-standing", WORKSPACE], {
 			role: "admin",
 			permissions: {
-				createChannels: true,
+				createProjects: true,
 				manageProviders: true,
 				manageMembers: true,
 				configureBuiltInBots: true,
@@ -222,7 +222,7 @@ function Preview({
 		client.setQueryData(["model-providers", WORKSPACE], providers);
 		client.setQueryData(["bots", WORKSPACE], bots);
 		client.setQueryData(
-			["built-in-bots", WORKSPACE],
+			["system-bots", WORKSPACE],
 			systemBots.map((bot) => ({ ...bot, model: summariesModel })),
 		);
 		client.setQueryData(["models", WORKSPACE], {

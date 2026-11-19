@@ -4,7 +4,7 @@ import { AutomationRunner } from "./automation-runner.ts";
 /** How long the scheduler waits to look again when no automation was due. */
 const POLL_INTERVAL = Duration.seconds(15);
 
-/** Accepts the runs of scheduled automations as they fall due. */
+/** Accepts the runs of automations' routines as they fall due. */
 export const layer = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const runner = yield* AutomationRunner.Service;

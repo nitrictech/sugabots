@@ -17,11 +17,11 @@ import { serviceOperations } from "../database/database.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../providers/tested-configuration.ts";
 import type { UserFacing } from "../user-message.ts";
-import { BotComputers } from "./bot-computers.ts";
 import { toComputerProvider } from "./computer-provider-reads.ts";
 import { ComputerProviderRepository } from "./computer-provider-repository.ts";
 import { Computers } from "./computers.ts";
 import { pinnedToDigest } from "./image-digest.ts";
+import { ProjectComputers } from "./project-computers.ts";
 
 /**
  * Configuring where a workspace's computers run: checking addresses against
@@ -111,7 +111,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ComputerProviderSetup");
 	const authorization = yield* Authorization.Service;
 	const providers = yield* ComputerProviderRepository.Service;
-	const botComputers = yield* BotComputers.Service;
+	const projectComputers = yield* ProjectComputers.Service;
 	const computers = yield* Computers.Service;
 	const egress = yield* Egress.Service;
 
@@ -175,7 +175,7 @@ export const make = Effect.gen(function* () {
 					const modeOf = (row: typeof before) =>
 						ComputerProviderRepository.networkModeIn(row.settings);
 					if (modeOf(updated) !== modeOf(before)) {
-						yield* botComputers.applyNetwork({ workspaceId });
+						yield* projectComputers.applyNetwork({ workspaceId });
 					}
 					return toComputerProvider(updated);
 				}),
@@ -187,10 +187,10 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId } = yield* managed(workspace);
 					yield* requireProvider(workspaceId, providerId);
-					if (yield* botComputers.anyMadeBy(workspaceId, providerId)) {
+					if (yield* projectComputers.anyMadeBy(workspaceId, providerId)) {
 						const configured = yield* providers.connection(workspaceId, providerId);
 						if (!configured) return yield* new ComputersNotDestroyed({ cause: "incomplete" });
-						yield* botComputers
+						yield* projectComputers
 							.destroyAllMadeBy(workspaceId, configured)
 							.pipe(Effect.mapError((cause) => new ComputersNotDestroyed({ cause })));
 					}
@@ -282,7 +282,7 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
 		ComputerProviderRepository.layer,
-		BotComputers.layer,
+		ProjectComputers.layer,
 		Computers.layer,
 	]),
 );

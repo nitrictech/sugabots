@@ -1,4 +1,5 @@
 import type {
+	Bot,
 	Connection,
 	ConnectionAccess,
 	ConnectionSignInFailure,
@@ -24,39 +25,47 @@ import { Effect } from "effect";
 import { useMemo } from "react";
 import { client } from "@/api.ts";
 
-/** How many of the connection's tools its bot can use: every one not set to off. */
+/** How many of the connection's tools bots can use: every one not set to off. */
 export function usableToolCount(connection: Connection): number {
 	return connection.toolCounts.allow + connection.toolCounts.ask;
 }
 
-/** The bot's connections, each with how many tools are at each setting; nothing is asked before a bot is chosen. */
-export function useConnections(botId: string | undefined) {
-	return useQuery(connectionsQuery(botId));
+/**
+ * A project's connections, each with how many tools are at each setting;
+ * nothing is asked before a project is chosen. A bot's are its default
+ * project's.
+ */
+export function useConnections(projectId: string | undefined) {
+	return useQuery(connectionsQuery(projectId));
 }
 
-function connectionsQuery(botId: string | undefined) {
+function connectionsQuery(projectId: string | undefined) {
 	return queryOptions({
-		queryKey: ["connections", botId],
-		queryFn: botId
+		queryKey: ["connections", projectId],
+		queryFn: projectId
 			? ({ signal }) =>
-					Effect.runPromise(client.api.connections.list({ params: { botId } }), { signal })
+					Effect.runPromise(client.api.connections.list({ params: { projectId } }), { signal })
 			: skipToken,
 	});
 }
 
 /** One connection with its tools, without the server's descriptions of them. */
-export function useConnectionWithTools(botId: string, connectionId: string) {
+export function useConnectionWithTools(projectId: string, connectionId: string) {
 	return useQuery({
-		queryKey: connectionKey(botId, connectionId),
+		queryKey: connectionKey(projectId, connectionId),
 		queryFn: ({ signal }) =>
-			Effect.runPromise(client.api.connections.get({ params: { botId, connectionId } }), {
+			Effect.runPromise(client.api.connections.get({ params: { projectId, connectionId } }), {
 				signal,
 			}),
 	});
 }
 
-/** Under the bot's list, so refreshing the list refreshes every connection read from it too. */
-const connectionKey = (botId: string, connectionId: string) => ["connections", botId, connectionId];
+/** Under the project's list, so refreshing the list refreshes every connection read from it too. */
+const connectionKey = (projectId: string, connectionId: string) => [
+	"connections",
+	projectId,
+	connectionId,
+];
 
 /** How a connection is named and marked wherever its tools are shown. */
 export interface ConnectionLook {
@@ -66,14 +75,22 @@ export interface ConnectionLook {
 }
 
 /**
- * The connections of the bots `botIds` by the handle that prefixes their
- * tool keys, so a `sentry__search_issues` in a transcript can be shown as
- * Sentry's. A handle missing from the map belongs to a connection that has
- * since been removed; callers write the handle out rather than dropping the
- * step. Where two bots use the same handle, either one's look serves.
+ * The connections of the project `projectId`, a conversation's, and the own
+ * connections of the bots `botIds`, their default projects', by the handle
+ * that prefixes their tool keys, so a `sentry__search_issues` in a transcript
+ * can be shown as Sentry's. A handle missing from the map belongs to a
+ * connection that has since been removed; callers write the handle out rather
+ * than dropping the step. Where two use the same handle, either one's look serves.
  */
-export function useConnectionLooks(botIds: readonly string[]): ReadonlyMap<string, ConnectionLook> {
-	const lists = useQueries({ queries: botIds.map((botId) => connectionsQuery(botId)) });
+export function useConnectionLooks(
+	botIds: readonly string[],
+	projectId?: string | null,
+): ReadonlyMap<string, ConnectionLook> {
+	const defaultProjectIds = useDefaultProjectsOf(botIds);
+	const projectIds = [...new Set([...(projectId ? [projectId] : []), ...defaultProjectIds])];
+	const lists = useQueries({
+		queries: projectIds.map((one) => connectionsQuery(one)),
+	});
 	const found = lists.flatMap((list) => list.data ?? []);
 	const key = found.map((connection) => connection.id).join(" ");
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `key` names what `found` holds, which is a new array on every render.
@@ -89,10 +106,26 @@ export function useConnectionLooks(botIds: readonly string[]): ReadonlyMap<strin
 	}, [key]);
 }
 
-export function useConnectionActions(botId: string) {
+/**
+ * The default projects of the bots `botIds`, as the bot rosters already
+ * loaded say: a transcript is shown inside a workspace whose roster the
+ * sidebar has loaded. A bot no roster has yet is left out.
+ */
+function useDefaultProjectsOf(botIds: readonly string[]): string[] {
+	const rosters = useQueryClient().getQueriesData<readonly Bot[]>({ queryKey: ["bots"] });
+	return botIds.flatMap((botId) => {
+		for (const [, roster] of rosters) {
+			const found = roster?.find((one) => one.id === botId);
+			if (found) return [found.defaultProjectId];
+		}
+		return [];
+	});
+}
+
+export function useConnectionActions(projectId: string) {
 	const queryClient = useQueryClient();
-	const listKey = ["connections", botId];
-	const updateKey = ["connections", botId, "update"];
+	const listKey = ["connections", projectId];
+	const updateKey = ["connections", projectId, "update"];
 	const refresh = () => queryClient.invalidateQueries({ queryKey: listKey });
 	const { connections } = client.api;
 
@@ -102,7 +135,7 @@ export function useConnectionActions(botId: string) {
 				Effect.runPromise(
 					// The generated client splits a union payload into one request type
 					// per member, which a request holding the whole union does not satisfy.
-					connections.create({ params: { botId }, payload: json } as Parameters<
+					connections.create({ params: { projectId }, payload: json } as Parameters<
 						typeof connections.create
 					>[0]),
 				),
@@ -117,12 +150,14 @@ export function useConnectionActions(botId: string) {
 		update: useMutation({
 			mutationKey: updateKey,
 			mutationFn: ({ connectionId, json }: { connectionId: string; json: ConnectionUpdate }) =>
-				Effect.runPromise(connections.update({ params: { botId, connectionId }, payload: json })),
+				Effect.runPromise(
+					connections.update({ params: { projectId, connectionId }, payload: json }),
+				),
 			onMutate: async ({ connectionId, json }) => {
 				const chosen = choiceFor(json);
 				if (!chosen) return undefined;
 				await queryClient.cancelQueries({ queryKey: listKey });
-				const detailKey = connectionKey(botId, connectionId);
+				const detailKey = connectionKey(projectId, connectionId);
 				const before = {
 					list: queryClient.getQueryData<Connection[]>(listKey),
 					detail: queryClient.getQueryData<ConnectionWithTools>(detailKey),
@@ -157,16 +192,16 @@ export function useConnectionActions(botId: string) {
 		}),
 		remove: useMutation({
 			mutationFn: ({ connectionId }: { connectionId: string }) =>
-				Effect.runPromise(connections.remove({ params: { botId, connectionId } })),
+				Effect.runPromise(connections.remove({ params: { projectId, connectionId } })),
 			onSuccess: refresh,
 		}),
 		testUnsaved: useMutation({
 			mutationFn: (json: UnsavedConnection) =>
-				Effect.runPromise(connections.testUnsaved({ params: { botId }, payload: json })),
+				Effect.runPromise(connections.testUnsaved({ params: { projectId }, payload: json })),
 		}),
 		test: useMutation({
 			mutationFn: ({ connectionId }: { connectionId: string }) =>
-				Effect.runPromise(connections.test({ params: { botId, connectionId } })),
+				Effect.runPromise(connections.test({ params: { projectId, connectionId } })),
 			onSettled: refresh,
 		}),
 		/**
@@ -177,7 +212,7 @@ export function useConnectionActions(botId: string) {
 		connect: useMutation({
 			mutationFn: async (json: { name: string; url: string }) => {
 				const result = await Effect.runPromise(
-					connections.connectFromCatalog({ params: { botId }, payload: json }),
+					connections.connectFromCatalog({ params: { projectId }, payload: json }),
 				);
 				browser.go(result.authorizationUrl);
 				return result;
@@ -191,7 +226,7 @@ export function useConnectionActions(botId: string) {
 		signIn: useMutation({
 			mutationFn: async ({ connectionId }: { connectionId: string }) => {
 				const result = await Effect.runPromise(
-					connections.startOAuth({ params: { botId, connectionId } }),
+					connections.startOAuth({ params: { projectId, connectionId } }),
 				);
 				// Left here rather than in `onSuccess`, which is skipped once the
 				// card that asked has gone from the page.
@@ -247,7 +282,7 @@ export function signInFailureReason(code: string): string {
 const SIGN_IN_FAILURE_REASONS: Record<ConnectionSignInFailure, string> = {
 	missing_state: "The sign-in came back incomplete. Try again.",
 	unknown_state: "The sign-in does not match any connection.",
-	not_allowed: "You are not allowed to connect a server to this bot.",
+	not_allowed: "You are not allowed to connect a server here.",
 	refused: "The server's sign-in was refused or cancelled.",
 	not_completed: "The server did not accept the sign-in. Try again.",
 };

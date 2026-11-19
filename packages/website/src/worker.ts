@@ -1,6 +1,6 @@
 /**
  * Serves the prerendered site, and each page's Markdown version to requests
- * that prefer `text/markdown`, such as AI agents', and handles the site's
+ * that prefer `text/markdown`, such as AI assistants', and handles the site's
  * redirects. Built by Wrangler, not Vite.
  */
 
@@ -89,7 +89,7 @@ function prefersMarkdown(accept: string) {
 
 const HTTP_QUALITY_VALUE = /^(?:0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)$/;
 
-/** mediaRangeQualities parses Accept weights, defaulting to 1 when omitted and 0 when invalid. */
+/** Each media range's weight in an Accept header: 1 when it gives none, 0 when it gives a malformed one. */
 function mediaRangeQualities(accept: string) {
 	return new Map(
 		accept.split(",").map((range) => {

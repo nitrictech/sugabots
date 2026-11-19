@@ -18,7 +18,7 @@ const AUTOMATION_ID = "0199a3a0-0000-7000-8000-000000000001";
 const TRIGGER_ID = "0199a3a0-0000-7000-8000-000000000003";
 const OTHER_TRIGGER_ID = "0199a3a0-0000-7000-8000-000000000002";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000006";
-const BOT_ID = "0199a3a0-0000-7000-8000-000000000007";
+const PROJECT_ID = "0199a3a0-0000-7000-8000-000000000007";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000008";
 const RUN_ID = "0199a3a0-0000-7000-8000-000000000004";
 const CONVERSATION_ID = "0199a3a0-0000-7000-8000-000000000005";
@@ -221,18 +221,18 @@ describe("an automation's runs", () => {
 				listRuns: (automation) =>
 					Effect.as(asked(calls, automation), { items: [], nextCursor: null }),
 			},
-		}).request(`/bots/${BOT_ID}/automations/${AUTOMATION_ID}/runs`, { headers: session });
+		}).request(`/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/runs`, { headers: session });
 
 		expect(response.status).toBe(200);
 		expect(calls).toEqual([
-			{ input: { botId: BOT_ID, automationId: AUTOMATION_ID }, userId: USER_ID },
+			{ input: { projectId: PROJECT_ID, automationId: AUTOMATION_ID }, userId: USER_ID },
 		]);
 	});
 
 	it("answers an automation hidden from the caller as not found", async () => {
 		const response = await appAs({
 			view: { listRuns: () => Effect.fail(new ResourceHidden({ resource: "bot" })) },
-		}).request(`/bots/${BOT_ID}/automations/${AUTOMATION_ID}/runs`, { headers: session });
+		}).request(`/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/runs`, { headers: session });
 
 		expect(response.status).toBe(404);
 	});
@@ -249,7 +249,7 @@ describe("an automation's runs", () => {
 						duplicate: false,
 					}),
 			},
-		}).request(`/bots/${BOT_ID}/automations/${AUTOMATION_ID}/run`, {
+		}).request(`/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/run`, {
 			method: "POST",
 			headers: session,
 			body: JSON.stringify({ requestId }),
@@ -257,7 +257,7 @@ describe("an automation's runs", () => {
 
 		expect(response.status).toBe(202);
 		expect(calls).toEqual([
-			{ input: { botId: BOT_ID, automationId: AUTOMATION_ID, requestId }, userId: USER_ID },
+			{ input: { projectId: PROJECT_ID, automationId: AUTOMATION_ID, requestId }, userId: USER_ID },
 		]);
 	});
 
@@ -266,7 +266,7 @@ describe("an automation's runs", () => {
 			automations: {
 				run: () => Effect.fail(new ActionForbidden({ permission: "automation.run" })),
 			},
-		}).request(`/bots/${BOT_ID}/automations/${AUTOMATION_ID}/run`, {
+		}).request(`/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/run`, {
 			method: "POST",
 			headers: session,
 			body: JSON.stringify({ requestId: "0199a3a0-0000-7000-8000-0000000000c1" }),
@@ -294,7 +294,7 @@ describe("the workspace's automations", () => {
 });
 
 describe("an automation's triggers", () => {
-	const triggerPath = `/bots/${BOT_ID}/automations/${AUTOMATION_ID}/triggers/${TRIGGER_ID}`;
+	const triggerPath = `/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/triggers/${TRIGGER_ID}`;
 
 	it("changes the trigger in the path, as the person asking", async () => {
 		const calls: Array<{ input: unknown; userId: string }> = [];
@@ -313,7 +313,7 @@ describe("an automation's triggers", () => {
 		expect(calls).toEqual([
 			{
 				input: {
-					trigger: { botId: BOT_ID, automationId: AUTOMATION_ID, triggerId: TRIGGER_ID },
+					trigger: { projectId: PROJECT_ID, automationId: AUTOMATION_ID, triggerId: TRIGGER_ID },
 					changed: input,
 				},
 				userId: USER_ID,
@@ -357,7 +357,7 @@ function anAutomation(): Automation {
 	return {
 		id: AUTOMATION_ID,
 		workspaceId: WORKSPACE_ID,
-		botId: BOT_ID,
+		projectId: PROJECT_ID,
 		name: "Alerts",
 		instructions: "Handle input.",
 		triggers: [{ id: TRIGGER_ID, kind: "webhook", auth: { kind: "bearer" } }],

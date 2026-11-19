@@ -420,8 +420,13 @@ function rulesFor(action: NetworkRuleAction, hosts: readonly string[]): NetworkR
 	return hosts.map((host) => ({ action, target: host }));
 }
 
-const MADE_WITHOUT_CREDENTIAL_PROXY = userText`This bot's computer was made before computers could be signed in to the services the bot uses, such as its repositories. Upgrade it under Computer in the bot's settings: its work is kept.`;
-const MADE_WITHOUT_NETWORK_RULES = userText`This bot's computer was made before computers had network rules, so it can't be kept to them. Upgrade it under Computer in the bot's settings: its work is kept.`;
+// A provider doesn't know whose computer it runs, so the copy names both
+// places its Computer settings can be: a project's, or a bot's for the
+// computer of the bot's default project.
+const UPGRADE_UNDER_COMPUTER =
+	"Upgrade it under Computer in its project's settings, or in its bot's settings if it's a bot's own computer: its work is kept.";
+const MADE_WITHOUT_CREDENTIAL_PROXY = userText`This computer was made before computers could be signed in to the services its project is connected to, such as its repositories. ${UPGRADE_UNDER_COMPUTER}`;
+const MADE_WITHOUT_NETWORK_RULES = userText`This computer was made before computers had network rules, so it can't be kept to them. ${UPGRADE_UNDER_COMPUTER}`;
 
 async function run(
 	sandbox: OpenSandbox,

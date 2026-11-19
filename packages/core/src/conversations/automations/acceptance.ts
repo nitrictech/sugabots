@@ -4,10 +4,17 @@ import { handleFromName, MAX_CONVERSATION_TITLE_CHARACTERS } from "@sugabots/con
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { query, transaction } from "../../database/database.ts";
-import { automation, automationRun, automationTrigger, bot, user } from "../../database/schema.ts";
+import {
+	automation,
+	automationRun,
+	automationTrigger,
+	project,
+	user,
+} from "../../database/schema.ts";
 import { ConversationRepository } from "../repository/repository.ts";
 import {
 	AutomationNotFound,
+	AutomationProjectHasNoLead,
 	AutomationTriggerConflict,
 	AutomationTriggerRejected,
 	inScope,
@@ -31,7 +38,8 @@ export interface Trigger extends Scope {
  * posts the trigger, and queues the run. A trigger with an identity already
  * accepted returns that run again, as a duplicate. Whoever triggers it has
  * already decided that it may run; this checks only that the automation takes
- * the trigger.
+ * the trigger. The run is done by the project's lead bot as it is now, so a
+ * project without one runs nothing.
  */
 export const makeAcceptTrigger = Effect.gen(function* () {
 	const repository = yield* AutomationRepository.Service;
@@ -44,11 +52,14 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 				yield* lockTriggers(input.automationId);
 				const [definition] = yield* query((db) =>
 					db
-						.select({ automation })
+						.select({ automation, leadBotId: project.leadBotId })
 						.from(automation)
 						.innerJoin(
-							bot,
-							and(eq(bot.id, automation.botId), eq(bot.workspaceId, automation.workspaceId)),
+							project,
+							and(
+								eq(project.id, automation.projectId),
+								eq(project.workspaceId, automation.workspaceId),
+							),
 						)
 						.where(inScope(input))
 						.limit(1),
@@ -85,19 +96,21 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					}
 					return { runId: existing.id, conversationId: existing.conversationId, duplicate: true };
 				}
+				const { leadBotId } = definition;
+				if (leadBotId === null) return yield* new AutomationProjectHasNoLead();
 
 				// The feed the run is listed in, opened before the run's own conversation.
-				yield* conversations.openAutomationFeed(definition.automation);
+				yield* conversations.openAutomationFeed(definition.automation, leadBotId);
 				const acceptedAt = yield* DateTime.nowAsDate;
 				const runConversation = yield* conversations.openRun({
 					workspaceId: input.workspaceId,
-					botId: input.botId,
+					botId: leadBotId,
 					title: executionTitle(definition.automation.name, acceptedAt),
 				});
 				const execution = yield* repository.accept({
 					automationId: input.automationId,
 					workspaceId: input.workspaceId,
-					botId: input.botId,
+					botId: leadBotId,
 					conversationId: runConversation.id,
 					triggerId: input.triggerId,
 					triggerKind: input.trigger.kind,
@@ -219,7 +232,7 @@ const runOwnersOf = (createdById: string | null, trigger: RunTrigger) =>
 
 function sameTrigger(left: RunTrigger, right: RunTrigger) {
 	if (left.kind !== right.kind) return false;
-	if (left.kind === "schedule" && right.kind === "schedule") {
+	if (left.kind === "routine" && right.kind === "routine") {
 		return left.scheduledAt === right.scheduledAt;
 	}
 	if (left.kind === "manual" && right.kind === "manual") {

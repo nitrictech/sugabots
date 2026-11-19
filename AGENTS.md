@@ -8,7 +8,7 @@
 
 ## Naming
 
-[`GLOSSARY.md`](GLOSSARY.md) defines the product's words: bots and their tasks, channels and their threads, computers, automations and the rest. Use its words and definitions in identifiers, comments, docs, UI text and bot prompts. Where the code still uses an old name, its "Code renames" table gives the new one: rename what you touch, and write comments with the glossary's definitions even before the code is renamed. `bun run glossary:report` counts the retired words left.
+[`GLOSSARY.md`](GLOSSARY.md) defines the product's words: bots, projects and their threads, computers, automations and the rest. Use its words and definitions in identifiers, comments, docs, UI text and bot prompts. Where the code still uses an old name, its "Code renames" table gives the new one: rename what you touch, and write comments with the glossary's definitions even before the code is renamed. `bun run glossary:report` counts the retired words left.
 
 ## Working from an issue
 

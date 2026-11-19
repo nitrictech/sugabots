@@ -1,6 +1,7 @@
 import { botColorVariables } from "@sugabots/avatars";
 import {
 	type AutomationResultOf,
+	type BotParticipant,
 	type CollaborationPart,
 	type ConversationKind,
 	type FilePart,
@@ -14,15 +15,7 @@ import {
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, CornerUpLeft, Reply, SquareArrowOutUpRight } from "lucide-react";
-import {
-	type CSSProperties,
-	Fragment,
-	type MouseEvent,
-	type ReactNode,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { type CSSProperties, Fragment, type ReactNode, useMemo, useRef, useState } from "react";
 import { type ApprovalCapabilities, mayAnswer } from "@/lib/approvals.ts";
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { useConnectionLooks } from "@/lib/connections.ts";
@@ -30,12 +23,13 @@ import { useConversationEvents } from "@/lib/conversation-events.ts";
 import { useConversation } from "@/lib/conversations.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
+import { collaborationWorkState } from "@/lib/work-state.ts";
 import { BotAvatar, WatchingAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { LabelledRule } from "@/ui/labelled-rule.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
-import type { ActivityState } from "./ChatActivityRow.tsx";
 import {
 	type AnsweringFace,
 	formatDay,
@@ -53,19 +47,16 @@ import { type FileUrlOf, MessageFiles } from "./MessageFiles.tsx";
 import { MessageMarkdown, writerOf } from "./MessageMarkdown.tsx";
 import { AddReactionButton, MessageReactions, type Reacting } from "./MessageReactions.tsx";
 import { groupMentionsBy } from "./mentions.tsx";
-import { SideConversationLine, type SideConversationStatus } from "./SideConversationLine.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
-import { ToolLine, WorkedFor } from "./ToolLine.tsx";
+import { WorkedFor } from "./ToolLine.tsx";
 import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
 
-type BotParticipant = Extract<Participant, { kind: "bot" }>;
-
 /*
- * A message is drawn as a row: its author's face and name at the head of a
- * group, then its parts in order. Text is its words, and each collaboration is
- * a side line opening the conversation it started. So a bot that writes,
- * asks another bot, and writes again shows as words, a side line, and
- * words, in the order it happened.
+ * A bot's message is drawn open on the page, its face and name at the head of
+ * a group, then its parts in order. Text is its words, and each collaboration
+ * is a card showing the conversation it started. So a bot that writes, asks
+ * another bot, and writes again shows as words, a card, and words, in the
+ * order it happened. A person's message sits in a bubble.
  *
  * A reply's text is drawn once it is settled, never as it streams. What the
  * bot writes on the way is often the lead-in to a tool call ("Let me find
@@ -76,7 +67,7 @@ type BotParticipant = Extract<Participant, { kind: "bot" }>;
  * happened. While the turn runs, one line says the bot is typing.
  *
  * Tool calls are not drawn as parts at all. They belong to the turn rather than
- * to the transcript: the tool line above a reply is the way to what they did.
+ * to the transcript: the work line above a reply is the way to what they did.
  * What the bot said just before a call is narration and goes with them. The
  * exception is a write somebody was asked to approve: it stopped the reply,
  * and whoever answered it may want to read again what they agreed to, so it
@@ -90,6 +81,7 @@ export function ConversationMessages({
 	participants,
 	members,
 	conversationKind,
+	projectId,
 	dividers = true,
 	onOpenItem,
 	onOpenFile,
@@ -102,7 +94,6 @@ export function ConversationMessages({
 	peopleTyping = [],
 	showsTyping = true,
 	highlightedMessageId,
-	itemActivityAt,
 	authorLinkOf,
 	onReply,
 	sideLinesOf,
@@ -113,22 +104,27 @@ export function ConversationMessages({
 	answeringFace,
 	viewerWriting = false,
 	viewerId,
-	look = "rows",
+	namedBotId,
 	nameColorsFor,
 }: {
 	messages: Message[];
-	/** The bot the task is with; none in a channel. */
+	/** The bot the thread is with; none in a project. */
 	host?: BotParticipant;
 	isRunning: boolean;
 	/**
-	 * Everyone in the conversation and the channel's bots and people: how a
+	 * Everyone in the conversation and the project's bots and people: how a
 	 * collaboration's other bot is found, and who a mention can name.
 	 */
 	participants: Participant[];
-	/** The channel's people, whom a person's `@here` or `@channel` would notify. */
+	/** The project's people, whom a person's `@here` or `@channel` would notify. */
 	members: readonly PersonParticipant[];
 	/** What kind of conversation it is, which decides whether `@here` and `@channel` notify anyone. */
 	conversationKind: ConversationKind;
+	/**
+	 * The project the conversation is in, a bot's default one or one people
+	 * made, whose connections its tools may come from; null in a direct message.
+	 */
+	projectId?: string | null;
 	/**
 	 * Day markers between messages. Off where the caller places its own, as the
 	 * chat does between these messages and its activity rows.
@@ -176,13 +172,11 @@ export function ConversationMessages({
 	showsTyping?: boolean;
 	/** A message pointed out for a moment, as one jumped to is. */
 	highlightedMessageId?: string;
-	/** When each collaboration a message opened last had something in it, by its conversation's id. */
-	itemActivityAt?: ReadonlyMap<string, string>;
 	/** Where an author's name leads. Names are plain text without it. */
 	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
 	/** Starts a reply quoting the message, from its hover toolbar. Without it, none is offered. */
 	onReply?: (message: Message) => void;
-	/** The lines of the tasks a bot's message started, drawn under it. */
+	/** The lines of the threads a bot's message started, drawn under it. */
 	sideLinesOf?: (message: Message) => ReactNode;
 	/**
 	 * In an automation's feed, where each result already sits under its run,
@@ -208,11 +202,11 @@ export function ConversationMessages({
 	/** The person reading, whose own messages are drawn on the right. Without it, everyone's are drawn alike. */
 	viewerId?: string;
 	/**
-	 * How the messages are drawn: as rows, as direct messages and channels have
-	 * them, or as a bot's task, with bots' words open on the page and people's
-	 * in bubbles.
+	 * The bot the chat's header already names, as a bot's thread names its own
+	 * bot; its messages carry no face and name of their own. Without it, every
+	 * bot's run of messages is headed by its face and name.
 	 */
-	look?: MessageLook;
+	namedBotId?: string;
 	/**
 	 * The conversation people's name colours are picked for, so a person keeps
 	 * theirs on a message brought in from elsewhere. By default, each message's
@@ -226,7 +220,7 @@ export function ConversationMessages({
 	const lastReplyTyping =
 		lastMessage !== undefined && lastMessage.author.kind === "bot" && isTyping(lastMessage);
 	const speakers = useMemo(() => speakersIn(messages), [messages]);
-	const looks = useConnectionLooks(speakers);
+	const looks = useConnectionLooks(speakers, projectId);
 	const fileNames = useMemo(() => fileNamesIn(messages), [messages]);
 	const watchedWritten = useRepliesWatchedBeingWritten(messages);
 	return (
@@ -249,12 +243,11 @@ export function ConversationMessages({
 						{message.author.kind === "automation_trigger" ? (
 							<AutomationTriggerCard message={message} />
 						) : (
-							<Row
-								look={look}
+							<ThreadMessage
 								message={message}
 								startsGroup={headsRun}
 								viewerId={viewerId}
-								hostId={host?.id}
+								namedBotId={namedBotId}
 								nameColorsFor={nameColorsFor}
 								liveFace={
 									message.id === answeringFace?.messageId
@@ -273,7 +266,6 @@ export function ConversationMessages({
 								sending={sending.has(message.id)}
 								queuedNote={queuedNote}
 								highlighted={message.id === highlightedMessageId}
-								itemActivityAt={itemActivityAt}
 								authorLink={authorLinkOf?.(message.author)}
 								onReply={onReply}
 								sideLines={sideLinesOf?.(message)}
@@ -341,37 +333,11 @@ function useRepliesWatchedBeingWritten(messages: readonly Message[]): ReadonlySe
 	return seen.current;
 }
 
-/** How a conversation draws its messages; see `ConversationMessages`' `look`. */
-export type MessageLook = "rows" | "task";
-
-/** One message, drawn in the conversation's look. */
-function Row({
-	look,
-	viewerId,
-	hostId,
-	nameColorsFor,
-	...row
-}: Parameters<typeof MessageRow>[0] & {
-	look: MessageLook;
-	viewerId: string | undefined;
-	hostId: string | undefined;
-	nameColorsFor: string | undefined;
-}) {
-	return look === "task" ? (
-		<TaskMessage {...row} viewerId={viewerId} hostId={hostId} nameColorsFor={nameColorsFor} />
-	) : (
-		<MessageRow {...row} />
-	);
-}
-
 const NONE_QUEUED: ReadonlySet<string> = new Set();
 /** Where a file is served while its message is still being sent: nowhere yet. */
 const notServedYet: FileUrlOf = () => undefined;
 
 const NONE_SENDING: ReadonlySet<string> = new Set();
-
-/** Screens that cannot hover, which is to say touch screens. */
-const NO_HOVER = "(hover: none)";
 
 /** How long a reply takes to grow to fit its words: longer for more of them, within bounds. */
 const REVEAL_MS = { minimum: 400, maximum: 700, perCharacter: 0.5 };
@@ -409,7 +375,7 @@ const WORDS = {
 type RowSide = "bot" | "person" | "mine";
 
 /**
- * One message as a bot's task draws it. A bot's carries its face, name and
+ * One message. A bot's carries its face, name and
  * time at the head of a group, then its work line, words, any collaboration it
  * opened as a card, and any call somebody was asked to approve as its card,
  * with a row of actions under it. A person's words sit in a bubble: someone else's on the
@@ -417,11 +383,11 @@ type RowSide = "bot" | "person" | "mine";
  * quotes the message it answers above its words, and people's reactions sit
  * under them.
  */
-function TaskMessage({
+function ThreadMessage({
 	message,
 	startsGroup,
 	viewerId,
-	hostId,
+	namedBotId,
 	nameColorsFor,
 	participants,
 	members,
@@ -453,8 +419,8 @@ function TaskMessage({
 	startsGroup: boolean;
 	/** The person reading, whose own messages are drawn on the right. */
 	viewerId: string | undefined;
-	/** The bot the chat is with, whose face is in the chat's header rather than over its messages. */
-	hostId: string | undefined;
+	/** The bot the chat's header names, whose face and name are there rather than over its messages. */
+	namedBotId: string | undefined;
 	/** The conversation people's name colours are picked for; each message's own without it. */
 	nameColorsFor: string | undefined;
 	participants: Participant[];
@@ -475,7 +441,6 @@ function TaskMessage({
 	queuedNote: boolean;
 	/** Whether it is pointed out for a moment, as one jumped to is. */
 	highlighted: boolean;
-	itemActivityAt?: ReadonlyMap<string, string>;
 	/** Where its author's name leads. */
 	authorLink?: AuthorLink;
 	onReply?: (message: Message) => void;
@@ -606,15 +571,8 @@ function TaskMessage({
 	const fileList = files.length > 0 && (
 		<MessageFiles files={files} urlOf={sending ? notServedYet : fileUrlOf} />
 	);
-	const reactions = (
-		<MessageReactions message={message} reacting={reacting} addable={finished} filled />
-	);
-	// Between a message's reactions and what can be done to it, once it has any.
-	const divider = (message.reactions?.length ?? 0) > 0 && (
-		<span aria-hidden className="mx-1.5 h-3.5 w-px bg-border-strong" />
-	);
-	// The chat's own bot is named in its header, so its messages carry no head of their own.
-	const headed = startsGroup && !(bot !== undefined && bot.id === hostId);
+	// The bot the header names carries no head of its own.
+	const headed = startsGroup && !(bot !== undefined && bot.id === namedBotId);
 	// Shown with the actions on messages without a head, which would carry it.
 	const followUpTime = !headed && (
 		<span className="px-1 text-2xs text-subtle-foreground tabular-nums">
@@ -689,25 +647,20 @@ function TaskMessage({
 						)}
 						{sideLines}
 					</div>
-					{/* Its reactions, then what can be done to it, shown while it is pointed at. */}
-					<div className="flex min-h-7 flex-wrap items-center gap-1 pt-1">
-						{reactions}
+					<MessageToolbar
+						side={side}
+						message={message}
+						reacting={reacting}
+						picking={picking}
+						className="pt-1"
+					>
 						{finished && (
-							<div
-								className={cn(
-									"flex items-center gap-0.5 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100 [@media(hover:none)]:opacity-100",
-									(message.reactions?.length ?? 0) === 0 && "-ml-1.5",
-									picking ? "opacity-100" : "opacity-0",
-								)}
-							>
-								{(message.reactions?.length ?? 0) > 0 && (
-									<span aria-hidden className="mr-1.5 ml-1 h-3.5 w-px bg-border-strong" />
-								)}
+							<>
 								{actions}
 								{followUpTime}
-							</div>
+							</>
 						)}
-					</div>
+					</MessageToolbar>
 					{notes}
 				</>
 			) : (
@@ -732,9 +685,7 @@ function TaskMessage({
 									className={cn(
 										"min-w-0 rounded-bubble px-3.5 py-2 transition-shadow duration-700",
 										highlighted && "ring-2 ring-ring ring-offset-2 ring-offset-background",
-										side === "mine"
-											? "rounded-br-tail bubble-mine"
-											: "bg-zinc-100 dark:bg-zinc-900",
+										side === "mine" ? "rounded-br-tail bubble-mine" : "bg-bubble",
 										side === "person" && startsGroup && "rounded-tl-tail",
 									)}
 								>
@@ -761,34 +712,12 @@ function TaskMessage({
 						</div>
 						{fileList}
 						{sideLines}
-						{/*
-						 * Under it, its reactions, and beside them what can be done to it and its
-						 * time, shown while it is pointed at. Under your own, the reactions keep to
-						 * the bubble's edge and the rest opens out to their left.
-						 */}
-						<div
-							className={cn(
-								"flex min-h-7 flex-wrap items-center gap-1",
-								side === "mine" && "flex-row-reverse",
-							)}
-						>
-							{reactions}
-							<div
-								className={cn(
-									"flex items-center gap-0.5 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100 [@media(hover:none)]:opacity-100",
-									(message.reactions?.length ?? 0) === 0 &&
-										(side === "mine" ? "-mr-1.5" : "-ml-1.5"),
-									picking ? "opacity-100" : "opacity-0",
-								)}
-							>
-								{side === "person" && divider}
-								{actions}
-								<span className="px-1.5 text-2xs text-subtle-foreground tabular-nums">
-									<MessageTime createdAt={message.createdAt} />
-								</span>
-								{side === "mine" && divider}
-							</div>
-						</div>
+						<MessageToolbar side={side} message={message} reacting={reacting} picking={picking}>
+							{actions}
+							<span className="px-1.5 text-2xs text-subtle-foreground tabular-nums">
+								<MessageTime createdAt={message.createdAt} />
+							</span>
+						</MessageToolbar>
 						{notes}
 					</div>
 				</div>
@@ -817,25 +746,12 @@ function MessageActions({
 }) {
 	return (
 		<>
-			{words && (
-				<CopyIconButton label="Copy text" text={words} side="top" className={ACTION_BUTTON} />
-			)}
+			{words && <CopyIconButton label="Copy text" text={words} side="top" variant="toolbar" />}
 			{reacting && (
-				<AddReactionButton
-					message={message}
-					reacting={reacting}
-					align="start"
-					onOpenChange={onPickingChange}
-					className={ACTION_BUTTON}
-				/>
+				<AddReactionButton message={message} reacting={reacting} onOpenChange={onPickingChange} />
 			)}
 			{onReply && (
-				<IconButton
-					label="Reply"
-					side="top"
-					onClick={() => onReply(message)}
-					className={ACTION_BUTTON}
-				>
+				<IconButton label="Reply" side="top" variant="toolbar" onClick={() => onReply(message)}>
 					<Reply aria-hidden />
 				</IconButton>
 			)}
@@ -843,8 +759,61 @@ function MessageActions({
 	);
 }
 
-const ACTION_BUTTON =
-	"size-7 rounded-md text-subtle-foreground hover:bg-chip hover:text-foreground [&_svg]:size-3.75";
+/**
+ * Under a message, its reactions, then `children`, what can be done to it and
+ * its time, shown while the message is pointed at or its emoji picker is
+ * open. Under your own the row runs from the right, so the reactions keep to
+ * the bubble's edge and the rest opens out to their left. A rule parts the
+ * reactions from the rest once there are any.
+ */
+function MessageToolbar({
+	side,
+	message,
+	reacting,
+	picking,
+	className,
+	children,
+}: {
+	side: RowSide;
+	message: Message;
+	reacting: Reacting | undefined;
+	/** Whether its emoji picker is open, which keeps the row up once the pointer has left for it. */
+	picking: boolean;
+	className?: string;
+	children: ReactNode;
+}) {
+	const reacted = (message.reactions?.length ?? 0) > 0;
+	const rule = reacted && (
+		<span
+			aria-hidden
+			className={cn("h-3.5 w-px bg-border-strong", side === "bot" ? "mr-1.5 ml-1" : "mx-1.5")}
+		/>
+	);
+	return (
+		<div
+			className={cn(
+				"flex min-h-7 flex-wrap items-center gap-1",
+				side === "mine" && "flex-row-reverse",
+				className,
+			)}
+		>
+			<MessageReactions message={message} reacting={reacting} />
+			{children && (
+				<div
+					className={cn(
+						"flex items-center gap-0.5 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100 [@media(hover:none)]:opacity-100",
+						!reacted && (side === "mine" ? "-mr-1.5" : "-ml-1.5"),
+						picking ? "opacity-100" : "opacity-0",
+					)}
+				>
+					{side !== "mine" && rule}
+					{children}
+					{side === "mine" && rule}
+				</div>
+			)}
+		</div>
+	);
+}
 
 /** How a name is coloured, with the variables a bot's colour needs. */
 interface QuoteTone {
@@ -891,9 +860,8 @@ function ReplyQuote({
 			<span className="min-w-0 truncate text-subtle-foreground">{replyTo.preview}</span>
 		</>
 	);
-	const className = cn(
-		"flex min-w-0 max-w-full items-center gap-1.5 py-0.5 text-left text-xs leading-snug",
-	);
+	const className =
+		"flex min-w-0 max-w-full items-center gap-1.5 py-0.5 text-left text-xs leading-snug";
 	if (!onJump) {
 		return (
 			<p className={cn("m-0", className)} style={tone.style}>
@@ -935,13 +903,8 @@ function AuthorName({
 	if (!link) {
 		return <span className={className}>{name}</span>;
 	}
-	const linkClassName = cn(className, "rounded hover:underline focus-ring");
-	return link.kind === "bot" ? (
-		<Link {...link.options} className={linkClassName}>
-			{name}
-		</Link>
-	) : (
-		<Link {...link.options} className={linkClassName}>
+	return (
+		<Link {...link} className={cn(className, "rounded hover:underline focus-ring")}>
 			{name}
 		</Link>
 	);
@@ -983,374 +946,6 @@ function MessageTime({ createdAt }: { createdAt: string }) {
 	);
 }
 
-/** How each part of a row is sized: the regular chat, or the sidebar's narrower conversation. */
-const ROW = {
-	regular: { face: 36, row: "gap-3.5 px-5", words: "text-sm leading-normal" },
-	compact: { face: 32, row: "gap-3 px-4.5", words: "text-sm leading-normal" },
-} as const;
-
-/**
- * One message as a row, as direct messages and channels draw them: at the head of a group its author's face, name and
- * time, then its words, any collaboration it opened as a side line, and any
- * call somebody was asked to approve as its card. A reply has the message it
- * quotes over its author's name, and people's reactions under its words.
- * Hovered, it lifts slightly, shows its time beside a follow-up, and offers to
- * react to it, reply to it and copy its words.
- */
-function MessageRow({
-	message,
-	startsGroup,
-	participants,
-	members,
-	conversationKind,
-	looks,
-	fileNames,
-	approvalCapabilities,
-	compact,
-	arrivedLive,
-	queued,
-	sending,
-	queuedNote,
-	highlighted,
-	itemActivityAt,
-	authorLink,
-	onReply,
-	sideLines,
-	inAutomationFeed,
-	onJumpToMessage,
-	reacting,
-	fileUrlOf,
-	onOpenItem,
-	onOpenFile,
-	onOpenDesktop,
-	previews,
-	liveFace,
-}: {
-	message: Message;
-	/** Whether it heads its author's group, so it carries their face and name. */
-	startsGroup: boolean;
-	participants: Participant[];
-	members: readonly PersonParticipant[];
-	conversationKind: ConversationKind;
-	looks: ReturnType<typeof useConnectionLooks>;
-	/** The conversation's files by id, for the tool line's calls that read them. */
-	fileNames: ReadonlyMap<string, string>;
-	approvalCapabilities: ApprovalCapabilities | undefined;
-	compact: boolean;
-	/** Finished while the conversation was open, so it arrives rather than simply being there. */
-	arrivedLive: boolean;
-	/** Whether this message waits for the next reply, because one is still being written. */
-	queued: boolean;
-	/** Whether it is still on its way to the API, so it cannot be replied or reacted to yet. */
-	sending: boolean;
-	/** Whether it ends a run of waiting messages, which says so once under the last of them. */
-	queuedNote: boolean;
-	/** Whether it is pointed out for a moment, as one jumped to is. */
-	highlighted: boolean;
-	itemActivityAt?: ReadonlyMap<string, string>;
-	/** Where its author's name leads. */
-	authorLink?: AuthorLink;
-	onReply?: (message: Message) => void;
-	sideLines?: ReactNode;
-	inAutomationFeed: boolean;
-	onJumpToMessage?: (messageId: string) => void;
-	reacting?: Reacting;
-	/** Where a file attached to it is served. */
-	fileUrlOf: (fileId: string) => string;
-	onOpenItem: (conversationId: string) => void;
-	onOpenFile?: (fileId: string) => void;
-	onOpenDesktop?: () => void;
-	previews: boolean;
-	/** Given only where the face of the bot answering is drawn: whether it's typing, and whether the viewer is writing back. */
-	liveFace?: AnsweringFaceState;
-}) {
-	// Unset until the first tap, so a screen that hovers never has a time shown twice.
-	const [timeTapped, setTimeTapped] = useState(false);
-	// The toolbar stays up while its emoji picker is open, as the pointer has left the row for it.
-	const [picking, setPicking] = useState(false);
-	const { author } = message;
-	if (author.kind === "automation_trigger") return null;
-
-	// A tap is a touch screen's hover: it shows a follow-up's time, as hovering does.
-	function toggleTimeOnTouch(event: MouseEvent) {
-		if (startsGroup || !window.matchMedia(NO_HOVER).matches) return;
-		// A tap in a mention's card, drawn elsewhere on the page, still reaches here through React.
-		if (!(event.target instanceof Element) || !event.currentTarget.contains(event.target)) return;
-		if (event.target.closest("a, button, [role=button]")) return;
-		setTimeTapped((shown) => !shown);
-	}
-	const bot = author.kind === "bot" ? author : undefined;
-	const size = ROW[compact ? "compact" : "regular"];
-	const calls = message.parts.filter((part): part is ToolCallPart => part.type === "tool_call");
-	const files = message.parts.filter((part): part is FilePart => part.type === "file");
-	const segments = segmentsOf(message);
-	const mentionable = [...participants, ...groupMentionsBy(author, members, conversationKind)];
-	const words = segments
-		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
-		.join("\n\n");
-	// A reply with nothing settled yet is only its typing line, under the last message.
-	if (showsNothingYet(message)) return null;
-	const finished = message.status === "complete" && !sending;
-	const replyable = onReply !== undefined && finished;
-	const reactable = reacting !== undefined && finished;
-	return (
-		// biome-ignore lint/a11y/useKeyWithClickEvents: a tap only puts on screen the time a screen reader already reads in the row, so a keyboard has nothing to reach.
-		<article
-			aria-label={`${author.name}, ${messageStatus(message, { queued })}`}
-			data-message-id={message.id}
-			onClick={toggleTimeOnTouch}
-			className={cn(
-				"group/message relative flex pb-0.5 transition-colors duration-700 motion-reduce:animate-none",
-				highlighted ? "bg-chip" : "hover:bg-message-hover",
-				size.row,
-				startsGroup ? "pt-3.5" : "pt-0.5",
-				!arrivedLive && "animate-rise",
-			)}
-			style={bot ? botColorVariables(bot.color) : undefined}
-		>
-			{/* A reply's face lines up with its author's name, under the quote. */}
-			<span
-				className={cn("flex shrink-0 justify-center", message.replyTo && "pt-5.25")}
-				style={{ width: size.face }}
-			>
-				{startsGroup ? (
-					<span aria-hidden className="mt-0.5 flex">
-						{author.kind === "bot" && liveFace ? (
-							<WatchingAvatar
-								bot={author}
-								size={size.face}
-								busy={liveFace.botTyping}
-								watching={liveFace.viewerWriting}
-							/>
-						) : author.kind === "bot" ? (
-							<BotAvatar
-								color={author.color}
-								face={author.face}
-								shape={author.shape}
-								size={size.face}
-							/>
-						) : (
-							<PersonAvatar person={author} size={size.face} />
-						)}
-					</span>
-				) : (
-					<span
-						className={cn(
-							"text-2xs text-subtle-foreground tabular-nums leading-5.5 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100",
-							timeTapped ? "opacity-100" : "opacity-0",
-						)}
-					>
-						<MessageTime createdAt={message.createdAt} />
-					</span>
-				)}
-			</span>
-			<div className="flex min-w-0 flex-1 flex-col items-start">
-				{message.replyTo && <RowReplyQuote replyTo={message.replyTo} onJump={onJumpToMessage} />}
-				{startsGroup && (
-					<div className="flex items-center gap-2 pb-px">
-						<RowAuthorName name={author.name} link={authorLink} />
-						{bot && (
-							<span className="rounded bg-chip px-1.25 py-px font-semibold text-2xs text-muted-foreground leading-snug">
-								Bot
-							</span>
-						)}
-						<span className="text-subtle-foreground text-xs">
-							<MessageTime createdAt={message.createdAt} />
-						</span>
-					</div>
-				)}
-				{bot && <ToolLine parts={message.parts} looks={looks} fileNames={fileNames} />}
-				{segments.map((segment) => {
-					if (segment.type === "collaboration") {
-						const recipient = participants.find(
-							(participant): participant is BotParticipant =>
-								participant.kind === "bot" && participant.id === segment.collaboration.botId,
-						);
-						if (!bot || !recipient) return null;
-						return (
-							<CollaborationLine
-								key={segment.key}
-								initiator={bot}
-								recipient={recipient}
-								status={segment.collaboration.status}
-								lastActivityAt={itemActivityAt?.get(segment.collaboration.conversationId)}
-								onOpen={() => onOpenItem(segment.collaboration.conversationId)}
-							/>
-						);
-					}
-					if (segment.type === "tool_call") {
-						const call = segment.toolCall;
-						if (!bot) return null;
-						return (
-							<div key={segment.key} className="w-full max-w-115 pt-1.5 pb-1">
-								<ToolApprovalCard
-									call={call}
-									bot={bot}
-									conversationId={message.conversationId}
-									canApprove={mayAnswer(call, bot.id, approvalCapabilities)}
-									look={looks.get(splitToolKey(call.tool).handle)}
-								/>
-							</div>
-						);
-					}
-					if (!segment.text) return null;
-					const markdown = (
-						<MessageMarkdown
-							text={segment.text}
-							mentionable={mentionable}
-							writer={writerOf(author)}
-						/>
-					);
-					return (
-						<div
-							key={segment.key}
-							className={cn("min-w-0 self-stretch break-words text-body-foreground", size.words)}
-						>
-							{bot && arrivedLive ? (
-								<div
-									className="reply-grow"
-									style={{ ["--reveal-duration" as string]: `${revealDurationMs(segment.text)}ms` }}
-								>
-									<div>{markdown}</div>
-								</div>
-							) : (
-								markdown
-							)}
-						</div>
-					);
-				})}
-				{files.length > 0 && (
-					<MessageFiles files={files} urlOf={sending ? notServedYet : fileUrlOf} />
-				)}
-				{bot &&
-					previews &&
-					onOpenDesktop &&
-					message.status === "streaming" &&
-					calls.some((call) => call.tool.startsWith(BROWSER_TOOL_PREFIX)) && (
-						<div className="w-full max-w-115 pt-2 pb-1.5">
-							<LiveDesktopCard
-								conversationId={message.conversationId}
-								botId={bot.id}
-								botName={bot.name}
-								onOpen={onOpenDesktop}
-							/>
-						</div>
-					)}
-				{bot && previews && onOpenFile && (
-					<FileCards
-						parts={message.parts}
-						botName={bot.name}
-						onOpen={onOpenFile}
-						className="pt-2"
-					/>
-				)}
-				{sideLines}
-				<MessageReactions message={message} reacting={reacting} addable={finished} />
-				{message.automationResultOf && !inAutomationFeed && (
-					<RowNote className="text-subtle-foreground">
-						<AutomationResultLink run={message.automationResultOf} onOpenItem={onOpenItem} />
-					</RowNote>
-				)}
-				{message.status === "failed" && (
-					<RowNote className="text-destructive-text">
-						<span className="font-semibold">Reply failed.</span>
-						{message.error && <span> {message.error}</span>}
-					</RowNote>
-				)}
-				{message.status === "cancelled" && (
-					<RowNote className="font-semibold text-subtle-foreground">Reply stopped</RowNote>
-				)}
-				{queuedNote && <RowNote className="text-subtle-foreground">Queued</RowNote>}
-			</div>
-			{(words || replyable || reactable) && (
-				<div
-					className={cn(
-						"absolute -top-3.5 right-5 z-10 flex rounded-md border border-border-strong bg-panel p-0.5 shadow-popover transition-opacity group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 [@media(hover:none)]:sr-only",
-						picking ? "opacity-100" : "pointer-events-none opacity-0",
-					)}
-				>
-					{reactable && (
-						<AddReactionButton
-							message={message}
-							reacting={reacting}
-							onOpenChange={setPicking}
-							className={TOOLBAR_BUTTON}
-						/>
-					)}
-					{replyable && (
-						<IconButton
-							label="Reply"
-							side="top"
-							onClick={() => onReply(message)}
-							className={TOOLBAR_BUTTON}
-						>
-							<Reply aria-hidden />
-						</IconButton>
-					)}
-					{words && (
-						<CopyIconButton label="Copy text" text={words} side="top" className={TOOLBAR_BUTTON} />
-					)}
-				</div>
-			)}
-		</article>
-	);
-}
-
-const TOOLBAR_BUTTON =
-	"h-7 w-7.5 rounded-tail text-soft-foreground hover:bg-border-strong [&_svg]:size-3.75";
-
-/**
- * Over a reply, whose message it answers and that message's first line. With
- * `onJump` it is a button going to that message.
- */
-function RowReplyQuote({
-	replyTo,
-	onJump,
-}: {
-	replyTo: MessageReplyTo;
-	onJump?: (messageId: string) => void;
-}) {
-	const name = messageAuthorName(replyTo.author);
-	const quote = (
-		<>
-			<CornerUpLeft aria-hidden size={13} strokeWidth={2.2} className="shrink-0" />
-			<span className="shrink-0">Replying to</span>
-			<span className="shrink-0 font-semibold text-soft-foreground">{name}</span>
-			<span className="ml-0.5 min-w-0 truncate">{replyTo.preview}</span>
-		</>
-	);
-	// 21px tall, which the reply's face is moved down by to line up with the name.
-	const className =
-		"-ml-1 flex h-5.25 max-w-full items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground leading-4.75";
-	if (!onJump) return <p className={cn("m-0", className)}>{quote}</p>;
-	return (
-		<button
-			type="button"
-			aria-label={`Replying to ${name}: ${replyTo.preview}`}
-			onClick={() => onJump(replyTo.id)}
-			className={cn("focus-ring transition-colors hover:text-foreground", className)}
-		>
-			{quote}
-		</button>
-	);
-}
-
-/** An author's name, leading to their page when there is one. */
-function RowAuthorName({ name, link }: { name: string; link: AuthorLink | undefined }) {
-	const className = "font-semibold text-sm text-foreground";
-	if (!link) return <span className={className}>{name}</span>;
-	const linkClassName = cn(className, "rounded hover:underline focus-ring");
-	return link.kind === "bot" ? (
-		<Link {...link.options} className={linkClassName}>
-			{name}
-		</Link>
-	) : (
-		<Link {...link.options} className={linkClassName}>
-			{name}
-		</Link>
-	);
-}
-
 /** A line under a message's words, such as why a reply failed. */
 function RowNote({ className, children }: { className: string; children: ReactNode }) {
 	return <p className={cn("m-0 pt-1 text-xs", className)}>{children}</p>;
@@ -1376,57 +971,8 @@ function AutomationResultLink({
 	);
 }
 
-/** Where a collaboration stands, as its line here and its row in Inbox both say it. */
-export function collaborationActivityState(status: CollaborationPart["status"]): ActivityState {
-	switch (status) {
-		case "waiting":
-		case "pending":
-			return "running";
-		case "answered":
-			return "done";
-		case "failed":
-			return "failed";
-	}
-}
-
-/** How a collaboration's line shows where it stands. */
-const COLLABORATION_LINE_STATUS: Record<ActivityState, SideConversationStatus> = {
-	running: "working",
-	done: { text: "Done", done: true },
-	failed: { text: "Stopped" },
-};
-
 /**
- * The collaboration a bot's message opened, hanging off it: both bots' faces,
- * who it asked, where it stands, and when it last moved.
- */
-function CollaborationLine({
-	initiator,
-	recipient,
-	status,
-	lastActivityAt,
-	onOpen,
-}: {
-	initiator: BotParticipant;
-	recipient: BotParticipant;
-	status: CollaborationPart["status"];
-	lastActivityAt?: string;
-	onOpen: () => void;
-}) {
-	return (
-		<SideConversationLine
-			faces={[initiator, recipient]}
-			label={`Asked ${recipient.name}`}
-			description={`Open Collaboration: ${initiator.name} and ${recipient.name}`}
-			lastActivityAt={lastActivityAt}
-			status={COLLABORATION_LINE_STATUS[collaborationActivityState(status)]}
-			onOpen={onOpen}
-		/>
-	);
-}
-
-/**
- * The collaboration a bot's message opened, inline in a bot's chat: what the
+ * The collaboration a bot's message opened, inline in the chat: what the
  * two said to each other, each with their face, name and time, and a button
  * opening it beside the chat. Followed live while it runs; once it is over it
  * is only read.
@@ -1446,7 +992,7 @@ function CollaborationCard({
 	participants: Participant[];
 	onOpen: () => void;
 }) {
-	const running = collaborationActivityState(status) === "running";
+	const running = collaborationWorkState(status) === "running";
 	const conversation = useConversation(conversationId);
 	useConversationEvents(running ? conversationId : undefined);
 	const messages = (conversation.data?.messages ?? []).filter(
@@ -1460,8 +1006,9 @@ function CollaborationCard({
 			<IconButton
 				label={`Open Collaboration: ${initiator.name} and ${recipient.name}`}
 				side="top"
+				variant="toolbar"
 				onClick={onOpen}
-				className="absolute top-2 right-2 size-7 rounded-md text-subtle-foreground opacity-0 transition-opacity hover:bg-chip hover:text-foreground group-focus-within/collaboration:opacity-100 group-hover/collaboration:opacity-100 [@media(hover:none)]:opacity-100 [&_svg]:size-3.5"
+				className="absolute top-2 right-2 opacity-0 transition-opacity group-focus-within/collaboration:opacity-100 group-hover/collaboration:opacity-100 [@media(hover:none)]:opacity-100 [&_svg]:size-3.5"
 			>
 				<SquareArrowOutUpRight aria-hidden />
 			</IconButton>
@@ -1528,12 +1075,12 @@ function CollaborationMessage({
 function AutomationTriggerCard({ message }: { message: Message }) {
 	if (message.author.kind !== "automation_trigger") return null;
 	const source =
-		message.author.triggerKind === "schedule"
-			? "Scheduled trigger"
+		message.author.triggerKind === "routine"
+			? "Routine"
 			: message.author.triggerKind === "webhook"
 				? "Webhook trigger"
 				: message.author.triggerKind === "github"
-					? "Repository trigger"
+					? "GitHub trigger"
 					: "Manual run";
 	return (
 		<article aria-label={`${source} for ${message.author.automationName}`} className="px-5 pt-3.5">
@@ -1551,13 +1098,7 @@ function AutomationTriggerCard({ message }: { message: Message }) {
 
 /** Where the chat moves on to a new day: a rule either side of "Today", "Yesterday" or the date. */
 export function DaySeparator({ at }: { at: string }) {
-	return (
-		<div className="flex items-center gap-3 px-5 pt-6 pb-1">
-			<span aria-hidden className="h-px flex-1 bg-border" />
-			<span className="text-subtle-foreground text-xs">{formatDay(new Date(at))}</span>
-			<span aria-hidden className="h-px flex-1 bg-border" />
-		</div>
-	);
+	return <LabelledRule className="pt-6 pb-1">{formatDay(new Date(at))}</LabelledRule>;
 }
 
 /** For example "Today at 4:58:34 PM", "Aug 5 at 3:46:46 PM", or "Aug 5, 2025 at 3:46:46 PM". */

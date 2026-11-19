@@ -20,11 +20,11 @@ import {
 	automation,
 	automationRun,
 	bot as botTable,
-	channel,
-	channelBot,
-	channelMember,
 	conversationParticipant,
 	message,
+	project,
+	projectBot,
+	projectMember,
 	toolCall,
 	turn,
 	user,
@@ -123,8 +123,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 	let workspaceId: string;
 	let workspaceSlug: string;
-	let channelId: string;
-	let channelSlug: string;
+	let projectId: string;
+	let projectSlug: string;
 	let botId: string;
 	let people: Record<"ada" | "bob" | "cy" | "outsider", { id: string; name: string }>;
 
@@ -165,25 +165,25 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values(rows.map((person) => ({ workspaceId, userId: person.id }))),
 		);
-		channelSlug = `channel-${suffix}`;
+		projectSlug = `project-${suffix}`;
 		const [room] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({
 					workspaceId,
 					name: "Launch",
-					slug: channelSlug,
+					slug: projectSlug,
 					createdById: ada.id,
 				})
 				.returning(),
 		);
-		if (!room) throw new Error("Could not create the channel");
-		channelId = room.id;
-		// Everybody but the outsider is in the channel.
+		if (!room) throw new Error("Could not create the project");
+		projectId = room.id;
+		// Everybody but the outsider is in the project.
 		await onDatabase((db) =>
 			db
-				.insert(channelMember)
-				.values([ada, bob, cy].map((person) => ({ workspaceId, channelId, userId: person.id }))),
+				.insert(projectMember)
+				.values([ada, bob, cy].map((person) => ({ workspaceId, projectId, userId: person.id }))),
 		);
 		const [bot] = await onDatabase((db) =>
 			db
@@ -202,7 +202,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		if (!bot) throw new Error("Could not create the bot");
 		botId = bot.id;
 		await onDatabase((db) =>
-			db.insert(channelBot).values({ workspaceId, channelId, botId: botId }),
+			db.insert(projectBot).values({ workspaceId, projectId, botId: botId }),
 		);
 	});
 
@@ -212,7 +212,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			seedConversation(db, {
 				id,
 				workspaceId,
-				kind: "task",
+				kind: "project_thread",
 				botId,
 				title: "Release notes",
 			}),
@@ -228,16 +228,15 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		return id;
 	};
 
-	const channelConversation = async () => {
+	const projectThread = async () => {
 		const id = crypto.randomUUID();
 		await onDatabase((db) =>
 			seedConversation(db, {
 				id,
 				workspaceId,
-				kind: "channel_conversation",
-				channelId,
+				kind: "project_thread",
+				projectId,
 				title: "Launch",
-				main: true,
 			}),
 		);
 		return id;
@@ -245,7 +244,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 
 	/**
 	 * The bot's turn answering `askedBy`, finished with `content`. Nobody in
-	 * the channel asks, unless a test says who did.
+	 * the project asks, unless a test says who did.
 	 */
 	const botReplied = async (
 		conversationId: string,
@@ -322,8 +321,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			),
 		);
 
-	it("tells a person they were mentioned in a channel, linking to the message", async () => {
-		const chat = await channelConversation();
+	it("tells a person they were mentioned in a project, linking to the message", async () => {
+		const chat = await projectThread();
 		const posted = personPosted(
 			chat,
 			people.ada,
@@ -337,19 +336,19 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				title: `${people.ada.name} mentioned you in Launch`,
 				body: `@${handleFromName(people.bob.name)} can you look at the launch checklist?`,
 				tag: `conversation:${chat}`,
-				path: `/${workspaceSlug}/channels/${channelSlug}/${chat}?message=${posted.message.id}`,
+				path: `/${workspaceSlug}/projects/${projectSlug}/${chat}?message=${posted.message.id}`,
 				conversationId: chat,
 			},
 		]);
-		// Not the author, nor somebody who was only in the channel.
+		// Not the author, nor somebody who was only in the project.
 		expect(sentTo(people.ada.id)).toEqual([]);
 		expect(sentTo(people.cy.id)).toEqual([]);
 	});
 
 	it.each(["@here the launch moved to Friday", "@channel the launch moved to Friday"])(
-		"tells everyone in the channel of a person's %s, but not the author or an outsider",
+		"tells everyone in the project of a person's %s, but not the author or an outsider",
 		async (text) => {
-			const chat = await channelConversation();
+			const chat = await projectThread();
 
 			await emit(personPosted(chat, people.ada, text));
 
@@ -377,8 +376,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(people.bob.id)).toEqual([]);
 	});
 
-	it("tells a person of a reply to their message in a channel, and names a file shared without text", async () => {
-		const chat = await channelConversation();
+	it("tells a person of a reply to their message in a project, and names a file shared without text", async () => {
+		const chat = await projectThread();
 		const asked = personPosted(chat, people.bob, "Who has the launch checklist?");
 
 		await emit(
@@ -408,8 +407,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		]);
 	});
 
-	it("names the files an automation's result shares without text in a channel", async () => {
-		const chat = await channelConversation();
+	it("names the files an automation's result shares without text in a project", async () => {
+		const chat = await projectThread();
 		await chooseLevel(people.bob.id, "all");
 		const resultSharing = (titles: readonly string[]) =>
 			ConversationEvent.MessagePosted({
@@ -446,7 +445,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		]);
 	});
 
-	it("tells the people in a task of its bot's reply, linking to the task, and those who chose everything", async () => {
+	it("tells the people in a bot's thread of the bot's reply, linking to the thread, and those who chose everything", async () => {
 		const conversation = await conversationWithBot([people.ada.id]);
 		await chooseLevel(people.cy.id, "all");
 
@@ -458,7 +457,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				title: "Scout in Release notes",
 				body: "The release notes are drafted.",
 				tag: `conversation:${conversation}`,
-				path: `/${workspaceSlug}/tasks/${conversation}?message=${reply.messageId}`,
+				path: `/${workspaceSlug}/threads/${conversation}?message=${reply.messageId}`,
 				conversationId: conversation,
 			},
 		]);
@@ -511,13 +510,13 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		]);
 	});
 
-	it("lets a channel's level quiet its bots, and a bot's level win over it", async () => {
-		const chat = await channelConversation();
+	it("lets a project's level quiet its bots, and a bot's level win over it", async () => {
+		const chat = await projectThread();
 		for (const person of [people.ada, people.bob]) {
 			await as(
 				person.id,
 				Effect.flatMap(Notifications.Service, (service) =>
-					service.setLevel({ kind: "channel", id: channelId }, "nothing"),
+					service.setLevel({ kind: "project", id: projectId }, "nothing"),
 				),
 			);
 		}
@@ -534,8 +533,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(people.ada.id)).toEqual([]);
 	});
 
-	it("quiets a muted bot's replies in a channel, and not what people post there", async () => {
-		const chat = await channelConversation();
+	it("quiets a muted bot's replies in a project, and not what people post there", async () => {
+		const chat = await projectThread();
 		await chooseLevel(people.bob.id, "all");
 		await as(
 			people.bob.id,
@@ -582,8 +581,8 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(settings.mutedUntil.bots).toEqual({});
 	});
 
-	it("quiets every bot in a channel muted for a while, even one with a level of its own", async () => {
-		const chat = await channelConversation();
+	it("quiets every bot in a project muted for a while, even one with a level of its own", async () => {
+		const chat = await projectThread();
 		for (const person of [people.ada, people.bob]) {
 			await as(
 				person.id,
@@ -595,7 +594,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await as(
 			people.bob.id,
 			Effect.flatMap(Notifications.Service, (service) =>
-				service.mute({ kind: "channel", id: channelId }, new Date(Date.now() + 60_000)),
+				service.mute({ kind: "project", id: projectId }, new Date(Date.now() + 60_000)),
 			),
 		);
 
@@ -614,12 +613,16 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		createdById?: string,
 		name = "Digest",
 	) => {
+		const [ownProject] = await onDatabase((db) =>
+			db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, botId)),
+		);
+		if (!ownProject) throw new Error("The bot has no default project");
 		const [defined] = await onDatabase((db) =>
 			db
 				.insert(automation)
 				.values({
 					workspaceId,
-					botId: botId,
+					projectId: ownProject.id,
 					name,
 					instructions: "Summarise",
 					createdById,
@@ -682,7 +685,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			title: "Digest failed",
 			body: "The calendar could not be read.",
 			tag: `automation:${failedRun}`,
-			path: `/${workspaceSlug}/tasks/${failedRun}?itemPage=${failedRun}`,
+			path: `/${workspaceSlug}/threads/${failedRun}?itemPage=${failedRun}`,
 			conversationId: failedRun,
 		};
 		expect(await deliveredTo(people.bob.id)).toEqual([failure]);
@@ -707,7 +710,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(people.ada.id)).toEqual([]);
 	});
 
-	it("tells those an automation's result mentions in its automation's feed, unless it went to a channel as well", async () => {
+	it("tells those an automation's result mentions in its automation's feed, unless it went to a project as well", async () => {
 		const runConversation = await automationRunElsewhere({ state: "completed" }, people.bob.id);
 		const [run] = await onDatabase((db) =>
 			db
@@ -774,7 +777,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				title: "Scout mentioned you in Digest",
 				body: content,
 				tag: conversationNotificationTag(feed),
-				path: `/${workspaceSlug}/tasks/${feed}?itemPage=${runConversation}`,
+				path: `/${workspaceSlug}/threads/${feed}?itemPage=${runConversation}`,
 				conversationId: feed,
 			},
 		]);
@@ -782,7 +785,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(people.cy.id)).toEqual([]);
 
 		published.length = 0;
-		const chat = await channelConversation();
+		const chat = await projectThread();
 		const inChat = await resultPosted(chat);
 		await emit(inFeed, inChat);
 

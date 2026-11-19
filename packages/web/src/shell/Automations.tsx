@@ -1,52 +1,59 @@
 import { useRender } from "@base-ui/react/use-render";
 import type { Automation, Bot, ListedAutomation } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { CircleAlert, Plus, RefreshCcw } from "lucide-react";
+import { Plus, RefreshCcw } from "lucide-react";
 import type { ReactNode } from "react";
-import { scheduleLabel } from "@/lib/automation-schedule.ts";
 import { useAutomations, useRecentRuns, useWorkspaceAutomationsById } from "@/lib/automations.ts";
-import { useBotTasks } from "@/lib/chats.ts";
-import { automationFeedLink, newAutomationLink } from "@/lib/links.ts";
+import { useBotThreads } from "@/lib/chats.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import {
+	ownerLink,
+	ownerName,
+	type ResourceOwner,
+	resourcePermissions,
+	resourceProjectId,
+	useLeadBot,
+} from "@/lib/resource-owner.tsx";
+import { automationStartsLabel } from "@/lib/routine-schedule.ts";
 import { outcomeOf, type RunOutcome, RunStatus } from "@/screens/AutomationRun.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { BotCrumb } from "@/shell/BotCrumb.tsx";
+import { OwnerCrumb } from "@/shell/BotCrumb.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
+import { ProblemMark } from "@/ui/attention-dot.tsx";
 import { buttonStyles } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
- * A bot's automations as a page, each with how it stands. One chosen, or one
- * being made, takes the page's place as `children`, its breadcrumb the way
- * back. With no automations, the page says how one is made.
+ * A bot's or a project's automations as a page, each with how it stands. One
+ * chosen, or one being made, takes the page's place as `children`, its
+ * breadcrumb the way back. With no automations, the page says how one is made.
  */
 export function AutomationsPage({
-	bot,
+	owner,
 	selectedAutomationId,
 	making = false,
 	children,
 }: {
-	bot: Bot;
+	owner: ResourceOwner;
 	selectedAutomationId: string | undefined;
 	/** Whether an automation is being made, which takes the list's place as an open one does. */
 	making?: boolean;
 	children: ReactNode;
 }) {
-	const list = useListedAutomations(bot);
+	const list = useListedAutomations(owner);
 	const automationById = useWorkspaceAutomationsById();
 	const automations = list.automations ?? [];
-	// One bot's, "Growth Desk / Automations" from a tablet up; a phone, with no room for the breadcrumb, names the bot.
+	const name = ownerName(owner);
+	// "Growth Desk / Automations" from a tablet up; a phone, with no room for the breadcrumb, names the owner.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
-	const title = phone ? `${bot.name}'s automations` : "Automations";
+	const title = phone ? `${name}'s automations` : "Automations";
 	const chosen = selectedAutomationId !== undefined || making;
-	const newAutomation = bot.permissions.manageAutomations && (
+	const newAutomation = resourcePermissions(owner).manageAutomations && (
 		<IconButton
 			label="New automation"
 			variant="bar"
-			render={<Link {...newAutomationLink(bot)} />}
+			render={ownerLink(owner, { page: "newAutomation" })}
 			className={FLOATING_ON_PHONE}
 		>
 			<Plus size={16} strokeWidth={1.75} />
@@ -61,14 +68,14 @@ export function AutomationsPage({
 			>
 				<PageHeader
 					title={title}
-					parent={<BotCrumb bot={bot} />}
-					place={{ kind: "bot", bot }}
+					parent={<OwnerCrumb owner={owner} />}
+					place={{ kind: "owner", owner }}
 					actions={newAutomation}
 				/>
 				{none ? (
 					// Someone who may make one is taken to the form instead; anyone else is told who can.
 					<div className="flex min-h-0 flex-1 flex-col pb-20">
-						<NoAutomations title={`No automations for ${bot.name} yet`} owner={bot.name} />
+						<NoAutomations title={`No automations for ${name} yet`} owner={name} />
 					</div>
 				) : (
 					<ul className="tab-bar-clearance m-0 flex min-h-0 w-full flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2 md:mx-auto md:max-w-180 md:pt-4">
@@ -81,6 +88,7 @@ export function AutomationsPage({
 							<li key={row.automation.id}>
 								<AutomationRow
 									row={row}
+									owner={owner}
 									automation={automationById.get(row.automation.id)}
 									selected={row.automation.id === selectedAutomationId}
 								/>
@@ -94,33 +102,46 @@ export function AutomationsPage({
 	);
 }
 
+/** One of the automations a list shows, with the bot that runs it. */
+export type ShownAutomation = ListedAutomation & { bot: Bot };
+
 /**
- * A bot's automations as its Automations list shows them, or undefined until
- * they are loaded. Somebody who manages the automations of a bot they do not
- * reach, as an administrator does another person's private bot, reads only
- * how each is set up, so the list says nothing of how they ran.
+ * A bot's or a project's automations as its Automations list shows them, or
+ * undefined until they are loaded. A bot's list says how each ran; somebody
+ * who manages the automations of a bot they do not reach, as an administrator
+ * does another person's private bot, reads only how each is set up. A
+ * project's are listed as they are set up, each run by its lead bot.
  */
-export function useListedAutomations(bot: Bot): {
-	automations: ListedAutomation[] | undefined;
+export function useListedAutomations(owner: ResourceOwner): {
+	automations: ShownAutomation[] | undefined;
 	isError: boolean;
 } {
-	const reaches = bot.permissions.talk;
-	const tasks = useBotTasks(reaches ? bot.id : undefined);
-	const definitions = useAutomations(reaches ? undefined : bot.id);
-	if (reaches) return { automations: tasks.data?.automations, isError: tasks.isError };
+	const fromThreads = "bot" in owner && owner.bot.permissions.talk;
+	const threads = useBotThreads(fromThreads ? owner.bot.id : undefined);
+	const definitions = useAutomations(fromThreads ? undefined : resourceProjectId(owner));
+	const runner = useLeadBot(owner);
+	if (fromThreads) {
+		const list = threads.data;
+		return {
+			automations: list?.automations.map((row) => ({ ...row, bot: list.bot })),
+			isError: threads.isError,
+		};
+	}
 	return {
-		automations: definitions.data?.map((automation) => ({
-			automation: {
-				id: automation.id,
-				name: automation.name,
-				state: automation.state,
-				failed: false,
-				pausedAfterFailures: false,
-			},
-			bot,
-			conversation: null,
-			mentionsYou: false,
-		})),
+		automations:
+			runner &&
+			definitions.data?.map((automation) => ({
+				automation: {
+					id: automation.id,
+					name: automation.name,
+					state: automation.state,
+					failed: false,
+					pausedAfterFailures: false,
+				},
+				bot: runner,
+				conversation: null,
+				mentionsYou: false,
+			})),
 		isError: definitions.isError,
 	};
 }
@@ -173,11 +194,14 @@ export function NoAutomations({
  */
 export function AutomationRow({
 	row,
+	owner,
 	automation,
 	selected,
 	render,
 }: {
-	row: ListedAutomation;
+	row: ShownAutomation;
+	/** The bot or project whose automation it is. */
+	owner: ResourceOwner;
 	/** The automation in full, for when it runs, once the workspace's automations are loaded. */
 	automation: Automation | undefined;
 	selected: boolean;
@@ -186,9 +210,9 @@ export function AutomationRow({
 }) {
 	// How it last ran is history, which somebody who manages the bot without reaching it does not read.
 	const lastRun = useRecentRuns({
-		botId: row.bot.id,
+		projectId: resourceProjectId(owner),
 		automationId: row.automation.id,
-		enabled: row.bot.permissions.talk,
+		enabled: resourcePermissions(owner).readHistory,
 	}).data?.items[0];
 	const paused = row.automation.state === "paused";
 	const status: RunOutcome | undefined = paused
@@ -196,7 +220,7 @@ export function AutomationRow({
 			? "pausedAfterFailures"
 			: "paused"
 		: lastRun && outcomeOf(lastRun.state, lastRun.posted);
-	const schedule = automation && scheduleLabel(automation);
+	const schedule = automation && automationStartsLabel(automation);
 	// Gone wrong: its last run failed, or it paused itself after failing again.
 	const problem =
 		status === "failed"
@@ -206,7 +230,7 @@ export function AutomationRow({
 				: undefined;
 	const why = problem && lastRun?.state === "failed" ? lastRun.error : null;
 	return useRender({
-		render: render ?? <Link {...automationFeedLink(row.bot, row.automation.id)} />,
+		render: render ?? ownerLink(owner, { page: "automation", automationId: row.automation.id }),
 		props: {
 			"aria-current": selected ? "page" : undefined,
 			className: cn(
@@ -240,15 +264,9 @@ export function AutomationRow({
 							</span>
 							{lastRun && <ListTime at={lastRun.acceptedAt} />}
 							{problem && (
-								<Tooltip label={problem} side="top">
-									<CircleAlert
-										aria-label={problem}
-										role="img"
-										size={14}
-										strokeWidth={2}
-										className="shrink-0 self-center text-destructive-text"
-									/>
-								</Tooltip>
+								<span className="flex shrink-0 self-center">
+									<ProblemMark label={problem} />
+								</span>
 							)}
 						</span>
 						<span className="flex min-w-0 items-center gap-3 text-xs">

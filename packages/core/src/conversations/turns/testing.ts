@@ -4,8 +4,8 @@ import { Effect, Layer, Schema } from "effect";
 import { query } from "../../database/database.ts";
 import {
 	bot,
-	channel,
 	connection,
+	project,
 	user,
 	workspace,
 	workspaceMember,
@@ -111,12 +111,12 @@ export async function prepareRunnable(
 }
 
 /**
- * A bot with a connection, whose admin has asked it something in a task, so
- * its turn is asked for in the task. A channel stands beside it, for cases
+ * A bot with a connection, whose admin has asked it something in a thread, so
+ * its turn is asked for in the thread. A project stands beside it, for cases
  * that need one.
  */
 export async function aChatAwaitingReply(
-	chatsAs: (userId: string) => Pick<Promised<Chats.Interface>, "startTask">,
+	chatsAs: (userId: string) => Pick<Promised<Chats.Interface>, "startThread">,
 ) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const [space] = await onDatabase((db) =>
@@ -141,7 +141,7 @@ export async function aChatAwaitingReply(
 	);
 	const [room] = await onDatabase((db) =>
 		db
-			.insert(channel)
+			.insert(project)
 			.values({
 				workspaceId,
 				name: "Room",
@@ -151,7 +151,7 @@ export async function aChatAwaitingReply(
 			.returning(),
 	);
 	if (!room) throw new Error("fixture");
-	const channelId = room.id;
+	const projectId = room.id;
 	const [host] = await onDatabase((db) =>
 		db
 			.insert(bot)
@@ -167,12 +167,17 @@ export async function aChatAwaitingReply(
 			.returning({ id: bot.id }),
 	);
 	if (!host) throw new Error("fixture");
+	// The bot's own connection, which its default project holds.
+	const [own] = await onDatabase((db) =>
+		db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, host.id)),
+	);
+	if (!own) throw new Error("default project fixture");
 	const [connected] = await onDatabase((db) =>
 		db
 			.insert(connection)
 			.values({
 				workspaceId,
-				botId: host.id,
+				projectId: own.id,
 				name: `Linear ${suffix}`,
 				handle: `linear-${suffix}`,
 				url: "https://linear.example.com/mcp",
@@ -182,7 +187,7 @@ export async function aChatAwaitingReply(
 			.returning({ id: connection.id }),
 	);
 	if (!connected) throw new Error("fixture");
-	const started = await chatsAs(memberId).startTask({
+	const started = await chatsAs(memberId).startThread({
 		botId: host.id,
 		messageId: crypto.randomUUID(),
 		content: "What does example.com say?",
@@ -190,7 +195,7 @@ export async function aChatAwaitingReply(
 	const opened = started.conversation;
 	return {
 		workspaceId,
-		channelId,
+		projectId,
 		memberId,
 		hostId: host.id,
 		connectionId: connected.id,

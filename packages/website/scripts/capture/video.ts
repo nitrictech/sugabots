@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser, BrowserContext, Route } from "playwright";
-import { click, closePanel, drawCursor, openNewTask, write } from "./app.ts";
+import { click, closePanel, drawCursor, openNewThread, write } from "./app.ts";
 import type { Backdrop } from "./backdrops.ts";
 import { signedInContext, WORKSPACE } from "./browser.ts";
 import { type Environment, REPO, step } from "./environment.ts";
@@ -11,7 +11,7 @@ import { type Chrome, chromes, openStage, type Stage } from "./stage.ts";
 
 /**
  * The demo under the hero. Kestrel Freight was charged twice: from Support's
- * chat, Anita starts a task asking Ticket Desk to refund it. Ticket Desk
+ * handover thread, Anita starts a thread asking Ticket Desk to refund it. Ticket Desk
  * offers to find out why too, hands that to Billing Engineer, asks before it
  * refunds, and Support's people pick it up from there.
  *
@@ -41,7 +41,7 @@ const EVENT_LEAD_MILLISECONDS = 500;
 const OUTPUT = join(REPO, "packages/website/public/demo");
 const NAME = "sugabots-demo";
 
-/** The bot Anita starts her task with, as the sidebar names it. */
+/** The bot Anita starts her thread with, as the sidebar names it. */
 const TICKET_DESK = "Ticket Desk";
 
 /** What Anita writes, in the order she writes it. */
@@ -64,10 +64,10 @@ type Directing = Director & { markPoster(): void };
 const SCENES: Scene[] = [
 	{
 		about:
-			"In Support's chat, Lorraine says Kestrel Freight needs a refund. Anita starts a task with Ticket Desk from the sidebar and asks it to refund Kestrel Freight.",
+			"In Support's handover thread, Lorraine says Kestrel Freight needs a refund. Anita starts a thread with Ticket Desk from the sidebar and asks it to refund Kestrel Freight.",
 		async play(stage) {
 			await stage.page.waitForTimeout(1200);
-			await openNewTask(stage, TICKET_DESK);
+			await openNewThread(stage, TICKET_DESK);
 			await write(stage, SAYS.refund);
 		},
 	},
@@ -94,7 +94,7 @@ const SCENES: Scene[] = [
 	},
 	{
 		about:
-			"Ticket Desk asks before it refunds. Anita allows it in the task, Ticket Desk sums up, and Lorraine thanks it there.",
+			"Ticket Desk asks before it refunds. Anita allows it in the thread, Ticket Desk sums up, and Lorraine thanks it there.",
 		async play(stage, director) {
 			const allow = stage.app.getByRole("button", { name: /^Allow/ }).first();
 			await allow.waitFor({ timeout: 20_000 });
@@ -107,7 +107,7 @@ const SCENES: Scene[] = [
 	},
 	{
 		about:
-			"Doreen mentions Anita in Support's chat. She sees it in Inbox and answers, and Doreen closes the ticket.",
+			"Doreen mentions Anita in Support's handover thread. She sees it in Inbox and answers, and Doreen closes the ticket.",
 		async play(stage, director) {
 			void director.stage(["cue", "mention"]);
 			const inbox = stage.app.getByRole("link", { name: /^Inbox\b.*\d+ unread/ });
@@ -143,7 +143,7 @@ async function captureVideoIn(browser: Browser, environment: Environment, chrome
 	const stage = await openStage(context, environment.appUrl, LAYOUT);
 	await stage.setChrome(chrome);
 	await stage.setBackdrop(BACKDROP);
-	await stage.open(`/${WORKSPACE}/channels/support`);
+	await stage.open(`/${WORKSPACE}/projects/support`);
 	await drawCursor(stage);
 	await stage.page.waitForTimeout(1500);
 
@@ -258,7 +258,7 @@ function ffmpeg(args: string[]) {
 
 type Director = ReturnType<typeof directorFor>;
 
-/** The id a `/conversations/:id/messages` or `/bots/:id/tasks` request names. */
+/** The id a `/conversations/:id/messages` or `/bots/:id/threads` request names. */
 function addressedIdOf(url: string) {
 	return new URL(url).pathname.split("/").at(-2) ?? "";
 }
@@ -307,12 +307,12 @@ function directorFor(environment: Environment) {
 		stage,
 		/**
 		 * Anita's messages are posted by the stage, which plays what follows: a
-		 * task she starts with a bot, or writes in, the bot's part in it; one in a
-		 * channel's chat, whoever answers her. Allow is answered here, and the
+		 * thread she starts with a bot, or writes in, the bot's part in it; one in a
+		 * project's thread, whoever answers her. Allow is answered here, and the
 		 * stage plays the rest.
 		 */
 		async answerFor(context: BrowserContext) {
-			await context.route("**/api/bots/*/tasks", async (route) => {
+			await context.route("**/api/bots/*/threads", async (route) => {
 				const request = route.request();
 				if (request.method() !== "POST") return route.continue();
 				const sent = request.postDataJSON() as { id: string; message: string };

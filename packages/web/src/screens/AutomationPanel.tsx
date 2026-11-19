@@ -1,20 +1,24 @@
 import {
 	type Automation,
-	type Bot,
 	type ConversationDetails,
 	MAX_AUTOMATION_INSTRUCTIONS_CHARACTERS,
 	MAX_AUTOMATION_NAME_CHARACTERS,
 } from "@sugabots/contracts";
-import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { ChevronRight, Copy, Pencil, Play, Trash2 } from "lucide-react";
-import { type FormEvent, type ReactNode, useId, useState } from "react";
-import { triggerLabel } from "@/lib/automation-schedule.ts";
+import { type FormEvent, useId, useState } from "react";
 import { useAutomationActions, useAutomations } from "@/lib/automations.ts";
 import { useAutomationControls } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { automationFeedLink, automationsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import {
+	type ResourceOwner,
+	resourcePermissions,
+	resourceProjectId,
+	useLeadBot,
+	useNavigateToOwnerPage,
+} from "@/lib/resource-owner.tsx";
+import { useSaving } from "@/lib/saving.ts";
 import { AutomationsCrumb } from "@/shell/BotCrumb.tsx";
 import { PageHeader } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -27,40 +31,54 @@ import {
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
 import { DropdownMenuItem } from "@/ui/dropdown-menu.tsx";
+import { InstructionsField } from "@/ui/instructions-field.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
-import { SettingsAddMark, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
+import { SETTINGS_CARD, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
-import { copyOf, DeleteAutomation, instructionsNote } from "./AutomationEditor.tsx";
-import { TriggerKindMark, triggerKindChoice } from "./AutomationTriggerKinds.tsx";
-import { TriggerDialog, triggerDraftOf } from "./AutomationTriggers.tsx";
+import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
+import {
+	copyOf,
+	DeleteAutomation,
+	instructionsNote,
+	type PlacedAutomation,
+} from "./AutomationEditor.tsx";
+import {
+	TriggerDialog,
+	type TriggerSection,
+	TriggersGroup,
+	triggerDraftOf,
+} from "./AutomationTriggers.tsx";
 import { WebhookGroups } from "./AutomationWebhook.tsx";
-import { ChatSidebar } from "./ChatSidebar.tsx";
+import { ChatSidebar, ShowMore } from "./ChatSidebar.tsx";
 
 /** What the panel has open over the page, if anything. */
 type PanelDialog =
 	| { kind: "rename" }
 	| { kind: "instructions" }
 	| { kind: "delete" }
-	/** A trigger, by its id, or a new one while it has none. */
-	| { kind: "trigger"; triggerId: string | undefined };
+	/** A trigger, by its id. */
+	| { kind: "trigger"; triggerId: string }
+	/** A new routine, or another new trigger. */
+	| { kind: "new_trigger"; section: TriggerSection };
 
 /**
  * An automation beside its feed, set up in place: whether it is on, what it
  * is told, what starts it, and where its results go, then Run now. Its ⋯
- * renames, duplicates or deletes it. Somebody who may not manage its bot's
- * automations sees it without being able to change it.
+ * renames, duplicates or deletes it. Somebody who may not manage its bot's or
+ * project's automations sees it without being able to change it.
  *
  * Without `onClose` it is the automation's own page rather than beside its
  * feed: under its breadcrumb, with whether it runs, Run now and its ⋯ at the
  * top, and its instructions written straight into.
  */
 export function AutomationPanel({
-	bot,
+	owner,
 	conversationId,
 	standing,
 	onClose,
 }: {
-	bot: Bot;
+	/** The bot or project whose automation it is. */
+	owner: ResourceOwner;
 	/** Its feed, refreshed when it changes; undefined where it is shown without one. */
 	conversationId: string | undefined;
 	/** How the automation stands, as its feed knows it. */
@@ -68,15 +86,19 @@ export function AutomationPanel({
 	/** Closes it beside the feed; undefined where it is the page. */
 	onClose: (() => void) | undefined;
 }) {
-	const automations = useAutomations(bot.id).data;
+	const projectId = resourceProjectId(owner);
+	const may = resourcePermissions(owner);
+	// The bot that runs it, which its instructions are written to.
+	const runner = useLeadBot(owner);
+	const automations = useAutomations(projectId).data;
 	const automation = automations?.find((one) => one.id === standing.id);
 	const controls = useAutomationControls(conversationId, standing);
 	const actions = useAutomationActions();
-	const navigate = useNavigate();
+	const navigateToOwnerPage = useNavigateToOwnerPage();
 	const [dialog, setDialog] = useState<PanelDialog>();
 	// Pausing and Run now go through the feed's own controls, so why they failed is kept here.
 	const [controlFailure, setControlFailure] = useState<unknown>();
-	const mayManage = bot.permissions.manageAutomations;
+	const mayManage = may.manageAutomations;
 	const active = standing.state === "enabled";
 	const close = () => setDialog(undefined);
 
@@ -93,10 +115,13 @@ export function AutomationPanel({
 		const siblingNames = (automations ?? []).map(({ name }) => name);
 		try {
 			const created = await actions.create.mutateAsync({
-				botId: bot.id,
+				projectId,
 				json: copyOf(original, siblingNames),
 			});
-			await navigate(automationFeedLink(bot, created.automation.id));
+			await navigateToOwnerPage(owner, {
+				page: "automation",
+				automationId: created.automation.id,
+			});
 		} catch {
 			// The panel shows the error.
 		}
@@ -120,6 +145,16 @@ export function AutomationPanel({
 				Delete automation
 			</DropdownMenuItem>
 		</MoreMenu>
+	);
+
+	const stateSwitch = (
+		<Toggle
+			label="Automation on"
+			tooltip={active ? "Pause automation" : "Resume automation"}
+			checked={active}
+			disabled={!mayManage || controls.pending}
+			onChange={(on) => void control(() => controls.setPaused(!on))}
+		/>
 	);
 
 	// On a phone, across from Back at the top, as a phone's page has its actions; else beside the name.
@@ -148,7 +183,7 @@ export function AutomationPanel({
 					{actions.update.error && <Alert>{failureMessage(actions.update.error)}</Alert>}
 					{controlFailure !== undefined && <Alert>{failureMessage(controlFailure)}</Alert>}
 					{!asPage && (
-						<PanelCard className="flex h-12 items-center gap-2.5 px-3.5">
+						<div className={cn(SETTINGS_CARD, "flex h-12 items-center gap-2.5 px-3.5")}>
 							<span
 								aria-hidden
 								className={cn(
@@ -160,21 +195,9 @@ export function AutomationPanel({
 											: "bg-disabled-foreground",
 								)}
 							/>
-							<span className="flex-1 text-xs text-foreground">
-								{active
-									? "Active"
-									: standing.pausedAfterFailures
-										? "Paused after two failures"
-										: "Paused"}
-							</span>
-							<Toggle
-								label="Automation on"
-								tooltip={active ? "Pause automation" : "Resume automation"}
-								checked={active}
-								disabled={!mayManage || controls.pending}
-								onChange={(on) => void control(() => controls.setPaused(!on))}
-							/>
-						</PanelCard>
+							<span className="flex-1 text-xs text-foreground">{stateWords(standing)}</span>
+							{stateSwitch}
+						</div>
 					)}
 					{automation && (
 						<>
@@ -185,7 +208,7 @@ export function AutomationPanel({
 									editable={mayManage}
 									onSave={(instructions) =>
 										actions.update.mutateAsync({
-											botId: bot.id,
+											projectId: projectId,
 											automationId: automation.id,
 											json: { instructions },
 										})
@@ -197,14 +220,19 @@ export function AutomationPanel({
 									onEdit={mayManage ? () => setDialog({ kind: "instructions" }) : undefined}
 								/>
 							)}
-							<Triggers
-								automation={automation}
-								editable={mayManage}
-								onOpen={(triggerId) => setDialog({ kind: "trigger", triggerId })}
-							/>
+							{(["routines", "triggers"] as const).map((section) => (
+								<TriggersGroup
+									key={section}
+									section={section}
+									triggers={automation.triggers.map((trigger) => ({ key: trigger.id, trigger }))}
+									editable={mayManage}
+									onOpen={(triggerId) => setDialog({ kind: "trigger", triggerId })}
+									onAdd={() => setDialog({ kind: "new_trigger", section })}
+								/>
+							))}
 						</>
 					)}
-					{!asPage && bot.permissions.runAutomations && (
+					{!asPage && may.runAutomations && (
 						<Button
 							variant="outline"
 							disabled={controls.pending}
@@ -235,11 +263,11 @@ export function AutomationPanel({
 					>
 						{dialog?.kind === "instructions" && (
 							<InstructionsDialog
-								botName={bot.name}
+								botName={runner?.name ?? "the bot"}
 								instructions={automation.instructions}
 								onSave={async (instructions) => {
 									await actions.update.mutateAsync({
-										botId: bot.id,
+										projectId: projectId,
 										automationId: automation.id,
 										json: { instructions },
 									});
@@ -248,20 +276,25 @@ export function AutomationPanel({
 							/>
 						)}
 					</Dialog>
-					<Dialog open={dialog?.kind === "trigger"} onOpenChange={(opened) => !opened && close()}>
-						{dialog?.kind === "trigger" && (
+					<Dialog
+						open={dialog?.kind === "trigger" || dialog?.kind === "new_trigger"}
+						onOpenChange={(opened) => !opened && close()}
+					>
+						{(dialog?.kind === "trigger" || dialog?.kind === "new_trigger") && (
 							<AutomationTriggerDialog
-								placed={{ automation, bot }}
-								triggerId={dialog.triggerId}
+								placed={{ automation, owner }}
+								opened={dialog}
 								done={close}
 							/>
 						)}
 					</Dialog>
 					<DeleteAutomation
-						placed={{ automation, bot }}
+						placed={{ automation, owner }}
 						open={dialog?.kind === "delete"}
 						onOpenChange={(opened) => setDialog(opened ? { kind: "delete" } : undefined)}
-						onDeleted={() => void navigate({ ...automationsLink(bot), replace: true })}
+						onDeleted={() =>
+							void navigateToOwnerPage(owner, { page: "automations" }, { replace: true })
+						}
 					/>
 				</>
 			)}
@@ -272,28 +305,16 @@ export function AutomationPanel({
 			<section aria-label="Automation" className="flex min-h-0 min-w-0 flex-1 flex-col">
 				<PageHeader
 					title={automation?.name ?? "Automation"}
-					parent={<AutomationsCrumb bot={bot} />}
-					place={{ kind: "bot", bot }}
+					parent={<AutomationsCrumb owner={owner} />}
+					place={{ kind: "owner", owner }}
 					actions={
 						<span className="flex shrink-0 items-center gap-2">
 							{/* Whether it runs, and running it now, at the top as a page's own actions. */}
 							<span className="flex items-center gap-2 text-muted-foreground text-xs">
-								<span className="max-md:sr-only">
-									{active
-										? "On"
-										: standing.pausedAfterFailures
-											? "Paused after failures"
-											: "Paused"}
-								</span>
-								<Toggle
-									label="Automation on"
-									tooltip={active ? "Pause automation" : "Resume automation"}
-									checked={active}
-									disabled={!mayManage || controls.pending}
-									onChange={(on) => void control(() => controls.setPaused(!on))}
-								/>
+								<span className="max-md:sr-only">{stateWords(standing)}</span>
+								{stateSwitch}
 							</span>
-							{bot.permissions.runAutomations && (
+							{may.runAutomations && (
 								<Button
 									variant="outline"
 									size="sm"
@@ -325,13 +346,10 @@ export function AutomationPanel({
 	);
 }
 
-/** A card in the panel, one of the automation's settings or a group of them. */
-function PanelCard({ className, children }: { className?: string; children: ReactNode }) {
-	return (
-		<div className={cn("overflow-hidden rounded-xl border border-border bg-card", className)}>
-			{children}
-		</div>
-	);
+/** Whether the automation runs, as the words beside its switch say it. */
+function stateWords(standing: NonNullable<ConversationDetails["automation"]>): string {
+	if (standing.state === "enabled") return "On";
+	return standing.pausedAfterFailures ? "Paused after failures" : "Paused";
 }
 
 /** Instructions longer than this are folded to four lines until asked for the rest. */
@@ -371,19 +389,20 @@ function Instructions({
 		);
 	}
 	return (
-		<PanelCard className="flex flex-col gap-1.5 px-3.5 pt-3 pb-3.5">
+		<div className={cn(SETTINGS_CARD, "flex flex-col gap-1.5 px-3.5 pt-3 pb-3.5")}>
 			<div className="flex items-center gap-2">
 				<h4 className="m-0 flex-1 font-normal text-xs text-muted-foreground">Instructions</h4>
 				{onEdit && (
-					<button
-						type="button"
+					<Button
+						variant="quiet"
+						size="text"
 						aria-label="Edit instructions"
 						onClick={onEdit}
-						className="focus-ring inline-flex items-center gap-0.5 rounded-sm text-muted-foreground text-xs hover:text-foreground"
+						className="gap-0.5 text-muted-foreground"
 					>
 						Edit
 						<ChevronRight aria-hidden size={13} strokeWidth={2.2} />
-					</button>
+					</Button>
 				)}
 			</div>
 			<p
@@ -394,17 +413,8 @@ function Instructions({
 			>
 				{instructions}
 			</p>
-			{folds && (
-				<button
-					type="button"
-					aria-expanded={open}
-					onClick={() => setOpen(!open)}
-					className="focus-ring self-start rounded-sm text-muted-foreground text-xs hover:text-foreground"
-				>
-					{open ? "Show less" : "Show more"}
-				</button>
-			)}
-		</PanelCard>
+			{folds && <ShowMore open={open} onToggle={() => setOpen(!open)} />}
+		</div>
 	);
 }
 
@@ -422,127 +432,22 @@ function InlineInstructions({
 	editable: boolean;
 	onSave: (instructions: string) => Promise<unknown>;
 }) {
-	const [draft, setDraft] = useState(instructions);
+	const { fieldProps } = useCommittedDraft(instructions, onSave);
 	const id = useId();
-	function commit() {
-		const next = draft.trim();
-		if (next === instructions || next === "") {
-			setDraft(instructions);
-			return;
-		}
-		void onSave(next).catch(() => setDraft(instructions));
-	}
 	return (
-		<PanelCard className="flex flex-col gap-1 p-1">
+		<div className={cn(SETTINGS_CARD, "flex flex-col gap-1 p-1")}>
 			<label htmlFor={id} className="px-2.5 pt-2 text-muted-foreground text-xs">
 				Instructions
 			</label>
-			<textarea
+			<InstructionsField
 				id={id}
-				value={draft}
-				onChange={(event) => setDraft(event.target.value)}
-				onBlur={commit}
+				{...fieldProps}
 				readOnly={!editable}
 				maxLength={MAX_AUTOMATION_INSTRUCTIONS_CHARACTERS}
 				placeholder="What it should do each time it runs."
-				className="block min-h-48 w-full resize-y rounded-lg bg-transparent px-2.5 pb-2.5 text-soft-foreground text-sm leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+				className="min-h-48 rounded-lg px-2.5 pt-0 pb-2.5 text-sm text-soft-foreground"
 			/>
-		</PanelCard>
-	);
-}
-
-/** What starts the automation, each opening to change it, then Add trigger, for somebody who may. */
-function Triggers({
-	automation,
-	editable,
-	onOpen,
-}: {
-	automation: Automation;
-	editable: boolean;
-	/** Opens a trigger, by its id, or a new one. */
-	onOpen: (triggerId: string | undefined) => void;
-}) {
-	return (
-		<section aria-labelledby={`${automation.id}-triggers`} className="flex flex-col gap-2 pt-1">
-			<h4
-				id={`${automation.id}-triggers`}
-				className="m-0 px-0.5 font-normal text-xs text-muted-foreground"
-			>
-				Triggers
-			</h4>
-			<PanelCard>
-				<ul className="m-0 flex list-none flex-col p-0">
-					{automation.triggers.length === 0 && (
-						<li className="border-border border-b px-3.5 py-3 text-xs text-muted-foreground last:border-b-0">
-							None. It runs only when someone runs it.
-						</li>
-					)}
-					{automation.triggers.map((trigger) => {
-						const choice = triggerKindChoice(trigger.kind);
-						return (
-							<li key={trigger.id} className="border-border border-b last:border-b-0">
-								<TriggerRow
-									icon={<TriggerKindMark choice={choice} />}
-									label={choice.label}
-									sub={triggerLabel(trigger)}
-									onClick={editable ? () => onOpen(trigger.id) : undefined}
-								/>
-							</li>
-						);
-					})}
-					{editable && (
-						<li>
-							<TriggerRow
-								icon={<SettingsAddMark />}
-								label="Add trigger"
-								onClick={() => onOpen(undefined)}
-							/>
-						</li>
-					)}
-				</ul>
-			</PanelCard>
-		</section>
-	);
-}
-
-function TriggerRow({
-	icon,
-	label,
-	sub,
-	onClick,
-}: {
-	icon: ReactNode;
-	label: string;
-	sub?: string;
-	onClick: (() => void) | undefined;
-}) {
-	const contents = (
-		<>
-			{icon}
-			<span className="flex min-w-0 flex-1 flex-col">
-				<span className="truncate text-xs text-foreground">{label}</span>
-				{sub && <span className="truncate text-muted-foreground text-xs">{sub}</span>}
-			</span>
-			{onClick && sub && (
-				<ChevronRight
-					aria-hidden
-					size={14}
-					strokeWidth={2.2}
-					className="shrink-0 text-subtle-foreground"
-				/>
-			)}
-		</>
-	);
-	const className = "flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left";
-	if (!onClick) return <div className={className}>{contents}</div>;
-	return (
-		<button
-			type="button"
-			onClick={onClick}
-			className={cn(className, "focus-ring transition-colors hover:bg-row-hover")}
-		>
-			{contents}
-		</button>
+		</div>
 	);
 }
 
@@ -552,21 +457,25 @@ function TriggerRow({
  */
 function AutomationTriggerDialog({
 	placed,
-	triggerId,
+	opened,
 	done,
 }: {
-	placed: { automation: Automation; bot: Bot };
-	triggerId: string | undefined;
+	placed: PlacedAutomation;
+	opened: Extract<PanelDialog, { kind: "trigger" | "new_trigger" }>;
 	done: () => void;
 }) {
-	const { automation, bot } = placed;
+	const { automation, owner } = placed;
 	const actions = useAutomationActions();
-	const addressed = { botId: bot.id, automationId: automation.id };
-	const editing = automation.triggers.find((trigger) => trigger.id === triggerId);
+	const addressed = { projectId: automation.projectId, automationId: automation.id };
+	const editing =
+		opened.kind === "trigger"
+			? automation.triggers.find((trigger) => trigger.id === opened.triggerId)
+			: undefined;
 	return (
 		<TriggerDialog
-			bot={{ bot }}
+			owner={owner}
 			editing={editing && triggerDraftOf(editing)}
+			adding={opened.kind === "new_trigger" ? opened.section : undefined}
 			settings={
 				editing?.kind === "webhook" ? (
 					<>
@@ -623,23 +532,13 @@ function AutomationTriggerDialog({
  * A form's submit that waits on `onSave`, keeping the dialog open with why
  * when it fails.
  */
-function useSaving(onSave: () => Promise<unknown>) {
-	const [saving, setSaving] = useState(false);
-	const [failure, setFailure] = useState<unknown>();
-	async function submit(event: FormEvent) {
+function useSubmit(onSave: () => Promise<unknown>) {
+	const { pending, failure, save } = useSaving();
+	function submit(event: FormEvent) {
 		event.preventDefault();
-		if (saving) return;
-		setSaving(true);
-		setFailure(undefined);
-		try {
-			await onSave();
-		} catch (error) {
-			setFailure(error);
-		} finally {
-			setSaving(false);
-		}
+		void save(onSave);
 	}
-	return { saving, failure, submit };
+	return { saving: pending, failure, submit };
 }
 
 function RenameDialog({
@@ -651,7 +550,7 @@ function RenameDialog({
 }) {
 	const [name, setName] = useState(initialName);
 	const next = name.trim();
-	const { saving, failure, submit } = useSaving(() => onSave(next));
+	const { saving, failure, submit } = useSubmit(() => onSave(next));
 	return (
 		<DialogForm onSubmit={submit}>
 			<DialogFormHeader title="Rename automation" />
@@ -685,10 +584,9 @@ function InstructionsDialog({
 	instructions: string;
 	onSave: (instructions: string) => Promise<unknown>;
 }) {
-	const id = useId();
 	const [draft, setDraft] = useState(instructions);
 	const next = draft.trim();
-	const { saving, failure, submit } = useSaving(() => onSave(next));
+	const { saving, failure, submit } = useSubmit(() => onSave(next));
 	return (
 		<DialogForm width="wide" onSubmit={submit}>
 			<DialogFormHeader title="Instructions" />
@@ -697,16 +595,12 @@ function InstructionsDialog({
 					What {botName} does each time this runs.
 				</p>
 				<SettingsGroup className="p-1" note={instructionsNote(draft)}>
-					<label htmlFor={id} className="sr-only">
-						Instructions
-					</label>
-					<textarea
-						id={id}
+					<InstructionsField
 						value={draft}
 						onChange={(event) => setDraft(event.target.value)}
 						maxLength={MAX_AUTOMATION_INSTRUCTIONS_CHARACTERS}
 						placeholder="e.g. Summarise this week's replies and flag anything that has stalled."
-						className="block min-h-60 w-full resize-y rounded-xl bg-transparent p-3 text-sm text-foreground leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+						className="p-3 text-sm"
 					/>
 				</SettingsGroup>
 				{failure !== undefined && <Alert>{failureMessage(failure)}</Alert>}

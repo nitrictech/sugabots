@@ -2,9 +2,9 @@ import type { ToolSet } from "ai";
 import { Effect, Exit, Layer, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CurrentActor } from "../../../authorization/current-actor.ts";
-import { BotComputers } from "../../../computers/bot-computers.ts";
 import { ComputerCredentials } from "../../../computers/computer-credentials.ts";
 import { ComputerProviderRepository } from "../../../computers/computer-provider-repository.ts";
+import { ProjectComputers } from "../../../computers/project-computers.ts";
 import { recordingIds, removeWorkVolumes } from "../../../computers/testing.ts";
 import {
 	bot as botTable,
@@ -16,6 +16,7 @@ import {
 import { closeDatabase, onDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { Egress } from "../../../providers/network/egress.ts";
 import { unimplemented } from "../../../testing.ts";
+import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
 import { seedConversation } from "../../seed.test-support.ts";
 import { ComputerTools } from "../computer.ts";
 import { DesktopViewer } from "./viewer.ts";
@@ -34,7 +35,7 @@ const SLOW = 180_000;
 describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandbox", () => {
 	let tools: ToolSet;
 	let viewer: DesktopViewer.Interface;
-	let botComputers: BotComputers.Interface;
+	let projectComputers: ProjectComputers.Interface;
 	let workspaceId: string;
 	let ownerId: string;
 	let outsiderId: string;
@@ -49,18 +50,18 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	beforeAll(async () => {
 		let computerTools: ComputerTools.Interface;
 		let providers: ComputerProviderRepository.Interface;
-		[computerTools, viewer, botComputers, providers] = await runOnPostgres(
+		[computerTools, viewer, projectComputers, providers] = await runOnPostgres(
 			Effect.all([
 				ComputerTools.Service,
 				DesktopViewer.Service,
-				BotComputers.Service,
+				ProjectComputers.Service,
 				ComputerProviderRepository.Service,
 			]).pipe(
 				Effect.provide(
 					Layer.mergeAll(
 						ComputerTools.layer,
 						DesktopViewer.layer,
-						BotComputers.layer,
+						ProjectComputers.layer,
 						ComputerProviderRepository.layer,
 					),
 				),
@@ -124,10 +125,15 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		botId = bot.id;
 		bystanderId = bystander.id;
 		computerlessId = computerless.id;
-		const task = await onDatabase((db) =>
-			seedConversation(db, { workspaceId, kind: "task", botId, title: "Look something up" }),
+		const thread = await onDatabase((db) =>
+			seedConversation(db, {
+				workspaceId,
+				kind: "project_thread",
+				botId,
+				title: "Look something up",
+			}),
 		);
-		conversationId = task.id;
+		conversationId = thread.id;
 		await onDatabase((db) =>
 			db
 				.insert(conversationParticipant)
@@ -151,6 +157,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			Scope.provide(scope)(
 				computerTools.forTurn({
 					workspaceId,
+					projectId: await runOnPostgres(defaultProjectOf(botId)),
 					usesComputer: true,
 					naturalBrowsing: false,
 					turnId: "turn-1",
@@ -169,7 +176,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 			Effect.provide(ComputerProviderRepository.Service, ComputerProviderRepository.layer),
 		);
 		const provider = await runOnPostgres(providers.enabled(workspaceId));
-		if (provider) await runOnPostgres(botComputers.destroyAllMadeBy(workspaceId, provider));
+		if (provider) await runOnPostgres(projectComputers.destroyAllMadeBy(workspaceId, provider));
 		await closeDatabase();
 		removeWorkVolumes(idsHandedOut);
 	}, SLOW);
@@ -239,7 +246,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 	);
 
 	it(
-		"hides it from someone who can't reach the task",
+		"hides it from someone who can't reach the thread",
 		async () => {
 			const exit = await openAs(outsiderId);
 
@@ -248,13 +255,13 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		SLOW,
 	);
 
-	it("refuses a bot that isn't in the task", async () => {
+	it("refuses a bot that isn't in the thread", async () => {
 		const exit = await openAs(ownerId, bystanderId);
 
 		expect(Exit.isFailure(exit) && exit.toString()).toContain("DesktopUnavailable");
 	});
 
-	it("refuses a bot in the task that doesn't use the computer", async () => {
+	it("refuses a bot in the thread that doesn't use the computer", async () => {
 		const exit = await openAs(ownerId, computerlessId);
 
 		expect(Exit.isFailure(exit) && exit.toString()).toContain("DesktopUnavailable");

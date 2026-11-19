@@ -35,18 +35,24 @@ const toolsWithoutDescriptions = sql<ToolHints[]>`coalesce(
 
 const listedRow = { ...columnsBesideTools, tools: toolsWithoutDescriptions };
 
-/** The bot's connections, oldest first, each with how many tools are at each setting. */
-export const connectionsIn = (workspaceId: string, botId: string, cipher: Credentials.Interface) =>
-	listedRows(and(eq(connection.workspaceId, workspaceId), eq(connection.botId, botId))).pipe(
+/** The project's connections, oldest first, each with how many tools are at each setting. */
+export const connectionsIn = (
+	workspaceId: string,
+	projectId: string,
+	cipher: Credentials.Interface,
+) =>
+	listedRows(
+		and(eq(connection.workspaceId, workspaceId), eq(connection.projectId, projectId)),
+	).pipe(
 		Effect.map((rows) =>
 			rows.map(({ row, connectedBy }) => toConnection(row, connectedBy, cipher).connection),
 		),
 	);
 
-/** One of the bot's connections with its tools, or nothing. */
+/** One of the project's connections with its tools, or nothing. */
 export const connectionIn = (
 	workspaceId: string,
-	botId: string,
+	projectId: string,
 	connectionId: string,
 	cipher: Credentials.Interface,
 ) =>
@@ -54,7 +60,7 @@ export const connectionIn = (
 		and(
 			eq(connection.id, connectionId),
 			eq(connection.workspaceId, workspaceId),
-			eq(connection.botId, botId),
+			eq(connection.projectId, projectId),
 		),
 	).pipe(
 		Effect.map(([found]): ConnectionWithTools | undefined => {
@@ -91,7 +97,7 @@ function toConnection(
 		connection: {
 			id: row.id,
 			workspaceId: row.workspaceId,
-			botId: row.botId,
+			projectId: row.projectId,
 			name: row.name,
 			handle: row.handle,
 			kind: row.kind,

@@ -33,7 +33,7 @@ export const docGroups: readonly DocGroup[] = [
 		summary: "The pieces of a workspace, and how people and bots use them together.",
 		pages: [
 			{ slug: "bots", bot: { color: "orange", face: "dot" } },
-			{ slug: "channels", bot: { color: "teal", face: "square" } },
+			{ slug: "projects", bot: { color: "teal", face: "square" } },
 			{ slug: "conversations", bot: { color: "sky", face: "pill" } },
 			{ slug: "tools-and-approvals", bot: { color: "yellow", face: "square" } },
 			{ slug: "connections", bot: { color: "ice", face: "arc" } },

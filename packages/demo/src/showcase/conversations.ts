@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { ConnectionTool, JsonValue, WrittenFileKind } from "@sugabots/contracts";
-import { CONNECTION_TOOL_SEPARATOR, FIRST_CHAT_NAME } from "@sugabots/contracts";
+import { CONNECTION_TOOL_SEPARATOR } from "@sugabots/contracts";
 import { reachesConversationFor } from "@sugabots/core/authorization/access";
-import { taskTitleFrom } from "@sugabots/core/conversations/chats/task-title";
+import { threadTitleFrom } from "@sugabots/core/conversations/chats/thread-title";
 import { seedConversation } from "@sugabots/core/conversations/seed.test-support";
 import { FILE_WRITE_TOOL } from "@sugabots/core/conversations/tools/files/tool";
 import { query } from "@sugabots/core/database/database";
@@ -11,8 +11,6 @@ import {
 	automationFeed,
 	automationRun,
 	bot,
-	channelBot,
-	channelConversation,
 	connection,
 	conversation,
 	conversationParticipant,
@@ -23,14 +21,16 @@ import {
 	messageReaction,
 	type PlacedConversationRow,
 	placedConversation,
+	projectBot,
+	projectThread,
 	type StoredMessagePart,
-	task,
 	toolCall,
 	turn,
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { Files } from "@sugabots/core/files/files";
 import type { ToolAccess } from "@sugabots/core/providers/sql";
+import { defaultProjectIdOf } from "@sugabots/core/workspaces/bots/bot";
 import type { UserText } from "@sugabots/errors";
 import { and, eq, getColumns, isNull, max, sql } from "drizzle-orm";
 import { Effect } from "effect";
@@ -40,7 +40,7 @@ import { Effect } from "effect";
  * them from, so the screenshots need no model, no second login and no waiting.
  * Nothing is announced: the app shows them when it next loads.
  *
- * Each main chat and task gets only the scripted messages it does not have
+ * Each project's thread and bot's thread gets only the scripted messages it does not have
  * yet, matched by their text, so a scene added later reaches a showcase seeded
  * before it. An automation that already has a run at a scheduled time keeps it.
  */
@@ -49,8 +49,8 @@ import { Effect } from "effect";
 interface Cast<Person extends string> {
 	workspaceId: string;
 	people: Record<Person, string>;
-	/** By the seed's key for each channel. */
-	channelIds: Record<string, string>;
+	/** By the seed's key for each project. */
+	projectIds: Record<string, string>;
 	/** By name. */
 	botIds: ReadonlyMap<string, string>;
 	/** By bot name: the model each is on, which their turns record. */
@@ -106,10 +106,10 @@ interface ScriptedMessage<Person extends string> {
 }
 
 /**
- * A task: somebody's conversation with one bot. The first message is theirs,
- * and names the task as the app would.
+ * A bot's thread: somebody's conversation with that one bot. The first message
+ * is theirs, and names the thread as the app would.
  */
-export interface TaskScene<Person extends string> {
+export interface ThreadScene<Person extends string> {
 	bot: string;
 	messages: readonly [
 		ScriptedMessage<Person> & { from: { person: Person } },
@@ -118,13 +118,22 @@ export interface TaskScene<Person extends string> {
 }
 
 /**
- * What was said in a channel's main chat: its people, and the channel's bots
- * answering when they are mentioned.
+ * What was said in one of a project's threads: its people, and the project's
+ * bots answering when they are mentioned. The first message is a person's, who
+ * started the thread.
  */
 export interface ChatScene<Person extends string> {
-	channel: string;
-	messages: readonly ScriptedMessage<Person>[];
+	project: string;
+	/** What the thread is called. */
+	thread: string;
+	messages: readonly [
+		ScriptedMessage<Person> & { from: { person: Person } },
+		...ScriptedMessage<Person>[],
+	];
 }
+
+/** Support's thread, where the seed writes the morning's handover and the demo's story starts (see `stage.ts`). */
+export const SUPPORT_HANDOVER_THREAD = "Today's tickets";
 
 /** One past run of a bot's automation, which posts its result in the automation's feed. */
 export interface AutomationRun {
@@ -138,9 +147,9 @@ export interface AutomationRun {
 	failed?: UserText;
 }
 
-/** A connection every bot in a channel has, with the tools its server lists and what they may do with each. */
+/** A connection every bot in a project has, with the tools its server lists and what they may do with each. */
 export interface SeedConnection {
-	channel: string;
+	project: string;
 	name: string;
 	handle: string;
 	url: string;
@@ -184,13 +193,13 @@ function isWeekend(date: Date): boolean {
 
 export const ensureConnections = (input: {
 	workspaceId: string;
-	channelIds: Record<string, string>;
+	projectIds: Record<string, string>;
 	createdById: string;
 	connections: readonly SeedConnection[];
 }) =>
 	Effect.forEach(
 		input.connections,
-		// Each bot in the seed's channel has its own connection to it.
+		// Each bot in the seed's project has its own connection to it, in its default project.
 		(seed) =>
 			query((db) =>
 				db
@@ -199,7 +208,7 @@ export const ensureConnections = (input: {
 						db
 							.select({
 								workspaceId: bot.workspaceId,
-								botId: bot.id,
+								projectId: defaultProjectIdOf(bot.id).as("project_id"),
 								name: sql<string>`${seed.name}`.as("name"),
 								handle: sql<string>`${seed.handle}`.as("handle"),
 								url: sql<string>`${seed.url}`.as("url"),
@@ -211,11 +220,11 @@ export const ensureConnections = (input: {
 								createdById: sql<string>`${input.createdById}::uuid`.as("created_by_id"),
 							})
 							.from(bot)
-							.innerJoin(channelBot, eq(channelBot.botId, bot.id))
+							.innerJoin(projectBot, eq(projectBot.botId, bot.id))
 							.where(
 								and(
 									eq(bot.workspaceId, input.workspaceId),
-									eq(channelBot.channelId, channelIdOf(input.channelIds, seed.channel)),
+									eq(projectBot.projectId, projectIdOf(input.projectIds, seed.project)),
 								),
 							),
 					)
@@ -228,7 +237,7 @@ export const ensureConversations = <Person extends string>(
 	cast: Cast<Person>,
 	written: {
 		chats: readonly ChatScene<Person>[];
-		tasks: readonly TaskScene<Person>[];
+		threads: readonly ThreadScene<Person>[];
 		runs: readonly AutomationRun[];
 	},
 ) =>
@@ -241,28 +250,37 @@ export const ensureConversations = <Person extends string>(
 		for (const chat of written.chats) {
 			if (yield* writeChatScene(cast, day, chat)) count += 1;
 		}
-		for (const scene of written.tasks) {
-			if (yield* writeTask(cast, day, scene)) count += 1;
+		for (const scene of written.threads) {
+			if (yield* writeThread(cast, day, scene)) count += 1;
 		}
 		yield* markEverythingRead(cast);
 		return count;
 	});
 
 /**
- * The task `scene` tells, made if it is not there yet: one with its bot and
+ * The bot's thread `scene` tells, made if it is not there yet: one with its bot and
  * the title its first message gives it.
  */
-const taskOf = <Person extends string>(cast: Cast<Person>, day: Date, scene: TaskScene<Person>) =>
+const threadOf = <Person extends string>(
+	cast: Cast<Person>,
+	day: Date,
+	scene: ThreadScene<Person>,
+) =>
 	Effect.gen(function* () {
 		const botId = idOf(cast.botIds, scene.bot);
 		const [first] = scene.messages;
-		const title = taskTitleFrom(textOf(first.parts));
+		const title = threadTitleFrom(textOf(first.parts));
 		const [existing] = yield* query((db) =>
 			db
 				.select({ conversation: getColumns(placedConversation) })
-				.from(task)
-				.innerJoin(placedConversation, eq(placedConversation.id, task.conversationId))
-				.where(and(eq(task.botId, botId), eq(placedConversation.title, title))),
+				.from(placedConversation)
+				.where(
+					and(
+						eq(placedConversation.kind, "project_thread"),
+						eq(placedConversation.botId, botId),
+						eq(placedConversation.title, title),
+					),
+				),
 		);
 		if (existing) return existing.conversation;
 		const startedById = cast.people[first.from.person];
@@ -270,7 +288,7 @@ const taskOf = <Person extends string>(cast: Cast<Person>, day: Date, scene: Tas
 		const { id } = yield* query((db) =>
 			seedConversation(db, {
 				workspaceId: cast.workspaceId,
-				kind: "task",
+				kind: "project_thread",
 				botId,
 				startedById,
 				title,
@@ -286,27 +304,43 @@ const taskOf = <Person extends string>(cast: Cast<Person>, day: Date, scene: Tas
 		return yield* placedById(id);
 	});
 
-/** The channel's main chat, made if it is not there yet. */
-const mainChatOf = (cast: Cast<string>, channelId: string) =>
+/**
+ * The project's thread `scene` tells, made if it is not there yet: one in its
+ * project, not archived, by its name, started by whoever wrote first in it, who
+ * joins it with their first message.
+ */
+const projectThreadOf = <Person extends string>(
+	cast: Cast<Person>,
+	day: Date,
+	scene: ChatScene<Person>,
+) =>
 	Effect.gen(function* () {
-		const mainChatId = () =>
-			query((db) =>
-				db
-					.select({ id: channelConversation.conversationId })
-					.from(channelConversation)
-					.where(
-						and(eq(channelConversation.main, true), eq(channelConversation.channelId, channelId)),
+		const projectId = projectIdOf(cast.projectIds, scene.project);
+		const [existing] = yield* query((db) =>
+			db
+				.select({ conversation: getColumns(placedConversation) })
+				.from(projectThread)
+				.innerJoin(placedConversation, eq(placedConversation.id, projectThread.conversationId))
+				.where(
+					and(
+						eq(projectThread.projectId, projectId),
+						isNull(projectThread.archivedAt),
+						eq(placedConversation.title, scene.thread),
 					),
-			).pipe(Effect.map(([found]) => found?.id));
-		const existing = yield* mainChatId();
-		if (existing) return yield* placedById(existing);
+				),
+		);
+		if (existing) return existing.conversation;
+		const [first] = scene.messages;
+		const startedById = cast.people[first.from.person];
+		const at = timeOn(day, first.at);
 		const { id } = yield* query((db) =>
 			seedConversation(db, {
 				workspaceId: cast.workspaceId,
-				kind: "channel_conversation",
-				channelId,
-				main: true,
-				title: FIRST_CHAT_NAME,
+				kind: "project_thread",
+				projectId,
+				startedById,
+				title: scene.thread,
+				createdAt: at,
 			}),
 		);
 		return yield* placedById(id);
@@ -339,35 +373,35 @@ const automationFeedOf = (
 		return yield* placedById(id);
 	});
 
-/** Writes into the task the scene's messages it does not have yet. */
-const writeTask = <Person extends string>(
+/** Writes into the bot's thread the scene's messages it does not have yet. */
+const writeThread = <Person extends string>(
 	cast: Cast<Person>,
 	day: Date,
-	scene: TaskScene<Person>,
+	scene: ThreadScene<Person>,
 ) =>
 	Effect.gen(function* () {
-		const task = yield* taskOf(cast, day, scene);
+		const thread = yield* threadOf(cast, day, scene);
 		const wrote = yield* writeMessages(cast, day, {
-			inConversation: task,
+			inConversation: thread,
 			messages: scene.messages,
 		});
-		if (wrote) yield* touch(task.id);
+		if (wrote) yield* touch(thread.id);
 		return wrote;
 	});
 
-/** Writes into its channel's main chat the scene's messages it does not have yet. */
+/** Writes into its project's thread the scene's messages it does not have yet. */
 const writeChatScene = <Person extends string>(
 	cast: Cast<Person>,
 	day: Date,
 	scene: ChatScene<Person>,
 ) =>
 	Effect.gen(function* () {
-		const mainChat = yield* mainChatOf(cast, channelIdOf(cast.channelIds, scene.channel));
+		const thread = yield* projectThreadOf(cast, day, scene);
 		const wrote = yield* writeMessages(cast, day, {
-			inConversation: mainChat,
+			inConversation: thread,
 			messages: scene.messages,
 		});
-		if (wrote) yield* touch(mainChat.id);
+		if (wrote) yield* touch(thread.id);
 		return wrote;
 	});
 
@@ -757,7 +791,12 @@ const writeToolCall = (
 						db
 							.select({ id: connection.id, revision: connection.configurationRevision })
 							.from(connection)
-							.where(and(eq(connection.botId, input.botId), eq(connection.handle, handle))),
+							.where(
+								and(
+									eq(connection.projectId, defaultProjectIdOf(sql`${input.botId}::uuid`)),
+									eq(connection.handle, handle),
+								),
+							),
 					);
 		if (handle !== undefined && !used)
 			return yield* Effect.die(new Error(`No ${handle} connection`));
@@ -837,7 +876,6 @@ const writeFile = (
 		const written = yield* authoring
 			.create(
 				{
-					workspaceId: cast.workspaceId,
 					botId: idOf(cast.botIds, input.bot),
 					conversationId: input.conversationId,
 				},
@@ -898,7 +936,7 @@ const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =
 				.from(automation)
 				.where(
 					and(
-						eq(automation.botId, botId),
+						eq(automation.projectId, defaultProjectIdOf(sql`${botId}::uuid`)),
 						eq(automation.name, run.automation),
 						isNull(automation.deletedAt),
 					),
@@ -920,7 +958,7 @@ const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =
 		);
 		if (ranAlready) return false;
 
-		const feed = yield* automationFeedOf(cast, defined);
+		const feed = yield* automationFeedOf(cast, { id: defined.id, botId, name: defined.name });
 		const finishedAt = timeOn(day, run.finishedAt);
 		const runId = randomUUID();
 		const runConversation = yield* query((db) =>
@@ -934,10 +972,10 @@ const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =
 					id: runId,
 					automationId: defined.id,
 					botId,
-					triggerKind: "schedule",
+					triggerKind: "routine",
 					triggerIdentity: scheduledAt.toISOString(),
 					trigger: {
-						kind: "schedule",
+						kind: "routine",
 						scheduledAt: scheduledAt.toISOString(),
 						acceptedAt: scheduledAt.toISOString(),
 					},
@@ -965,7 +1003,7 @@ const writeAutomationRun = (cast: Cast<string>, day: Date, run: AutomationRun) =
 					kind: "automation_trigger",
 					runId,
 					automationName: defined.name,
-					triggerKind: "schedule",
+					triggerKind: "routine",
 				},
 				kind: "text",
 				status: "complete",
@@ -1090,9 +1128,9 @@ function idOf(ids: ReadonlyMap<string, string>, name: string): string {
 	return id;
 }
 
-function channelIdOf(channelIds: Record<string, string>, channel: string): string {
-	const id = channelIds[channel];
-	if (!id) throw new Error(`No channel is keyed ${channel}`);
+function projectIdOf(projectIds: Record<string, string>, project: string): string {
+	const id = projectIds[project];
+	if (!id) throw new Error(`No project is keyed ${project}`);
 	return id;
 }
 

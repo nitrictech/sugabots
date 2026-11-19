@@ -222,16 +222,6 @@ export const ByModel = meta.story({
 	},
 });
 
-/** By channel, counting each channel's bots, with the system bots' work last. */
-export const ByChannel = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("radio", { name: "Channel" }));
-		await expect(canvas.getByText("Revenue")).toBeInTheDocument();
-		await expect(canvas.getAllByText("3 bots")).toHaveLength(2);
-		await expect(canvas.getByText("$5.65")).toBeInTheDocument();
-	},
-});
-
 /** Stepping back a month reads that month instead, and it can be stepped forward again. */
 export const EarlierMonth = meta.story({
 	play: async ({ canvas, userEvent }) => {

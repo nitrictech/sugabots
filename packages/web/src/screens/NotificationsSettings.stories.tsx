@@ -2,7 +2,7 @@ import type { NotificationPreferences, NotificationSettings } from "@sugabots/co
 import { HttpResponse, http } from "msw";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyChannels, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyProjects, storyWorkspace } from "@/story-app.tsx";
 
 const API = import.meta.env.VITE_API_URL as string;
 
@@ -12,23 +12,23 @@ const nothingChosen: NotificationSettings = {
 	quietHours: null,
 	turnFailures: true,
 	automationRuns: "failures",
-	channels: {},
+	projects: {},
 	bots: {},
-	mutedUntil: { channels: {}, bots: {} },
+	mutedUntil: { projects: {}, bots: {} },
 };
 
-const [firstChannel, secondChannel] = storyChannels;
+const [firstProject, secondProject] = storyProjects;
 
-/** Somebody who hears of everything, but not from one channel, and not overnight. */
+/** Somebody who hears of everything, but not from one project, and not overnight. */
 const chosen: NotificationSettings = {
 	level: "all",
 	pausedUntil: null,
 	quietHours: { from: "22:00", to: "07:30", timeZone: "Pacific/Auckland" },
 	turnFailures: false,
 	automationRuns: "all",
-	channels: secondChannel ? { [secondChannel.id]: "nothing" } : {},
+	projects: secondProject ? { [secondProject.id]: "nothing" } : {},
 	bots: {},
-	mutedUntil: { channels: {}, bots: {} },
+	mutedUntil: { projects: {}, bots: {} },
 };
 
 /** Answers with `settings`, and with each change as the server would save it. */
@@ -50,7 +50,7 @@ const meta = preview.meta({
 
 const page = () => <StoryApp path={`/${storyWorkspace.slug}/settings/notifications`} />;
 
-/** NothingChosen is where everybody starts: mentions, replies and approvals, in every channel. */
+/** NothingChosen is where everybody starts: mentions, replies and approvals, in every project. */
 export const NothingChosen = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...settingsHandlers(nothingChosen), ...appHandlers());
@@ -60,9 +60,9 @@ export const NothingChosen = meta.story({
 		const level = await canvas.findByRole("group", { name: "Notify me about" });
 		await expect(within(level).getByRole("radio", { name: "Mentions and replies" })).toBeChecked();
 		await expect(canvas.getByText(/replies in conversations you're part of/)).toBeInTheDocument();
-		if (firstChannel) {
+		if (firstProject) {
 			await expect(
-				canvas.getByRole("button", { name: `Notifications for ${firstChannel.name}` }),
+				canvas.getByRole("button", { name: `Notifications for ${firstProject.name}` }),
 			).toHaveTextContent("Default");
 		}
 	},
@@ -84,7 +84,7 @@ export const ChoosingEverything = meta.story({
 	},
 });
 
-/** Chosen shows a channel turned off and quiet hours overnight. */
+/** Chosen shows a project turned off and quiet hours overnight. */
 export const Chosen = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...settingsHandlers(chosen), ...appHandlers());
@@ -93,9 +93,9 @@ export const Chosen = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByLabelText("From", undefined)).toHaveValue("22:00");
 		await expect(canvas.getByLabelText("To")).toHaveValue("07:30");
-		if (secondChannel) {
+		if (secondProject) {
 			await expect(
-				canvas.getByRole("button", { name: `Notifications for ${secondChannel.name}` }),
+				canvas.getByRole("button", { name: `Notifications for ${secondProject.name}` }),
 			).toHaveTextContent("Nothing");
 		}
 	},

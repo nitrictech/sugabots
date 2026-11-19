@@ -11,7 +11,7 @@ const ID = "0199a3a0-0000-7000-8000-000000000001";
 describe("Automation contracts", () => {
 	it.each([
 		{
-			kind: "schedule",
+			kind: "routine",
 			schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
 			timezone: "Australia/Sydney",
 		},
@@ -27,7 +27,7 @@ describe("Automation contracts", () => {
 	});
 
 	it.each([
-		{ kind: "schedule", schedule: { repeat: "cron", expression: "0 9 * * 1-5" } },
+		{ kind: "routine", schedule: { repeat: "cron", expression: "0 9 * * 1-5" } },
 		{ kind: "webhook", expression: "0 9 * * 1-5", timezone: "UTC" },
 	])("rejects an incomplete or mixed $kind trigger", (trigger) => {
 		expect(
@@ -128,7 +128,7 @@ describe("Automation contracts", () => {
 				kind: "automation_trigger",
 				runId: ID,
 				automationName: "Morning review",
-				triggerKind: "schedule",
+				triggerKind: "routine",
 			}),
 		).toMatchObject({ kind: "automation_trigger", runId: ID });
 	});

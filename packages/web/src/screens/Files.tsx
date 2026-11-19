@@ -1,6 +1,4 @@
 import {
-	type Bot,
-	type Channel,
 	type FileAuthor,
 	type FileSummary,
 	type FileVersionSummary,
@@ -9,18 +7,24 @@ import {
 	type WrittenFile,
 	type WrittenFileSummary,
 } from "@sugabots/contracts";
-import { Link, useNavigate, useRouter } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Check, ChevronDown, Download, FileText, Link2, Paperclip, Trash2 } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
-import { chatFileUrl } from "@/lib/chat-files.ts";
+import { conversationFileUrl } from "@/lib/conversation-files.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { fileSizeLabel } from "@/lib/file-looks.ts";
 import { useDeleteFile, useFile, useFiles, useFileVersions } from "@/lib/files.ts";
-import { fileLink, filesLink } from "@/lib/links.ts";
 import { formatClockTime, formatListTime } from "@/lib/list-time.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
-import { BotCrumb } from "@/shell/BotCrumb.tsx";
+import {
+	OwnerLink,
+	ownerLinkOptions,
+	ownerName,
+	type ResourceOwner,
+	resourcePermissions,
+} from "@/lib/resource-owner.tsx";
+import { OwnerCrumb } from "@/shell/BotCrumb.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { type CloseStage, Stage, StageMark } from "@/shell/Stage.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
@@ -39,45 +43,25 @@ import { FILE_KINDS } from "./file-kinds.tsx";
 
 type Loading = "loading" | "failed";
 
-/** Whose files they are: a channel's, made in its conversations, or a bot's, made in its tasks. */
-type FileOwner = { channel: Channel } | { bot: Bot };
-
-/** The file `fileId` of `owner`, as a link, at `version` when one is given. */
-function FileLink({
-	owner,
-	fileId,
-	...props
-}: {
-	owner: FileOwner;
-	fileId: string;
-	"aria-current"?: "page";
-	className?: string;
-	children: ReactNode;
-}) {
-	return "channel" in owner ? (
-		<Link {...fileLink(owner, fileId)} {...props} />
-	) : (
-		<Link {...fileLink(owner, fileId)} {...props} />
-	);
-}
-
 /** Where `owner`'s files, or one of them at `version`, are, as an address. */
 function useFileHref() {
 	const router = useRouter();
-	return (owner: FileOwner, fileId?: string, version?: number) =>
-		"channel" in owner
-			? router.buildLocation(fileId ? fileLink(owner, fileId, { version }) : filesLink(owner)).href
-			: router.buildLocation(fileId ? fileLink(owner, fileId, { version }) : filesLink(owner)).href;
+	return (owner: ResourceOwner, fileId?: string, version?: number) =>
+		router.buildLocation(
+			ownerLinkOptions(owner, fileId ? { page: "file", fileId, version } : { page: "files" }),
+		).href;
 }
 
-/** What `owner` is called, for saying whose files these are. */
-function ownerName(owner: FileOwner): string {
-	return "channel" in owner ? owner.channel.name : owner.bot.name;
+const REMOVED_BOT = "A removed bot";
+
+/** Who wrote a file or a version of one, or that the bot that did is gone. */
+function authorName(author: FileAuthor): string {
+	return author?.name ?? REMOVED_BOT;
 }
 
 /**
- * The files uploaded or made in a channel, or in a bot's tasks, newest first:
- * the documents and pages bots wrote, with the one chosen open beside them at
+ * The files uploaded or made in a project's threads, or in a bot's, newest
+ * first: the files bots wrote, with the one chosen open beside them at
  * its current version or the one `version` names, and the files sent on
  * messages, which open on their own.
  */
@@ -86,13 +70,13 @@ export function FilesPage({
 	selectedId,
 	version,
 }: {
-	owner: FileOwner;
+	owner: ResourceOwner;
 	selectedId?: string;
 	version?: number;
 }) {
 	const { data, isError } = useFiles(
-		"channel" in owner
-			? { kind: "channel", channelId: owner.channel.id }
+		"project" in owner
+			? { kind: "project", projectId: owner.project.id }
 			: { kind: "bot", botId: owner.bot.id },
 	);
 	const navigate = useNavigate();
@@ -129,7 +113,7 @@ export function FileListView({
 	now,
 	children,
 }: {
-	owner: FileOwner;
+	owner: ResourceOwner;
 	files: readonly FileSummary[] | Loading;
 	/** The file open beside the list, which its row marks. */
 	selectedId?: string;
@@ -142,15 +126,7 @@ export function FileListView({
 	const pane = useRef<HTMLDivElement>(null);
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
-			<Page
-				title="Files"
-				parent={"bot" in owner ? <BotCrumb bot={owner.bot} /> : undefined}
-				place={
-					"channel" in owner
-						? { kind: "channel", channel: owner.channel }
-						: { kind: "bot", bot: owner.bot }
-				}
-			>
+			<Page title="Files" parent={<OwnerCrumb owner={owner} />} place={{ kind: "owner", owner }}>
 				{files !== "loading" && files !== "failed" && files.length === 0 ? (
 					// As tall as the page leaves above the tabs, so there is nothing to scroll.
 					<div className="flex h-above-tab-bar pb-20">
@@ -226,7 +202,7 @@ function FileRow({
 	selected,
 	now,
 }: {
-	owner: FileOwner;
+	owner: ResourceOwner;
 	file: FileSummary;
 	selected: boolean;
 	now: Date;
@@ -245,16 +221,16 @@ function WrittenFileRow({
 	selected,
 	now,
 }: {
-	owner: FileOwner;
+	owner: ResourceOwner;
 	file: WrittenFileSummary;
 	selected: boolean;
 	now: Date;
 }) {
 	const kind = FILE_KINDS[file.kind];
 	return (
-		<FileLink
+		<OwnerLink
 			owner={owner}
-			fileId={file.id}
+			to={{ page: "file", fileId: file.id }}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				"focus-ring flex items-center gap-3 rounded-lg p-2 transition-colors",
@@ -265,13 +241,13 @@ function WrittenFileRow({
 			<span className="flex min-w-0 flex-1 flex-col leading-snug">
 				<span className="truncate font-medium text-xs text-foreground">{file.title}</span>
 				<span className="truncate text-subtle-foreground text-xs">
-					{[kind.label, `v${file.version}`, file.createdBy?.name ?? "A removed bot"].join(", ")}
+					{[kind.label, `v${file.version}`, authorName(file.createdBy)].join(", ")}
 				</span>
 			</span>
 			<time dateTime={file.updatedAt} className="shrink-0 text-subtle-foreground text-xs">
 				{formatListTime(new Date(file.updatedAt), now)}
 			</time>
-		</FileLink>
+		</OwnerLink>
 	);
 }
 
@@ -280,10 +256,10 @@ function WrittenFileRow({
  * where the conversation serves it, as the message's own link does.
  */
 function MessageFileRow({ file, now }: { file: MessageFileSummary; now: Date }) {
-	const sentBy = file.sentBy ?? (file.kind === "upload" ? "Someone who left" : "A removed bot");
+	const sentBy = file.sentBy ?? (file.kind === "upload" ? "Someone who left" : REMOVED_BOT);
 	return (
 		<a
-			href={chatFileUrl(file.conversationId, file.id)}
+			href={conversationFileUrl(file.conversationId, file.id)}
 			target="_blank"
 			rel="noreferrer"
 			className="focus-ring flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-message-hover"
@@ -318,7 +294,7 @@ export function FileStage({
 	onVersionChange,
 	onClose,
 }: {
-	owner: FileOwner;
+	owner: ResourceOwner;
 	fileId: string;
 	version: number | undefined;
 	/** `undefined` for the current version. */
@@ -328,8 +304,7 @@ export function FileStage({
 	const shown = useFile(fileId, version);
 	const versions = useFileVersions(fileId);
 	const remove = useDeleteFile();
-	const mayDelete =
-		"channel" in owner ? owner.channel.permissions.deleteFiles : owner.bot.permissions.update;
+	const mayDelete = resourcePermissions(owner).deleteFiles;
 	async function deleteFile() {
 		try {
 			await remove.mutateAsync(fileId);
@@ -379,7 +354,7 @@ export function FileStageView({
 	onClose,
 	deletion,
 }: {
-	owner: FileOwner;
+	owner: ResourceOwner;
 	file: WrittenFile | Loading;
 	/** Newest first. */
 	versions: readonly FileVersionSummary[];
@@ -421,7 +396,7 @@ export function FileStageView({
 			title={file.title}
 			byline={
 				<>
-					{shown.author?.name ?? "A removed bot"}{" "}
+					{authorName(shown.author)}{" "}
 					<time dateTime={shown.createdAt}>{writtenWhen(new Date(shown.createdAt), now)}</time>
 				</>
 			}
@@ -599,4 +574,4 @@ function KindMark({ kind }: { kind: WrittenFileSummary["kind"] }) {
 	);
 }
 
-const byline = (author: FileAuthor) => (author ? `by ${author.name}` : "by a removed bot");
+const byline = (author: FileAuthor) => `by ${author ? author.name : REMOVED_BOT.toLowerCase()}`;

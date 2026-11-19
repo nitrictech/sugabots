@@ -4,7 +4,9 @@ description: AI teammates with a job, a model to think with, and a face.
 ---
 
 A bot is an AI teammate. Each one has its own instructions and model, and its
-own tasks, files, computer, connections and automations.
+own threads, files, computer, connections and automations. Its threads are kept
+in a hidden project of its own, which it leads alone, so they work just as a
+[project's](/docs/projects) do; only you never see that project itself.
 
 ## Make a bot
 
@@ -22,32 +24,34 @@ A new bot starts on the workspace's [default model](/docs/models#default-model).
 If there's none, connect one in **Settings → Models** first. Bots can't think
 without one.
 
-A new bot is pinned to your sidebar, and opens in a setup task: it interviews
+A new bot is pinned to your sidebar, and opens in a setup thread: it interviews
 you about the work it's for, then writes its own instructions. You can read and
 change them afterwards in its settings.
 
 ## Public and private
 
 - A **public** bot is for everyone in the workspace. Anyone can find it, talk to
-  it, and see its tasks and files. Only public bots can be added to
-  [channels](/docs/channels).
+  it, and see its threads and files. Only public bots can be added to
+  [projects](/docs/projects).
 - A **private** bot is for its creator alone. Nobody else can talk to it or see
-  its tasks. The owner and admins see that it exists, but not its tasks.
+  its threads. The owner and admins see that it exists, but not its threads.
 
 Other bots can still [ask a private bot for help](/docs/conversations#bots-asking-bots).
-Making a bot private takes it out of every channel it was in.
+Making a bot private takes it out of every project it was in. A bot that
+[leads a project](/docs/projects#lead-bot) can't be made private until another
+bot leads it.
 
 ## What a bot has
 
 | Part | What it is |
 | --- | --- |
-| Tasks | Its conversations, each about one piece of work. See [Conversations](/docs/conversations) |
-| Files | Files uploaded or made in its tasks |
-| Computer | Its own machine, where it runs commands and keeps files. It's paused when idle |
-| Connections | The apps and APIs it works with, and its own GitHub app. See [Connections](/docs/connections) |
-| Automations | Work it does on its own, on a schedule or when something calls it. See [Automations](/docs/automations) |
+| Threads | Its conversations, each about one piece of work. See [Conversations](/docs/conversations) |
+| Files | Files uploaded or made in its threads |
+| Computer | Its own machine, where it runs commands and keeps files in its threads. It's paused when idle. In a project's threads it uses the [project's computer](/docs/projects#computer) instead |
+| Connections | The apps and APIs it works with, and its own GitHub app. In a project's threads it also uses the [project's](/docs/projects#connections), which win where both have one with the same name. See [Connections](/docs/connections) |
+| Automations | Work it does on its own, on a routine, such as every weekday at 9, or when something triggers it. See [Automations](/docs/automations) |
 
-Above a bot's tasks, **Lately** says in a few sentences what it has been doing: the Summariser writes it from the summaries of its newest tasks each time one of them changes. Your Personal Assistant reads it too, to know what each bot is up to.
+Above a bot's threads, **Lately** says in a few sentences what it has been doing: the Summariser writes it from the summaries of its newest threads each time one of them changes. Your Personal Assistant reads it too, to know what each bot is up to.
 
 ## Tell it what to do
 
@@ -57,7 +61,7 @@ Its creator, the owner and admins can change a bot's settings:
 | --- | --- |
 | Description | One line on what the bot is for. Other bots read it to decide whether to ask it for help |
 | Model | What it thinks with. Each bot can use a different one |
-| Instructions | How it should work. It follows these in every task and channel |
+| Instructions | How it should work. It follows these in every thread and project |
 | Tools | Which built-in tools it may use |
 | Visibility | Public or private |
 
@@ -89,20 +93,21 @@ bots are a browse away. Pin or unpin any bot you can see.
 ## Your Personal Assistant
 
 Everyone has a **Personal Assistant**, made for them when they join, and always
-first in their sidebar. Only you can talk to yours or see its tasks, admins
+first in their sidebar. Only you can talk to yours or see its threads, admins
 included.
 
-It knows the workspace: the channels, the bots you can reach and what each has
+It knows the workspace: the projects, the bots you can reach and what each has
 been doing lately, and what is waiting on you, such as unread mentions,
 approvals and failing automations. Ask it what needs you, or how something in
-Sugabots works. It points you to the right bot, and starts a task with it for
-you when you agree. It can also make a channel, join one, add a bot to a
-channel or pin a bot for you: each waits for your approval before it happens. You can change
+Sugabots works. It points you to the right bot, and starts a thread with it for
+you when you agree. It can also make a project, join one, add a bot to a
+project or pin a bot for you: each waits for your approval before it happens. You can change
 its look and add connections to it. Its instructions are looked after by
 Sugabots, so you can't edit them.
 
 ## Remove a bot
 
-**Delete bot** is at the bottom of its settings. Its tasks, files, automations
+**Delete bot** is at the bottom of its settings. Its threads, files, automations
 and connections go with it, and that can't be undone. Its creator, the owner and
-admins can delete it. A Personal Assistant can't be deleted.
+admins can delete it, once another bot leads any project it leads. A Personal
+Assistant can't be deleted.

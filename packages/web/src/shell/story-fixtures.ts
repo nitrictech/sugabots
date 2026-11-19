@@ -4,21 +4,21 @@ import type {
 	BotFace,
 	BotPermissions,
 	BotShape,
-	Channel,
-	ChannelPermissions,
 	DirectMessage,
 	DirectMessageListItem,
+	Project,
+	ProjectPermissions,
 } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 
 /*
- * Channels and bots for the shell's stories, shaped like the design's example
+ * Projects and bots for the shell's stories, shaped like the design's example
  * workspace: Revenue, Engineering and Design, and the viewer's Personal
  * Assistant.
  */
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
-const PERMISSIONS: ChannelPermissions = {
+const PERMISSIONS: ProjectPermissions = {
 	rename: true,
 	manageMembers: true,
 	manageBots: true,
@@ -26,6 +26,11 @@ const PERMISSIONS: ChannelPermissions = {
 	join: false,
 	delete: true,
 	deleteFiles: true,
+	manageConnections: true,
+	manageComputer: true,
+	useDesktop: true,
+	manageAutomations: true,
+	runAutomations: true,
 };
 
 /** What the viewer may do with a bot in the stories: everything. */
@@ -40,7 +45,7 @@ export const BOT_PERMISSIONS: BotPermissions = {
 	talk: true,
 };
 
-function channel(id: string, name: string, color: Channel["color"]): Channel {
+function project(id: string, name: string, color: Project["color"], lead: Bot | null): Project {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000000${id}`,
 		workspaceId: WORKSPACE,
@@ -48,16 +53,13 @@ function channel(id: string, name: string, color: Channel["color"]): Channel {
 		slug: name.toLowerCase(),
 		color,
 		description: null,
+		leadBotId: lead?.id ?? null,
 		visibility: "public",
 		isMember: true,
 		permissions: PERMISSIONS,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }
-
-export const revenue = channel("a1", "Revenue", "green");
-export const engineering = channel("a2", "Engineering", "blue");
-export const design = channel("a3", "Design", "plum");
 
 let next = 0;
 function bot(
@@ -73,7 +75,6 @@ function bot(
 		workspaceId: WORKSPACE,
 		name,
 		handle: name.toLowerCase().replace(/\s+/g, "-"),
-		systemBotKey: null,
 		description: null,
 		color,
 		face,
@@ -87,6 +88,7 @@ function bot(
 		visibility: "public",
 		assistant: false,
 		pinned: true,
+		defaultProjectId: `0199a3a0-0000-7000-8000-0000000002${String(next).padStart(2, "0")}`,
 		permissions: BOT_PERMISSIONS,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		...extra,
@@ -104,11 +106,16 @@ export const chief = bot("Chief", "purple", "wink", "blob", {
 	visibility: "private",
 });
 
-/** The channels, each with the bots added to it. */
-export const channelsWithBots = [
-	{ channel: revenue, bots: [growthDesk, accountManager, leadResearcher] },
-	{ channel: engineering, bots: [linearHandler, oncall] },
-	{ channel: design, bots: [] },
+export const revenue = project("a1", "Revenue", "green", growthDesk);
+export const engineering = project("a2", "Engineering", "blue", linearHandler);
+/** A project from before projects had leads, which had no bots then. */
+export const design = project("a3", "Design", "plum", null);
+
+/** The projects, each with the bots added to it. */
+export const projectsWithBots = [
+	{ project: revenue, bots: [growthDesk, accountManager, leadResearcher] },
+	{ project: engineering, bots: [linearHandler, oncall] },
+	{ project: design, bots: [] },
 ];
 
 /** Every bot in the stories' workspace. */

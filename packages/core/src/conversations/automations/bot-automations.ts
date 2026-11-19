@@ -2,9 +2,9 @@ export * as BotAutomations from "./bot-automations.ts";
 
 import type {
 	Automation,
-	AutomationSchedule,
 	AutomationTrigger,
 	RepositoryEvent,
+	RoutineSchedule,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
@@ -12,9 +12,9 @@ import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { AuthenticatedUserId, CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations } from "../../database/database.ts";
-import { bot, workspace } from "../../database/schema.ts";
+import { bot, project, workspace } from "../../database/schema.ts";
 import { Installation } from "../../installation/installation.ts";
-import { botAutomationsPath } from "../../installation/web-app-paths.ts";
+import { botAutomationsPath, projectPath } from "../../installation/web-app-paths.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type {
 	AutomationNotFound,
@@ -26,23 +26,24 @@ import type {
 } from "./automation.ts";
 import { Automations } from "./automations.ts";
 import type { AutomationRepository } from "./repository.ts";
-import type { InvalidAutomationSchedule } from "./schedule.ts";
+import type { InvalidRoutineSchedule } from "./schedule.ts";
 
 /**
- * A bot's own automations, as it reads and changes them in a conversation, for
- * the person whose message it is answering and with their permissions. It
- * cannot act for nobody: a turn answering another bot, or an automation's
- * trigger, is refused.
+ * The automations of the project a bot is working in, as it reads and changes
+ * them in a conversation there, for the person whose message it is answering
+ * and with their permissions: in its own threads, its default project's, which
+ * are its own. It cannot act for nobody: a turn answering another bot, or an
+ * automation's run, is refused.
  *
- * A bot sets up automations on one schedule, in its workspace's timezone, and
- * records itself as their maker; it changes that schedule while it is the
- * automation's only trigger. Other triggers are set up in settings: a webhook's
- * secret is shown once, so one made here would leave it in the conversation.
+ * A bot sets up automations with one routine, in its workspace's timezone,
+ * and records itself as their maker; the project's lead bot runs them. It
+ * changes that routine while the routine is all that starts the automation. Triggers are set up in settings: a webhook's secret is shown
+ * once, so one made here would leave it in the conversation.
  */
 export interface Interface {
 	readonly list: (bot: Bot) => Effect.Effect<BotAutomation[], Refused>;
 	readonly create: (bot: Bot, input: NewBotAutomation) => Effect.Effect<BotAutomation, Refused>;
-	/** Changes one of the bot's automations. Its schedule changes only while that is its only trigger. */
+	/** Changes one of the project's automations. Its routine changes only while one routine is all that starts it. */
 	readonly update: (
 		bot: Bot,
 		automationId: string,
@@ -59,28 +60,36 @@ export const make = Effect.gen(function* () {
 	const automations = yield* Automations.Service;
 	const installation = yield* Installation.Service;
 
-	/** Where the bot lives: its workspace's timezone, and where its automations' pages are. */
-	const placeOf = (botId: string) =>
+	/**
+	 * Where the project is: its workspace's timezone, and the page an automation
+	 * of it is set up on. A bot's own automations have their own pages; a
+	 * project people made shows its automations on its own page.
+	 */
+	const placeOf = (projectId: string) =>
 		Effect.flatMap(
 			query((db) =>
 				db
 					.select({
 						timeZone: workspace.timeZone,
 						workspaceSlug: workspace.slug,
-						handle: bot.handle,
+						projectSlug: project.slug,
+						botHandle: bot.handle,
 					})
-					.from(bot)
-					.innerJoin(workspace, eq(workspace.id, bot.workspaceId))
-					.where(eq(bot.id, botId))
+					.from(project)
+					.innerJoin(workspace, eq(workspace.id, project.workspaceId))
+					.leftJoin(bot, eq(bot.id, project.defaultOfBotId))
+					.where(eq(project.id, projectId))
 					.limit(1),
 			),
-			([row]) =>
-				row
-					? Effect.succeed({
-							timeZone: row.timeZone,
-							automationsUrl: `${installation.webAppUrl}${botAutomationsPath(row.workspaceSlug, row.handle)}`,
-						})
-					: Effect.die(new Error("A bot with automations is not in a workspace")),
+			([row]) => {
+				if (!row) return Effect.die(new Error("A project with automations is not in a workspace"));
+				const { botHandle } = row;
+				const pageOf = (automationId: string) =>
+					botHandle === null
+						? `${installation.webAppUrl}${projectPath(row.workspaceSlug, row.projectSlug)}`
+						: `${installation.webAppUrl}${botAutomationsPath(row.workspaceSlug, botHandle)}/${automationId}`;
+				return Effect.succeed({ timeZone: row.timeZone, pageOf });
+			},
 		);
 
 	/**
@@ -105,9 +114,9 @@ export const make = Effect.gen(function* () {
 			operation(
 				"list",
 				Effect.gen(function* () {
-					const listed = yield* forAsker(bot, automations.list({ botId: bot.botId }));
-					const place = yield* placeOf(bot.botId);
-					return listed.map((automation) => toBotAutomation(automation, place.automationsUrl));
+					const listed = yield* forAsker(bot, automations.list({ projectId: bot.projectId }));
+					const place = yield* placeOf(bot.projectId);
+					return listed.map((automation) => toBotAutomation(automation, place.pageOf));
 				}),
 			),
 
@@ -115,25 +124,25 @@ export const make = Effect.gen(function* () {
 			operation(
 				"create",
 				Effect.gen(function* () {
-					const place = yield* placeOf(bot.botId);
+					const place = yield* placeOf(bot.projectId);
 					const defined = yield* forAsker(
 						bot,
 						automations.create(
-							{ botId: bot.botId, madeByBot: true },
+							{ projectId: bot.projectId, madeByBotId: bot.botId },
 							{
 								name: input.name,
 								instructions: input.instructions,
 								triggers: [
 									{
-										kind: "schedule",
-										schedule: { repeat: "cron", expression: input.schedule },
+										kind: "routine",
+										schedule: { repeat: "cron", expression: input.routineExpression },
 										timezone: place.timeZone,
 									},
 								],
 							},
 						),
 					);
-					return toBotAutomation(defined.automation, place.automationsUrl);
+					return toBotAutomation(defined.automation, place.pageOf);
 				}),
 			),
 
@@ -141,11 +150,14 @@ export const make = Effect.gen(function* () {
 			operation(
 				"update",
 				Effect.gen(function* () {
-					const place = yield* placeOf(bot.botId);
-					const addressed = { botId: bot.botId, automationId };
+					const place = yield* placeOf(bot.projectId);
+					const addressed = { projectId: bot.projectId, automationId };
 					const current = yield* forAsker(bot, automations.get(addressed));
 					const [only, ...others] = current.triggers;
-					if (changes.schedule !== undefined && (only?.kind !== "schedule" || others.length > 0)) {
+					if (
+						changes.routineExpression !== undefined &&
+						(only?.kind !== "routine" || others.length > 0)
+					) {
 						return yield* new TriggerSetInSettings();
 					}
 					const updated = yield* forAsker(
@@ -157,21 +169,21 @@ export const make = Effect.gen(function* () {
 								changes.paused === undefined ? undefined : changes.paused ? "paused" : "enabled",
 						}),
 					);
-					if (changes.schedule === undefined || !only) {
-						return toBotAutomation(updated.automation, place.automationsUrl);
+					if (changes.routineExpression === undefined || !only) {
+						return toBotAutomation(updated.automation, place.pageOf);
 					}
 					const rescheduled = yield* forAsker(
 						bot,
 						automations.updateTrigger(
 							{ ...addressed, triggerId: only.id },
 							{
-								kind: "schedule",
-								schedule: { repeat: "cron", expression: changes.schedule },
+								kind: "routine",
+								schedule: { repeat: "cron", expression: changes.routineExpression },
 								timezone: place.timeZone,
 							},
 						),
 					);
-					return toBotAutomation(rescheduled.automation, place.automationsUrl);
+					return toBotAutomation(rescheduled.automation, place.pageOf);
 				}),
 			),
 	});
@@ -186,9 +198,13 @@ export const layerNoDeps = Layer.effect(Service, make);
  */
 export const layer = Layer.suspend(() => layerNoDeps.pipe(Layer.provide(Automations.layer)));
 
-/** The bot and the person whose message it is answering, if a person asked. */
+/**
+ * The bot, the project it is working in, whose automations it reads and
+ * changes, and the person whose message it is answering, if a person asked.
+ */
 export interface Bot {
 	readonly botId: string;
+	readonly projectId: string;
 	readonly askedBy: string | null;
 }
 
@@ -198,40 +214,41 @@ interface BotAutomation {
 	name: string;
 	instructions: string;
 	/**
-	 * What starts it: each schedule and the timezone it runs in, a webhook, or
-	 * a repository's events. A schedule the bot set is a cron expression; one
+	 * What starts it: each routine with the timezone it runs in, a webhook, or
+	 * a repository's events. A routine the bot set runs on a cron expression; one
 	 * picked in settings is by its days and times. With none, it runs only when
 	 * someone runs it.
 	 */
 	when: Array<
-		| { kind: "schedule"; schedule: AutomationSchedule; timezone: string; nextRunAt: string | null }
+		| { kind: "routine"; schedule: RoutineSchedule; timezone: string; nextRunAt: string | null }
 		| { kind: "webhook" }
 		| { kind: "github"; repository: string; events: readonly RepositoryEvent[] }
 	>;
 	paused: boolean;
-	/** The automation's own settings page, for a link in the bot's reply. */
+	/** The page the automation is set up on, for a link in the bot's reply. */
 	settingsUrl: string;
 }
 
 interface NewBotAutomation {
 	name: string;
 	instructions: string;
-	/** A five-field cron expression, in the workspace's timezone. */
-	schedule: string;
+	/** Its one routine, as a five-field cron expression in the workspace's timezone. */
+	routineExpression: string;
 }
 
 interface BotAutomationChanges {
 	name?: string;
 	instructions?: string;
-	schedule?: string;
+	/** A new five-field cron expression for its one routine. */
+	routineExpression?: string;
 	paused?: boolean;
 }
 
 function whenOf(trigger: AutomationTrigger): BotAutomation["when"][number] {
 	switch (trigger.kind) {
-		case "schedule":
+		case "routine":
 			return {
-				kind: "schedule",
+				kind: "routine",
 				schedule: trigger.schedule,
 				timezone: trigger.timezone,
 				nextRunAt: trigger.nextScheduledAt,
@@ -243,14 +260,17 @@ function whenOf(trigger: AutomationTrigger): BotAutomation["when"][number] {
 	}
 }
 
-function toBotAutomation(automation: Automation, automationsUrl: string): BotAutomation {
+function toBotAutomation(
+	automation: Automation,
+	pageOf: (automationId: string) => string,
+): BotAutomation {
 	return {
 		id: automation.id,
 		name: automation.name,
 		instructions: automation.instructions,
 		when: automation.triggers.map(whenOf),
 		paused: automation.state === "paused",
-		settingsUrl: `${automationsUrl}/${automation.id}`,
+		settingsUrl: pageOf(automation.id),
 	};
 }
 
@@ -261,7 +281,7 @@ export type Refused =
 	| TriggerSetInSettings
 	| AutomationNotFound
 	| AutomationRepository.AutomationNameTaken
-	| InvalidAutomationSchedule
+	| InvalidRoutineSchedule
 	| WebhookSecretTooShort
 	| WebhookDeliveryIdHeaderRejected
 	| AutomationRepositoryNotConnected
@@ -270,7 +290,7 @@ export type Refused =
 
 export class NobodyAsked extends Data.TaggedError("NobodyAsked") implements UserFacing {
 	get userMessage() {
-		return userText`Only a person can ask a bot to read or change its automations, and this turn answers no one.`;
+		return userText`Only a person can ask a bot to read or change automations, and this turn answers no one.`;
 	}
 }
 
@@ -279,7 +299,7 @@ export class MayNotManageAutomations
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`The person asking may not do that: only the bot's creator or an admin can have it set up or change its automations.`;
+		return userText`The person asking may not do that: only those who manage this project's automations (for a bot's own, its creator or an admin) can have them set up or changed.`;
 	}
 }
 
@@ -288,6 +308,6 @@ export class TriggerSetInSettings
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`That automation has triggers other than one schedule, which only its settings can change. Its name, instructions and whether it is paused can still be changed here.`;
+		return userText`That automation has more than one routine, or a trigger, which only its settings can change. Its name, instructions and whether it is paused can still be changed here.`;
 	}
 }

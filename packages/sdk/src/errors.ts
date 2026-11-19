@@ -1,5 +1,6 @@
 import {
 	type ApiFailure,
+	apiFailureSchema,
 	BadRequest,
 	Conflict,
 	Forbidden,
@@ -11,18 +12,8 @@ import {
 import { type UserText, userText } from "@sugabots/errors";
 import { Schema } from "effect";
 
-const failureSchema = Schema.Union([
-	BadRequest,
-	Unauthorized,
-	Forbidden,
-	NotFound,
-	Conflict,
-	PayloadTooLarge,
-	InternalServerError,
-]);
-
 /** Whether `failure` is the API answering, rather than a request that never got there. */
-export const isApiFailure = Schema.is(failureSchema);
+export const isApiFailure = Schema.is(apiFailureSchema);
 
 /**
  * The failure a status means, for the parts of the API the generated client
@@ -50,7 +41,7 @@ export function failureForStatus(status: number, message: UserText, details?: un
 
 /** The API's own failure if `body` is one, or the one its status means. */
 export function failureFromResponse(body: unknown, status: number): ApiFailure {
-	const decoded = Schema.decodeUnknownResult(failureSchema)(body);
+	const decoded = Schema.decodeUnknownResult(apiFailureSchema)(body);
 	if (decoded._tag === "Success") {
 		return decoded.success;
 	}

@@ -17,8 +17,8 @@ import {
 } from "../membership/membership.ts";
 
 /**
- * Where a workspace's days begin. Its automations' schedules in its zone are
- * taken to follow it, so they move when it does; a schedule set in any other
+ * Where a workspace's days begin. Its automations' routines in its zone are
+ * taken to follow it, so they move when it does; a routine set in any other
  * zone was chosen for that zone, and stays.
  */
 export interface Interface {
@@ -26,7 +26,7 @@ export interface Interface {
 	readonly get: (
 		input: InWorkspace,
 	) => Effect.Effect<WorkspaceTimeZoneView, AuthorizationDenied, CurrentActor.Service>;
-	/** Moves the workspace, and its automations' schedules in its old zone, to `timeZone`. */
+	/** Moves the workspace, and its automations' routines in its old zone, to `timeZone`. */
 	readonly change: (
 		input: InWorkspace & { timeZone: TimeZone },
 	) => Effect.Effect<void, AuthorizationDenied | TimeZoneUnknown, CurrentActor.Service>;
@@ -41,14 +41,14 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const automations = yield* AutomationRepository.Service;
 
-	/** Rewrites each schedule in `from` to run in `to`, from now. */
-	const moveSchedules = (workspaceId: string, from: string, to: TimeZone) =>
+	/** Rewrites each routine in `from` to run in `to`, from now. */
+	const moveRoutines = (workspaceId: string, from: string, to: TimeZone) =>
 		Effect.gen(function* () {
 			const schedules = yield* query((db) =>
 				db
 					.select({
 						trigger: automationTrigger,
-						botId: automation.botId,
+						projectId: automation.projectId,
 						state: automation.state,
 					})
 					.from(automationTrigger)
@@ -59,12 +59,12 @@ export const make = Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
 			yield* Effect.forEach(
 				schedules,
-				({ trigger, botId, state }) =>
+				({ trigger, projectId, state }) =>
 					Effect.gen(function* () {
-						if (trigger.settings.kind !== "schedule") return;
+						if (trigger.settings.kind !== "routine") return;
 						const settings = { ...trigger.settings, timezone: to };
 						yield* automations.updateTrigger(
-							{ workspaceId, botId, automationId: trigger.automationId },
+							{ workspaceId, projectId, automationId: trigger.automationId },
 							trigger.id,
 							{
 								settings,
@@ -79,7 +79,7 @@ export const make = Effect.gen(function* () {
 			);
 		}).pipe(
 			// Automations run only in the zones this runtime lists, a narrower set than Postgres knows.
-			Effect.catchTag("InvalidAutomationSchedule", () => Effect.fail(new TimeZoneUnknown())),
+			Effect.catchTag("InvalidRoutineSchedule", () => Effect.fail(new TimeZoneUnknown())),
 		);
 
 	return Service.of({
@@ -105,7 +105,10 @@ export const make = Effect.gen(function* () {
 							.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
 							.where(and(eq(automationTrigger.workspaceId, workspaceId), inZone(current.timeZone))),
 					);
-					return { timeZone: current.timeZone, scheduledAutomations: scheduled?.automations ?? 0 };
+					return {
+						timeZone: current.timeZone,
+						automationsWithRoutines: scheduled?.automations ?? 0,
+					};
 				}),
 			),
 
@@ -120,7 +123,7 @@ export const make = Effect.gen(function* () {
 					yield* requireTimeZoneKnownToPostgres(input.timeZone);
 					yield* transaction(
 						Effect.gen(function* () {
-							// Locked, so a change made meanwhile moves the schedules this one leaves.
+							// Locked, so a change made meanwhile moves the routines this one leaves.
 							const [current] = yield* query((db) =>
 								db
 									.select({ timeZone: workspace.timeZone })
@@ -130,7 +133,7 @@ export const make = Effect.gen(function* () {
 							);
 							if (!current) return yield* new ResourceHidden({ resource: "workspace" });
 							if (current.timeZone === input.timeZone) return;
-							yield* moveSchedules(workspaceId, current.timeZone, input.timeZone);
+							yield* moveRoutines(workspaceId, current.timeZone, input.timeZone);
 							yield* query((db) =>
 								db
 									.update(workspace)
@@ -150,10 +153,10 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([Authorization.layer, AutomationRepository.layer]),
 );
 
-/** Schedules in `timeZone` of the automations still defined. */
+/** Routines in `timeZone` of the automations still defined. */
 function inZone(timeZone: string) {
 	return and(
-		eq(automationTrigger.kind, "schedule"),
+		eq(automationTrigger.kind, "routine"),
 		sql`${automationTrigger.settings}->>'timezone' = ${timeZone}`,
 		isNull(automation.deletedAt),
 	);

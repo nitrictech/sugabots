@@ -268,7 +268,7 @@ describe("the conversation feed", () => {
 		]);
 	});
 
-	it("shows an opened collaboration in the asking reply, and lists its task", () => {
+	it("shows an opened collaboration in the asking reply, and lists its thread", () => {
 		expect(
 			sent(
 				ConversationEvent.CollaborationOpened({

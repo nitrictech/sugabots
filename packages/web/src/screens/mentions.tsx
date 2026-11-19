@@ -31,33 +31,33 @@ import { MentionCard } from "./MentionCard.tsx";
  */
 
 /**
- * Everyone a mention in the conversation can name: those in it, then the channel's bots
+ * Everyone a mention in the conversation can name: those in it, then the project's bots
  * and people who are not.
  */
 export function mentionableIn(
-	details: Pick<ConversationDetails, "participants" | "channelBots" | "members">,
+	details: Pick<ConversationDetails, "participants" | "projectBots" | "members">,
 ): Participant[] {
 	const joined = new Set(details.participants.map(({ id }) => id));
 	return [
 		...details.participants,
-		...details.channelBots.filter(({ id }) => !joined.has(id)),
+		...details.projectBots.filter(({ id }) => !joined.has(id)),
 		...details.members.filter(({ id }) => !joined.has(id)),
 	];
 }
 
-/** The bots among `channelBots` that `draft` names, each once, in the order it first names them. */
-export function botsNamed(draft: string, channelBots: readonly Participant[]): BotParticipant[] {
-	const bots = channelBots.filter((member): member is BotParticipant => member.kind === "bot");
+/** The bots among `projectBots` that `draft` names, each once, in the order it first names them. */
+export function botsNamed(draft: string, projectBots: readonly Participant[]): BotParticipant[] {
+	const bots = projectBots.filter((member): member is BotParticipant => member.kind === "bot");
 	const handles = new Set(mentionedHandles(draft));
 	return [...handles].flatMap((handle) => bots.filter((bot) => bot.handle === handle));
 }
 
-/** `@here` or `@channel`, which a person writes to notify everyone who can see the conversation. */
+/** `@here` or `@channel`, which a person writes in a thread to notify its project's people. */
 export interface GroupMention {
 	kind: "group";
 	handle: GroupMentionHandle;
 	/**
-	 * The people it would notify: the channel's people but its writer, never a bot.
+	 * The people it would notify: the project's people but its writer, never a bot.
 	 * Each one's own notification settings can still hold theirs back.
 	 */
 	notifies: readonly PersonParticipant[];
@@ -71,9 +71,9 @@ type Writer = { kind: "person"; id: string } | { kind: Exclude<MessageAuthor["ki
 
 /**
  * `@here` and `@channel` as `writer` can use them in a conversation of kind
- * `conversationKind`, each notifying `members`, the channel's people, but the
+ * `conversationKind`, each notifying `members`, the project's people, but the
  * writer. None where they would notify nobody, so they stay text: written by a
- * bot or an automation, in a conversation that notifies nobody, or in a channel with nobody else in it. None in a
+ * bot or an automation, in a conversation that notifies nobody, or in a project with nobody else in it. None in a
  * direct message either, where everybody in it is told of every message.
  */
 export function groupMentionsBy(
@@ -90,7 +90,7 @@ export function groupMentionsBy(
 
 /**
  * Whom the handle `handle`, as a mention writes it, names among `mentionable`.
- * A person whose handle is `here` or `channel` is mentioned with everyone else.
+ * A person whose handle is that of `@here` or `@channel` is mentioned with everyone else.
  */
 export function targetWithHandle(
 	mentionable: readonly MentionTarget[],

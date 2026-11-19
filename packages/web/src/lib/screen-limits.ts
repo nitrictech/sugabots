@@ -6,6 +6,3 @@
 
 /** More models than this and a provider's list gets a search and a filter by who makes them. */
 export const MODEL_SEARCH_THRESHOLD = 20;
-
-/** How many of a bot's open tasks show under it, before the rest are offered. */
-export const TASKS_SHOWN = 6;

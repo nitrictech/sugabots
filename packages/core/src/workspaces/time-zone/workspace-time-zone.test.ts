@@ -11,7 +11,7 @@ import { closeDatabase, onDatabase, type Promised } from "../../database/testing
 import { onPostgresAs } from "../testing.ts";
 import { WorkspaceTimeZone } from "./workspace-time-zone.ts";
 
-/** Moving a workspace to another time zone, with its automations' schedules, against Postgres. */
+/** Moving a workspace to another time zone, with its automations' routines, against Postgres. */
 describe.skipIf(!process.env.DATABASE_URL)(
 	"a workspace's time zone, against Postgres",
 	async () => {
@@ -19,12 +19,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			EventBus.inProcess({ store: EventStore.inMemory() }),
 		);
 		let workspaceId: string;
-		let botId: string;
+		let ownProjectId: string;
 		let timeZones: Promised<WorkspaceTimeZone.Interface>;
 		let automations: Promised<Automations.Interface>;
 
 		const atNine = (timezone: string) => ({
-			kind: "schedule" as const,
+			kind: "routine" as const,
 			schedule: { repeat: "cron" as const, expression: "0 9 * * *" },
 			timezone,
 		});
@@ -35,7 +35,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
 		beforeEach(async () => {
 			let userId: string;
-			({ workspaceId, botId, userId } = await anAutomationOwner());
+			({ workspaceId, userId, ownProjectId } = await anAutomationOwner());
 			await onDatabase((db) =>
 				db
 					.update(workspace)
@@ -46,13 +46,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			automations = onPostgresAs(userId)(Context.get(conversations, Automations.Service));
 		});
 
-		it("moves the schedules in the workspace's zone, and leaves the ones set for another", async () => {
+		it("moves the routines in the workspace's zone, and leaves the ones set for another", async () => {
 			const local = await automations.create(
-				{ botId },
+				{ projectId: ownProjectId },
 				{ name: "Standup", instructions: "Ask.", triggers: [atNine("Australia/Sydney")] },
 			);
 			const paused = await automations.create(
-				{ botId },
+				{ projectId: ownProjectId },
 				{
 					name: "Paused standup",
 					instructions: "Ask.",
@@ -61,33 +61,38 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				},
 			);
 			const elsewhere = await automations.create(
-				{ botId },
+				{ projectId: ownProjectId },
 				{ name: "London report", instructions: "Report.", triggers: [atNine("Europe/London")] },
 			);
 			expect(await timeZones.get({ workspace: workspaceId })).toEqual({
 				timeZone: "Australia/Sydney",
-				scheduledAutomations: 2,
+				automationsWithRoutines: 2,
 			});
 
 			await timeZones.change({ workspace: workspaceId, timeZone: "Asia/Tokyo" });
 
 			expect(await timeZones.get({ workspace: workspaceId })).toEqual({
 				timeZone: "Asia/Tokyo",
-				scheduledAutomations: 2,
+				automationsWithRoutines: 2,
 			});
-			const moved = await automations.get({ botId, automationId: local.automation.id });
+			const moved = await automations.get({
+				projectId: ownProjectId,
+				automationId: local.automation.id,
+			});
 			expect(moved.triggers).toEqual([
 				expect.objectContaining({ timezone: "Asia/Tokyo", nextScheduledAt: expect.any(String) }),
 			]);
 			// Nine in Tokyo is midnight UTC.
 			const [trigger] = moved.triggers;
-			const nextScheduledAt = trigger?.kind === "schedule" ? trigger.nextScheduledAt : null;
+			const nextScheduledAt = trigger?.kind === "routine" ? trigger.nextScheduledAt : null;
 			expect(nextScheduledAt && new Date(nextScheduledAt).getUTCHours()).toBe(0);
 			expect(
-				(await automations.get({ botId, automationId: paused.automation.id })).triggers,
+				(await automations.get({ projectId: ownProjectId, automationId: paused.automation.id }))
+					.triggers,
 			).toEqual([expect.objectContaining({ timezone: "Asia/Tokyo", nextScheduledAt: null })]);
 			expect(
-				(await automations.get({ botId, automationId: elsewhere.automation.id })).triggers,
+				(await automations.get({ projectId: ownProjectId, automationId: elsewhere.automation.id }))
+					.triggers,
 			).toEqual([expect.objectContaining({ timezone: "Europe/London" })]);
 		});
 

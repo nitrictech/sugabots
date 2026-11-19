@@ -15,8 +15,8 @@ const withSearch = (path: string, search: Search = {}) => {
 	return query === "" ? path : `${path}?${query}`;
 };
 
-export const channelPath = (workspaceSlug: string, channelSlug: string) =>
-	`/${workspaceSlug}/channels/${channelSlug}`;
+export const projectPath = (workspaceSlug: string, projectSlug: string) =>
+	`/${workspaceSlug}/projects/${projectSlug}`;
 
 export const botPath = (workspaceSlug: string, botHandle: string) =>
 	`/${workspaceSlug}/bots/${botHandle}`;
@@ -41,23 +41,23 @@ export const inboxPath = (workspaceSlug: string, rootConversationId: string, sea
 
 /**
  * Where the conversation `conversationId` opens: in the direct messages, in
- * its channel, or as a bot's task. `channelSlug` is null outside a channel.
+ * its project, or as a bot's thread. `projectSlug` is null outside a project.
  */
 export const conversationPath = (
 	place: {
 		workspaceSlug: string;
 		kind: PlacedConversationRow["kind"];
-		channelSlug: string | null;
+		projectSlug: string | null;
 	},
 	conversationId: string,
 	search?: Search,
 ) => {
-	const { workspaceSlug, kind, channelSlug } = place;
+	const { workspaceSlug, kind, projectSlug } = place;
 	if (kind === "direct_message") {
 		return withSearch(`/${workspaceSlug}/dm/${conversationId}`, search);
 	}
-	if (channelSlug !== null) {
-		return withSearch(`${channelPath(workspaceSlug, channelSlug)}/${conversationId}`, search);
+	if (projectSlug !== null) {
+		return withSearch(`${projectPath(workspaceSlug, projectSlug)}/${conversationId}`, search);
 	}
-	return withSearch(`/${workspaceSlug}/tasks/${conversationId}`, search);
+	return withSearch(`/${workspaceSlug}/threads/${conversationId}`, search);
 };

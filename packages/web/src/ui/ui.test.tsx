@@ -1,7 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
+import { SettingsNameRow } from "@/ui/settings-page.tsx";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
 
 /**
@@ -94,5 +97,93 @@ describe("PersonAvatar", () => {
 
 		expect(screen.getByTitle("Rowan Ellis").querySelector("img")).toBeNull();
 		expect(screen.getByTitle("Rowan Ellis").textContent).toBe("RE");
+	});
+});
+
+describe("SearchField", () => {
+	function Search() {
+		const [query, setQuery] = useState("");
+		return <SearchField label="Search bots" value={query} onChange={setQuery} />;
+	}
+
+	it("clears what was typed on Escape", () => {
+		render(<Search />);
+		const field = screen.getByRole("searchbox", { name: "Search bots" });
+
+		fireEvent.change(field, { target: { value: "trip" } });
+		fireEvent.keyDown(field, { key: "Escape" });
+
+		expect((field as HTMLInputElement).value).toBe("");
+	});
+});
+
+describe("useSearchFilter", () => {
+	const bots = [
+		{ name: "Trip Planner", handle: "trips" },
+		{ name: "Inbox Sorter", handle: "rowan-mail" },
+	];
+
+	function FilteredBots() {
+		const { query, setQuery, matches } = useSearchFilter(bots, (bot) => [bot.name, bot.handle]);
+		return (
+			<>
+				<SearchField label="Search bots" value={query} onChange={setQuery} />
+				<ul>
+					{matches.map((bot) => (
+						<li key={bot.name}>{bot.name}</li>
+					))}
+				</ul>
+			</>
+		);
+	}
+
+	it("matches what is typed in any field, ignoring case and surrounding spaces", async () => {
+		render(<FilteredBots />);
+
+		fireEvent.change(screen.getByRole("searchbox"), { target: { value: "  ROWAN " } });
+
+		await waitFor(() =>
+			expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+				"Inbox Sorter",
+			]),
+		);
+	});
+});
+
+describe("SettingsNameRow", () => {
+	function edit(onCommit: (name: string) => unknown, typed: string) {
+		render(<SettingsNameRow name="Lisbon trip" onCommit={onCommit} />);
+		const field = screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement;
+		fireEvent.change(field, { target: { value: typed } });
+		return field;
+	}
+
+	it("saves the name trimmed when the field is left", () => {
+		const onCommit = vi.fn();
+		const field = edit(onCommit, "  Porto trip  ");
+
+		fireEvent.blur(field);
+
+		expect(onCommit).toHaveBeenCalledWith("Porto trip");
+		expect(field.value).toBe("Porto trip");
+	});
+
+	it("puts the saved name back on Escape, without saving", () => {
+		const onCommit = vi.fn();
+		const field = edit(onCommit, "Porto trip");
+
+		fireEvent.keyDown(field, { key: "Escape" });
+		fireEvent.blur(field);
+
+		expect(field.value).toBe("Lisbon trip");
+		expect(onCommit).not.toHaveBeenCalled();
+	});
+
+	it("puts the saved name back when saving fails", async () => {
+		const field = edit(() => Promise.reject(new Error("Offline")), "Porto trip");
+
+		fireEvent.blur(field);
+
+		await waitFor(() => expect(field.value).toBe("Lisbon trip"));
 	});
 });

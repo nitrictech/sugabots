@@ -10,7 +10,8 @@ import { Check, ChevronRight } from "lucide-react";
  * pointer is right-clicked; both hold the same items.
  */
 
-const popupClassName =
+/** The panel a menu is drawn as, for a select or listbox that has to be another element. */
+export const MENU_POPUP =
 	"z-50 max-h-(--available-height) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-border-strong bg-panel p-1 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
@@ -41,7 +42,7 @@ function DropdownMenuContent({
 			>
 				<MenuPrimitive.Popup
 					data-slot="dropdown-menu-content"
-					className={cn(popupClassName, className)}
+					className={cn(MENU_POPUP, className)}
 					{...props}
 				/>
 			</MenuPrimitive.Positioner>
@@ -49,7 +50,8 @@ function DropdownMenuContent({
 	);
 }
 
-const itemClassName =
+/** A menu row's look, for the options of a select or listbox. */
+export const MENU_ITEM =
 	"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-tail px-2.5 py-2 text-sm outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
 
 function DropdownMenuItem({
@@ -64,7 +66,7 @@ function DropdownMenuItem({
 			data-slot="dropdown-menu-item"
 			data-variant={variant}
 			className={cn(
-				itemClassName,
+				MENU_ITEM,
 				"data-[variant=destructive]:text-destructive-text data-[variant=destructive]:data-highlighted:bg-destructive-hover",
 				className,
 			)}
@@ -82,7 +84,7 @@ function DropdownMenuCheckboxItem({
 	return (
 		<MenuPrimitive.CheckboxItem
 			data-slot="dropdown-menu-checkbox-item"
-			className={cn(itemClassName, "group/checkbox", className)}
+			className={cn(MENU_ITEM, "group/checkbox", className)}
 			{...props}
 		>
 			<span
@@ -119,7 +121,7 @@ function DropdownMenuRadioItem({ className, children, ...props }: MenuPrimitive.
 	return (
 		<MenuPrimitive.RadioItem
 			data-slot="dropdown-menu-radio-item"
-			className={cn(itemClassName, "pr-8", className)}
+			className={cn(MENU_ITEM, "pr-8", className)}
 			{...props}
 		>
 			{children}
@@ -158,7 +160,7 @@ function DropdownMenuSubTrigger({
 	return (
 		<MenuPrimitive.SubmenuTrigger
 			data-slot="dropdown-menu-sub-trigger"
-			className={cn(itemClassName, "data-popup-open:bg-chip", className)}
+			className={cn(MENU_ITEM, "data-popup-open:bg-chip", className)}
 			{...props}
 		>
 			{children}
@@ -182,7 +184,7 @@ function ContextMenuContent({ className, ...props }: ContextMenuPrimitive.Popup.
 			<ContextMenuPrimitive.Positioner className="isolate z-50 outline-none">
 				<ContextMenuPrimitive.Popup
 					data-slot="context-menu-content"
-					className={cn(popupClassName, className)}
+					className={cn(MENU_POPUP, className)}
 					{...props}
 				/>
 			</ContextMenuPrimitive.Positioner>

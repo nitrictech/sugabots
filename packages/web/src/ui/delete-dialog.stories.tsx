@@ -17,8 +17,8 @@ const meta = preview.meta({
 	},
 });
 
-/** DeleteChannel confirms an irreversible deletion with Cancel beside a red action. */
-export const DeleteChannel = meta.story({
+/** DeleteProject confirms an irreversible deletion with Cancel beside a red action. */
+export const DeleteProject = meta.story({
 	play: async ({ args, canvasElement, userEvent }) => {
 		const dialog = await within(canvasElement.ownerDocument.body).findByRole("dialog", {
 			name: "Delete Engineering?",
@@ -40,5 +40,5 @@ export const Pending = meta.story({
 
 /** Failed says why the deletion didn't happen and leaves the dialog open to retry. */
 export const Failed = meta.story({
-	args: { error: "The channel could not be deleted. Try again." },
+	args: { error: "The project could not be deleted. Try again." },
 });

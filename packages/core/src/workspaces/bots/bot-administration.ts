@@ -7,15 +7,17 @@ import { type AuthorizationDenied, ResourceHidden } from "../../authorization/ac
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import type { Actor } from "../../authorization/permissions.ts";
-import { BotComputers } from "../../computers/bot-computers.ts";
 import type { Computers } from "../../computers/computers.ts";
+import { ProjectComputers } from "../../computers/project-computers.ts";
 import { serviceOperations } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import type { UserFacing } from "../../user-message.ts";
+import { type LeadsProjects, refuseWhileLeading } from "../projects/project-leads.ts";
+import { defaultProjectOf } from "../projects/project-reads.ts";
 import { personFacingBotRow, toBot } from "./bot.ts";
-import { systemBots, visiblePersonFacingBots } from "./bot-reads.ts";
+import { isPinnedBy, systemBots, visiblePersonFacingBots } from "./bot-reads.ts";
 import { BotRepository } from "./bot-repository.ts";
 import { PersonalAssistants } from "./personal-assistants.ts";
 
@@ -75,6 +77,7 @@ export interface Interface {
 		| BotRepository.BotHandleReserved
 		| BotRepository.BotGone
 		| BotRepository.SystemBotImmutable
+		| LeadsProjects
 		| AssistantStaysPrivate
 		| AssistantInstructionsManaged
 		| AssistantManaged,
@@ -84,7 +87,7 @@ export interface Interface {
 		botId: string;
 	}) => Effect.Effect<
 		void,
-		AuthorizationDenied | BotRepository.SystemBotImmutable | Computers.Unavailable,
+		AuthorizationDenied | BotRepository.SystemBotImmutable | LeadsProjects | Computers.Unavailable,
 		CurrentActor.Service
 	>;
 	readonly systemBots: (input: {
@@ -111,15 +114,19 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const bots = yield* BotRepository.Service;
 	const modelProviders = yield* ModelProviderRepository.Service;
-	const botComputers = yield* BotComputers.Service;
+	const projectComputers = yield* ProjectComputers.Service;
 	const personalAssistants = yield* PersonalAssistants.Service;
 
-	/** The bot as `actor` is shown it, with whether they pinned it. */
-	const shown = (row: schema.BotRow, actor: Actor) =>
+	/** The bot as `actor` is shown it, with whether they pinned it, unless told. */
+	const shown = (row: schema.BotRow, actor: Actor, pinned?: boolean) =>
 		Effect.gen(function* () {
 			const bot = personFacingBotRow(row);
 			if (!bot) return yield* new ResourceHidden({ resource: "bot" });
-			return toBot(bot, { actor, pinned: yield* bots.isPinned(actor.userId, row.id) });
+			const defaultProjectId = yield* defaultProjectOf(bot.id);
+			return toBot(
+				{ ...bot, defaultProjectId },
+				{ actor, pinned: pinned ?? (yield* isPinnedBy(row.id, actor.userId)) },
+			);
 		});
 
 	return Service.of({
@@ -151,7 +158,7 @@ export const make = Effect.gen(function* () {
 					const { workspaceId, actor } = yield* authorization.workspace(workspace, "bot.create");
 					yield* modelProviders.requireEnabled(workspaceId, bot.model);
 					const made = yield* bots.create(workspaceId, { createdById: actor.userId, bot });
-					return toBot(made, { actor, pinned: true });
+					return yield* shown(made, actor, true);
 				}),
 			),
 
@@ -183,7 +190,7 @@ export const make = Effect.gen(function* () {
 						model === undefined
 							? yield* personalAssistants.provision(person)
 							: yield* personalAssistants.provisionWithModel({ ...person, model });
-					return toBot(assistant, { actor });
+					return yield* shown(assistant, actor, false);
 				}),
 			),
 
@@ -212,8 +219,14 @@ export const make = Effect.gen(function* () {
 				"remove",
 				Effect.gen(function* () {
 					const { bot } = yield* authorization.bot(botId, "bot.delete");
-					// Deleting the bot deletes its computer's record, so its machine goes first.
-					yield* botComputers.destroy({ workspaceId: bot.workspaceId, botId: bot.id });
+					// Checked again as it is deleted; here so its computer is kept when it is refused.
+					yield* refuseWhileLeading(bot.id);
+					// Deleting the bot deletes its default project and so its computer's
+					// record, so its machine goes first.
+					yield* projectComputers.destroy({
+						workspaceId: bot.workspaceId,
+						projectId: yield* defaultProjectOf(bot.id),
+					});
 					yield* bots.remove(bot.workspaceId, bot.id);
 				}),
 			),
@@ -255,7 +268,7 @@ export const layer = layerNoDeps.pipe(
 		Authorization.layer,
 		BotRepository.layer,
 		ModelProviderRepository.layer,
-		BotComputers.layer,
+		ProjectComputers.layer,
 		PersonalAssistants.layer,
 	]),
 );

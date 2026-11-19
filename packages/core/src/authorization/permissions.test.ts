@@ -5,11 +5,11 @@ import {
 	type BotFacts,
 	type BotPermission,
 	botPermissions,
-	type ChannelPermission,
-	channelPermissions,
-	mayInChannel,
+	mayInProject,
 	mayInWorkspace,
 	mayOnBot,
+	type ProjectPermission,
+	projectPermissions,
 	reachesBot,
 	type WorkspacePermission,
 } from "./permissions.ts";
@@ -66,19 +66,31 @@ const WORKSPACE_PERMISSIONS = Object.keys({
 	"workspace.delete": true,
 	"workspace.builtInBots.configure": true,
 	"workspace.usage.manage": true,
-	"channel.create": true,
+	"project.create": true,
 	"bot.create": true,
 } satisfies Record<WorkspacePermission, true>) as WorkspacePermission[];
 
-const CHANNEL_PERMISSIONS = Object.keys({
-	"channel.read": true,
-	"channel.update": true,
-	"channel.delete": true,
-	"channel.members.manage": true,
-	"channel.bots.manage": true,
-	"channel.leave": true,
+const PROJECT_PERMISSIONS = Object.keys({
+	"project.read": true,
+	"project.update": true,
+	"project.delete": true,
+	"project.members.manage": true,
+	"project.bots.manage": true,
+	"project.leave": true,
+	"project.threads.manage": true,
 	"approval.decide": true,
-} satisfies Record<ChannelPermission, true>) as ChannelPermission[];
+	"connection.read": true,
+	"connection.manage": true,
+	"automation.read": true,
+	"automation.manage": true,
+	"automation.run": true,
+	"automation.history.read": true,
+	"approval.automation.decide": true,
+	"computer.read": true,
+	"computer.manage": true,
+	"computer.request.decide": true,
+	"computer.desktop.use": true,
+} satisfies Record<ProjectPermission, true>) as ProjectPermission[];
 
 const BOT_PERMISSIONS = Object.keys({
 	"bot.read": true,
@@ -105,24 +117,40 @@ const OWNER_ONLY: WorkspacePermission[] = [
 	"workspace.delete",
 ];
 
-/** What a member may do in the workspace: belong to it, and make channels and bots. */
+/** What a member may do in the workspace: belong to it, and make projects and bots. */
 const MEMBER_IN_WORKSPACE: WorkspacePermission[] = [
 	"workspace.read",
-	"channel.create",
+	"project.create",
 	"bot.create",
 ];
 
-/** What a member holds in a channel they are in: everything but changing or deleting it. */
-const MEMBER_IN_CHANNEL: ChannelPermission[] = [
-	"channel.read",
-	"channel.leave",
-	"channel.members.manage",
-	"channel.bots.manage",
+/** What a member holds in a project they are in: everything but changing or deleting it. */
+const MEMBER_IN_PROJECT: ProjectPermission[] = [
+	"project.read",
+	"project.leave",
+	"project.members.manage",
+	"project.bots.manage",
 	"approval.decide",
+	"connection.read",
+	"automation.read",
+	"automation.history.read",
+	"automation.run",
+	"computer.read",
+	"computer.desktop.use",
 ];
 
-/** What a viewer holds in a channel they are in: reading, taking part, and leaving. */
-const VIEWER_IN_CHANNEL: ChannelPermission[] = ["channel.read", "channel.leave"];
+/**
+ * What a viewer holds in a project they are in: reading, taking part, and
+ * leaving, and seeing its connections, automations and computer.
+ */
+const VIEWER_IN_PROJECT: ProjectPermission[] = [
+	"project.read",
+	"project.leave",
+	"connection.read",
+	"automation.read",
+	"automation.history.read",
+	"computer.read",
+];
 
 /** What anybody who reaches a bot may do with it without managing it. */
 const USING_A_BOT: BotPermission[] = [
@@ -136,7 +164,7 @@ const USING_A_BOT: BotPermission[] = [
 	"computer.desktop.use",
 ];
 
-/** What a viewer who reaches a bot may do with it: read, and take part in its tasks. */
+/** What a viewer who reaches a bot may do with it: read, and take part in its threads. */
 const VIEWING_A_BOT: BotPermission[] = [
 	"bot.read",
 	"bot.settings.read",
@@ -147,7 +175,7 @@ const VIEWING_A_BOT: BotPermission[] = [
 
 /**
  * What a bot's creator, or an administrator, may do with it besides use it,
- * with reading the configuration they change, but not its tasks, files or
+ * with reading the configuration they change, but not its threads, files or
  * automations' runs.
  */
 const MANAGING_A_BOT: BotPermission[] = [
@@ -195,43 +223,111 @@ describe("workspace actions", () => {
 	});
 });
 
-describe("channel actions", () => {
+describe("project actions", () => {
 	describe.each(["owner", "admin"] as const)("as %s", (role) => {
-		it.each(CHANNEL_PERMISSIONS)("in the channel may %s unless it is leaving", (permission) => {
-			expect(mayInChannel(actor(role), permission, { isMember: true })).toBe(
-				permission !== "channel.leave",
+		it.each(PROJECT_PERMISSIONS)("in the project may %s unless it is leaving", (permission) => {
+			expect(mayInProject(actor(role), permission, { isMember: true, defaultOf: null })).toBe(
+				permission !== "project.leave",
 			);
 		});
 
-		it.each(CHANNEL_PERMISSIONS)("outside the channel may not %s", (permission) => {
-			expect(mayInChannel(actor(role), permission, { isMember: false })).toBe(false);
+		it.each(PROJECT_PERMISSIONS)("outside the project may not %s", (permission) => {
+			expect(mayInProject(actor(role), permission, { isMember: false, defaultOf: null })).toBe(
+				false,
+			);
 		});
 	});
 
-	it.each(CHANNEL_PERMISSIONS)("a member in the channel may %s only when granted", (permission) => {
-		expect(mayInChannel(actor("member"), permission, { isMember: true })).toBe(
-			MEMBER_IN_CHANNEL.includes(permission),
+	it.each(PROJECT_PERMISSIONS)("a member in the project may %s only when granted", (permission) => {
+		expect(mayInProject(actor("member"), permission, { isMember: true, defaultOf: null })).toBe(
+			MEMBER_IN_PROJECT.includes(permission),
 		);
 	});
 
-	it.each(CHANNEL_PERMISSIONS)("a viewer in the channel may %s only when granted", (permission) => {
-		expect(mayInChannel(actor("viewer"), permission, { isMember: true })).toBe(
-			VIEWER_IN_CHANNEL.includes(permission),
+	it.each(PROJECT_PERMISSIONS)("a viewer in the project may %s only when granted", (permission) => {
+		expect(mayInProject(actor("viewer"), permission, { isMember: true, defaultOf: null })).toBe(
+			VIEWER_IN_PROJECT.includes(permission),
 		);
 	});
 
 	it.each(["member", "viewer"] as const)(
-		"a %s outside the channel may do nothing in it",
+		"a %s outside the project may do nothing in it",
 		(role) => {
-			for (const permission of CHANNEL_PERMISSIONS) {
-				expect(mayInChannel(actor(role), permission, { isMember: false })).toBe(false);
+			for (const permission of PROJECT_PERMISSIONS) {
+				expect(mayInProject(actor(role), permission, { isMember: false, defaultOf: null })).toBe(
+					false,
+				);
 			}
 		},
 	);
 
-	it.each(CHANNEL_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
-		expect(mayInChannel(actor(undefined), permission, { isMember: true })).toBe(false);
+	it.each(PROJECT_PERMISSIONS)("somebody outside the workspace may not %s", (permission) => {
+		expect(mayInProject(actor(undefined), permission, { isMember: true, defaultOf: null })).toBe(
+			false,
+		);
 	});
+});
+
+describe("a bot's default project", () => {
+	/** A bot's default project, as its bot's facts decide it. */
+	const defaultProjectOf = (bot: BotFacts) => ({ isMember: false, defaultOf: bot });
+
+	it("is reached by whoever reaches its bot, and by nobody else", () => {
+		const publicOne = defaultProjectOf(publicBotBy(BOB));
+		for (const role of ["owner", "admin", "member", "viewer"] as const) {
+			expect(mayInProject(actor(role), "project.read", publicOne)).toBe(true);
+		}
+		const privateOne = defaultProjectOf(privateBotBy(BOB));
+		expect(mayInProject(actor("member", BOB), "project.read", privateOne)).toBe(true);
+		expect(mayInProject(actor("member"), "project.read", privateOne)).toBe(false);
+		const assistants = defaultProjectOf(assistantOf(BOB));
+		expect(mayInProject(actor("member", BOB), "project.read", assistants)).toBe(true);
+		expect(mayInProject(actor("owner"), "project.read", assistants)).toBe(false);
+	});
+
+	it("lets an admin manage what a private bot's default project holds, but not see its threads", () => {
+		const privateOne = defaultProjectOf(privateBotBy(BOB));
+		const managed: ProjectPermission[] = [
+			"connection.read",
+			"connection.manage",
+			"automation.read",
+			"automation.manage",
+			"approval.automation.decide",
+			"computer.read",
+			"computer.manage",
+			"computer.request.decide",
+		];
+		for (const permission of PROJECT_PERMISSIONS) {
+			expect(mayInProject(actor("admin"), permission, privateOne)).toBe(
+				managed.includes(permission),
+			);
+		}
+	});
+
+	it("lets its bot's managers tidy its threads, and those who may decide the bot's calls decide them", () => {
+		const own = defaultProjectOf(publicBotBy(BOB));
+		expect(mayInProject(actor("member", BOB), "project.threads.manage", own)).toBe(true);
+		expect(mayInProject(actor("admin"), "project.threads.manage", own)).toBe(true);
+		expect(mayInProject(actor("member"), "project.threads.manage", own)).toBe(false);
+		expect(mayInProject(actor("member"), "approval.decide", own)).toBe(true);
+		expect(mayInProject(actor("viewer"), "approval.decide", own)).toBe(false);
+	});
+
+	it.each(["owner", "admin", "member"] as const)(
+		"lets a %s never change it, staff it, join, leave or delete it",
+		(role) => {
+			const own = defaultProjectOf(publicBotBy(BOB));
+			const permissions = projectPermissions(actor(role, BOB), { ...own, isPublic: true });
+			expect(permissions).toMatchObject({
+				rename: false,
+				manageMembers: false,
+				manageBots: false,
+				leave: false,
+				join: false,
+				delete: false,
+			});
+		},
+	);
 });
 
 describe("reaching a bot", () => {
@@ -316,7 +412,7 @@ describe("bot actions", () => {
 
 	it("lets a viewer decide what their own Personal Assistant asks to do for them", () => {
 		expect(mayOnBot(actor("viewer"), "approval.decide", assistantOf(ALICE))).toBe(true);
-		expect(mayInWorkspace(actor("viewer"), "channel.create")).toBe(false);
+		expect(mayInWorkspace(actor("viewer"), "project.create")).toBe(false);
 	});
 
 	it.each(BOT_PERMISSIONS)(
@@ -332,8 +428,10 @@ describe("bot actions", () => {
 });
 
 describe("what the API tells a client", () => {
-	it("lets an admin change, staff and delete a channel, and not leave it", () => {
-		expect(channelPermissions(actor("admin"), { isMember: true, isPublic: false })).toEqual({
+	it("lets an admin change, staff and delete a project, and not leave it", () => {
+		expect(
+			projectPermissions(actor("admin"), { isMember: true, defaultOf: null, isPublic: false }),
+		).toEqual({
 			rename: true,
 			manageMembers: true,
 			manageBots: true,
@@ -341,11 +439,18 @@ describe("what the API tells a client", () => {
 			join: false,
 			delete: true,
 			deleteFiles: true,
+			manageConnections: true,
+			manageComputer: true,
+			useDesktop: true,
+			manageAutomations: true,
+			runAutomations: true,
 		});
 	});
 
-	it("lets a member staff and leave a channel they are in, and not change or delete it", () => {
-		expect(channelPermissions(actor("member"), { isMember: true, isPublic: true })).toEqual({
+	it("lets a member staff and leave a project they are in, run its automations and use its desktop, and not change or delete it", () => {
+		expect(
+			projectPermissions(actor("member"), { isMember: true, defaultOf: null, isPublic: true }),
+		).toEqual({
 			rename: false,
 			manageMembers: true,
 			manageBots: true,
@@ -353,12 +458,19 @@ describe("what the API tells a client", () => {
 			join: false,
 			delete: false,
 			deleteFiles: false,
+			manageConnections: false,
+			manageComputer: false,
+			useDesktop: true,
+			manageAutomations: false,
+			runAutomations: true,
 		});
 	});
 
-	it("lets anyone in the workspace join a public channel they are not in, and nothing else", () => {
+	it("lets anyone in the workspace join a public project they are not in, and nothing else", () => {
 		for (const role of ["member", "viewer"] as const) {
-			expect(channelPermissions(actor(role), { isMember: false, isPublic: true })).toEqual({
+			expect(
+				projectPermissions(actor(role), { isMember: false, defaultOf: null, isPublic: true }),
+			).toEqual({
 				rename: false,
 				manageMembers: false,
 				manageBots: false,
@@ -366,17 +478,24 @@ describe("what the API tells a client", () => {
 				join: true,
 				delete: false,
 				deleteFiles: false,
+				manageConnections: false,
+				manageComputer: false,
+				useDesktop: false,
+				manageAutomations: false,
+				runAutomations: false,
 			});
 		}
 	});
 
-	it("does not offer to join a private channel, or a public one from outside the workspace", () => {
-		expect(channelPermissions(actor("member"), { isMember: false, isPublic: false }).join).toBe(
-			false,
-		);
-		expect(channelPermissions(actor(undefined), { isMember: false, isPublic: true }).join).toBe(
-			false,
-		);
+	it("does not offer to join a private project, or a public one from outside the workspace", () => {
+		expect(
+			projectPermissions(actor("member"), { isMember: false, defaultOf: null, isPublic: false })
+				.join,
+		).toBe(false);
+		expect(
+			projectPermissions(actor(undefined), { isMember: false, defaultOf: null, isPublic: true })
+				.join,
+		).toBe(false);
 	});
 
 	it("lets a member talk to a public bot without managing it", () => {

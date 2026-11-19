@@ -17,7 +17,7 @@ const meta = preview.meta({
 /** Initials on a grey disc at each size the app uses: rows, lists, the sidebar, a page's hero. */
 export const Sizes = meta.story({
 	render: (args) => (
-		<div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+		<div className="flex items-center gap-4">
 			{[22, 30, 32, 36, 46, 88].map((size) => (
 				<PersonAvatar key={size} {...args} size={size} />
 			))}
@@ -31,7 +31,7 @@ export const Sizes = meta.story({
 /** One name gives its first two letters; several give the first and last initial. */
 export const Initials = meta.story({
 	render: () => (
-		<div style={{ display: "flex", gap: 16 }}>
+		<div className="flex gap-4">
 			<PersonAvatar person={{ name: "Mara", email: "mara@example.com" }} size={36} />
 			<PersonAvatar person={{ name: "Jay Young", email: "jay@example.com" }} size={36} />
 			<PersonAvatar person={{ name: "Sam de la Park", email: "sam@example.com" }} size={36} />

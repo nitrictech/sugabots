@@ -51,13 +51,13 @@ export const builtInToolCatalog: readonly BuiltInToolEntry[] = [
 		key: "file_list",
 		name: "List files",
 		description:
-			"Lists the documents and pages it wrote, and those written in the channel it is in.",
+			"Lists the documents and pages it wrote, and those written in the project it is in.",
 		usesWeb: false,
 	},
 	{
 		key: "file_read",
 		name: "Read files",
-		description: "Reads a document or page it wrote, or one written in the channel it is in.",
+		description: "Reads a document or page it wrote, or one written in the project it is in.",
 		usesWeb: false,
 	},
 	{

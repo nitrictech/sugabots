@@ -14,7 +14,7 @@ import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	botStandingFor,
-	channelStandingFor,
+	projectStandingFor,
 	type ResourceHidden,
 	requireReach,
 } from "../authorization/access.ts";
@@ -55,14 +55,14 @@ export interface Interface {
 		preferences: NotificationPreferences,
 	) => Effect.Effect<NotificationSettings, never, CurrentActor.Service>;
 	/**
-	 * Sets the actor's level for a channel or bot they reach, or with null goes
+	 * Sets the actor's level for a project or bot they reach, or with null goes
 	 * back to the one above it, which also ends its mute.
 	 */
 	readonly setLevel: (
 		place: Place,
 		level: NotificationLevel | null,
 	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
-	/** Mutes a channel or bot the actor reaches until `until`, or with null, or a time passed, ends its mute. */
+	/** Mutes a project or bot the actor reaches until `until`, or with null, or a time passed, ends its mute. */
 	readonly mute: (
 		place: Place,
 		until: Date | null,
@@ -120,16 +120,16 @@ export const make = Effect.gen(function* () {
 			);
 			const now = yield* DateTime.nowAsDate;
 			const levels = {
-				channels: {} as Record<string, NotificationLevel>,
+				projects: {} as Record<string, NotificationLevel>,
 				bots: {} as Record<string, NotificationLevel>,
 			};
 			const mutedUntil = {
-				channels: {} as Record<string, string>,
+				projects: {} as Record<string, string>,
 				bots: {} as Record<string, string>,
 			};
 			for (const override of overrides) {
-				const [kind, id] = override.channelId
-					? (["channels", override.channelId] as const)
+				const [kind, id] = override.projectId
+					? (["projects", override.projectId] as const)
 					: (["bots", override.botId] as const);
 				if (!id) continue;
 				if (override.level) levels[kind][id] = override.level;
@@ -337,7 +337,7 @@ const notificationsFor = Effect.fn("Notifications.notificationsFor")(function* (
 	}
 });
 
-/** A channel or a bot, where a person chooses in place of the level above. */
+/** A project or a bot, where a person chooses in place of the level above. */
 export interface Place {
 	kind: NotificationPlaceKind;
 	id: string;
@@ -346,18 +346,18 @@ export interface Place {
 /** The person's override row for `place`: how to find it, make it, and update it in place. */
 function overrideOf(userId: string, place: Place) {
 	const column =
-		place.kind === "channel" ? notificationOverride.channelId : notificationOverride.botId;
+		place.kind === "project" ? notificationOverride.projectId : notificationOverride.botId;
 	return {
 		where: and(eq(notificationOverride.userId, userId), eq(column, place.id)),
-		row: place.kind === "channel" ? { userId, channelId: place.id } : { userId, botId: place.id },
+		row: place.kind === "project" ? { userId, projectId: place.id } : { userId, botId: place.id },
 		conflict: { target: [notificationOverride.userId, column], targetWhere: isNotNull(column) },
 	};
 }
 
 const requireReachOf = (userId: string, place: Place) =>
-	place.kind === "channel"
-		? query((db) => channelStandingFor(db, place.id, userId)).pipe(
-				Effect.flatMap((standing) => requireReach(standing, "channel")),
+	place.kind === "project"
+		? query((db) => projectStandingFor(db, place.id, userId)).pipe(
+				Effect.flatMap((standing) => requireReach(standing, "project")),
 			)
 		: query((db) => botStandingFor(db, place.id, userId)).pipe(
 				Effect.flatMap((standing) => requireReach(standing, "bot")),

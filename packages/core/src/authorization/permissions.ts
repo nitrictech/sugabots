@@ -1,6 +1,6 @@
 import {
 	type BotPermissions as BotPermissionsView,
-	type ChannelPermissions as ChannelPermissionsView,
+	type ProjectPermissions as ProjectPermissionsView,
 	WORKSPACE_ROLES,
 	type WorkspacePermissions as WorkspacePermissionsView,
 	type WorkspaceRole,
@@ -19,11 +19,14 @@ import {
  *
  * - **Workspace actions** concern the workspace itself, and are answered from
  *   the caller's role alone.
- * - **Channel actions** concern a channel and its conversations, answered from
- *   the caller's role and whether they are in it.
- * - **Bot actions** concern a bot and what it owns: its tasks, connections,
- *   automations and computer. They are answered from the caller's role and
- *   the bot's visibility, creator and person, if it is a Personal Assistant.
+ * - **Project actions** concern a project and what is in it: its threads,
+ *   connections, automations and computer. They are answered from the
+ *   caller's role and whether they are in it. A bot's default project is the
+ *   exception: it follows its bot (see `mayInProject`).
+ * - **Bot actions** concern a bot, and what its default project holds, as
+ *   that project's actions are decided. They are answered from the caller's
+ *   role and the bot's visibility, creator and person, if it is a Personal
+ *   Assistant.
  *
  * Every permission here is asked for somewhere.
  *
@@ -37,7 +40,7 @@ import {
 
 /** An action addressed at a workspace. */
 export type WorkspacePermission =
-	/** Belong to the workspace: see its people, its public bots and channels, and its enabled models. */
+	/** Belong to the workspace: see its people, its public bots and projects, and its enabled models. */
 	| "workspace.read"
 	/** Rename the workspace, change its address, and move it to another time zone. */
 	| "workspace.update"
@@ -58,59 +61,78 @@ export type WorkspacePermission =
 	| "workspace.builtInBots.configure"
 	/** See what the workspace's models cost, every bot's included, and limit it. */
 	| "workspace.usage.manage"
-	/** Make a channel. */
-	| "channel.create"
+	/** Make a project. */
+	| "project.create"
 	/** Make a bot. */
 	| "bot.create";
 
 /**
- * An action addressed at a channel. `channel.read` is reach: holding it is being
- * in the channel, seeing its conversations and taking part in them.
+ * An action addressed at a project, or at something in it: its threads,
+ * connections, automations and computer. `project.read` is reach: holding it
+ * is being in the project, seeing its conversations and automations' runs,
+ * and taking part in them. Its connections, automations and computer are
+ * managed by whoever may change the project.
  */
-export type ChannelPermission =
-	| "channel.read"
-	| "channel.update"
-	| "channel.delete"
+export type ProjectPermission =
+	| ProjectResourcePermission
+	| "project.read"
+	/** Change its name, address, colour, description, visibility and lead bot. */
+	| "project.update"
+	| "project.delete"
+	/** Rename and archive its threads, and delete the files made in them. */
+	| "project.threads.manage"
 	/** Invite and remove people. */
-	| "channel.members.manage"
+	| "project.members.manage"
 	/** Add and remove bots. */
-	| "channel.bots.manage"
-	/** Take yourself out. Administrators stay in every channel. */
-	| "channel.leave"
-	/** Decide a tool call a bot raised in the channel. */
+	| "project.bots.manage"
+	/** Take yourself out. Administrators stay in every project. */
+	| "project.leave"
+	/** Decide a tool call a bot raised in the project. */
 	| "approval.decide";
 
 /**
- * An action addressed at a bot, or at something it owns: its tasks,
- * connections, automations and computer. `bot.read` is reach: seeing the
- * bot's tasks, files and automations' runs, and taking part in them. Its
- * configuration is read by whoever reaches it or manages it, so an
- * administrator can manage a private bot without seeing what it was asked.
+ * An action on what a project holds besides its threads: its connections,
+ * automations and computer. In a bot's default project each is the bot's
+ * action of the same name, so a bot's are decided as its own.
+ */
+type ProjectResourcePermission =
+	/** See the connections and their settings. */
+	| "connection.read"
+	/** Add, change, sign in and remove connections, the GitHub app among them. */
+	| "connection.manage"
+	/** See the automations as defined, without what their runs said. */
+	| "automation.read"
+	| "automation.manage"
+	| "automation.run"
+	/** See what the automations' runs did and said. */
+	| "automation.history.read"
+	/** Decide a tool call a bot raised while one of the automations ran. */
+	| "approval.automation.decide"
+	/** See how the computer stands. */
+	| "computer.read"
+	/** Decide what the computer may reach, reset and upgrade it. */
+	| "computer.manage"
+	/** Allow or refuse a bot's request to reach more from the computer. */
+	| "computer.request.decide"
+	/** Click and type on the computer's desktop, rather than only watch it. */
+	| "computer.desktop.use";
+
+/**
+ * An action addressed at a bot, or at what its default project holds.
+ * `bot.read` is reach: seeing the bot's threads, files and automations' runs,
+ * and taking part in them. Its configuration is read by whoever reaches it or
+ * manages it, so an administrator can manage a private bot without seeing
+ * what it was asked.
  */
 export type BotPermission =
+	| Exclude<ProjectResourcePermission, "computer.read">
 	| "bot.read"
 	/** See the bot's settings and the state of its computer. */
 	| "bot.settings.read"
 	| "bot.update"
 	| "bot.delete"
-	| "connection.read"
-	| "connection.manage"
-	/** See the bot's automations as defined, without what their runs said. */
-	| "automation.read"
-	| "automation.manage"
-	| "automation.run"
-	/** See what the bot's automations' runs did and said. */
-	| "automation.history.read"
-	/** Decide a tool call the bot raised in one of its tasks. */
-	| "approval.decide"
-	/** Decide a tool call the bot raised while an automation ran. */
-	| "approval.automation.decide"
-	/** Decide what the bot's computer may reach, and allow its requests for more. */
-	| "computer.manage"
-	/** Allow or refuse the bot's own request to reach more from its computer. */
-	| "computer.request.decide"
-	/** Click and type on the bot's desktop, rather than only watch it. */
-	| "computer.desktop.use";
+	/** Decide a tool call the bot raised in one of its threads. */
+	| "approval.decide";
 
 /**
  * The caller.
@@ -124,10 +146,12 @@ export interface Actor {
 	workspaceRole: WorkspaceRole | undefined;
 }
 
-/** What a decision about a channel needs to know about it. */
-export interface ChannelFacts {
-	/** Whether a `channel_member` row puts the caller in this channel. */
+/** What a decision about a project needs to know about it. */
+export interface ProjectFacts {
+	/** Whether a `project_member` row puts the caller in this project. */
 	isMember: boolean;
+	/** On a bot's default project: the bot, which decides who reaches it. Null on any other. */
+	defaultOf: BotFacts | null;
 }
 
 /** What a decision about a bot needs to know about it. */
@@ -145,7 +169,7 @@ const ADMINISTRATOR_WORKSPACE_GRANTS: readonly WorkspacePermission[] = [
 	"workspace.members.manage",
 	"workspace.builtInBots.configure",
 	"workspace.usage.manage",
-	"channel.create",
+	"project.create",
 	"bot.create",
 ];
 
@@ -157,39 +181,108 @@ const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
 		"workspace.delete",
 	]),
 	admin: new Set<WorkspacePermission>(ADMINISTRATOR_WORKSPACE_GRANTS),
-	member: new Set<WorkspacePermission>(["workspace.read", "channel.create", "bot.create"]),
+	member: new Set<WorkspacePermission>(["workspace.read", "project.create", "bot.create"]),
 	viewer: new Set<WorkspacePermission>(["workspace.read"]),
 };
 
 /**
- * The channel permissions each role holds in the channels it is a member of.
+ * The project permissions each role holds in the projects it is a member of.
  *
- * Nobody reaches a channel without a `channel_member` row. Administrators are no
- * exception: database triggers make them members of every channel, as
- * `channelMember` in `packages/core/src/workspaces/sql.ts` describes.
+ * Nobody reaches a project without a `project_member` row. Administrators are no
+ * exception: database triggers make them members of every project, as
+ * `projectMember` in `packages/core/src/workspaces/sql.ts` describes.
  */
-const ADMINISTRATOR_CHANNEL_GRANTS = new Set<ChannelPermission>([
-	"channel.read",
-	"channel.update",
-	"channel.delete",
-	"channel.members.manage",
-	"channel.bots.manage",
+const ADMINISTRATOR_PROJECT_GRANTS = new Set<ProjectPermission>([
+	"project.read",
+	"project.update",
+	"project.delete",
+	"project.threads.manage",
+	"project.members.manage",
+	"project.bots.manage",
 	"approval.decide",
+	"connection.read",
+	"connection.manage",
+	"automation.read",
+	"automation.manage",
+	"automation.run",
+	"automation.history.read",
+	"approval.automation.decide",
+	"computer.read",
+	"computer.manage",
+	"computer.request.decide",
+	"computer.desktop.use",
 ]);
 
-const CHANNEL_GRANTS: Record<WorkspaceRole, ReadonlySet<ChannelPermission>> = {
-	owner: ADMINISTRATOR_CHANNEL_GRANTS,
-	admin: ADMINISTRATOR_CHANNEL_GRANTS,
-	member: new Set<ChannelPermission>([
-		"channel.read",
-		"channel.leave",
-		"channel.members.manage",
-		"channel.bots.manage",
+/**
+ * What every member who reads a project's connections, automations and
+ * computer may do with them, as anyone who reaches a public bot may with its.
+ */
+const PROJECT_RESOURCE_READS: readonly ProjectPermission[] = [
+	"connection.read",
+	"automation.read",
+	"automation.history.read",
+	"computer.read",
+];
+
+const PROJECT_GRANTS: Record<WorkspaceRole, ReadonlySet<ProjectPermission>> = {
+	// Administrators change the project, so they manage what it holds.
+	owner: ADMINISTRATOR_PROJECT_GRANTS,
+	admin: ADMINISTRATOR_PROJECT_GRANTS,
+	member: new Set<ProjectPermission>([
+		"project.read",
+		"project.leave",
+		"project.members.manage",
+		"project.bots.manage",
 		"approval.decide",
+		...PROJECT_RESOURCE_READS,
+		"automation.run",
+		"computer.desktop.use",
 	]),
-	// A viewer reads and takes part, which `channel.read` grants, and changes nothing.
-	viewer: new Set<ChannelPermission>(["channel.read", "channel.leave"]),
+	// A viewer reads and takes part, which `project.read` grants, and changes nothing.
+	viewer: new Set<ProjectPermission>(["project.read", "project.leave", ...PROJECT_RESOURCE_READS]),
 };
+
+/**
+ * What may be done in a bot's default project, as what it takes on the bot.
+ * Its threads are the bot's own, so whoever reaches the bot reads them and
+ * takes part, and who decides the bot's tool calls decides there; the bot's
+ * managers tidy them. Its connections, automations and computer are the
+ * bot's, decided as the bot's own (see `RESOURCES_OF_DEFAULT_PROJECTS`).
+ * Nothing else: nobody joins or leaves a default project, adds people or bots
+ * to it, or changes or deletes it, which is made and deleted with its bot.
+ */
+const DEFAULT_PROJECT_GRANTS: Partial<Record<ProjectPermission, BotPermission>> = {
+	"project.read": "bot.read",
+	"approval.decide": "approval.decide",
+	"project.threads.manage": "bot.update",
+	"connection.read": "connection.read",
+	"connection.manage": "connection.manage",
+	"automation.read": "automation.read",
+	"automation.manage": "automation.manage",
+	"automation.run": "automation.run",
+	"automation.history.read": "automation.history.read",
+	"approval.automation.decide": "approval.automation.decide",
+	"computer.read": "bot.settings.read",
+	"computer.manage": "computer.manage",
+	"computer.request.decide": "computer.request.decide",
+	"computer.desktop.use": "computer.desktop.use",
+};
+
+/**
+ * The actions in a default project that its bot's managers take whether or
+ * not they reach the bot, as they manage what a private bot holds without
+ * seeing its threads. The rest take reach as well.
+ */
+const RESOURCES_OF_DEFAULT_PROJECTS: ReadonlySet<ProjectPermission> = new Set<ProjectPermission>([
+	"connection.read",
+	"connection.manage",
+	"automation.read",
+	"automation.manage",
+	"approval.automation.decide",
+	"computer.read",
+	"computer.manage",
+	"computer.request.decide",
+]);
 
 /** What anyone who reaches a bot may do with it. */
 const BOT_USER_GRANTS = new Set<BotPermission>([
@@ -203,7 +296,7 @@ const BOT_USER_GRANTS = new Set<BotPermission>([
 	"computer.desktop.use",
 ]);
 
-/** What a viewer who reaches a bot may do with it: read, and take part in its tasks. */
+/** What a viewer who reaches a bot may do with it: read, and take part in its threads. */
 const BOT_VIEWER_GRANTS = new Set<BotPermission>([
 	"bot.read",
 	"bot.settings.read",
@@ -238,7 +331,7 @@ const BOT_MANAGER_GRANTS = new Set<BotPermission>([
  * whatever their role: change its look and its connections, decide what it
  * asks to reach from its computer, and decide what it asks to do for them. An
  * action they allow still runs with their own permissions, so a viewer's
- * assistant can't make a channel for them. Sugabots manages the rest of it.
+ * assistant can't make a project for them. Sugabots manages the rest of it.
  */
 const ASSISTANT_OWNER_GRANTS = new Set<BotPermission>([
 	"bot.update",
@@ -267,18 +360,31 @@ export function mayInWorkspace(actor: Actor, permission: WorkspacePermission): b
 }
 
 /**
- * Whether the caller may take a channel-addressed action on this channel.
+ * Whether the caller may take a project-addressed action on this project:
+ * granted by their role to the members of a project people made, and in a
+ * bot's default project by what they may do with the bot, reaching it but for
+ * what its managers manage, so an administrator manages a private bot's
+ * computer, connections and automations but does not see its threads, as for
+ * the bot itself (see `DEFAULT_PROJECT_GRANTS`).
  *
- * `channel` must be a channel in the workspace `actor.workspaceRole` describes;
+ * `project` must be a project in the workspace `actor.workspaceRole` describes;
  * `access.ts` loads both together so they never mix.
  */
-export function mayInChannel(
+export function mayInProject(
 	actor: Actor,
-	permission: ChannelPermission,
-	channel: ChannelFacts,
+	permission: ProjectPermission,
+	project: ProjectFacts,
 ): boolean {
 	if (!actor.workspaceRole) return false;
-	return channel.isMember && CHANNEL_GRANTS[actor.workspaceRole].has(permission);
+	if (project.defaultOf) {
+		const onBot = DEFAULT_PROJECT_GRANTS[permission];
+		return (
+			onBot !== undefined &&
+			(RESOURCES_OF_DEFAULT_PROJECTS.has(permission) || reachesBot(actor, project.defaultOf)) &&
+			mayOnBot(actor, onBot, project.defaultOf)
+		);
+	}
+	return project.isMember && PROJECT_GRANTS[actor.workspaceRole].has(permission);
 }
 
 /**
@@ -316,31 +422,41 @@ export function rolesGrantedInWorkspace(permission: WorkspacePermission): Worksp
 }
 
 /**
- * The roles holding a channel permission in the channels they are members of,
- * for the queries that filter by the stored role rather than asking about one
- * caller. The equivalent single-resource answer is `mayInChannel`.
+ * The roles holding a project permission in the projects people made that
+ * they are members of, for the queries that filter by the stored role rather
+ * than asking about one caller. The equivalent single-resource answer is
+ * `mayInProject`, which also decides for a bot's default project.
  */
-export function rolesGrantedInChannel(permission: ChannelPermission): WorkspaceRole[] {
-	return WORKSPACE_ROLES.filter((role) => CHANNEL_GRANTS[role].has(permission));
+export function rolesGrantedInProject(permission: ProjectPermission): WorkspaceRole[] {
+	return WORKSPACE_ROLES.filter((role) => PROJECT_GRANTS[role].has(permission));
 }
 
 /**
- * The channel permissions a client needs resolved, as the API returns them.
+ * The project permissions a client needs resolved, as the API returns them.
  * `isPublic` says whether somebody not in it may join it.
  */
-export function channelPermissions(
+export function projectPermissions(
 	actor: Actor,
-	channel: ChannelFacts & { isPublic: boolean },
-): ChannelPermissionsView {
-	const may = (permission: ChannelPermission) => mayInChannel(actor, permission, channel);
+	project: ProjectFacts & { isPublic: boolean },
+): ProjectPermissionsView {
+	const may = (permission: ProjectPermission) => mayInProject(actor, permission, project);
 	return {
-		rename: may("channel.update"),
-		manageMembers: may("channel.members.manage"),
-		manageBots: may("channel.bots.manage"),
-		leave: may("channel.leave"),
-		join: !channel.isMember && channel.isPublic && mayInWorkspace(actor, "workspace.read"),
-		delete: may("channel.delete"),
-		deleteFiles: may("channel.update"),
+		rename: may("project.update"),
+		manageMembers: may("project.members.manage"),
+		manageBots: may("project.bots.manage"),
+		leave: may("project.leave"),
+		join:
+			project.defaultOf === null &&
+			!project.isMember &&
+			project.isPublic &&
+			mayInWorkspace(actor, "workspace.read"),
+		delete: may("project.delete"),
+		deleteFiles: may("project.threads.manage"),
+		manageConnections: may("connection.manage"),
+		manageComputer: may("computer.manage"),
+		useDesktop: may("computer.desktop.use"),
+		manageAutomations: may("automation.manage"),
+		runAutomations: may("automation.run"),
 	};
 }
 
@@ -362,7 +478,7 @@ export function botPermissions(actor: Actor, bot: BotFacts): BotPermissionsView 
 /** The workspace permissions a client needs resolved, as the API returns them. */
 export function workspacePermissions(actor: Actor): WorkspacePermissionsView {
 	return {
-		createChannels: mayInWorkspace(actor, "channel.create"),
+		createProjects: mayInWorkspace(actor, "project.create"),
 		createBots: mayInWorkspace(actor, "bot.create"),
 		updateWorkspace: mayInWorkspace(actor, "workspace.update"),
 		manageProviders: mayInWorkspace(actor, "workspace.providers.manage"),

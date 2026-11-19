@@ -21,7 +21,7 @@ export function BotsDirectory() {
 	const { bots: reachable, isPending, error } = useBots();
 	const pin = usePinBot();
 	const newBot = useNewBot();
-	const bots = (reachable ?? []).filter((bot) => bot.systemBotKey === null);
+	const bots = reachable ?? [];
 	const assistant = bots.filter((bot) => bot.assistant);
 	const rest = bots.filter((bot) => !bot.assistant);
 	return (

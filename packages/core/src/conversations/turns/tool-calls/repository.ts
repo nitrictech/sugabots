@@ -3,7 +3,7 @@ export * as ToolCallRepository from "./repository.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { JsonValue, ToolCallPart } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, asc, eq, inArray, type SQL } from "drizzle-orm";
+import { and, asc, eq, exists, inArray, type SQL } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	type Database,
@@ -16,6 +16,7 @@ import {
 import {
 	connection,
 	conversation,
+	projectBot,
 	type ToolCallRow,
 	toolCall,
 	turn,
@@ -318,7 +319,18 @@ export const make = Effect.gen(function* () {
 										and(
 											eq(connection.id, binding.connectionId),
 											eq(connection.workspaceId, scope.workspaceId),
-											eq(connection.botId, scope.botId),
+											// The project's or the bot's own: one of the projects it is in.
+											exists(
+												db
+													.select({ projectId: projectBot.projectId })
+													.from(projectBot)
+													.where(
+														and(
+															eq(projectBot.projectId, connection.projectId),
+															eq(projectBot.botId, scope.botId),
+														),
+													),
+											),
 											eq(connection.configurationRevision, binding.connectionRevision),
 										),
 									)

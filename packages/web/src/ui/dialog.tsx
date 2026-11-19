@@ -106,4 +106,19 @@ function DialogDescription({ className, ...props }: DialogPrimitive.Description.
 	);
 }
 
-export { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger };
+/** The grab bar at the top of a sheet a phone pulls up from the bottom. `className` places it. */
+function SheetHandle({ className }: { className?: string }) {
+	return (
+		<span aria-hidden className={cn("h-1 w-9 shrink-0 rounded-full bg-border-strong", className)} />
+	);
+}
+
+export {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+	DialogTrigger,
+	SheetHandle,
+};

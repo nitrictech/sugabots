@@ -22,7 +22,7 @@ const OPEN_ENDPOINTS = new Set([
 
 const PLACEHOLDERS: Record<string, string> = {
 	workspace: "0199a3a0-0000-7000-8000-000000000001",
-	channelId: "0199a3a0-0000-7000-8000-000000000002",
+	projectId: "0199a3a0-0000-7000-8000-000000000002",
 	botId: "0199a3a0-0000-7000-8000-000000000003",
 	providerId: "0199a3a0-0000-7000-8000-000000000004",
 	conversationId: "0199a3a0-0000-7000-8000-000000000005",
@@ -45,8 +45,8 @@ const PLACEHOLDERS: Record<string, string> = {
 	emoji: "%F0%9F%91%8D",
 	fileId: "0199a3a0-0000-7000-8000-000000000010",
 	triggerId: "0199a3a0-0000-7000-8000-000000000011",
-	// Whether a notification choice is for a channel or a bot.
-	kind: "channel",
+	// Whether a notification choice is for a project or a bot.
+	kind: "project",
 };
 
 function fill(pattern: string): string {

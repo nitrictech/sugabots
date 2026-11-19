@@ -9,6 +9,7 @@ import { Option, Schema } from "effect";
 import { Trash2 } from "lucide-react";
 import { useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { useSaving } from "@/lib/saving.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -27,20 +28,12 @@ export function FilterGroup({
 	onEditingChange?: (editing: boolean) => void;
 }) {
 	const [editing, setEditing] = useState<number | "new">();
-	const [pending, setPending] = useState(false);
-	const [error, setError] = useState<unknown>();
+	const saving = useSaving();
+	const { pending } = saving;
 	async function save(next: WebhookCondition[]) {
-		setPending(true);
-		setError(undefined);
-		try {
-			await onChange(next);
-			setEditing(undefined);
-			onEditingChange?.(false);
-		} catch (cause) {
-			setError(cause);
-		} finally {
-			setPending(false);
-		}
+		if (!(await saving.save(() => onChange(next)))) return;
+		setEditing(undefined);
+		onEditingChange?.(false);
 	}
 	function beginEditing(target: number | "new") {
 		setEditing(target);
@@ -49,7 +42,7 @@ export function FilterGroup({
 	function cancel() {
 		setEditing(undefined);
 		onEditingChange?.(false);
-		setError(undefined);
+		saving.clearFailure();
 	}
 	return (
 		<SettingsGroup
@@ -109,7 +102,7 @@ export function FilterGroup({
 					At most {MAX_WEBHOOK_FILTER_CONDITIONS} conditions.
 				</p>
 			)}
-			{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
+			{saving.failure !== undefined && <Alert>{failureMessage(saving.failure)}</Alert>}
 		</SettingsGroup>
 	);
 }

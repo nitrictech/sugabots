@@ -25,13 +25,13 @@ import type { OAuthRecord } from "./oauth.ts";
 import { toolAccessOf } from "./tool-access.ts";
 
 /**
- * The only writer of `connection`: the MCP servers and GitHub apps each bot
- * may use, the MCP servers' sealed secrets and OAuth records, and the
- * apps' sealed credentials.
+ * The only writer of `connection`: the MCP servers, HTTP endpoints and GitHub
+ * apps each project is connected to, the MCP servers' sealed secrets and OAuth
+ * records, and the apps' sealed credentials.
  *
- * A name, and the handle made from it, is unique per bot. `target` does not
- * look at what the bot may do with the tools: a connection whose tools
- * are all off can still be tested.
+ * A name, and the handle made from it, is unique per project. `target` does
+ * not look at what bots may do with the tools: a connection whose tools are
+ * all off can still be tested.
  *
  * What a person chooses for a tool is not a change of configuration: it
  * leaves `configurationRevision`, and the approvals made under it, alone.
@@ -43,17 +43,17 @@ import { toolAccessOf } from "./tool-access.ts";
 export interface Interface {
 	readonly create: (
 		workspaceId: string,
-		botId: string,
+		projectId: string,
 		userId: string,
 		input: NewConnection,
 	) => Effect.Effect<ConnectionRow, ConnectionNameTaken>;
 	/**
-	 * Gives the bot a GitHub connection to the app made for it, `id`. It
+	 * Gives the project a GitHub connection to the app made for it, `id`. It
 	 * waits on `installed` before it is signed in.
 	 */
 	readonly createGitHub: (
 		workspaceId: string,
-		botId: string,
+		projectId: string,
 		userId: string,
 		input: {
 			id: string;
@@ -86,13 +86,13 @@ export interface Interface {
 	) => Effect.Effect<readonly GitHubConnectionRepository[] | undefined>;
 	readonly update: (
 		workspaceId: string,
-		botId: string,
+		projectId: string,
 		connectionId: string,
 		changes: ConnectionUpdate,
 	) => Effect.Effect<ConnectionRow | undefined, ConnectionNameTaken | UnknownConnectionTool>;
 	readonly remove: (
 		workspaceId: string,
-		botId: string,
+		projectId: string,
 		connectionId: string,
 	) => Effect.Effect<boolean>;
 	/**
@@ -107,7 +107,7 @@ export interface Interface {
 	) => Effect.Effect<void>;
 	readonly target: (
 		workspaceId: string,
-		botId: string,
+		projectId: string,
 		connectionId: string,
 	) => Effect.Effect<ConnectionTarget | undefined>;
 	/**
@@ -115,7 +115,10 @@ export interface Interface {
 	 * waiting on its sign-in offers nothing, and neither does one whose every
 	 * listed tool is off, so a turn does not reach its server at all.
 	 */
-	readonly targetsForBot: (workspaceId: string, botId: string) => Effect.Effect<BotTargets>;
+	readonly targetsForProject: (
+		workspaceId: string,
+		projectId: string,
+	) => Effect.Effect<ProjectTargets>;
 	/** What the OAuth client has learnt and been issued, unsealed. */
 	readonly oauthRecord: (
 		workspaceId: string,
@@ -134,7 +137,7 @@ export interface Interface {
 	readonly byOauthState: (state: string) => Effect.Effect<
 		| {
 				workspaceId: string;
-				botId: string;
+				projectId: string;
 				connectionId: string;
 				startedByUserId: string | undefined;
 		  }
@@ -169,7 +172,7 @@ export const make = Effect.gen(function* () {
 	};
 
 	return Service.of({
-		create: (workspaceId, botId, userId, input) =>
+		create: (workspaceId, projectId, userId, input) =>
 			operation(
 				"create",
 				Effect.gen(function* () {
@@ -188,7 +191,7 @@ export const make = Effect.gen(function* () {
 								.insert(connection)
 								.values({
 									workspaceId,
-									botId,
+									projectId,
 									createdById: userId,
 									handle: handleFromName(values.name),
 									...values,
@@ -203,7 +206,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		createGitHub: (workspaceId, botId, userId, input) =>
+		createGitHub: (workspaceId, projectId, userId, input) =>
 			operation(
 				"createGitHub",
 				Effect.gen(function* () {
@@ -215,7 +218,7 @@ export const make = Effect.gen(function* () {
 								.insert(connection)
 								.values({
 									workspaceId,
-									botId,
+									projectId,
 									createdById: userId,
 									kind: "github",
 									name,
@@ -311,15 +314,15 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		update: (workspaceId, botId, connectionId, changes) =>
+		update: (workspaceId, projectId, connectionId, changes) =>
 			operation(
 				"update",
 				transaction(
 					Effect.gen(function* () {
-						const ofBot = and(
+						const ofProject = and(
 							eq(connection.id, connectionId),
 							eq(connection.workspaceId, workspaceId),
-							eq(connection.botId, botId),
+							eq(connection.projectId, projectId),
 						);
 						const connectionChanged =
 							changes.url !== undefined ||
@@ -334,7 +337,7 @@ export const make = Effect.gen(function* () {
 								db
 									.select({ kind: connection.kind, url: connection.url, names: listedToolNames })
 									.from(connection)
-									.where(ofBot)
+									.where(ofProject)
 									.limit(1)
 									.for("update"),
 							);
@@ -376,7 +379,7 @@ export const make = Effect.gen(function* () {
 										lastTestedAt: connectionChanged ? null : undefined,
 										lastTestError: connectionChanged ? null : undefined,
 									})
-									.where(ofBot)
+									.where(ofProject)
 									.returning(),
 							(failure) => (isUniqueViolation(failure) ? new ConnectionNameTaken() : undefined),
 						);
@@ -385,7 +388,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		remove: (workspaceId, botId, connectionId) =>
+		remove: (workspaceId, projectId, connectionId) =>
 			operation(
 				"remove",
 				query((db) =>
@@ -395,7 +398,7 @@ export const make = Effect.gen(function* () {
 							and(
 								eq(connection.id, connectionId),
 								eq(connection.workspaceId, workspaceId),
-								eq(connection.botId, botId),
+								eq(connection.projectId, projectId),
 							),
 						)
 						.returning({ id: connection.id }),
@@ -426,7 +429,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		target: (workspaceId, botId, connectionId) =>
+		target: (workspaceId, projectId, connectionId) =>
 			operation(
 				"target",
 				query((db) =>
@@ -437,16 +440,16 @@ export const make = Effect.gen(function* () {
 							and(
 								eq(connection.id, connectionId),
 								eq(connection.workspaceId, workspaceId),
-								eq(connection.botId, botId),
+								eq(connection.projectId, projectId),
 							),
 						)
 						.limit(1),
 				).pipe(Effect.map(([row]) => row && toTarget(row))),
 			),
 
-		targetsForBot: (workspaceId, botId) =>
+		targetsForProject: (workspaceId, projectId) =>
 			operation(
-				"targetsForBot",
+				"targetsForProject",
 				query((db) =>
 					db
 						.select()
@@ -454,7 +457,7 @@ export const make = Effect.gen(function* () {
 						.where(
 							and(
 								eq(connection.workspaceId, workspaceId),
-								eq(connection.botId, botId),
+								eq(connection.projectId, projectId),
 								// GitHub's tools work through its app, with no address of its own to reach.
 								inArray(connection.kind, ["mcp", "http"]),
 							),
@@ -512,7 +515,7 @@ export const make = Effect.gen(function* () {
 						([row]) =>
 							row && {
 								workspaceId: row.workspaceId,
-								botId: row.botId,
+								projectId: row.projectId,
 								connectionId: row.id,
 								startedByUserId: unsealOauthRecord(row, cipher)?.startedByUserId,
 							},
@@ -524,12 +527,12 @@ export const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(Service, make);
 
-/** A bot's connections as a turn sees them. */
-interface BotTargets {
+/** A project's connections as a turn sees them. */
+interface ProjectTargets {
 	targets: ConnectionTarget[];
 	/**
 	 * Connections that offer nothing until someone signs in again, by handle,
-	 * and by address so they still count as ones the bot has.
+	 * and by address so they still count as ones the project has.
 	 */
 	signInExpired: Pick<ConnectionTarget, "handle" | "url">[];
 }
@@ -545,7 +548,7 @@ export class ConnectionNameTaken
 	implements UserFacing
 {
 	get userMessage() {
-		return userText`A connection with that name already exists for this bot`;
+		return userText`A connection with that name already exists here`;
 	}
 }
 

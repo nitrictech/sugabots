@@ -2,14 +2,15 @@ import {
 	administersWorkspace,
 	type Bot,
 	type BotPermissions,
-	type Channel,
-	type ChannelPermissions,
 	type ConversationDetails,
+	type ListedThread,
 	type ModelProvider,
+	type Project,
+	type ProjectPermissions,
+	type ProjectThread,
 	type SessionUser,
 	type StreamEvent,
 	type SystemBot,
-	type Task,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
 import { NotFound } from "@sugabots/contracts/http";
@@ -76,8 +77,8 @@ export const workspace = {
 	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 
-/** Every channel permission, as an admin gets them. */
-const ADMIN_IN_CHANNEL: ChannelPermissions = {
+/** Every project permission, as an admin gets them. */
+const ADMIN_IN_PROJECT: ProjectPermissions = {
 	rename: true,
 	manageMembers: true,
 	manageBots: true,
@@ -85,20 +86,28 @@ const ADMIN_IN_CHANNEL: ChannelPermissions = {
 	join: false,
 	delete: true,
 	deleteFiles: true,
+	manageConnections: true,
+	manageComputer: true,
+	useDesktop: true,
+	manageAutomations: true,
+	runAutomations: true,
 };
 
-/** What a member gets in a channel they are in. */
-const MEMBER_IN_CHANNEL: ChannelPermissions = {
-	...ADMIN_IN_CHANNEL,
+/** What a member gets in a project they are in. */
+const MEMBER_IN_PROJECT: ProjectPermissions = {
+	...ADMIN_IN_PROJECT,
 	rename: false,
 	leave: true,
 	delete: false,
 	deleteFiles: false,
+	manageConnections: false,
+	manageComputer: false,
+	manageAutomations: false,
 };
 
 /** What a viewer gets there: nothing they could change. */
-export const VIEWER_IN_CHANNEL: ChannelPermissions = {
-	...MEMBER_IN_CHANNEL,
+const VIEWER_IN_PROJECT: ProjectPermissions = {
+	...MEMBER_IN_PROJECT,
 	manageMembers: false,
 	manageBots: false,
 };
@@ -125,8 +134,8 @@ const USER_OF_BOT: BotPermissions = {
 	manageAutomations: false,
 };
 
-/** The two channels the dev seed makes. */
-export const channels: Channel[] = [
+/** The two projects the dev seed makes. */
+export const projects: Project[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000a1",
 		workspaceId: WORKSPACE,
@@ -135,8 +144,10 @@ export const channels: Channel[] = [
 		color: "green",
 		description: null,
 		visibility: "public",
+		// Customer Research, which the bots below list first.
+		leadBotId: "0199a3a0-0000-7000-8000-0000000000b1",
 		isMember: true,
-		permissions: ADMIN_IN_CHANNEL,
+		permissions: ADMIN_IN_PROJECT,
 		createdAt: "2026-09-09T00:00:00.000Z",
 	},
 	{
@@ -147,8 +158,10 @@ export const channels: Channel[] = [
 		color: "blue",
 		description: null,
 		visibility: "public",
+		// Customer Research, which the bots below list first.
+		leadBotId: "0199a3a0-0000-7000-8000-0000000000b1",
 		isMember: true,
-		permissions: ADMIN_IN_CHANNEL,
+		permissions: ADMIN_IN_PROJECT,
 		createdAt: "2026-09-09T00:00:00.000Z",
 	},
 ];
@@ -224,7 +237,7 @@ export const bots: Bot[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000b1",
 		workspaceId: WORKSPACE,
-		systemBotKey: null,
+		defaultProjectId: "0199a3a0-0000-7000-8000-0000000002b1",
 		name: "Customer Research",
 		handle: "customer-research",
 		description: "Digs through calls and notes for what customers asked for.",
@@ -246,7 +259,7 @@ export const bots: Bot[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000b2",
 		workspaceId: WORKSPACE,
-		systemBotKey: null,
+		defaultProjectId: "0199a3a0-0000-7000-8000-0000000002b2",
 		name: "Issue Triager",
 		handle: "issue-triager",
 		description: "Sorts incoming issues every weekday morning.",
@@ -268,7 +281,7 @@ export const bots: Bot[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000b3",
 		workspaceId: WORKSPACE,
-		systemBotKey: null,
+		defaultProjectId: "0199a3a0-0000-7000-8000-0000000002b3",
 		name: "Linear Handler",
 		handle: "linear-handler",
 		description: "Reads and writes Linear on the team's behalf.",
@@ -296,7 +309,7 @@ export const triager = bots[1] as Bot;
 export const personalAssistant: Bot = {
 	id: "0199a3a0-0000-7000-8000-0000000000bf",
 	workspaceId: WORKSPACE,
-	systemBotKey: null,
+	defaultProjectId: "0199a3a0-0000-7000-8000-0000000002bf",
 	name: "Personal Assistant",
 	handle: "personal-assistant",
 	description: "Your private assistant.",
@@ -347,31 +360,41 @@ export const builtInBots: SystemBot[] = [
 export const summariser = builtInBots[0] as SystemBot;
 export const compaction = builtInBots[1] as SystemBot;
 
-/** The first task with `bot`, one per bot, by the bot's id. */
-export function taskWith(bot: Bot): Task {
+/** The id of `bot`'s default project, where its threads are. */
+export function defaultProjectOf(bot: Bot): string {
+	return `${bot.id.slice(0, -4)}f${bot.id.slice(-3)}`;
+}
+
+/** The first thread with `bot`, one per bot, by the bot's id. */
+export function threadWith(bot: Bot): ProjectThread {
 	return {
-		kind: "task",
+		kind: "project_thread",
 		id: `${bot.id.slice(0, -4)}c${bot.id.slice(-3)}`,
 		workspaceId: bot.workspaceId,
+		projectId: defaultProjectOf(bot),
 		botId: bot.id,
 		title: `Working with ${bot.name}`,
+		archivedAt: null,
 		doneAt: null,
 		createdAt: "2026-09-18T08:00:00.000Z",
 		updatedAt: "2026-09-18T08:00:00.000Z",
 	};
 }
 
-/** Another task with `bot`, nothing said in it yet. */
-export function conversationWith(bot: Bot): Task {
+/** Another thread with `bot`, nothing said in it yet. */
+export function conversationWith(bot: Bot): ProjectThread {
 	return {
-		...taskWith(bot),
+		...threadWith(bot),
 		id: `${bot.id.slice(0, -4)}d${bot.id.slice(-3)}`,
-		title: `Task with ${bot.name}`,
+		title: `Thread with ${bot.name}`,
 	};
 }
 
-/** `task`, a task of `bot`'s, as the conversations API returns it, with nothing said yet. */
-export function taskDetails(bot: Bot, task: Task = taskWith(bot)): ConversationDetails {
+/** `thread`, a thread of `bot`'s, as the conversations API returns it, with nothing said yet. */
+export function threadDetails(
+	bot: Bot,
+	thread: ProjectThread = threadWith(bot),
+): ConversationDetails {
 	const participant = {
 		kind: "bot" as const,
 		id: bot.id,
@@ -381,21 +404,19 @@ export function taskDetails(bot: Bot, task: Task = taskWith(bot)): ConversationD
 		face: bot.face,
 		shape: bot.shape,
 	};
-	const { kind: _kind, botId, ...conversation } = task;
+	const { kind: _kind, archivedAt: _archivedAt, ...conversation } = thread;
 	return {
 		conversation: {
 			...conversation,
-			botId: botId,
-			channelId: null,
-			rootConversationId: task.id,
-			kind: "task",
+			rootConversationId: thread.id,
+			kind: "project_thread",
 			status: "done",
 			parentConversationId: null,
 			startedById: null,
 		},
 		automationRun: null,
 		participants: [participant],
-		channelBots: [participant],
+		projectBots: [participant],
 		members: [],
 		messages: [],
 		olderMessagesCursor: null,
@@ -404,11 +425,13 @@ export function taskDetails(bot: Bot, task: Task = taskWith(bot)): ConversationD
 	};
 }
 
-/** `bot`'s first task as its list shows it. */
-export function taskItem(bot: Bot, task: Task = taskWith(bot)) {
+/** A project's thread as its list shows it, with nothing new in it unless `standing` says. */
+export function listedThread(
+	thread: ProjectThread,
+	standing: Partial<Omit<ListedThread, "conversation">> = {},
+): ListedThread {
 	return {
-		bot,
-		conversation: task,
+		conversation: thread,
 		lastMessage: null,
 		participants: [],
 		messageCount: 1,
@@ -416,6 +439,7 @@ export function taskItem(bot: Bot, task: Task = taskWith(bot)) {
 		unreadMessages: 0,
 		needsApproval: false,
 		mentionsYou: false,
+		...standing,
 	};
 }
 
@@ -423,7 +447,7 @@ export function taskItem(bot: Bot, task: Task = taskWith(bot)) {
 export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): void {
 	client.events.conversation.mockImplementation(() => quietEventStream());
 	client.events.workspace.mockImplementation(() => quietEventStream());
-	client.api.chats.channelMarkers.mockReturnValue(Effect.succeed({ channels: {}, bots: {} }));
+	client.api.chats.projectMarkers.mockReturnValue(Effect.succeed({ projects: {}, bots: {} }));
 	client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
 	client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.chats.directMessages.mockReturnValue(Effect.succeed({ items: [] }));
@@ -438,9 +462,9 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			quietHours: null,
 			turnFailures: true,
 			automationRuns: "failures",
-			channels: {},
+			projects: {},
 			bots: {},
-			mutedUntil: { channels: {}, bots: {} },
+			mutedUntil: { projects: {}, bots: {} },
 		}),
 	);
 	client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace]));
@@ -478,19 +502,19 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.workspaces.acceptInvitation.mockReturnValue(
 		Effect.succeed({ workspaceId: WORKSPACE }),
 	);
-	const inChannel = administersWorkspace(role)
-		? ADMIN_IN_CHANNEL
+	const inProject = administersWorkspace(role)
+		? ADMIN_IN_PROJECT
 		: role === "member"
-			? MEMBER_IN_CHANNEL
-			: VIEWER_IN_CHANNEL;
-	client.api.channels.list.mockReturnValue(
+			? MEMBER_IN_PROJECT
+			: VIEWER_IN_PROJECT;
+	client.api.projects.list.mockReturnValue(
 		Effect.succeed(
-			channels.map((channel) => ({ ...channel, permissions: inChannel }) satisfies Channel),
+			projects.map((project) => ({ ...project, permissions: inProject }) satisfies Project),
 		),
 	);
-	client.api.channels.listMembers.mockReturnValue(Effect.succeed([]));
-	// Both of the seed's Suga-Team bots are in each channel.
-	client.api.channels.listBots.mockReturnValue(Effect.succeed([triager, linear]));
+	client.api.projects.listMembers.mockReturnValue(Effect.succeed([]));
+	// Both of the seed's Suga-Team bots are in each project.
+	client.api.projects.listBots.mockReturnValue(Effect.succeed([triager, linear]));
 	// An administrator manages every bot; anyone else only uses the seed's, which they did not make.
 	const onBot = administersWorkspace(role)
 		? MANAGER_OF_BOT
@@ -513,29 +537,28 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	client.api.automations.getSecret.mockReturnValue(
 		Effect.succeed({ kind: "set", secret: "whsec_0123456789abcdefghijklmnop" }),
 	);
-	// A channel has nothing in it until a case says so.
+	// A project has nothing in it until a case says so.
 	client.api.chats.list.mockReturnValue(Effect.succeed({ chats: [] }));
 	const reachable = [...bots, personalAssistant];
-	// Each bot has one task, nothing said in it yet.
-	client.api.chats.botTasks.mockImplementation(({ params }: { params: { botId: string } }) => {
+	// Each bot has one thread, nothing said in it yet.
+	client.api.chats.botThreads.mockImplementation(({ params }: { params: { botId: string } }) => {
 		const bot = reachable.find((one) => one.id === params.botId);
+		if (!bot) return Effect.fail(new NotFound({ message: userText`No such bot` }));
 		return Effect.succeed({
-			tasks: bot ? [taskItem(bot)] : [],
+			bot,
+			threads: [listedThread(threadWith(bot))],
 			automations: [],
 			summary: null,
 		});
 	});
 	client.api.chats.startInterview.mockReturnValue(Effect.succeed(null));
-	client.api.chats.openMainChat.mockReturnValue(
-		Effect.fail(new NotFound({ message: userText`No channel fixture` })),
-	);
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.conversations.get.mockImplementation(
 		({ params }: { params: { conversationId: string } }) => {
-			const bot = reachable.find((one) => taskWith(one).id === params.conversationId);
+			const bot = reachable.find((one) => threadWith(one).id === params.conversationId);
 			return bot
-				? Effect.succeed(taskDetails(bot))
+				? Effect.succeed(threadDetails(bot))
 				: Effect.fail(new NotFound({ message: userText`No such conversation` }));
 		},
 	);
@@ -546,7 +569,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		Effect.succeed({
 			role,
 			permissions: {
-				createChannels: role !== "viewer",
+				createProjects: role !== "viewer",
 				createBots: role !== "viewer",
 				updateWorkspace: administersWorkspace(role),
 				manageProviders: administersWorkspace(role),
@@ -678,7 +701,7 @@ export function mount(
 	});
 
 	render(
-		// A fresh cache per case, so one test's channels cannot answer another's.
+		// A fresh cache per case, so one test's projects cannot answer another's.
 		<TestApp
 			router={router}
 			queries={createQueryClient()}

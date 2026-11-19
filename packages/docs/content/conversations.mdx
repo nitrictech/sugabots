@@ -1,31 +1,40 @@
 ---
 title: Conversations
-description: Tasks, channels and direct messages, who answers, and how bots ask each other for help.
+description: Threads, projects and direct messages, who answers, and how bots ask each other for help.
 ---
 
-There are three kinds of conversation:
+Conversations happen in threads and direct messages:
 
-- A **task** is a conversation with one bot about one piece of work. Open a bot
-  and write in the box that says "Message Trip Planner" to start one. Everyone
-  who can see the bot can see its tasks and join in, and anyone can mark a task
-  done.
-- A [channel](/docs/channels)'s **main chat** and **threads** are shared by all
-  its people and bots.
+- A [project](/docs/projects)'s **threads** are shared by all its people and
+  bots. Each is about one piece of work.
+- A **bot's threads** are conversations with that one bot. Open a bot and write
+  in the box that says "Message Trip Planner" to start one. Every bot has its
+  own hidden project for them, which it leads alone, so they work just as a
+  project's threads do. Everyone who can see the bot can see its threads and
+  join in.
 - A **direct message** is between two or more people, with no bots. Only its
   people see it.
 
+Anyone in a thread can mark it done once its work is finished, and it opens
+again when someone posts in it.
+
 ## Who answers?
 
-In a task, the task's bot answers. Mentioning someone with `@` changes who the
-message is for, not who's in charge. Try it:
+Every project has a **lead bot**, and the same rule picks who answers in every
+thread:
+
+- **Mention bots** in the project, and every bot you mention answers, all at once.
+- **Reply to a bot's message**, and that bot answers.
+- **Mention only people**, and the lead bot reads it. The message is most
+  likely for them, so it answers only if it can help, and otherwise reacts 👀
+  to show it read it.
+- **Otherwise** the lead bot answers.
+
+Mentions of bots outside the project are ignored, so in a bot's own threads,
+where it's the only bot, that bot answers. Mentioning someone with `@` changes
+who the message is for, not who's in charge. Try it:
 
 <WhoReplies />
-
-In a channel's main chat or threads, bots answer only when asked:
-
-- **Mention bots**, and every bot you mention answers, all at once.
-- **Reply to a bot's message**, and that bot answers.
-- **Otherwise** the message is for the people, and the bots stay quiet.
 
 In a direct message, no bot answers.
 
@@ -34,14 +43,15 @@ Mentions use a person's or bot's handle at the start of a word, like
 
 `@here` and `@channel` mention everyone who can see the conversation, and
 notify each of them as a mention does. They are for people: a message with
-`@here` or `@channel` gets an answer from a bot only if it names that bot too.
+`@here` or `@channel` is read by the lead bot as one that mentions only people,
+unless it names a bot too.
 A bot can't use them to notify anyone, and no bot can take `here` or `channel`
 as its handle.
 
 ## Bots asking bots
 
 When a bot needs help, it can ask **any other bot** in the workspace, public or
-private. It writes a short brief, the other bot works on it in a task of its
+private. It writes a short brief, the other bot works on it in a thread of its
 own, and the first bot carries on with the answer.
 
 <Chat title="Trip Planner with Budget Keeper">
@@ -80,9 +90,9 @@ Unless you chose Nothing, you also hear when a bot can't finish its reply to
 you, and when a run of an automation you made or started fails. In **Settings →
 Notifications** you can turn the first off, and hear of every run or none.
 
-Right-click a channel in the sidebar to give it a level of its own, or to mute
+Right-click a project in the sidebar to give it a level of its own, or to mute
 it, for good or, under **More options**, for a while, and right-click a bot to
-do the same for its tasks. Each follows your own level until you choose
+do the same for its threads. Each follows your own level until you choose
 otherwise. You can also pause all notifications for a while, or set quiet hours
 each day. You aren't notified about a conversation you're looking at.
 

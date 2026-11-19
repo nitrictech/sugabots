@@ -2,15 +2,15 @@ import type { Bot } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Monitor } from "lucide-react";
-import { type PointerEvent, useRef, useState } from "react";
+import { type PointerEvent, type ReactNode, useRef, useState } from "react";
 import { useUpdateBot } from "@/lib/bots.ts";
-import { useComputerAccess } from "@/lib/computer-providers.ts";
+import { useComputerGap } from "@/lib/computer-providers.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
-import { DialogContent, DialogTitle } from "@/ui/dialog.tsx";
+import { DialogContent, DialogTitle, SheetHandle } from "@/ui/dialog.tsx";
 import { DesktopScreen } from "./DesktopViewer.tsx";
 
 /**
@@ -33,20 +33,11 @@ export function ComputerSheet({
 	onDismiss: () => void;
 }) {
 	const drag = useDragToDismiss(onDismiss);
-	const computers = useComputerAccess().data;
+	const missing = useComputerGap({ bot });
 	const may = useWorkspacePermissions();
 	const update = useUpdateBot(bot.id);
-	const backToChat = useBackToHere("Chat");
+	const backToThread = useBackToHere("Thread");
 	const title = `${bot.name}'s computer`;
-	// What stands between the bot and a computer: the workspace has none, or the bot doesn't use one.
-	const missing =
-		computers === undefined
-			? undefined
-			: !computers.enabled
-				? "workspace"
-				: !bot.usesComputer
-					? "bot"
-					: null;
 
 	return (
 		<DialogContent
@@ -61,7 +52,7 @@ export function ComputerSheet({
 				{...drag.handlers}
 				className="-mx-4 flex h-6 cursor-grab touch-none justify-center pt-2 active:cursor-grabbing"
 			>
-				<span className="h-1.25 w-9 rounded-full bg-border-strong" />
+				<SheetHandle />
 			</div>
 			{/* Named for a screen reader, which hears what the sheet is; the screen shows it. */}
 			<DialogTitle className="sr-only">{title}</DialogTitle>
@@ -120,7 +111,7 @@ export function ComputerSheet({
 							from="/$workspace"
 							to="./settings/$section"
 							params={{ section: "computers" }}
-							state={backToChat}
+							state={backToThread}
 							className={buttonStyles({ className: "h-11 w-full text-sm" })}
 						>
 							Set up computers
@@ -140,7 +131,7 @@ function NoComputer({
 }: {
 	text: string;
 	detail: string;
-	children?: React.ReactNode;
+	children?: ReactNode;
 }) {
 	return (
 		<div className="flex flex-col items-center gap-2 pt-2 text-center">

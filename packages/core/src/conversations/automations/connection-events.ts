@@ -2,7 +2,7 @@ import type { AcceptedRun } from "@sugabots/contracts";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { query, serviceOperations } from "../../database/database.ts";
-import { automation, automationTrigger, bot, connection } from "../../database/schema.ts";
+import { automation, automationTrigger, connection } from "../../database/schema.ts";
 import { makeAcceptTrigger } from "./acceptance.ts";
 import type { Automations } from "./automations.ts";
 
@@ -28,7 +28,7 @@ export const makeConnectionEvents = Effect.gen(function* () {
 					const accepted = yield* Effect.forEach(automations, (listener) =>
 						acceptTrigger({
 							workspaceId,
-							botId: listener.botId,
+							projectId: listener.projectId,
 							automationId: listener.automationId,
 							triggerId: listener.triggerId,
 							// A retry of the delivery lands on the run the first started.
@@ -47,6 +47,8 @@ export const makeConnectionEvents = Effect.gen(function* () {
 								AutomationNotFound: () => Effect.succeed([]),
 								AutomationTriggerRejected: () => Effect.succeed([]),
 								AutomationTriggerConflict: () => Effect.succeed([]),
+								// Nobody leads its project to run it.
+								AutomationProjectHasNoLead: () => Effect.succeed([]),
 							}),
 						),
 					);
@@ -59,7 +61,7 @@ export const makeConnectionEvents = Effect.gen(function* () {
 /**
  * The GitHub triggers of enabled automations run by `event` at `repository`,
  * through `connectionId`, while the connection still has the repository and
- * belongs to the automation's bot.
+ * belongs to the automation's project.
  */
 const listening = (on: {
 	workspaceId: string;
@@ -72,20 +74,16 @@ const listening = (on: {
 			.select({
 				automationId: automation.id,
 				triggerId: automationTrigger.id,
-				botId: automation.botId,
+				projectId: automation.projectId,
 			})
 			.from(automationTrigger)
 			.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
 			.innerJoin(
-				bot,
-				and(eq(bot.id, automation.botId), eq(bot.workspaceId, automation.workspaceId)),
-			)
-			.innerJoin(
 				connection,
 				and(
 					eq(connection.id, on.connectionId),
-					eq(connection.botId, bot.id),
-					eq(connection.workspaceId, bot.workspaceId),
+					eq(connection.projectId, automation.projectId),
+					eq(connection.workspaceId, automation.workspaceId),
 					sql`${connection.id}::text = ${automationTrigger.settings}->>'connectionId'`,
 					// GitHub's paths ignore case.
 					sql`exists (select 1 from jsonb_array_elements(${connection.settings}->'repositories') as kept

@@ -10,9 +10,18 @@ const meta = preview.meta({
 	argTypes: {
 		variant: {
 			control: "select",
-			options: ["default", "secondary", "outline", "ghost", "link", "destructive"],
+			options: [
+				"default",
+				"secondary",
+				"muted",
+				"outline",
+				"ghost",
+				"link",
+				"destructive",
+				"quiet",
+			],
 		},
-		size: { control: "select", options: ["sm", "default", "lg", "icon", "bare"] },
+		size: { control: "select", options: ["sm", "default", "lg", "bare", "text"] },
 	},
 });
 
@@ -32,4 +41,9 @@ export const Destructive = meta.story({
 /** Disabled keeps an unavailable action visible while preventing activation. */
 export const Disabled = meta.story({
 	args: { disabled: true },
+});
+
+/** Quiet text, as View all beside a list, at the size of a row's small text. */
+export const QuietText = meta.story({
+	args: { variant: "quiet", size: "text", children: "View all" },
 });

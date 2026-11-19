@@ -1,16 +1,18 @@
 import { userText } from "@sugabots/errors";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { noComputers } from "../../computers/testing.ts";
 import {
 	automation,
 	botSummary,
-	channelBot,
 	conversationRead,
 	message,
 	modelProvider,
 	pinnedBot,
+	project,
+	projectBot,
+	projectMember,
 	providerModel,
 	user,
 	workspace,
@@ -24,6 +26,7 @@ import {
 } from "../../database/testing.ts";
 import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
+import { defaultProjectOf } from "../automations/testing.ts";
 import { seedConversation } from "../seed.test-support.ts";
 import { AssistantGuide } from "./assistant-guide.ts";
 
@@ -144,7 +147,27 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 
 	it("lists automations failing now, though the person has read their failed runs", async () => {
 		const writer = await aBot(adaId, "Writer");
+		const [launch, hidden] = await onDatabase((db) =>
+			db
+				.insert(project)
+				.values([
+					{ workspaceId, name: "Launch", slug: "launch", leadBotId: writer.id },
+					{
+						workspaceId,
+						name: "Secret",
+						slug: "secret",
+						leadBotId: writer.id,
+						visibility: "private",
+					},
+				])
+				.returning(),
+		);
+		if (!launch || !hidden) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.insert(projectMember).values({ workspaceId, projectId: launch.id, userId: samId }),
+		);
 		const anAutomation = async (
+			projectId: string,
 			name: string,
 			state: "enabled" | "paused",
 			lastRun: "completed" | "failed",
@@ -155,7 +178,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 					.insert(automation)
 					.values({
 						workspaceId,
-						botId: writer.id,
+						projectId,
 						name,
 						instructions: "Report",
 						state,
@@ -208,55 +231,84 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 				]),
 			);
 		};
-		await anAutomation("Failed last", "enabled", "failed");
-		await anAutomation("Gave up", "paused", "failed", true);
-		await anAutomation("Paused by hand", "paused", "failed");
-		await anAutomation("Fine", "enabled", "completed");
+		const own = await defaultProjectOf(writer.id);
+		await anAutomation(own, "Failed last", "enabled", "failed");
+		await anAutomation(own, "Gave up", "paused", "failed", true);
+		await anAutomation(own, "Paused by hand", "paused", "failed");
+		await anAutomation(own, "Fine", "enabled", "completed");
+		await anAutomation(launch.id, "Launch report", "enabled", "failed");
+		// Sam isn't in the project, so its automations aren't theirs to hear about.
+		await anAutomation(hidden.id, "Secret report", "enabled", "failed");
 
 		const seen = await guide.guide(sam());
 
-		expect(seen.waitingOnYou.failingAutomations).toEqual([
-			{
-				bot: "Writer",
-				failing: 2,
-				link: `http://sugabots.test/${workspaceSlug}/bots/writer/automations`,
-			},
-		]);
+		expect(seen.waitingOnYou.failingAutomations).toEqual(
+			expect.arrayContaining([
+				{
+					bot: "Writer",
+					failing: 2,
+					link: `http://sugabots.test/${workspaceSlug}/bots/writer/automations`,
+				},
+				{
+					project: "Launch",
+					failing: 1,
+					link: `http://sugabots.test/${workspaceSlug}/projects/launch`,
+				},
+			]),
+		);
+		expect(seen.waitingOnYou.failingAutomations).toHaveLength(2);
 	});
 
-	it("makes a channel for the person, adds a public bot to it, and refuses a private one", async () => {
+	it("makes a project for the person, led by a public bot, adds another to it, and refuses a private one", async () => {
 		const writer = await aBot(samId, "Writer");
+		const editor = await aBot(samId, "Editor");
 		await aBot(samId, "Diary", "private");
 
-		const channel = await guide.createChannel(sam(), { name: "Launch", description: "Q4 launch" });
-		expect(channel).toEqual({
+		await expect(
+			guide.createProject(sam(), { name: "Launch", lead: "@diary" }),
+		).rejects.toMatchObject({ _tag: "BotNotPublic" });
+		const made = await guide.createProject(sam(), {
 			name: "Launch",
-			link: `http://sugabots.test/${workspaceSlug}/channels/launch`,
+			lead: "@writer",
+			description: "Q4 launch",
 		});
-		await guide.addBotToChannel(sam(), { channel: "#launch", bot: "@writer" });
+		expect(made).toEqual({
+			name: "Launch",
+			link: `http://sugabots.test/${workspaceSlug}/projects/launch`,
+		});
+		await guide.addBotToProject(sam(), { project: "#launch", bot: "@editor" });
 		const placed = await onDatabase((db) =>
 			db
-				.select({ botId: channelBot.botId })
-				.from(channelBot)
-				.where(eq(channelBot.botId, writer.id)),
+				.select({ botId: projectBot.botId })
+				.from(projectBot)
+				.innerJoin(project, eq(project.id, projectBot.projectId))
+				.where(and(eq(project.workspaceId, workspaceId), eq(project.slug, "launch"))),
 		);
-		expect(placed).toHaveLength(1);
+		expect(placed.map(({ botId }) => botId).sort()).toEqual([writer.id, editor.id].sort());
+		expect((await guide.guide(sam())).projects).toEqual([
+			expect.objectContaining({ address: "launch", lead: "@writer" }),
+		]);
 
 		await expect(
-			guide.addBotToChannel(sam(), { channel: "launch", bot: "diary" }),
+			guide.addBotToProject(sam(), { project: "launch", bot: "diary" }),
 		).rejects.toMatchObject({ _tag: "BotNotPublic" });
 		await expect(
-			guide.addBotToChannel(sam(), { channel: "nowhere", bot: "writer" }),
+			guide.addBotToProject(sam(), { project: "nowhere", bot: "writer" }),
 		).rejects.toMatchObject({ _tag: "NothingNamed" });
 	});
 
 	it("lists the person's unread mentions however many newer unread messages there are", async () => {
 		const writer = await aBot(adaId, "Writer");
-		const task = await onDatabase((db) =>
-			seedConversation(db, { workspaceId, kind: "task", botId: writer.id, title: "Launch" }),
+		const thread = await onDatabase((db) =>
+			seedConversation(db, {
+				workspaceId,
+				kind: "project_thread",
+				botId: writer.id,
+				title: "Launch",
+			}),
 		);
 		const said = (content: string, createdAt: Date) => ({
-			conversationId: task.id,
+			conversationId: thread.id,
 			authorUserId: adaId,
 			kind: "text" as const,
 			status: "complete" as const,
@@ -288,20 +340,24 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 			db.update(workspaceMember).set({ role: "viewer" }).where(eq(workspaceMember.userId, samId)),
 		);
 
-		await expect(guide.createChannel(sam(), { name: "Launch" })).rejects.toMatchObject({
+		await aBot(adaId, "Writer");
+
+		await expect(
+			guide.createProject(sam(), { name: "Launch", lead: "@writer" }),
+		).rejects.toMatchObject({
 			_tag: "ActionForbidden",
 		});
 	});
 
-	it("acts only on the channel at exactly the address given, not one by that name", async () => {
+	it("acts only on the project at exactly the address given, not one by that name", async () => {
 		await aBot(samId, "Writer");
-		await guide.createChannel(sam(), { name: "Launch" });
+		await guide.createProject(sam(), { name: "Launch", lead: "@writer" });
 
 		await expect(
-			guide.addBotToChannel(sam(), { channel: "Launch", bot: "@writer" }),
+			guide.addBotToProject(sam(), { project: "Launch", bot: "@writer" }),
 		).rejects.toMatchObject({ _tag: "NothingNamed" });
 		await expect(
-			guide.addBotToChannel(sam(), { channel: "launch", bot: "@Writer" }),
+			guide.addBotToProject(sam(), { project: "launch", bot: "@Writer" }),
 		).rejects.toMatchObject({ _tag: "NothingNamed" });
 	});
 

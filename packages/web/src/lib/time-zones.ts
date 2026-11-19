@@ -11,7 +11,7 @@ export interface TimeZoneChoice {
 
 /**
  * Every time zone this browser knows, by name. Automations run only in these,
- * so a workspace moved to one can keep its schedules.
+ * so a workspace moved to one can keep its routines.
  */
 export function timeZoneChoices(now: Date): TimeZoneChoice[] {
 	const zones = Intl.supportedValuesOf("timeZone");

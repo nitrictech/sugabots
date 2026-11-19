@@ -233,6 +233,7 @@ function settlementFor(
 ): Array<{ readonly conversationId: string; readonly outcome?: Turns.Ended }> {
 	switch (event._tag) {
 		case "TurnCompleted":
+		case "TurnStayedSilent":
 		case "LaneReleased":
 			return [{ conversationId: event.conversationId }];
 		case "TurnFailed":

@@ -26,7 +26,7 @@ const page = `/suga/settings/bots/${linear.handle}`;
 const webhookAutomation = {
 	id: "0199a3a0-0000-7000-8000-0000000000a1",
 	workspaceId: linear.workspaceId,
-	botId: linear.id,
+	projectId: linear.defaultProjectId,
 	name: "Triage intake",
 	instructions: "Triage the request.",
 	triggers: automationTriggers("0199a3a0-0000-7000-8000-0000000000a1", {
@@ -43,7 +43,7 @@ const scheduledAutomation = {
 	...webhookAutomation,
 	name: "Morning brief",
 	triggers: automationTriggers("0199a3a0-0000-7000-8000-0000000000a1", {
-		kind: "schedule",
+		kind: "routine",
 		schedule: { repeat: "cron", expression: "0 9 * * 1-5" },
 		timezone: "America/Los_Angeles",
 		nextScheduledAt: "2026-09-21T09:00:00.000Z",
@@ -78,7 +78,7 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 	return {
 		id: "0199a3a0-0000-7000-8000-0000000000f1",
 		workspaceId: linear.workspaceId,
-		botId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: "0199a3a0-0000-7000-8000-00000000b071",
 		name: "Linear",
 		handle: "linear",
 		url: "https://mcp.linear.app/mcp",
@@ -114,7 +114,7 @@ async function openLook() {
 }
 
 describe("what everybody sees", () => {
-	it("shows the bot as a contact card: its face, name and channel first", async () => {
+	it("shows the bot as a contact card: its name first, and a way to change its look", async () => {
 		mount(page);
 
 		expect(await screen.findByRole("heading", { name: linear.name })).toBeDefined();

@@ -19,8 +19,9 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { violatedUniqueConstraint } from "../../database/errors.ts";
-import { bot, channelBot, pinnedBot } from "../../database/schema.ts";
+import { bot, pinnedBot, project, projectBot } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
+import { type LeadsProjects, refuseWhileLeading } from "../projects/project-leads.ts";
 import { type PersonFacingBotRow, personFacingBotRow } from "./bot.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 import { SYSTEM_BOTS, type SystemBotDefinition } from "./system-bots.ts";
@@ -28,7 +29,8 @@ import { SYSTEM_BOTS, type SystemBotDefinition } from "./system-bots.ts";
 /**
  * The only writer of `bot` and `pinned_bot`: the bots people make, each
  * person's Personal Assistant, and the workspace's system bots, of which only
- * the model ever changes.
+ * the model ever changes. Each bot but a system bot gets its default project
+ * as it is made, from the `bot_default_project` trigger, and it goes with it.
  */
 export interface Interface {
 	/**
@@ -45,9 +47,13 @@ export interface Interface {
 		changes: BotUpdate,
 	) => Effect.Effect<
 		PersonFacingBotRow,
-		BotNameTaken | BotHandleReserved | BotGone | SystemBotImmutable
+		BotNameTaken | BotHandleReserved | BotGone | SystemBotImmutable | LeadsProjects
 	>;
-	readonly remove: (workspaceId: string, botId: string) => Effect.Effect<void, SystemBotImmutable>;
+	/** Refused while the bot leads a project people made (see `refuseWhileLeading`). */
+	readonly remove: (
+		workspaceId: string,
+		botId: string,
+	) => Effect.Effect<void, SystemBotImmutable | LeadsProjects>;
 	/**
 	 * `userId`'s Personal Assistant, made on `model`, or with no model, if they
 	 * have none. One they have is returned exactly as they left it.
@@ -64,8 +70,6 @@ export interface Interface {
 		botId: string;
 		pinned: boolean;
 	}) => Effect.Effect<void>;
-	/** Whether `userId` pinned the bot. */
-	readonly isPinned: (userId: string, botId: string) => Effect.Effect<boolean>;
 	/**
 	 * Creates any system bot the workspace does not have yet, with no model.
 	 * An existing one is left exactly as it is, so repeating this never unsets
@@ -218,9 +222,23 @@ export const make = Effect.gen(function* () {
 						if (!updated) {
 							return yield* new BotGone({ botId });
 						}
-						// Only public bots are in channels.
+						// Only public bots are in projects people made, so one made private
+						// leaves them, unless it leads one. Its default project it keeps.
 						if (updated.visibility === "private") {
-							yield* query((db) => db.delete(channelBot).where(eq(channelBot.botId, updated.id)));
+							yield* refuseWhileLeading(updated.id);
+							yield* query((db) =>
+								db
+									.delete(projectBot)
+									.where(
+										and(
+											eq(projectBot.botId, updated.id),
+											sql`${projectBot.projectId} not in (${db
+												.select({ id: project.id })
+												.from(project)
+												.where(eq(project.defaultOfBotId, updated.id))})`,
+										),
+									),
+							);
 						}
 						return updated;
 					}),
@@ -230,14 +248,18 @@ export const make = Effect.gen(function* () {
 		remove: (workspaceId, botId) =>
 			operation(
 				"remove",
-				Effect.gen(function* () {
-					if (yield* isSystemBot(workspaceId, botId)) {
-						return yield* new SystemBotImmutable();
-					}
-					yield* query((db) =>
-						db.delete(bot).where(and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId))),
-					);
-				}),
+				transaction(
+					Effect.gen(function* () {
+						if (yield* isSystemBot(workspaceId, botId)) {
+							return yield* new SystemBotImmutable();
+						}
+						const named = and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId));
+						// Locked first, so a project choosing it as lead meanwhile is seen below.
+						yield* query((db) => db.select({ id: bot.id }).from(bot).where(named).for("update"));
+						yield* refuseWhileLeading(botId);
+						yield* query((db) => db.delete(bot).where(named));
+					}),
+				),
 			),
 
 		provisionPersonalAssistant: ({ workspaceId, userId, model }) =>
@@ -294,18 +316,6 @@ export const make = Effect.gen(function* () {
 								.delete(pinnedBot)
 								.where(and(eq(pinnedBot.userId, userId), eq(pinnedBot.botId, botId))),
 				).pipe(Effect.asVoid),
-			),
-
-		isPinned: (userId, botId) =>
-			operation(
-				"isPinned",
-				query((db) =>
-					db
-						.select({ botId: pinnedBot.botId })
-						.from(pinnedBot)
-						.where(and(eq(pinnedBot.userId, userId), eq(pinnedBot.botId, botId)))
-						.limit(1),
-				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
 		ensureSystemBots: ({ workspaceId, createdById }) =>

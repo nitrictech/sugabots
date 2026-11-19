@@ -4,7 +4,7 @@ import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /*
  * Allowed, Ask first and Off as a connection's settings show them: a line
- * summing up its tools for the channel's list, and a pick-one row for a tool, or
+ * summing up its tools for the project's list, and a pick-one row for a tool, or
  * a kind of tool, on the connection's own page.
  */
 

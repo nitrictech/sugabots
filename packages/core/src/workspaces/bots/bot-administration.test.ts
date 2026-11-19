@@ -3,13 +3,13 @@ import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
-import { BotComputers } from "../../computers/bot-computers.ts";
 import { Computers } from "../../computers/computers.ts";
+import { ProjectComputers } from "../../computers/project-computers.ts";
 import {
 	bot,
-	channel,
-	channelBot,
 	modelProvider,
+	project,
+	projectBot,
 	providerModel,
 	user,
 	workspace,
@@ -20,10 +20,12 @@ import {
 	closeDatabase,
 	onDatabase,
 	type Promised,
+	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { unimplemented } from "../../testing.ts";
+import { defaultProjectOf } from "../projects/project-reads.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { BotAdministration } from "./bot-administration.ts";
 import { BotRepository } from "./bot-repository.ts";
@@ -41,7 +43,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 	let administration: Promised<BotAdministration.Interface>;
 	let workspaceId: string;
 	let creatorId: string;
-	/** The bots whose computers were destroyed, in order. */
+	/** The projects whose computers were destroyed, in order. */
 	let destroyedComputers: string[] = [];
 	let providerReachable = true;
 
@@ -56,11 +58,11 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 					BotRepository.layer,
 					ModelProviderRepository.layer,
 					PersonalAssistants.layer,
-					unimplemented(BotComputers.Service, {
-						destroy: ({ botId }) =>
+					unimplemented(ProjectComputers.Service, {
+						destroy: ({ projectId }) =>
 							providerReachable
 								? Effect.sync(() => {
-										destroyedComputers.push(botId);
+										destroyedComputers.push(projectId);
 									})
 								: Effect.fail(
 										new Computers.Unavailable({ provider: "opensandbox", cause: "unreachable" }),
@@ -296,8 +298,9 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		).toEqual([{ id: made.id }]);
 
 		providerReachable = true;
+		const ownProject = await runOnPostgres(defaultProjectOf(made.id));
 		await administration.remove({ botId: made.id });
-		expect(destroyedComputers).toEqual([made.id]);
+		expect(destroyedComputers).toEqual([ownProject]);
 		expect(await onDatabase((db) => db.select().from(bot).where(eq(bot.id, made.id)))).toEqual([]);
 	});
 
@@ -317,17 +320,17 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		expect(await administration.get({ botId: made.id })).toMatchObject({ pinned: true });
 	});
 
-	it("takes a bot made private out of every channel it was in", async () => {
+	it("takes a bot made private out of every project it was in", async () => {
 		const made = await administration.create({
 			workspace: workspaceId,
 			bot: { name: "Triage", model: OFFERED },
 		});
 		const [launch] = await onDatabase((db) =>
-			db.insert(channel).values({ workspaceId, name: "Launch", slug: "launch" }).returning(),
+			db.insert(project).values({ workspaceId, name: "Launch", slug: "launch" }).returning(),
 		);
-		if (!launch) throw new Error("could not create the channel");
+		if (!launch) throw new Error("could not create the project");
 		await onDatabase((db) =>
-			db.insert(channelBot).values({ workspaceId, channelId: launch.id, botId: made.id }),
+			db.insert(projectBot).values({ workspaceId, projectId: launch.id, botId: made.id }),
 		);
 
 		await administration.update({ botId: made.id, changes: { visibility: "private" } });
@@ -336,8 +339,8 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			await onDatabase((db) =>
 				db
 					.select()
-					.from(channelBot)
-					.where(and(eq(channelBot.channelId, launch.id), eq(channelBot.botId, made.id))),
+					.from(projectBot)
+					.where(and(eq(projectBot.projectId, launch.id), eq(projectBot.botId, made.id))),
 			),
 		).toEqual([]);
 	});

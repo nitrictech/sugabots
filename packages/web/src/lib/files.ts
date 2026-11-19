@@ -10,13 +10,12 @@ import { Effect } from "effect";
 import { client } from "@/api.ts";
 
 /*
- * Files: a channel's, or a bot's own, and the documents and pages bots wrote,
- * opened by version. They refetch on every visit, and whenever a conversation the
+ * Files: a project's, or a bot's own, each opened by version. They refetch on every visit, and whenever a conversation the
  * app is following reports a write (see `refreshFilesAfter`).
  */
 
-/** Whose files a list shows: a channel's, from its conversations, or a bot's, from its tasks. */
-type FileScope = { kind: "channel"; channelId: string } | { kind: "bot"; botId: string };
+/** Whose files a list shows: a project's, from its threads, or a bot's, from its own threads. */
+type FileScope = { kind: "project"; projectId: string } | { kind: "bot"; botId: string };
 
 /**
  * Refetches the files on screen once `toolCall` has written one. Every
@@ -28,16 +27,25 @@ export function refreshFilesAfter(queries: QueryClient, toolCall: ToolCallPart):
 	void queries.invalidateQueries({ queryKey: ["files"] });
 }
 
-const scopeKey = (scope: FileScope) =>
-	scope.kind === "channel" ? ["files", "channel", scope.channelId] : ["files", "bot", scope.botId];
+/** The cache key of `scope`'s list of files. */
+export const filesKey = (scope: FileScope) =>
+	scope.kind === "project" ? ["files", "project", scope.projectId] : ["files", "bot", scope.botId];
+
+/** The cache key of one file at `version`, or at its current version when none is given. */
+export const fileKey = (fileId: string, version?: number) => [
+	"files",
+	"one",
+	fileId,
+	version ?? "current",
+];
 
 export function useFiles(scope: FileScope) {
 	return useQuery({
-		queryKey: scopeKey(scope),
+		queryKey: filesKey(scope),
 		queryFn: ({ signal }) =>
 			Effect.runPromise(
-				scope.kind === "channel"
-					? client.api.files.listInChannel({ params: { channelId: scope.channelId } })
+				scope.kind === "project"
+					? client.api.files.listInProject({ params: { projectId: scope.projectId } })
 					: client.api.files.listForBot({ params: { botId: scope.botId } }),
 				{ signal },
 			),
@@ -55,7 +63,7 @@ export function useFile(fileId: string, version?: number) {
 
 function fileQuery(fileId: string, version?: number) {
 	return queryOptions({
-		queryKey: ["files", "one", fileId, version ?? "current"],
+		queryKey: fileKey(fileId, version),
 		queryFn: ({ signal }) =>
 			Effect.runPromise(
 				version === undefined

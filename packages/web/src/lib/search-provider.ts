@@ -2,8 +2,7 @@ import type { NewSearchProvider, SearchProviderUpdate } from "@sugabots/contract
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
-import { NotReadyError } from "@/lib/failure.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
+import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
 /** The workspace's search provider, or null when it has none. */
 export function useSearchProvider() {
@@ -48,17 +47,14 @@ export function useSearchProviderActions() {
 	const queryClient = useQueryClient();
 	const refresh = () =>
 		queryClient.invalidateQueries({ queryKey: ["search-provider", workspaceId] });
-	function requiredWorkspace() {
-		if (!workspaceId) throw new NotReadyError();
-		return workspaceId;
-	}
+	const requiredWorkspaceId = useRequiredWorkspaceId();
 
 	return {
 		replace: useMutation({
 			mutationFn: (json: NewSearchProvider) =>
 				Effect.runPromise(
 					client.api.searchProviders.replace({
-						params: { workspace: requiredWorkspace() },
+						params: { workspace: requiredWorkspaceId() },
 						payload: json,
 					}),
 				),
@@ -68,7 +64,7 @@ export function useSearchProviderActions() {
 			mutationFn: (json: SearchProviderUpdate) =>
 				Effect.runPromise(
 					client.api.searchProviders.update({
-						params: { workspace: requiredWorkspace() },
+						params: { workspace: requiredWorkspaceId() },
 						payload: json,
 					}),
 				),
@@ -77,14 +73,14 @@ export function useSearchProviderActions() {
 		remove: useMutation({
 			mutationFn: () =>
 				Effect.runPromise(
-					client.api.searchProviders.remove({ params: { workspace: requiredWorkspace() } }),
+					client.api.searchProviders.remove({ params: { workspace: requiredWorkspaceId() } }),
 				),
 			onSuccess: refresh,
 		}),
 		test: useMutation({
 			mutationFn: () =>
 				Effect.runPromise(
-					client.api.searchProviders.test({ params: { workspace: requiredWorkspace() } }),
+					client.api.searchProviders.test({ params: { workspace: requiredWorkspaceId() } }),
 				),
 			onSettled: refresh,
 		}),

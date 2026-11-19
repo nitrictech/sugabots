@@ -20,11 +20,11 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 		return handlers
 			.handle("list", ({ params, query }) =>
 				view
-					.list({ workspace: params.workspace, channel: query.channel })
+					.list({ workspace: params.workspace, project: query.project })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("channelMarkers", ({ params }) =>
-				view.channelMarkers(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
+			.handle("projectMarkers", ({ params }) =>
+				view.projectMarkers(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("inbox", ({ params }) =>
 				view.inbox(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
@@ -32,13 +32,22 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("approvals", ({ params }) =>
 				view.approvals(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("botTasks", ({ params }) =>
-				view.botTasks(params.botId).pipe(asSessionUser, asHttpError(chatErrors)),
+			.handle("botThreads", ({ params }) =>
+				view.botThreads(params.botId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("startTask", ({ params, payload }) =>
+			.handle("startThread", ({ params, payload }) =>
 				chats
-					.startTask({
+					.startThread({
 						botId: params.botId,
+						messageId: payload.id,
+						content: payload.message,
+					})
+					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("startProjectThread", ({ params, payload }) =>
+				chats
+					.startProjectThread({
+						projectId: params.projectId,
 						messageId: payload.id,
 						content: payload.message,
 					})
@@ -68,24 +77,19 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 					.openAutomationFeed({ workspace: params.workspace, automationId: params.automationId })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("openMainChat", ({ params }) =>
+			.handle("startNamedThread", ({ params, payload }) =>
 				chats
-					.openMainChat({ workspace: params.workspace, channelId: params.channelId })
+					.startNamedThread({ projectId: params.projectId, name: payload.name })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("startChat", ({ params, payload }) =>
+			.handle("renameThread", ({ params, payload }) =>
 				chats
-					.startChat({ channelId: params.channelId, name: payload.name })
+					.changeThread({ conversationId: params.conversationId, change: { name: payload.name } })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("renameChat", ({ params, payload }) =>
+			.handle("archiveThread", ({ params }) =>
 				chats
-					.changeChat({ conversationId: params.conversationId, change: { name: payload.name } })
-					.pipe(asSessionUser, asHttpError(chatErrors)),
-			)
-			.handle("archiveChat", ({ params }) =>
-				chats
-					.changeChat({ conversationId: params.conversationId, change: { archived: true } })
+					.changeThread({ conversationId: params.conversationId, change: { archived: true } })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("markDone", ({ params }) =>
@@ -177,7 +181,6 @@ const chatErrors = {
 	ReplyTargetNotFound: BadRequest,
 	HostHasNoModel: Conflict,
 	ChatArchived: Conflict,
-	FirstChatNotArchivable: Conflict,
 	InvalidPageCursor: BadRequest,
 	UploadsNotFound: BadRequest,
 };

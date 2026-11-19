@@ -9,16 +9,11 @@ export class NotReadyError extends Error {
 }
 
 /**
- * What to put in front of somebody when a request fails.
- *
- * Every screen needs this and each was writing its own `describe(failure)`,
- * three of them with the same name and different behaviour. The wording that
- * genuinely differs per screen is the `instead` map: a `Conflict` means
- * something specific where a channel is being named, and nothing in
- * particular anywhere else.
- *
- * Anything that is not one of the API's failures never reached it, so it gets the one
- * message that is true of all of them.
+ * What to put in front of somebody when a request fails: the API's own
+ * message, or the screen's wording for that failure in `instead`, such as
+ * what a `Conflict` means where a project is being named. Anything that is
+ * not one of the API's failures never reached it, so it gets the one message
+ * that is true of all of them.
  */
 export function failureMessage(
 	failure: unknown,

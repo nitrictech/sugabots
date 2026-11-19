@@ -45,7 +45,6 @@ export function Shell() {
 							resizable={!(sidebarHiding.hidden && sidebarHiding.chatShowing)}
 						/>
 					</SlidingSidebar>
-					{/* From a tablet up the page is a lighter panel beside the darker sidebar, a fine line between them. */}
 					<div className="flex min-h-0 min-w-0 flex-1 md:overflow-hidden md:border-border md:border-l md:bg-background">
 						<Outlet />
 					</div>

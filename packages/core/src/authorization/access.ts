@@ -7,10 +7,10 @@ import type { Executor } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
 import {
 	bot,
-	channel,
-	channelMember,
 	directMessageMember,
 	placedConversation,
+	project,
+	projectMember,
 	workspace,
 	workspaceMember,
 } from "../database/schema.ts";
@@ -20,29 +20,30 @@ import {
 	type Actor,
 	type BotFacts,
 	type BotPermission,
-	type ChannelFacts,
-	type ChannelPermission,
-	mayInChannel,
+	mayInProject,
 	mayOnBot,
-	rolesGrantedInChannel,
+	type ProjectFacts,
+	type ProjectPermission,
+	rolesGrantedInProject,
 	type WorkspacePermission,
 } from "./permissions.ts";
 
 /**
  * The facts every decision about who may do what is made from: the caller's
- * workspace role, and either the channel a resource is in and whether a
- * `channel_member` row puts them in it, or the bot it belongs to.
+ * workspace role, and either the project a resource is in and whether a
+ * `project_member` row puts them in it, or the bot it belongs to.
  * `Authorization` and `Visibility` load them here and decide with the pure
  * grants in `permissions.ts`; nothing else loads them or turns them into a
  * decision. Standings are only built in this module, so a caller cannot pair
- * a channel with somebody else's membership.
+ * a project with somebody else's membership.
  *
- * **Reach** is a stored `channel_member` row for a channel; administrators are put
- * in every one by the triggers described on `channelMember`. A bot is reached by
- * everyone in the workspace when it is public, by its creator alone when it is
- * private, and by its person alone when it is a Personal Assistant. A task,
- * an automation's feed or one of its runs is reached through the bot it is
- * with. A collaboration is reached as the conversation it was opened from,
+ * **Reach** is a stored `project_member` row for a project people made;
+ * administrators are put in every one by the triggers described on
+ * `projectMember`. A bot is reached by everyone in the workspace when it is
+ * public, by its creator alone when it is private, and by its person alone when
+ * it is a Personal Assistant. A bot's default project, where its own threads
+ * are, has no members: it is reached through its bot. An automation's feed
+ * and its runs are reached as its project is. A collaboration is reached as the conversation it was opened from,
  * whichever bot was asked, so asking a private bot shows its answer to the
  * people of that conversation and nobody else. A direct message between people
  * is reached through a `direct_message_member` row while its person is in the
@@ -59,14 +60,14 @@ export interface WorkspaceStanding {
 	actor: Actor & { workspaceRole: WorkspaceRole };
 }
 
-/** The caller's standing towards a channel. */
-export interface ChannelStanding {
-	channel: schema.ChannelRow;
+/** The caller's standing towards a project. */
+export interface ProjectStanding {
+	project: schema.ProjectRow;
 	actor: Actor;
-	/** What the decision was made from, including whether a `channel_member` row exists. */
-	facts: ChannelFacts;
-	/** Whether the caller may also take `permission` on this same channel. */
-	may(permission: ChannelPermission): boolean;
+	/** What the decision was made from, including whether a `project_member` row exists. */
+	facts: ProjectFacts;
+	/** Whether the caller may also take `permission` on this same project. */
+	may(permission: ProjectPermission): boolean;
 }
 
 /** The caller's standing towards a bot. */
@@ -79,17 +80,14 @@ export interface BotStanding {
 }
 
 /**
- * The caller's standing towards a conversation they reach: a channel's
- * conversation by their standing in the channel, a bot's conversation by
- * their standing towards the bot, and a direct message, being in which
- * permits only reading it and writing in it. A collaboration's standing is
- * the one towards the conversation it was opened from: `channel` when that is a
- * channel's, else `bot` with the standing towards that conversation's bot,
- * not the bot that was asked.
+ * The caller's standing towards a conversation they reach: a conversation in
+ * a project (a thread, an automation's feed or a run) by their standing in the
+ * project, and a direct message, being in which permits only reading it and
+ * writing in it. A collaboration's standing is the one towards the
+ * conversation it was opened from, not towards the bot that was asked.
  */
 export type ConversationStanding =
-	| { kind: "channel"; conversation: schema.PlacedConversationRow; standing: ChannelStanding }
-	| { kind: "bot"; conversation: schema.PlacedConversationRow; standing: BotStanding }
+	| { kind: "project"; conversation: schema.PlacedConversationRow; standing: ProjectStanding }
 	| { kind: "direct_message"; conversation: schema.PlacedConversationRow };
 
 /**
@@ -101,7 +99,7 @@ export class ResourceHidden
 	extends Data.TaggedError("ResourceHidden")<{
 		readonly resource:
 			| "workspace"
-			| "channel"
+			| "project"
 			| "bot"
 			| "conversation"
 			| "automation"
@@ -121,7 +119,7 @@ export class ResourceHidden
 /** The caller can see the resource and may not take this action on it. */
 export class ActionForbidden
 	extends Data.TaggedError("ActionForbidden")<{
-		readonly permission: WorkspacePermission | ChannelPermission | BotPermission;
+		readonly permission: WorkspacePermission | ProjectPermission | BotPermission;
 	}>
 	implements UserFacing
 {
@@ -136,77 +134,93 @@ export class ActionForbidden
 export type AuthorizationDenied = ResourceHidden | ActionForbidden;
 
 /**
- * The standing, when there is one and its caller reaches the channel or bot;
+ * The standing, when there is one and its caller reaches the project or bot;
  * otherwise `resource` is hidden, so a refusal never confirms an id.
  */
-export function requireReach<Standing extends ChannelStanding | BotStanding>(
+export function requireReach<Standing extends ProjectStanding | BotStanding>(
 	standing: Standing | undefined,
 	resource: ResourceHidden["resource"],
 ): Effect.Effect<Standing, ResourceHidden> {
 	const reached =
 		standing !== undefined &&
-		("channel" in standing ? standing.may("channel.read") : standing.may("bot.read"));
+		("project" in standing ? standing.may("project.read") : standing.may("bot.read"));
 	return reached ? Effect.succeed(standing) : Effect.fail(new ResourceHidden({ resource }));
 }
 
 /**
- * The standing of `actor` towards `row`, a channel they have just been put
+ * The standing of `actor` towards `row`, a project they have just been put
  * in, by creating it or joining it: they are its member.
  */
-export function joinedStanding(row: schema.ChannelRow, actor: Actor): ChannelStanding {
-	return channelStanding(row, actor, true);
+export function joinedStanding(row: schema.ProjectRow, actor: Actor): ProjectStanding {
+	return projectStanding(row, actor, true, null);
 }
 
-/** One person's standing towards one channel, from facts already in hand. */
-function channelStanding(row: schema.ChannelRow, actor: Actor, isMember: boolean): ChannelStanding {
-	const facts: ChannelFacts = { isMember };
+/**
+ * One person's standing towards one project, from facts already in hand:
+ * `defaultOf` is the bot whose default project it is, and must be when it is one.
+ */
+function projectStanding(
+	row: schema.ProjectRow,
+	actor: Actor,
+	isMember: boolean,
+	defaultOf: schema.BotRow | null,
+): ProjectStanding {
+	const facts: ProjectFacts = { isMember, defaultOf: defaultOf && botFactsOf(defaultOf) };
 	return {
-		channel: row,
+		project: row,
 		actor,
 		facts,
-		may: (permission) => mayInChannel(actor, permission, facts),
+		may: (permission) => mayInProject(actor, permission, facts),
 	};
+}
+
+function botFactsOf(row: schema.BotRow): BotFacts {
+	return { visibility: row.visibility, createdById: row.createdById, assistantOf: row.assistantOf };
 }
 
 /** One person's standing towards one bot, from facts already in hand. */
 function botStanding(row: schema.BotRow, actor: Actor): BotStanding {
-	const facts: BotFacts = {
-		visibility: row.visibility,
-		createdById: row.createdById,
-		assistantOf: row.assistantOf,
-	};
+	const facts = botFactsOf(row);
 	return { bot: row, actor, facts, may: (permission) => mayOnBot(actor, permission, facts) };
 }
 
+/** The bot whose default project a project is, joined beside it. */
+const defaultBot = alias(bot, "default_bot");
+const defaultBotOfProject = eq(defaultBot.id, project.defaultOfBotId);
+
 /**
- * What a channel standing is built from, for a query that has `channel`: the
- * columns to select, and the two joins onto the caller's membership of the
- * workspace and of the channel. Left joins, so a channel the caller has no
- * part in is still found, with a standing that permits nothing.
+ * What a project standing is built from, for a query that has `project`: the
+ * columns to select, and the joins onto the caller's membership of the
+ * workspace and of the project, and onto the bot whose default project it is.
+ * Left joins, so a project the caller has no part in is still found, with a
+ * standing that permits nothing.
  */
 const standingColumns = {
-	channel,
+	project,
 	role: workspaceMember.role,
-	membershipId: channelMember.id,
+	membershipId: projectMember.id,
+	defaultBot,
 };
 
 const workspaceMembershipOf = (userId: string) =>
-	and(eq(workspaceMember.workspaceId, channel.workspaceId), eq(workspaceMember.userId, userId));
+	and(eq(workspaceMember.workspaceId, project.workspaceId), eq(workspaceMember.userId, userId));
 
-const channelMembershipOf = (userId: string) =>
-	and(eq(channelMember.channelId, channel.id), eq(channelMember.userId, userId));
+const projectMembershipOf = (userId: string) =>
+	and(eq(projectMember.projectId, project.id), eq(projectMember.userId, userId));
 
 type StandingRow = {
-	channel: schema.ChannelRow;
+	project: schema.ProjectRow;
 	role: WorkspaceRole | null;
 	membershipId: string | null;
+	defaultBot: schema.BotRow | null;
 };
 
-function standingFromRow(row: StandingRow, userId: string): ChannelStanding {
-	return channelStanding(
-		row.channel,
+function standingFromRow(row: StandingRow, userId: string): ProjectStanding {
+	return projectStanding(
+		row.project,
 		{ userId, workspaceRole: row.role ?? undefined },
 		row.membershipId !== null,
+		row.defaultBot,
 	);
 }
 
@@ -237,24 +251,25 @@ export const workspaceStandingFor = Effect.fn("Access.workspaceStandingFor")(fun
 });
 
 /**
- * Everything a decision about one channel needs, in one query: the channel,
- * the caller's workspace role and whether a `channel_member` row puts them in it.
+ * Everything a decision about one project needs, in one query: the project,
+ * the caller's workspace role and whether a `project_member` row puts them in it.
  *
- * `undefined` only when there is no such channel. Somebody outside the
+ * `undefined` only when there is no such project. Somebody outside the
  * workspace gets a standing that permits nothing.
  */
-export const channelStandingFor = Effect.fn("Access.channelStandingFor")(function* (
+export const projectStandingFor = Effect.fn("Access.projectStandingFor")(function* (
 	db: Executor,
-	channelId: string,
+	projectId: string,
 	userId: string,
 ) {
-	if (!isUuid(channelId)) return undefined;
+	if (!isUuid(projectId)) return undefined;
 	const [row] = yield* db
 		.select(standingColumns)
-		.from(channel)
+		.from(project)
 		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(channelMember, channelMembershipOf(userId))
-		.where(eq(channel.id, channelId))
+		.leftJoin(projectMember, projectMembershipOf(userId))
+		.leftJoin(defaultBot, defaultBotOfProject)
+		.where(eq(project.id, projectId))
 		.limit(1);
 	return row ? standingFromRow(row, userId) : undefined;
 });
@@ -293,21 +308,18 @@ export const conversationStandingFor = Effect.fn("Access.conversationStandingFor
 ) {
 	if (!isUuid(conversationId)) return undefined;
 	// A collaboration is reached through the conversation it was opened from,
-	// so its channel and bot are that conversation's.
+	// so its project is that conversation's.
 	const reachedThrough = alias(placedConversation, "reached_through");
-	const reachChannelId = sql<
+	const reachProjectId = sql<
 		string | null
-	>`coalesce(${reachedThrough.channelId}, ${placedConversation.channelId})`;
-	const reachBotId = sql<
-		string | null
-	>`case when ${reachedThrough.id} is null then ${placedConversation.botId} else ${reachedThrough.botId} end`;
+	>`coalesce(${reachedThrough.projectId}, ${placedConversation.projectId})`;
 	const [row] = yield* db
 		.select({
 			conversation: getColumns(placedConversation),
-			channel,
-			bot,
+			project,
+			defaultBot,
 			role: workspaceMember.role,
-			membershipId: channelMember.id,
+			membershipId: projectMember.id,
 			inDirectMessage: reachesDirectMessageFor(placedConversation, userId),
 		})
 		.from(placedConversation)
@@ -318,8 +330,8 @@ export const conversationStandingFor = Effect.fn("Access.conversationStandingFor
 				eq(reachedThrough.id, placedConversation.rootConversationId),
 			),
 		)
-		.leftJoin(channel, eq(channel.id, reachChannelId))
-		.leftJoin(bot, and(eq(bot.id, reachBotId), isNull(bot.systemBotKey)))
+		.leftJoin(project, eq(project.id, reachProjectId))
+		.leftJoin(defaultBot, defaultBotOfProject)
 		.leftJoin(
 			workspaceMember,
 			and(
@@ -327,26 +339,18 @@ export const conversationStandingFor = Effect.fn("Access.conversationStandingFor
 				eq(workspaceMember.userId, userId),
 			),
 		)
-		.leftJoin(channelMember, channelMembershipOf(userId))
+		.leftJoin(projectMember, projectMembershipOf(userId))
 		.where(eq(placedConversation.id, conversationId))
 		.limit(1);
 	if (!row) return undefined;
 	const actor: Actor = { userId, workspaceRole: row.role ?? undefined };
-	if (row.channel) {
-		const inChannel: ConversationStanding = {
-			kind: "channel",
+	if (row.project) {
+		const inProject: ConversationStanding = {
+			kind: "project",
 			conversation: row.conversation,
-			standing: channelStanding(row.channel, actor, row.membershipId !== null),
+			standing: projectStanding(row.project, actor, row.membershipId !== null, row.defaultBot),
 		};
-		return inChannel.standing.may("channel.read") ? inChannel : undefined;
-	}
-	if (row.bot) {
-		const withBot: ConversationStanding = {
-			kind: "bot",
-			conversation: row.conversation,
-			standing: botStanding(row.bot, actor),
-		};
-		return withBot.standing.may("bot.read") ? withBot : undefined;
+		return inProject.standing.may("project.read") ? inProject : undefined;
 	}
 	if (row.conversation.kind !== "direct_message") return undefined;
 	const direct: ConversationStanding = { kind: "direct_message", conversation: row.conversation };
@@ -354,93 +358,99 @@ export const conversationStandingFor = Effect.fn("Access.conversationStandingFor
 });
 
 /**
- * The channels in a workspace that `userId` is in, by name, each with their
- * standing in it, in one query.
+ * `userId`'s standing in the project whose computer a turn of `turnBotId` in
+ * the conversation `conversationId` works on (see `computerProjectIdOf`), which
+ * decides that turn's requests to change the computer. `undefined` when there
+ * is no such conversation or project.
  */
-export const reachedChannelStandingsFor = Effect.fn("Access.reachedChannelStandingsFor")(function* (
+export const computerProjectStandingFor = Effect.fn("Access.computerProjectStandingFor")(function* (
+	db: Executor,
+	conversationId: string,
+	turnBotId: string,
+	userId: string,
+) {
+	if (!isUuid(conversationId) || !isUuid(turnBotId)) return undefined;
+	const [row] = yield* db
+		.select({ projectId: computerProjectIdOf(placedConversation, sql`${turnBotId}::uuid`) })
+		.from(placedConversation)
+		.where(eq(placedConversation.id, conversationId))
+		.limit(1);
+	return row?.projectId ? yield* projectStandingFor(db, row.projectId, userId) : undefined;
+});
+
+/**
+ * Every project in a workspace that `userId` reaches, bots' default projects
+ * included, each with their standing in it, in one query.
+ */
+export const projectStandingsFor = Effect.fn("Access.projectStandingsFor")(function* (
 	db: Executor,
 	workspaceId: string,
 	userId: string,
 ) {
 	const rows = yield* db
 		.select(standingColumns)
-		.from(channel)
+		.from(project)
 		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(channelMember, channelMembershipOf(userId))
-		.where(and(eq(channel.workspaceId, workspaceId), reachesChannelFor(channel.id, userId)))
-		.orderBy(asc(channel.name));
+		.leftJoin(projectMember, projectMembershipOf(userId))
+		.leftJoin(defaultBot, defaultBotOfProject)
+		.where(and(eq(project.workspaceId, workspaceId), reachesProjectFor(project.id, userId)));
 	return rows.map((row) => standingFromRow(row, userId));
 });
 
 /**
- * The channels of a workspace `userId` is in or could join, by name, each with
+ * The projects of a workspace `userId` is in or could join, by name, each with
  * their standing in it, in one query: the public ones, and the private ones
- * they are in.
+ * they are in. Bots' default projects are never listed.
  */
-export const listedChannelStandingsFor = Effect.fn("Access.listedChannelStandingsFor")(function* (
+export const listedProjectStandingsFor = Effect.fn("Access.listedProjectStandingsFor")(function* (
 	db: Executor,
 	workspaceId: string,
 	userId: string,
 ) {
 	const rows = yield* db
-		.select(standingColumns)
-		.from(channel)
+		.select({ project, role: workspaceMember.role, membershipId: projectMember.id })
+		.from(project)
 		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(channelMember, channelMembershipOf(userId))
+		.leftJoin(projectMember, projectMembershipOf(userId))
 		.where(
 			and(
-				eq(channel.workspaceId, workspaceId),
-				sql`(${channel.visibility} = 'public' or ${channelMember.id} is not null)`,
+				eq(project.workspaceId, workspaceId),
+				isNull(project.defaultOfBotId),
+				sql`(${project.visibility} = 'public' or ${projectMember.id} is not null)`,
 			),
 		)
-		.orderBy(asc(channel.name));
-	return rows.map((row) => standingFromRow(row, userId));
-});
-
-/**
- * The bots in a workspace `userId` is in, each with their standing towards
- * it, in one query: those they reach, and the private ones they don't, which
- * an administrator still manages. System bots are nobody's.
- */
-export const botStandingsFor = Effect.fn("Access.botStandingsFor")(function* (
-	db: Executor,
-	workspaceId: string,
-	userId: string,
-) {
-	const rows = yield* db
-		.select({ bot, role: workspaceMember.role })
-		.from(bot)
-		.innerJoin(
-			workspaceMember,
-			and(eq(workspaceMember.workspaceId, bot.workspaceId), eq(workspaceMember.userId, userId)),
-		)
-		.where(and(eq(bot.workspaceId, workspaceId), isNull(bot.systemBotKey)));
-	return rows.map((row) => botStanding(row.bot, { userId, workspaceRole: row.role }));
+		.orderBy(asc(project.name));
+	return rows.map((row) => standingFromRow({ ...row, defaultBot: null }, userId));
 });
 
 /**
  * Whether the caller, who reaches the conversation a tool call was raised in, may
- * decide it. A request to change a bot's computer is decided by the bot's
- * managers, or a Personal Assistant's person, wherever it was raised: `askingBot` is the caller's standing
- * towards the bot that raised the call, if they have one. Any other call is
- * decided by the conversation's people: in a channel's conversation by those holding
- * `approval.decide` there, and otherwise by those whose standing towards the
- * conversation's bot holds `approval.decide`, and `approval.automation.decide`
- * as well for a call raised while an automation runs. For a collaboration that
- * is the bot of the conversation it was opened from, whichever bot asked.
+ * decide it. A request to change a computer is decided by those who manage
+ * the computer's project, wherever it was raised: `computerProject` is the
+ * caller's standing in the project whose computer the asking turn used (see
+ * `computerProjectIdOf`), if they have one. Any other call is decided by the
+ * conversation's people: those holding `approval.decide` in its project, and
+ * `approval.automation.decide` as well for a call raised while an automation
+ * runs. For a collaboration that is the project of the conversation it was
+ * opened from, whichever bot asked.
+ *
+ * A bot brings its own connections into the projects it works in, and their
+ * calls are decided there too: only a public bot is in a project people
+ * made, and whoever decides there may use it.
  *
  * `reached` is the caller's standing towards the conversation, which a
  * `ConversationStanding` is; undefined when they have none.
  */
 export function mayDecideToolCall(
 	reached: DecidingStanding | undefined,
-	askingBot: BotStanding | undefined,
+	computerProject: ProjectStanding | undefined,
 	inAutomation: boolean,
 	deciders: ToolApprovalDeciders,
 ): boolean {
-	if (deciders === "computer-managers") return askingBot?.may("computer.request.decide") ?? false;
-	if (reached?.kind === "channel") return reached.standing.may("approval.decide");
-	if (reached?.kind !== "bot") return false;
+	if (deciders === "computer-managers") {
+		return computerProject?.may("computer.request.decide") ?? false;
+	}
+	if (reached?.kind !== "project") return false;
 	const needed = inAutomation
 		? (["approval.decide", "approval.automation.decide"] as const)
 		: (["approval.decide"] as const);
@@ -448,36 +458,54 @@ export function mayDecideToolCall(
 }
 
 /** What `mayDecideToolCall` reads of a caller's standing towards a conversation. */
-export type DecidingStanding =
-	| { kind: "channel"; standing: ChannelStanding }
-	| { kind: "bot"; standing: BotStanding }
-	| { kind: "direct_message" };
+type DecidingStanding = { kind: "project"; standing: ProjectStanding } | { kind: "direct_message" };
 
 /**
- * SQL for "`userId` is in the channel `channelId` names", `userId` being an id or
- * the column holding one: what `mayInChannel(actor, "channel.read", …)` decides for
- * one channel, written again as a `where` clause. The roles come from
- * `rolesGrantedInChannel`, but the shape of the rule is repeated here, so a change
- * to `mayInChannel`'s shape must be made here too.
+ * SQL for the project whose computer a turn of `turnBotId` in the conversation
+ * `row` works on: the conversation's project, or in a collaboration the bot's
+ * own default project, as a turn's `projectId` is chosen.
+ */
+export function computerProjectIdOf(
+	row: { kind: SQLWrapper; projectId: SQLWrapper },
+	turnBotId: SQLWrapper,
+): SQL<string | null> {
+	return sql<string | null>`case when ${row.kind} = 'collaboration'
+		then (select own_project.id from ${project} as own_project where own_project.default_of_bot_id = ${turnBotId})
+		else ${row.projectId} end`;
+}
+
+/**
+ * SQL for "`userId` reaches the project `projectId` names", `userId` being an
+ * id or the column holding one: what `mayInProject(actor, "project.read", …)`
+ * decides for one project, written again as a `where` clause. In a project
+ * people made, a member whose role reads projects; in a bot's default project,
+ * whoever reaches the bot. The roles come from `rolesGrantedInProject`, but the
+ * shape of the rule is repeated here, so a change to `mayInProject`'s shape
+ * must be made here too.
  *
  * Aliased throughout, so it composes with a query that already joins any of
  * these tables.
  */
-export function reachesChannelFor(
-	channelId: SQLWrapper,
+export function reachesProjectFor(
+	projectId: SQLWrapper,
 	userId: string | SQLWrapper,
 ): SQL<boolean> {
 	return sql`exists (
 		select 1
-		from ${channel} as reach_channel
+		from ${project} as reach_project
 		inner join ${workspaceMember} as reach_workspace_member
-			on reach_workspace_member.workspace_id = reach_channel.workspace_id
+			on reach_workspace_member.workspace_id = reach_project.workspace_id
 			and reach_workspace_member.user_id = ${userId}
-		inner join ${channelMember} as reach_channel_member
-			on reach_channel_member.channel_id = reach_channel.id
-			and reach_channel_member.user_id = ${userId}
-		where reach_channel.id = ${channelId}
-			and ${roleIsOneOf(ROLES_READING_CHANNELS)}
+		where reach_project.id = ${projectId}
+			and case when reach_project.default_of_bot_id is null
+				then ${roleIsOneOf(ROLES_READING_PROJECTS)} and exists (
+					select 1
+					from ${projectMember} as reach_project_member
+					where reach_project_member.project_id = reach_project.id
+						and reach_project_member.user_id = ${userId}
+				)
+				else ${reachesBotFor(sql`reach_project.default_of_bot_id`, userId)}
+			end
 	)`;
 }
 
@@ -512,13 +540,13 @@ export interface ConversationReachColumns {
 	workspaceId: SQLWrapper;
 	kind: SQLWrapper;
 	rootConversationId: SQLWrapper;
-	channelId: SQLWrapper;
+	projectId: SQLWrapper;
 	botId: SQLWrapper;
 }
 
 /**
- * SQL for "`userId` reaches the conversation `row`": the channel rule for a
- * channel's conversation, the bot rule for a bot's conversation, the rule of
+ * SQL for "`userId` reaches the conversation `row`": the project rule for a
+ * project's thread, the bot rule for a bot's conversation, the rule of
  * the conversation it was opened from for a collaboration, and membership of
  * the direct message for one between people. Written as SQL for lists, as
  * `conversationStandingFor` decides it for one conversation.
@@ -531,9 +559,9 @@ export function reachesConversationFor(
 		select 1
 		from ${placedConversation} as reach_opened_from
 		where reach_opened_from.id = ${row.rootConversationId}
-			and (${reachesChannelFor(sql`reach_opened_from.channel_id`, userId)}
+			and (${reachesProjectFor(sql`reach_opened_from.project_id`, userId)}
 				or ${reachesBotFor(sql`reach_opened_from.bot_id`, userId)})
-	) else (${reachesChannelFor(row.channelId, userId)} or ${reachesBotFor(row.botId, userId)} or ${reachesDirectMessageFor(row, userId)}) end)`;
+	) else (${reachesProjectFor(row.projectId, userId)} or ${reachesBotFor(row.botId, userId)} or ${reachesDirectMessageFor(row, userId)}) end)`;
 }
 
 /**
@@ -556,8 +584,8 @@ function reachesDirectMessageFor(
 	)`;
 }
 
-/** Roles that reach a channel once they have been added to it. */
-const ROLES_READING_CHANNELS = rolesGrantedInChannel("channel.read");
+/** Roles that reach a project once they have been added to it. */
+const ROLES_READING_PROJECTS = rolesGrantedInProject("project.read");
 
 /** `false` rather than an empty `in ()`, which is not valid SQL. */
 function roleIsOneOf(roles: readonly WorkspaceRole[]): SQL {

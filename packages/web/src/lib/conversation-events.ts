@@ -17,7 +17,7 @@ import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
-import { refreshAfterConversationChange, refreshChatMarkers } from "@/lib/chats.ts";
+import { refreshAfterConversationChange, refreshConversationMarkers } from "@/lib/chats.ts";
 import { refreshFilesAfter } from "@/lib/files.ts";
 import { changeReactions } from "@/lib/reactions.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
@@ -159,7 +159,7 @@ export function useWorkspaceEvents(): void {
 		const stream = client.events.workspace(workspaceId);
 		// A stream that drops may have missed a new message, so the lists are fetched afresh.
 		void consume(stream, (event) => applyWorkspaceEvent(queries, workspaceId, event)).catch(() => {
-			void refreshChatMarkers(queries, workspaceId);
+			void refreshConversationMarkers(queries, workspaceId);
 		});
 		return () => stream.close();
 	}, [queries, workspaceId]);
@@ -342,15 +342,19 @@ async function applyWorkspaceEvent(
 	switch (update.type) {
 		case "conversation.item_changed":
 			await Promise.all([
-				queries.invalidateQueries({ queryKey: ["chat-messages", update.rootConversationId] }),
-				queries.invalidateQueries({ queryKey: ["chat-history", update.rootConversationId] }),
+				queries.invalidateQueries({
+					queryKey: ["conversation-messages", update.rootConversationId],
+				}),
+				queries.invalidateQueries({
+					queryKey: ["conversation-history", update.rootConversationId],
+				}),
 				// A new message moves its conversation up the list, changes its preview, and may leave it unread.
 				refreshAfterConversationChange(queries, workspaceId),
 			]);
 			return;
 		case "conversation.changed":
 			await Promise.all([
-				queries.invalidateQueries({ queryKey: ["chat-history"] }),
+				queries.invalidateQueries({ queryKey: ["conversation-history"] }),
 				// A message, a reply, or an approval asked for may change how a chat stands in the lists.
 				refreshAfterConversationChange(queries, workspaceId),
 			]);
@@ -358,8 +362,8 @@ async function applyWorkspaceEvent(
 		case "reset":
 			// Any number of the events above may have been missed, so everything they keep fresh is fetched again.
 			await Promise.all([
-				queries.invalidateQueries({ queryKey: ["chat-messages"] }),
-				queries.invalidateQueries({ queryKey: ["chat-history"] }),
+				queries.invalidateQueries({ queryKey: ["conversation-messages"] }),
+				queries.invalidateQueries({ queryKey: ["conversation-history"] }),
 				refreshAfterConversationChange(queries, workspaceId),
 			]);
 			return;

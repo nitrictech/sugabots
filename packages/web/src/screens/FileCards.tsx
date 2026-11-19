@@ -9,8 +9,8 @@ import { cn } from "cn";
 import { ChevronDown, ChevronUp, Maximize2 } from "lucide-react";
 import { useState } from "react";
 import { useFile } from "@/lib/files.ts";
-import { StageMark } from "@/shell/Stage.tsx";
 import { Button } from "@/ui/button.tsx";
+import { IconTile } from "@/ui/icon-tile.tsx";
 import { FILE_KINDS } from "./file-kinds.tsx";
 
 /** A file as a message shows it: at the version written. */
@@ -103,12 +103,9 @@ export function FileCardView({
 					COLLAPSED_WIDTH,
 				)}
 			>
-				<span
-					aria-hidden
-					className="grid size-8 shrink-0 place-items-center rounded-md bg-chip text-subtle-foreground [&_svg]:size-4"
-				>
+				<IconTile size="md" tone="faded">
 					<kind.Icon strokeWidth={2} />
-				</span>
+				</IconTile>
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-muted-foreground text-xs line-through">
 						{file.title}
@@ -134,9 +131,9 @@ export function FileCardView({
 					showsContent && "border-border border-b",
 				)}
 			>
-				<StageMark>
+				<IconTile size="sm">
 					<kind.Icon strokeWidth={2} />
-				</StageMark>
+				</IconTile>
 				<span className="flex min-w-card-name flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-foreground text-xs">{file.title}</span>
 					<span className="truncate text-xs text-muted-foreground">

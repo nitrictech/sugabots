@@ -3,8 +3,9 @@ import { ChevronDown } from "lucide-react";
 import { createContext, type ReactNode, type Ref, use, useState } from "react";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
-import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
+import { BackButton } from "@/ui/back-button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
+import { SheetHandle } from "@/ui/dialog.tsx";
 
 /**
  * The column beside a chat: Details, or a collaboration or automation run opened
@@ -83,12 +84,7 @@ export function ChatSidebar({
 					className,
 				)}
 			>
-				{sheet && (
-					<span
-						aria-hidden
-						className="mx-auto mt-2 mb-3.5 h-1 w-9 shrink-0 rounded-full bg-border-strong md:hidden"
-					/>
-				)}
+				{sheet && <SheetHandle className="mx-auto mt-2 mb-3.5 md:hidden" />}
 				<header
 					className={cn(
 						"flex h-13 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4.5",
@@ -98,16 +94,7 @@ export function ChatSidebar({
 							"max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2",
 					)}
 				>
-					{headerless && (
-						<button
-							type="button"
-							aria-label="Back"
-							onClick={onClose}
-							className={cn(BACK_BUTTON, "md:hidden")}
-						>
-							<BackChevron />
-						</button>
-					)}
+					{headerless && <BackButton onClick={onClose} className="md:hidden" />}
 					<div className="flex min-w-0 flex-1 items-baseline gap-2">
 						<h2
 							ref={headingRef}
@@ -142,8 +129,8 @@ export function ChatSidebar({
 /** Whether the sections inside are floating cards, which `ChatSidebar` says for its `floating` Details. */
 const FloatingCards = createContext(false);
 
-/** One floating Details card's surface, for what heads the cards as well as each section. */
-export const FLOATING_CARD =
+/** One floating Details card's surface. */
+const FLOATING_CARD =
 	"md:pointer-events-auto md:rounded-xl md:border md:border-glass-edge md:bg-glass md:shadow-popover md:backdrop-blur-xl";
 
 /**

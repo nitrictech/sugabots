@@ -14,7 +14,7 @@ import { type WorkspaceAccessResult, workspaceAccessTool } from "./tool.ts";
 describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres", () => {
 	let suffix: string;
 	let workspaceId: string;
-	let taskId: string;
+	let threadId: string;
 	let owner: typeof user.$inferSelect;
 
 	afterAll(async () => {
@@ -36,15 +36,15 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 		return person;
 	}
 
-	async function joinTask(userId: string) {
+	async function joinThread(userId: string) {
 		await onDatabase((db) =>
-			db.insert(conversationParticipant).values({ conversationId: taskId, userId }),
+			db.insert(conversationParticipant).values({ conversationId: threadId, userId }),
 		);
 	}
 
 	async function lookUp(person: string): Promise<WorkspaceAccessResult> {
 		const lookUpTool = workspaceAccessTool({
-			conversationId: taskId,
+			conversationId: threadId,
 			workspaceId,
 			run: runOnPostgres,
 		});
@@ -84,16 +84,21 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 		);
 		if (!host) throw new Error("Could not create a bot");
 		const created = await onDatabase((db) =>
-			seedConversation(db, { workspaceId, kind: "task", botId: host.id, title: "Access" }),
+			seedConversation(db, {
+				workspaceId,
+				kind: "project_thread",
+				botId: host.id,
+				title: "Access",
+			}),
 		);
-		taskId = created.id;
+		threadId = created.id;
 	});
 
 	it("says a person's role and lists the owner first, then admins, as who can help", async () => {
 		const viewer = await member("Viewer", "viewer");
 		await member("Admin", "admin");
 		await member("Bystander", "member");
-		await joinTask(viewer.id);
+		await joinThread(viewer.id);
 
 		expect(await lookUp(`@${handleOf("Viewer")}`)).toEqual({
 			person: { name: viewer.name, handle: handleOf("Viewer"), role: "viewer" },
@@ -107,7 +112,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 
 	it("lists at most five who can help, and says when there are more", async () => {
 		const asker = await member("Asker", "member");
-		await joinTask(asker.id);
+		await joinThread(asker.id);
 		for (const index of [1, 2, 3, 4, 5]) await member(`Admin${index}`, "admin");
 
 		const result = await lookUp(handleOf("Asker"));
@@ -125,7 +130,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 	it("lists only the owner as who can change an admin's role", async () => {
 		const admin = await member("Admin", "admin");
 		await member("Other", "admin");
-		await joinTask(admin.id);
+		await joinThread(admin.id);
 
 		expect(await lookUp(handleOf("Admin"))).toEqual({
 			person: { name: admin.name, handle: handleOf("Admin"), role: "admin" },
@@ -136,7 +141,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 
 	it("lists nobody as who can change the owner's role", async () => {
 		await member("Admin", "admin");
-		await joinTask(owner.id);
+		await joinThread(owner.id);
 
 		expect(await lookUp(handleOf("Owner"))).toEqual({
 			person: { name: owner.name, handle: handleOf("Owner"), role: "owner" },
@@ -145,9 +150,9 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 		});
 	});
 
-	it("only looks up people in the task", async () => {
+	it("only looks up people in the thread", async () => {
 		const asker = await member("Asker", "member");
-		await joinTask(asker.id);
+		await joinThread(asker.id);
 		await member("Elsewhere", "admin");
 
 		expect(await lookUp(handleOf("Elsewhere"))).toEqual({
@@ -163,7 +168,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 				.returning(),
 		);
 		if (!former) throw new Error("Could not create a person");
-		await joinTask(former.id);
+		await joinThread(former.id);
 
 		expect(await lookUp(handleOf("Former"))).toMatchObject({
 			person: { handle: handleOf("Former"), role: "none" },

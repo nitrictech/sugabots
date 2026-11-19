@@ -14,11 +14,13 @@ import { WarningText } from "@/ui/warning-text.tsx";
  * whose sign-in expired, which it can't use until someone signs in again.
  * Someone who manages the bot's connections signs one in again from
  * here, or opens the list for several; anyone else is only told. Closing it
- * hides it until the chat is next opened. Nothing while every sign-in holds.
+ * hides it until the thread is next opened. Nothing while every sign-in holds.
  */
 export function ConnectionsNotice({ bot }: { bot: Bot }) {
 	const [dismissed, setDismissed] = useState(false);
-	const expired = useConnections(bot.id).data?.filter((connection) => connection.signInExpired);
+	const expired = useConnections(bot.defaultProjectId).data?.filter(
+		(connection) => connection.signInExpired,
+	);
 	if (dismissed || !expired || expired.length === 0) return null;
 	const canSignIn = bot.permissions.manageConnections;
 	const who = canSignIn ? "you sign" : "someone who manages it signs";
@@ -49,8 +51,8 @@ export function ConnectionsNotice({ bot }: { bot: Bot }) {
 
 /** One connection goes straight to its sign-in; several open the bot's connections, each with its own. */
 function SignInAgain({ bot, expired }: { bot: Bot; expired: readonly Connection[] }) {
-	const backToChat = useBackToHere("Chat");
-	const actions = useConnectionActions(bot.id);
+	const backToThread = useBackToHere("Thread");
+	const actions = useConnectionActions(bot.defaultProjectId);
 	const [only] = expired;
 	if (only && expired.length === 1) {
 		return (
@@ -70,7 +72,7 @@ function SignInAgain({ bot, expired }: { bot: Bot; expired: readonly Connection[
 	return (
 		<Link
 			{...botSettingsPageLink(bot, "connections")}
-			state={backToChat}
+			state={backToThread}
 			aria-label="Open connections"
 			className={buttonStyles({ variant: "secondary", size: "sm", className: "shrink-0" })}
 		>

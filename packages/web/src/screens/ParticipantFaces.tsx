@@ -8,6 +8,9 @@ const OVERLAP = 0.3;
 /** The ring round each face, so it reads apart from the one under it. */
 const RING_WIDTH_PX = 2;
 
+/** The count of those not shown: its figures as a share of its size, and never smaller than this. */
+const COUNT_FONT = { share: 0.45, minimumPx: 9 };
+
 /**
  * The faces of who is in a conversation, overlapping in a row: people first, then
  * bots, each in the order given, the first `shown` of them and then how many
@@ -36,16 +39,13 @@ export function ParticipantFaces({
 	const hidden = ordered.length - faces.length;
 	const overlapPx = Math.round(size * OVERLAP);
 	const ring = `0 0 0 ${RING_WIDTH_PX}px ${surface}`;
-	// Each is positioned, so a later face paints over an earlier one whatever draws it.
-	const place = (index: number) => ({
-		position: "relative" as const,
-		marginLeft: index === 0 ? 0 : -overlapPx,
-	});
+	// Each is positioned (`relative`), so a later face paints over an earlier one whatever draws it.
+	const place = (index: number) => ({ marginLeft: index === 0 ? 0 : -overlapPx });
 	return (
 		<span aria-hidden className="flex shrink-0 items-center">
 			{faces.map((participant, index) =>
 				participant.kind === "bot" ? (
-					<span key={participant.id} className="flex" style={place(index)}>
+					<span key={participant.id} className="relative flex" style={place(index)}>
 						<BotAvatar
 							color={participant.color}
 							face={participant.face}
@@ -57,7 +57,7 @@ export function ParticipantFaces({
 				) : (
 					<span
 						key={participant.id}
-						className="flex rounded-full"
+						className="relative flex rounded-full"
 						style={{ ...place(index), boxShadow: ring }}
 					>
 						<PersonAvatar person={participant} size={size} />
@@ -66,12 +66,12 @@ export function ParticipantFaces({
 			)}
 			{hidden > 0 && (
 				<span
-					className="grid shrink-0 place-items-center rounded-full bg-chip font-semibold text-muted-foreground"
+					className="relative grid shrink-0 place-items-center rounded-full bg-chip font-semibold text-muted-foreground"
 					style={{
 						...place(faces.length),
 						width: size,
 						height: size,
-						fontSize: Math.max(9, Math.round(size * 0.45)),
+						fontSize: Math.max(COUNT_FONT.minimumPx, Math.round(size * COUNT_FONT.share)),
 						boxShadow: ring,
 					}}
 				>

@@ -228,7 +228,7 @@ function Slide({ screenshot, label, offset, draggedPx, onSelect, onEnlarge }: Sl
 								/>
 							)}
 						</ForVisitorOs>
-						<span className="pointer-events-none absolute right-3.5 bottom-3.5 grid size-9 place-items-center rounded-full border border-white/14 bg-landing-page/72 text-landing-text opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+						<span className="pointer-events-none absolute right-3.5 bottom-3.5 grid size-9 place-items-center rounded-full landing-glass text-landing-text opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
 							<Maximize2Icon className="size-4" />
 						</span>
 					</button>
@@ -328,7 +328,7 @@ function EnlargedScreenshot({
 
 /** A round button over the enlarged screenshot: close, previous and next. */
 const lightboxButton =
-	"grid size-10 cursor-pointer place-items-center rounded-full border border-white/14 bg-landing-page/72 text-landing-text outline-none backdrop-blur-sm hover:bg-landing-button focus-visible:ring-2 focus-visible:ring-landing-accent";
+	"grid size-10 cursor-pointer place-items-center rounded-full landing-glass text-landing-text outline-none hover:bg-landing-button focus-visible:ring-2 focus-visible:ring-landing-accent";
 
 /**
  * The screenshots' titles and descriptions, the current one shown. Every

@@ -1,4 +1,5 @@
 import { cn } from "cn";
+import { countOf } from "@/lib/name-list.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
 
 /** Text longer than this, or on more than one line, is a block of its own rather than inline. */
@@ -82,7 +83,7 @@ function Fields({ fields, depth }: { fields: Record<string, unknown>; depth: num
 					</dt>
 					<dd className="m-0 min-w-0">
 						{key === "images" && Array.isArray(value) ? (
-							<span>{counted(value.length, "image")}</span>
+							<span>{countOf(value.length, "image", "images")}</span>
 						) : (
 							<Value value={value} depth={depth + 1} />
 						)}
@@ -149,8 +150,4 @@ function Empty() {
 function isShortScalar(value: unknown): boolean {
 	if (typeof value === "string") return value.length <= 40 && !value.includes("\n");
 	return typeof value === "number" || typeof value === "boolean";
-}
-
-function counted(count: number, noun: string): string {
-	return `${count} ${count === 1 ? noun : `${noun}s`}`;
 }

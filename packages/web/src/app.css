@@ -25,6 +25,10 @@
 	--aside: light-dark(#ffffff, var(--color-zinc-950));
 	/* Behind a page opened beside a chat, such as a file. */
 	--stage: light-dark(var(--color-zinc-100), var(--color-zinc-900));
+	/* Another person's message bubble. */
+	--bubble: light-dark(var(--color-zinc-100), var(--color-zinc-900));
+	/* The composer drawn as a pill, as New message's is. */
+	--composer: light-dark(var(--color-zinc-50), var(--color-zinc-800));
 	/* A card among the messages, such as an approval request. */
 	--card: light-dark(var(--color-zinc-50), var(--color-zinc-900));
 	/* A raised panel: a dialog, the composer's input. */
@@ -79,7 +83,7 @@
 	--glass-edge: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.08));
 	/* The send button with nothing to send. */
 	--chip-strong: light-dark(#e4e4e7, #1f1f23);
-	/* A channel tile, and a slot in one with no bot in it. */
+	/* A project tile, and a slot in one with no bot in it. */
 	--tile: light-dark(#e4e4e7, #26262a);
 	--tile-empty: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.06));
 
@@ -103,28 +107,22 @@
 	--ring-shadow: 0 0 0 3px var(--ring-halo);
 	/* How full a bot's short-term memory is. */
 	--meter: var(--primary);
-	/* The count of what is unread or waiting, on Inbox, a menu row or a tab, and the hand when a chat waits for your approval. */
+	/* The count of what is unread or waiting, on Inbox, a menu row or a tab. */
 	--rail-count: var(--primary);
-	--approval-marker: var(--primary);
 	/* A reaction you are among, under a message: a grey wash edged in the accent. Others' are a card on a chip's edge. */
 	--reaction-mine: light-dark(#f1f1f3, #1f1f23);
 	--reaction-mine-foreground: var(--foreground);
 
 	/* Red is only for errors and delete. */
 	--destructive: #f0505e;
+	/* Text and marks on a destructive fill, such as the ! on a failed run. */
+	--destructive-foreground: #fff;
 	/*
-	 * Red text, such as Delete channel, and the wash behind it on hover. Light is a
+	 * Red text, such as Delete project, and the wash behind it on hover. Light is a
 	 * shade darker than the design's #d6384e so it passes AA on a chip.
 	 */
 	--destructive-text: light-dark(#c42d45, #f08a94);
-	--destructive-hover: light-dark(
-		#fde8ea,
-		#2a1a1e
-	); /* An automation's failed run: its card, its edge, its heading, and why it failed. */
-	--failed-card: light-dark(#fdf1f3, oklch(0.19 0.03 20));
-	--failed-card-border: light-dark(#f3c4cc, oklch(0.36 0.09 20));
-	--failed-card-heading: light-dark(#8e1f31, #fbd5da);
-	--failed-card-text: light-dark(#7a2b38, #e3c3c8);
+	--destructive-hover: light-dark(#fde8ea, #2a1a1e);
 	--warning: light-dark(#8a5a12, oklch(0.8 0.09 75));
 	/* A dot for something that went ahead, such as an allowed request. */
 	--success: #3fcb6b;
@@ -140,6 +138,7 @@
 	--file-page-heading: light-dark(#9a9ea8, #8b8f99);
 	--file-badge-sheet: #1a7a43;
 	--file-badge-other: light-dark(#52525b, #3f3f46);
+	--file-badge-foreground: #fff;
 	/* Over the chat while files are dragged onto it, and the wash inside its dashed edge. */
 	--drop-veil: light-dark(rgba(255, 255, 255, 0.8), rgba(10, 10, 10, 0.8));
 	--drop-target: light-dark(rgba(241, 241, 243, 0.7), rgba(23, 23, 26, 0.6));
@@ -166,6 +165,8 @@
 }
 
 @theme inline {
+	--color-bubble: var(--bubble);
+	--color-composer: var(--composer);
 	--color-background: var(--background);
 	--color-rail: var(--rail);
 	--color-list: var(--list);
@@ -195,10 +196,6 @@
 	--color-switch-on: var(--switch-on);
 	--color-destructive-text: var(--destructive-text);
 	--color-destructive-hover: var(--destructive-hover);
-	--color-failed-card: var(--failed-card);
-	--color-failed-card-border: var(--failed-card-border);
-	--color-failed-card-heading: var(--failed-card-heading);
-	--color-failed-card-text: var(--failed-card-text);
 	--color-scrim: var(--scrim);
 	--color-glass: var(--glass);
 	--color-glass-edge: var(--glass-edge);
@@ -215,18 +212,19 @@
 	--color-ring: var(--ring);
 	--color-meter: var(--meter);
 	--color-rail-count: var(--rail-count);
-	--color-approval-marker: var(--approval-marker);
 	--color-reaction-mine: var(--reaction-mine);
 	--color-reaction-mine-foreground: var(--reaction-mine-foreground);
 	--color-warning: var(--warning);
 	--color-success-text: var(--success-text);
 	--color-success: var(--success);
 	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
 	--color-file-page: var(--file-page);
 	--color-file-page-line: var(--file-page-line);
 	--color-file-page-heading: var(--file-page-heading);
 	--color-file-badge-sheet: var(--file-badge-sheet);
 	--color-file-badge-other: var(--file-badge-other);
+	--color-file-badge-foreground: var(--file-badge-foreground);
 	--color-drop-veil: var(--drop-veil);
 	--color-drop-target: var(--drop-target);
 	--color-person-avatar: var(--person-avatar);
@@ -486,24 +484,9 @@
 }
 
 /*
- * A notch cut from an element's top right corner, for a lock of `--lock-size`
- * laid over that corner and reaching `--lock-overhang` past it, as `Locked`
- * sets both. Cut rather than backed with a colour, so it reads on whatever the
- * element sits on.
- */
-@utility lock-notch {
-	--lock-centre: calc(var(--lock-size) / 2 - var(--lock-overhang));
-	mask-image: radial-gradient(
-		circle at calc(100% - var(--lock-centre)) var(--lock-centre),
-		transparent calc(var(--lock-size) / 2 + 1px),
-		#000 calc(var(--lock-size) / 2 + 1.5px)
-	);
-}
-
-/*
- * Room on the right of a bot's task for Details' floating cards (17rem), only
+ * Room on the right of a bot's thread for Details' floating cards (17rem), only
  * as much as its centred column (50rem, `max-w-200`) needs to clear them: none
- * while the task is wide enough for both, all of them once it is not.
+ * while the thread is wide enough for both, all of them once it is not.
  */
 @utility pr-clear-details {
 	padding-right: clamp(0px, 2 * 17rem + 50rem - 100%, 17rem);
@@ -600,7 +583,6 @@
 	--animate-rise: rise 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 	--animate-cards-in: cards-in 240ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
 	--animate-sheet-up: sheet-up 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-	--animate-reply-in: reply-in 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 
 	@keyframes rise {
 		from {
@@ -618,18 +600,6 @@
 		from {
 			opacity: 0;
 			transform: translateY(-4px);
-		}
-		to {
-			opacity: 1;
-			transform: none;
-		}
-	}
-
-	/* Grows out of the typing line it replaces, from the avatar's corner. */
-	@keyframes reply-in {
-		from {
-			opacity: 0;
-			transform: translateY(8px) scale(0.96);
 		}
 		to {
 			opacity: 1;

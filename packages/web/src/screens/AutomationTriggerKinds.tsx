@@ -1,23 +1,27 @@
-import type { Bot } from "@sugabots/contracts";
-import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, Search } from "lucide-react";
-import { useDeferredValue, useState } from "react";
+import { ArrowUpRight } from "lucide-react";
 import {
 	TRIGGER_KINDS,
 	type TriggerKind,
 	type TriggerKindChoice,
 } from "@/lib/automation-trigger-words.ts";
 import { useConnections } from "@/lib/connections.ts";
-import { botSettingsPageLink } from "@/lib/links.ts";
+import {
+	ownerLink,
+	ownerName,
+	type ResourceOwner,
+	resourceProjectId,
+} from "@/lib/resource-owner.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DialogFormBody, DialogFormHeader, DialogFormStep } from "@/ui/dialog-form.tsx";
+import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SettingsGroup, SettingsRow, SettingsRowIcon } from "@/ui/settings-page.tsx";
-import { AutomationTriggerIcon } from "./ChatActivityRow.tsx";
+import { AutomationTriggerIcon } from "./RunRow.tsx";
 
 /*
  * The kinds of trigger an automation may have: Sugabots' own, and those of the
- * integrations its bot connects to. There may be many, so the
- * first step of adding one is a searchable list of only those the bot can use.
+ * integrations its project is connected to. There may be many, so the first
+ * step of adding one is a searchable list of only those the project can use.
+ * Routines are added from their own section, so the list leaves them out.
  */
 
 export function triggerKindChoice(kind: TriggerKind): TriggerKindChoice {
@@ -40,30 +44,27 @@ export function TriggerKindMark({ choice }: { choice: TriggerKindChoice }) {
 
 /**
  * The first step of adding a trigger: choosing its kind, found by typing part
- * of its name, from Sugabots' own and those of the integrations `bot` is
+ * of its name, from Sugabots' own and those of the integrations `owner` is
  * connected to, with a way to connect it to more.
  */
 export function TriggerKindStep({
-	bot,
+	owner,
 	onChoose,
 	done,
 }: {
-	/** The bot; undefined while none is chosen, which leaves only Sugabots' own. */
-	bot: { bot: Bot } | undefined;
+	owner: ResourceOwner;
 	onChoose: (kind: TriggerKind) => void;
 	done: () => void;
 }) {
-	const connections = useConnections(bot?.bot.id);
+	const connections = useConnections(resourceProjectId(owner));
 	const connected = new Set(connections.data?.map((one) => one.kind));
-	const [query, setQuery] = useState("");
-	const needle = useDeferredValue(query.trim().toLowerCase());
-	const matches = (choice: TriggerKindChoice) =>
-		needle === "" ||
-		choice.label.toLowerCase().includes(needle) ||
-		choice.sub.toLowerCase().includes(needle);
-	const own = TRIGGER_KINDS.filter((choice) => !choice.connection && matches(choice));
-	const integrations = TRIGGER_KINDS.filter(
-		(choice) => choice.connection && connected.has(choice.connection) && matches(choice),
+	const { query, setQuery, searching, matches } = useSearchFilter(TRIGGER_KINDS, (choice) => [
+		choice.label,
+		choice.sub,
+	]);
+	const own = matches.filter((choice) => !choice.connection && choice.kind !== "routine");
+	const integrations = matches.filter(
+		(choice) => choice.connection && connected.has(choice.connection),
 	);
 	const row = (choice: TriggerKindChoice) => (
 		<SettingsRow
@@ -79,43 +80,35 @@ export function TriggerKindStep({
 		<DialogFormStep onSubmit={(event) => event.preventDefault()}>
 			<DialogFormHeader title="Add a trigger" onClose={done} />
 			<DialogFormBody>
-				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-					<input
-						type="search"
-						value={query}
-						onChange={(event) => setQuery(event.target.value)}
-						placeholder="Search triggers"
-						aria-label="Search triggers"
-						className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-					/>
-				</label>
+				<SearchField label="Search triggers" value={query} onChange={setQuery} />
 				<div className="-mx-1 flex max-h-picker flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
 					{own.length > 0 && <SettingsGroup label="Built in">{own.map(row)}</SettingsGroup>}
-					{bot && (
-						<SettingsGroup label="From this bot's connections">
-							{integrations.map(row)}
-							{/* Set as the kinds above are, a name and a line under it, so the dialog keeps to their two styles. */}
-							<SettingsRow
-								label={
-									integrations.length > 0
-										? "Connect another app"
-										: needle === ""
-											? "No connections with triggers yet"
-											: `No connection matches “${query.trim()}”`
-								}
-								sub={
-									integrations.length > 0
-										? `In ${bot.bot.name}'s settings`
-										: `Connect an app in ${bot.bot.name}'s settings`
-								}
-								trailing={
-									<ArrowUpRight aria-hidden size={15} className="shrink-0 text-subtle-foreground" />
-								}
-								render={<Link {...botSettingsPageLink(bot.bot, "connections")} />}
-							/>
-						</SettingsGroup>
-					)}
+					<SettingsGroup
+						label={
+							"bot" in owner ? "From this bot's connections" : "From this project's connections"
+						}
+					>
+						{integrations.map(row)}
+						{/* Set as the kinds above are, a name and a line under it, so the dialog keeps to their two styles. */}
+						<SettingsRow
+							label={
+								integrations.length > 0
+									? "Connect another app"
+									: !searching
+										? "No connections with triggers yet"
+										: `No connection matches “${query.trim()}”`
+							}
+							sub={
+								integrations.length > 0
+									? `In ${ownerName(owner)}'s settings`
+									: `Connect an app in ${ownerName(owner)}'s settings`
+							}
+							trailing={
+								<ArrowUpRight aria-hidden size={15} className="shrink-0 text-subtle-foreground" />
+							}
+							render={ownerLink(owner, { page: "connections" })}
+						/>
+					</SettingsGroup>
 				</div>
 			</DialogFormBody>
 		</DialogFormStep>

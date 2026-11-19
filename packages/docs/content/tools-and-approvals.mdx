@@ -27,7 +27,8 @@ That's always on.
 
 ## Tools from connections
 
-A connection's tools belong to its bot. Each tool has its own approval:
+A connection's tools belong to its project, a bot's own to its default
+project. Each tool has its own approval:
 
 | Approval | What happens |
 | --- | --- |
@@ -58,10 +59,13 @@ A waiting call shows in the chat with **Allow** and **Deny**. Allow lets that
 one call run. There's no "always allow": the next call asks again.
 
 - **Anyone who can talk to the bot**, except viewers, can answer approvals in
-  its tasks. In a channel, anyone in it except viewers can answer.
+  its threads. In a project, anyone in it except viewers can answer.
 - **Viewers** see "Waiting for someone with permission to answer this."
-- **Only the bot's creator, the owner and admins** can answer approvals raised
-  by an [automation](/docs/automations) run. On your Personal Assistant, that's
-  you.
-- **Only the bot's creator, the owner and admins** can allow a bot's computer
-  to reach an internet address it couldn't before.
+- **Only those who manage the automation** can answer approvals raised by an
+  [automation](/docs/automations) run: for a bot's own, the bot's creator, the
+  owner and admins; for a project's, the owner and admins. On your Personal
+  Assistant, that's you.
+- **Only those who manage the computer** can allow it to reach an internet
+  address it couldn't before: for a bot's own computer, the bot's creator,
+  the owner and admins; for a [project's computer](/docs/projects#computer),
+  the owner and admins.

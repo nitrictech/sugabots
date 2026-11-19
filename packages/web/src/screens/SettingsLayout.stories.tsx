@@ -100,14 +100,14 @@ export const AsAMember = meta.story({
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas }) => {
 		const nav = await canvas.findByRole("navigation", { name: "Settings" });
-		// Waiting on their channels waits on the answers the list is drawn from.
+		// Waiting on their projects waits on the answers the list is drawn from.
 		await expect(await within(nav).findByRole("button", { name: "Revenue" })).toBeInTheDocument();
 		await expect(within(nav).queryByRole("link", { name: "Models" })).toBeNull();
-		await expect(within(nav).queryByRole("button", { name: "New channel" })).toBeNull();
+		await expect(within(nav).queryByRole("button", { name: "New project" })).toBeNull();
 	},
 });
 
-/** On a tablet: one list, you first, every section a row that opens it, and Done. */
+/** On a tablet: one list, you first, every section a row that opens it, and no Done. */
 export const TabletList = meta.story({
 	globals: TABLET,
 	render: () => <StoryApp path={settings} />,
@@ -142,10 +142,10 @@ export const PhoneSection = meta.story({
 	},
 });
 
-/** On a tablet, settings drill down as on a phone: a channel's page full screen, with the way back to the list. */
+/** On a tablet, settings drill down as on a phone: a project's page full screen, with the way back to the list. */
 export const TabletSection = meta.story({
 	globals: TABLET,
-	render: () => <StoryApp path={`${settings}/channels/revenue/bots`} />,
+	render: () => <StoryApp path={`${settings}/projects/revenue/bots`} />,
 	play: async ({ canvas }) => {
 		const page = await canvas.findByRole("main");
 		await expect(await within(page).findByRole("link", { name: "Settings" })).toBeInTheDocument();

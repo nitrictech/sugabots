@@ -11,6 +11,10 @@ import {
 	automationsIndexRoute,
 	automationsRoute,
 	newAutomationRoute,
+	projectAutomationRoute,
+	projectAutomationsIndexRoute,
+	projectAutomationsRoute,
+	projectNewAutomationRoute,
 } from "./routes/automations.tsx";
 import {
 	botFileRoute,
@@ -18,18 +22,9 @@ import {
 	botIndexRoute,
 	botRoute,
 	botsRoute,
-	newTaskRoute,
-	taskByIdRoute,
-	taskRoute,
+	threadByIdRoute,
+	threadRoute,
 } from "./routes/bots.tsx";
-import {
-	channelConversationRoute,
-	channelFileRoute,
-	channelFilesRoute,
-	channelIndexRoute,
-	channelRoute,
-	channelsRoute,
-} from "./routes/channels.tsx";
 import { gitHubSetupReturnRoute, signInReturnRoute } from "./routes/connection-returns.tsx";
 import {
 	directMessageRoute,
@@ -39,15 +34,25 @@ import {
 } from "./routes/direct-messages.tsx";
 import { inboxConversationRoute, inboxIndexRoute, inboxRoute } from "./routes/inbox.tsx";
 import { onboardingRoute } from "./routes/onboarding.tsx";
+import {
+	projectFileRoute,
+	projectFilesRoute,
+	projectIndexRoute,
+	projectNewThreadRoute,
+	projectRoute,
+	projectsRoute,
+	projectThreadRoute,
+} from "./routes/projects.tsx";
 import { type RouterContext, rootRoute } from "./routes/root.tsx";
 import {
 	settingsBotConnectionRoute,
 	settingsBotPageRoute,
 	settingsBotRoute,
-	settingsChannelPageRoute,
-	settingsChannelRoute,
 	settingsDefaultModelRoute,
 	settingsMemberRoute,
+	settingsProjectConnectionRoute,
+	settingsProjectPageRoute,
+	settingsProjectRoute,
 	settingsProviderRoute,
 	settingsRoute,
 	settingsSectionRoute,
@@ -76,7 +81,11 @@ import {
  *   /join/$code               where a referral link lands
  *   /invite/$id
  *   /connections/oauth/return        where a connection's sign-in comes back
+ *   /connections/github/return       where installing a project's GitHub app comes back
+ *   /onboarding              setting up a workspace, the first or another
  *   /$workspace              the person's Personal Assistant
+ *   /$workspace/home         on a phone, Home: the Personal Assistant, projects and pinned bots
+ *   /$workspace/you          on a phone, You: the workspace, its settings and signing out
  *   /$workspace/settings     workspace settings
  *   /$workspace/inbox     what is new across the workspace: mentions, unread messages, automation runs and collaborations
  *   /$workspace/inbox/$conversation   the conversation, run or collaboration of the one chosen, beside them
@@ -85,19 +94,21 @@ import {
  *   /$workspace/dm/$conversation   one of them, by its id, `?message=` jumped to
  *   /$workspace/approvals    every approval across the workspace
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
- *   /$workspace/channels     every channel the person is in or could join
- *   /$workspace/channels/$channel   a channel, which opens its main chat
- *   /$workspace/channels/$channel/$conversation   its main chat or one of its threads
- *   /$workspace/channels/$channel/files[/$file]   the files made in it
+ *   /$workspace/projects     every project the person is in or could join
+ *   /$workspace/projects/$project   a project, which opens its newest thread, or a new one; on a phone, its sidebar
+ *   /$workspace/projects/$project/new   starting a thread from its first message
+ *   /$workspace/projects/$project/$conversation   one of its threads
+ *   /$workspace/projects/$project/files[/$file]   the files made in it
+ *   /$workspace/projects/$project/automations[/new|/$automation]   its automations
  *   /$workspace/bots         every bot the person reaches
- *   /$workspace/bots/$bot    a bot, which opens its newest task, or a new one
- *   /$workspace/bots/$bot/new   starting a task from its first message
- *   /$workspace/bots/$bot/tasks/$conversation   one of its tasks, or an automation's feed
+ *   /$workspace/bots/$bot    a bot, starting a thread with it from its first message
+ *   /$workspace/bots/$bot/threads/$conversation   one of its threads, or an automation's feed
  *   /$workspace/bots/$bot/files[/$file]   the files it made
  *   /$workspace/bots/$bot/automations[/new|/$automation]   its automations
- *   /$workspace/tasks/$conversation   a task by its id alone, which goes on to its bot's address
+ *   /$workspace/threads/$conversation   a thread by its id alone, which goes on to its bot's address
  *   /$workspace/settings/members/$member   one person, by membership id
- *   /$workspace/settings/channels/$channel[/$page]   a channel's settings
+ *   /$workspace/settings/projects/$project[/$page]   a project's settings: General, People, Bots, Connections or Computer
+ *   /$workspace/settings/projects/$project/connections/$connection   one connection, by id
  *   /$workspace/settings/bots/$bot[/$page]   a bot's settings: General, Connections or Computer
  *   /$workspace/settings/bots/$bot/connections/$connection   one connection, by id
  *   /$workspace/settings/providers/$provider   one model provider
@@ -126,8 +137,9 @@ const routeTree = rootRoute.addChildren([
 		settingsRoute,
 		settingsSectionRoute,
 		settingsMemberRoute,
-		settingsChannelRoute,
-		settingsChannelPageRoute,
+		settingsProjectRoute,
+		settingsProjectPageRoute,
+		settingsProjectConnectionRoute,
 		settingsBotRoute,
 		settingsBotPageRoute,
 		settingsBotConnectionRoute,
@@ -143,19 +155,24 @@ const routeTree = rootRoute.addChildren([
 		]),
 		youRoute,
 		homeRoute,
-		channelsRoute,
+		projectsRoute,
 		botsRoute,
-		taskByIdRoute,
-		channelRoute.addChildren([
-			channelIndexRoute,
-			channelFilesRoute,
-			channelFileRoute,
-			channelConversationRoute,
+		threadByIdRoute,
+		projectRoute.addChildren([
+			projectIndexRoute,
+			projectNewThreadRoute,
+			projectFilesRoute,
+			projectFileRoute,
+			projectAutomationsRoute.addChildren([
+				projectAutomationsIndexRoute,
+				projectNewAutomationRoute,
+				projectAutomationRoute,
+			]),
+			projectThreadRoute,
 		]),
 		botRoute.addChildren([
 			botIndexRoute,
-			newTaskRoute,
-			taskRoute,
+			threadRoute,
 			botFilesRoute,
 			botFileRoute,
 			automationsRoute.addChildren([
@@ -169,8 +186,8 @@ const routeTree = rootRoute.addChildren([
 
 /**
  * Which way a phone slides from one page to the next, as a view transition's
- * type: `forward` into a page further in, as a channel opened from Home or a
- * thread from its channel, and `back` out of one. Switching tabs, or a change
+ * type: `forward` into a page further in, as a project opened from Home or a
+ * thread from its project, and `back` out of one. Switching tabs, or a change
  * that stays on its page, such as opening a bot's computer, does not slide.
  */
 function phoneSlide({
@@ -193,7 +210,7 @@ function phoneSlide({
 	if (to !== from) return [to > from ? "forward" : "back"];
 	// A tab for another tab.
 	if (to === 0) return false;
-	// Pages as deep as each other, as two threads in a channel are: a step
+	// Pages as deep as each other, as two threads in a project are: a step
 	// through history tells which way, a page opened going forward and Back going back.
 	return [toIndex > fromIndex ? "forward" : "back"];
 }
@@ -217,22 +234,22 @@ function locationDepth(location: ParsedLocation): number {
 
 /**
  * How far into the app a page is on a phone: a tab is 0; what it opens, 1; and
- * so on. A bot's task is a step past the bot's chat, though its address is
+ * so on. A bot's thread is a step past the bot's own page, though its address is
  * no longer, so depth is told from what the address names, not its length.
  */
 function pageDepth(pathname: string): number {
 	// The workspace's own part of the address is the same everywhere, so it counts for nothing.
 	const [section, ...rest] = pathname.split("/").filter(Boolean).slice(1);
 	switch (section) {
-		case "channels":
+		case "projects":
 		case "bots": {
-			// channels/$channel or bots/$bot is one in; what those open, two; files/$file or tasks/$task, three.
+			// projects/$project or bots/$bot is one in; what those open, two; files/$file or threads/$thread, three.
 			const [, place, item] = rest;
 			if (rest.length === 0) return 0;
 			if (place === undefined) return 1;
 			return item === undefined ? 2 : 3;
 		}
-		case "tasks":
+		case "threads":
 			return 2;
 		case "inbox":
 		case "approvals":

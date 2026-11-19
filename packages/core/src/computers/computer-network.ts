@@ -1,22 +1,22 @@
 export * as ComputerNetwork from "./computer-network.ts";
 
 import {
-	type BotComputerNetwork,
 	COMPUTER_NETWORK_MODE_DEFAULT,
 	type ComputerNetworkSettings,
+	type ProjectComputerNetwork,
 } from "@sugabots/contracts";
 import { UserText, userText } from "@sugabots/errors";
 import { and, eq, inArray } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
-import type { AuthorizationDenied } from "../authorization/access.ts";
+import { type AuthorizationDenied, computerProjectIdOf } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
 import { type Database, query, serviceOperations } from "../database/database.ts";
 import {
 	allowedHost,
 	blockedHost,
-	botAllowedHost,
-	conversation,
+	placedConversation,
+	projectAllowedHost,
 	toolCall,
 	turn,
 	user,
@@ -26,23 +26,23 @@ import {
 	addedHostsOf,
 	blockedHostsOf,
 	blockOn,
-	botAddedHostsOf,
+	projectAddedHostsOf,
 	TRUSTED_HOSTS,
 } from "./allowed-hosts.ts";
-import { BotComputers } from "./bot-computers.ts";
 import { ComputerProviderRepository } from "./computer-provider-repository.ts";
 import { Computers } from "./computers.ts";
+import { ProjectComputers } from "./project-computers.ts";
 
 /**
- * Where computers may connect to. Every bot's computer reaches
- * {@link TRUSTED_HOSTS} and the hosts its workspace added, and each bot adds
- * its own; the workspace's blocks keep hosts out of every computer's reach,
+ * Where computers may connect to. Every project's computer reaches
+ * {@link TRUSTED_HOSTS} and the hosts its workspace added, and each project
+ * adds its own, a bot's being its default project's; the workspace's blocks keep hosts out of every computer's reach,
  * whatever allows them. A change reaches running computers at once, and the
  * others when they are next opened.
  *
  * The workspace's lists take the current actor's `workspace.providers.manage`
- * on the workspace, named by its id or its slug. A bot's own list takes
- * `bot.settings.read` to see and `computer.manage` to change.
+ * on the workspace, named by its id or its slug. A project's own list takes
+ * `computer.read` in it to see and `computer.manage` to change.
  */
 export interface Interface {
 	readonly settings: (
@@ -66,28 +66,27 @@ export interface Interface {
 		workspace: string;
 		host: string;
 	}) => Effect.Effect<ComputerNetworkSettings, AuthorizationDenied, CurrentActor.Service>;
-	readonly botSettings: (
-		botId: string,
-	) => Effect.Effect<BotComputerNetwork, AuthorizationDenied, CurrentActor.Service>;
+	readonly projectSettings: (
+		projectId: string,
+	) => Effect.Effect<ProjectComputerNetwork, AuthorizationDenied, CurrentActor.Service>;
 	/** Adding a host the workspace blocked fails with {@link HostBlocked}. */
-	readonly addBotHost: (input: {
-		botId: string;
+	readonly addProjectHost: (input: {
+		projectId: string;
 		host: string;
-	}) => Effect.Effect<BotComputerNetwork, AuthorizationDenied | HostBlocked, CurrentActor.Service>;
-	/** Removing a host the bot never added changes nothing. */
-	readonly removeBotHost: (input: {
-		botId: string;
+	}) => Effect.Effect<
+		ProjectComputerNetwork,
+		AuthorizationDenied | HostBlocked,
+		CurrentActor.Service
+	>;
+	/** Removing a host the project never added changes nothing. */
+	readonly removeProjectHost: (input: {
+		projectId: string;
 		host: string;
-	}) => Effect.Effect<BotComputerNetwork, AuthorizationDenied, CurrentActor.Service>;
+	}) => Effect.Effect<ProjectComputerNetwork, AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * The workspace's block that keeps `host` out of its computers, if any, so
-	 * a request for it is refused without asking anyone.
-	 */
-	readonly blockOn: (workspaceId: string, host: string) => Effect.Effect<string | undefined>;
-	/**
-	 * Adds `host` to the bot of the turn whose call `sdkToolCallId` asked for
-	 * it, if a person allowed that call and the workspace hasn't blocked the
-	 * host since.
+	 * Adds `host` to the project whose computer the turn worked on whose call
+	 * `sdkToolCallId` asked for it, if a person allowed that call and the
+	 * workspace hasn't blocked the host since.
 	 */
 	readonly grantRequest: (input: {
 		turnId: string;
@@ -106,7 +105,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ComputerNetwork");
 	const authorization = yield* Authorization.Service;
-	const botComputers = yield* BotComputers.Service;
+	const projectComputers = yield* ProjectComputers.Service;
 	const providers = yield* ComputerProviderRepository.Service;
 	const computers = yield* Computers.Service;
 
@@ -153,28 +152,28 @@ export const make = Effect.gen(function* () {
 			} satisfies ComputerNetworkSettings;
 		});
 
-	const botSettingsOf = (bot: Bot) =>
+	const projectSettingsOf = (project: Project) =>
 		Effect.gen(function* () {
-			const [network, workspaceAdded, botAdded, blocked] = yield* Effect.all([
-				networkOf(bot.workspaceId),
-				addedHostsOf(bot.workspaceId),
-				botAddedHostsOf(bot),
-				blockedHostsOf(bot.workspaceId),
+			const [network, workspaceAdded, projectAdded, blocked] = yield* Effect.all([
+				networkOf(project.workspaceId),
+				addedHostsOf(project.workspaceId),
+				projectAddedHostsOf(project),
+				blockedHostsOf(project.workspaceId),
 			]);
 			const blocks = blocked.map((row) => row.host);
-			const names = yield* namesOf(botAdded.map((row) => row.addedById));
+			const names = yield* namesOf(projectAdded.map((row) => row.addedById));
 			return {
 				...network,
 				workspaceHosts: [...TRUSTED_HOSTS, ...workspaceAdded.map((row) => row.host)].map(
 					(host) => ({ host, blockedBy: blockOn(host, blocks) ?? null }),
 				),
-				addedHosts: botAdded.map((row) => ({
+				addedHosts: projectAdded.map((row) => ({
 					host: row.host,
 					addedByName: nameOf(names, row.addedById),
 					addedAt: row.createdAt.toISOString(),
 					blockedBy: blockOn(row.host, blocks) ?? null,
 				})),
-			} satisfies BotComputerNetwork;
+			} satisfies ProjectComputerNetwork;
 		});
 
 	const blockFor = (workspaceId: string, host: string) =>
@@ -185,14 +184,16 @@ export const make = Effect.gen(function* () {
 			),
 		);
 
-	const addToBot = (row: typeof botAllowedHost.$inferInsert) =>
-		query((db) => db.insert(botAllowedHost).values(row).onConflictDoNothing()).pipe(
-			Effect.andThen(botComputers.applyNetwork({ workspaceId: row.workspaceId, botId: row.botId })),
+	const addToProject = (row: typeof projectAllowedHost.$inferInsert) =>
+		query((db) => db.insert(projectAllowedHost).values(row).onConflictDoNothing()).pipe(
+			Effect.andThen(
+				projectComputers.applyNetwork({ workspaceId: row.workspaceId, projectId: row.projectId }),
+			),
 		);
 
-	const botOf = (standing: { bot: { id: string; workspaceId: string } }): Bot => ({
-		workspaceId: standing.bot.workspaceId,
-		botId: standing.bot.id,
+	const projectOf = (standing: { project: { id: string; workspaceId: string } }): Project => ({
+		workspaceId: standing.project.workspaceId,
+		projectId: standing.project.id,
 	});
 
 	return Service.of({
@@ -214,7 +215,7 @@ export const make = Effect.gen(function* () {
 								.values({ workspaceId, host, addedById: actor.userId })
 								.onConflictDoNothing(),
 						);
-						yield* botComputers.applyNetwork({ workspaceId });
+						yield* projectComputers.applyNetwork({ workspaceId });
 					}
 					return yield* settingsOf(workspaceId);
 				}),
@@ -231,7 +232,7 @@ export const make = Effect.gen(function* () {
 							.where(and(eq(allowedHost.workspaceId, workspaceId), eq(allowedHost.host, host)))
 							.returning({ host: allowedHost.host }),
 					);
-					if (removed.length > 0) yield* botComputers.applyNetwork({ workspaceId });
+					if (removed.length > 0) yield* projectComputers.applyNetwork({ workspaceId });
 					return yield* settingsOf(workspaceId);
 				}),
 			),
@@ -248,7 +249,7 @@ export const make = Effect.gen(function* () {
 							.onConflictDoNothing()
 							.returning({ host: blockedHost.host }),
 					);
-					if (blocked.length > 0) yield* botComputers.applyNetwork({ workspaceId });
+					if (blocked.length > 0) yield* projectComputers.applyNetwork({ workspaceId });
 					return yield* settingsOf(workspaceId);
 				}),
 			),
@@ -264,51 +265,54 @@ export const make = Effect.gen(function* () {
 							.where(and(eq(blockedHost.workspaceId, workspaceId), eq(blockedHost.host, host)))
 							.returning({ host: blockedHost.host }),
 					);
-					if (unblocked.length > 0) yield* botComputers.applyNetwork({ workspaceId });
+					if (unblocked.length > 0) yield* projectComputers.applyNetwork({ workspaceId });
 					return yield* settingsOf(workspaceId);
 				}),
 			),
 
-		botSettings: (botId) =>
+		projectSettings: (projectId) =>
 			operation(
-				"botSettings",
-				Effect.flatMap(authorization.bot(botId, "bot.settings.read"), (standing) =>
-					botSettingsOf(botOf(standing)),
+				"projectSettings",
+				Effect.flatMap(authorization.project(projectId, "computer.read"), (standing) =>
+					projectSettingsOf(projectOf(standing)),
 				),
 			),
 
-		addBotHost: ({ botId, host }) =>
+		addProjectHost: ({ projectId, host }) =>
 			operation(
-				"addBotHost",
+				"addProjectHost",
 				Effect.gen(function* () {
-					const standing = yield* authorization.bot(botId, "computer.manage");
-					const bot = botOf(standing);
-					const by = yield* blockFor(bot.workspaceId, host);
+					const standing = yield* authorization.project(projectId, "computer.manage");
+					const project = projectOf(standing);
+					const by = yield* blockFor(project.workspaceId, host);
 					if (by !== undefined) return yield* new HostBlocked({ host, by });
 					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToBot({ ...bot, host, addedById: standing.actor.userId });
+						yield* addToProject({ ...project, host, addedById: standing.actor.userId });
 					}
-					return yield* botSettingsOf(bot);
+					return yield* projectSettingsOf(project);
 				}),
 			),
 
-		removeBotHost: ({ botId, host }) =>
+		removeProjectHost: ({ projectId, host }) =>
 			operation(
-				"removeBotHost",
+				"removeProjectHost",
 				Effect.gen(function* () {
-					const bot = botOf(yield* authorization.bot(botId, "computer.manage"));
+					const project = projectOf(yield* authorization.project(projectId, "computer.manage"));
 					const removed = yield* query((db) =>
 						db
-							.delete(botAllowedHost)
-							.where(and(eq(botAllowedHost.botId, bot.botId), eq(botAllowedHost.host, host)))
-							.returning({ host: botAllowedHost.host }),
+							.delete(projectAllowedHost)
+							.where(
+								and(
+									eq(projectAllowedHost.projectId, project.projectId),
+									eq(projectAllowedHost.host, host),
+								),
+							)
+							.returning({ host: projectAllowedHost.host }),
 					);
-					if (removed.length > 0) yield* botComputers.applyNetwork(bot);
-					return yield* botSettingsOf(bot);
+					if (removed.length > 0) yield* projectComputers.applyNetwork(project);
+					return yield* projectSettingsOf(project);
 				}),
 			),
-
-		blockOn: (workspaceId, host) => operation("blockOn", blockFor(workspaceId, host)),
 
 		grantRequest: ({ turnId, sdkToolCallId, host }) =>
 			operation(
@@ -317,25 +321,27 @@ export const make = Effect.gen(function* () {
 					const [call] = yield* query((db) =>
 						db
 							.select({
-								workspaceId: conversation.workspaceId,
-								botId: turn.botId,
+								workspaceId: placedConversation.workspaceId,
+								projectId: computerProjectIdOf(placedConversation, turn.botId),
 								approvalStatus: toolCall.approvalStatus,
 								decidedById: toolCall.decidedById,
 							})
 							.from(toolCall)
 							.innerJoin(turn, eq(turn.id, toolCall.turnId))
-							.innerJoin(conversation, eq(conversation.id, toolCall.conversationId))
+							.innerJoin(placedConversation, eq(placedConversation.id, toolCall.conversationId))
 							.where(and(eq(toolCall.turnId, turnId), eq(toolCall.sdkToolCallId, sdkToolCallId)))
 							.limit(1),
 					);
-					if (call?.approvalStatus !== "allowed") return { kind: "not-allowed" };
+					if (call?.approvalStatus !== "allowed" || call.projectId === null) {
+						return { kind: "not-allowed" };
+					}
 					// Blocked while the request waited for its answer.
 					const by = yield* blockFor(call.workspaceId, host);
 					if (by !== undefined) return { kind: "blocked", by };
 					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToBot({
+						yield* addToProject({
 							workspaceId: call.workspaceId,
-							botId: call.botId,
+							projectId: call.projectId,
 							host,
 							addedById: call.decidedById,
 						});
@@ -351,18 +357,18 @@ export const layerNoDeps = Layer.effect(Service, make);
 export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
-		BotComputers.layer,
+		ProjectComputers.layer,
 		ComputerProviderRepository.layer,
 		Computers.layer,
 	]),
 );
 
-interface Bot {
+interface Project {
 	readonly workspaceId: string;
-	readonly botId: string;
+	readonly projectId: string;
 }
 
-/** The host is blocked for the workspace, so no bot may allow it. */
+/** The host is blocked for the workspace, so no project may allow it. */
 export class HostBlocked
 	extends Data.TaggedError("ComputerHostBlocked")<{ host: string; by: string }>
 	implements UserFacing

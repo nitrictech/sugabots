@@ -1,0 +1,327 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "53e243f3-ede0-458f-aa2a-c2ca8b0d2bda",
+  "prevIds": [
+    "eeb7810c-459d-4beb-b7ed-1a3ecd5cc9c7"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "project_allowed_host"
+      ],
+      "writes": [
+        "s|tbl|public.project_allowed_host",
+        "n|tbl|public.project_allowed_host",
+        "e|tbl|public.project_allowed_host",
+        "n|rel|public.project_allowed_host",
+        "n|type|public.project_allowed_host",
+        "n|rel|public.project_allowed_host_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "computer",
+        "project_id"
+      ],
+      "writes": [
+        "s|col|public.computer.project_id",
+        "n|col|public.computer.project_id",
+        "e|col|public.computer.project_id"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "automation",
+        "project_id"
+      ],
+      "writes": [
+        "s|col|public.automation.project_id",
+        "n|col|public.automation.project_id",
+        "e|col|public.automation.project_id"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connection",
+        "project_id"
+      ],
+      "writes": [
+        "s|col|public.connection.project_id",
+        "n|col|public.connection.project_id",
+        "e|col|public.connection.project_id"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "project_allowed_host"
+      ],
+      "writes": [
+        "s|fk|public.project_allowed_host.project_allowed_host_added_by_id_user_id_fkey",
+        "n|fk|public.project_allowed_host.project_allowed_host_added_by_id_user_id_fkey",
+        "e|fk|public.project_allowed_host.project_allowed_host_added_by_id_user_id_fkey",
+        "n|con|public.project_allowed_host.project_allowed_host_added_by_id_user_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.project_allowed_host",
+        "n|sch|public",
+        "n|tbl|public.user",
+        "n|sch|public",
+        "n|col|public.project_allowed_host.added_by_id",
+        "n|col|public.user.id",
+        "e|uniqueness|public.user.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "project_allowed_host"
+      ],
+      "writes": [
+        "s|fk|public.project_allowed_host.project_allowed_host_project_workspace_fkey",
+        "n|fk|public.project_allowed_host.project_allowed_host_project_workspace_fkey",
+        "e|fk|public.project_allowed_host.project_allowed_host_project_workspace_fkey",
+        "n|con|public.project_allowed_host.project_allowed_host_project_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.project_allowed_host",
+        "n|sch|public",
+        "n|tbl|public.project",
+        "n|sch|public",
+        "n|col|public.project_allowed_host.project_id",
+        "n|col|public.project_allowed_host.workspace_id",
+        "n|col|public.project.id",
+        "n|col|public.project.workspace_id",
+        "e|uniqueness|public.project.id.workspace_id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "project_allowed_host",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer",
+        "name": "project_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_allowed_host",
+        "name": "workspace_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_allowed_host",
+        "name": "project_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_allowed_host",
+        "name": "host",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_allowed_host",
+        "name": "added_by_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_allowed_host",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation",
+        "name": "project_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connection",
+        "name": "project_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_allowed_host",
+        "name": "project_allowed_host_added_by_id_user_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "added_by_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "user",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_allowed_host",
+        "name": "project_allowed_host_project_workspace_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "project_id",
+          "workspace_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "project",
+        "columnsTo": [
+          "id",
+          "workspace_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_allowed_host",
+        "name": "project_allowed_host_pkey",
+        "columns": [
+          "project_id",
+          "host"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}

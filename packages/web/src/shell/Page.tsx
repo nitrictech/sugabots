@@ -1,20 +1,17 @@
-import type { Bot, Channel } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { ReactNode } from "react";
 import { formatAge } from "@/lib/list-time.ts";
+import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useSidebarHiddenBesideChat } from "@/lib/sidebar-hidden.tsx";
 import { HeaderBack } from "@/screens/ChatHeader.tsx";
 import { CrumbSeparator } from "@/shell/BotCrumb.tsx";
 
 /**
  * Where a page sits on a phone: one of its tabs, titled large with no Back,
- * or a page of a channel's or a bot's, such as its Files, which leads back
- * to the channel or the bot.
+ * or a page of a project's or a bot's, such as its Files, which leads back
+ * to the project or the bot.
  */
-type PagePlace =
-	| { kind: "tab" }
-	| { kind: "channel"; channel: Channel }
-	| { kind: "bot"; bot: Bot };
+type PagePlace = { kind: "tab" } | { kind: "owner"; owner: ResourceOwner };
 
 /**
  * A page beside the sidebar, such as Inbox: its `PageHeader`, and what it
@@ -47,7 +44,7 @@ export function Page({
 /**
  * The title across the top of a page or of a list beside the sidebar, with
  * `actions` at the right: the same in each, so the titles line up. On a
- * phone, a tab's page is titled large, as the tabs' are, and a channel's or
+ * phone, a tab's page is titled large, as the tabs' are, and a project's or
  * bot's page has Back to it. From a tablet up, `parent` goes before the title
  * as a breadcrumb, and the header clears the button that brings the sidebar
  * back while the sidebar is put away.
@@ -75,8 +72,15 @@ export function PageHeader({
 				tab ? "max-md:gap-0.5 max-md:pr-2 max-md:pl-4" : "max-md:gap-2 max-md:px-4",
 			)}
 		>
-			{place.kind === "channel" && <HeaderBack back={{ to: "channel", channel: place.channel }} />}
-			{place.kind === "bot" && <HeaderBack back={{ to: "bot", bot: place.bot }} />}
+			{place.kind === "owner" && (
+				<HeaderBack
+					back={
+						"bot" in place.owner
+							? { to: "bot", bot: place.owner.bot }
+							: { to: "project", project: place.owner.project }
+					}
+				/>
+			)}
 			{parent && (
 				<span className="flex min-w-0 shrink items-center gap-1.5 max-md:hidden">
 					{parent}

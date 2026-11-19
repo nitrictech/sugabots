@@ -6,9 +6,15 @@ import { Data, Effect } from "effect";
 import { Authorization } from "../../authorization/authorization.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { query, serviceOperations } from "../../database/database.ts";
-import { automation, automationRun, bot, placedConversation } from "../../database/schema.ts";
+import {
+	automation,
+	automationRun,
+	bot,
+	placedConversation,
+	project,
+} from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { personFacingBotRow, toBot } from "../../workspaces/bots/bot.ts";
+import { personFacingBotRow, pinnedBy, toBot } from "../../workspaces/bots/bot.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import {
 	AutomationNotFound,
@@ -36,42 +42,49 @@ export const makeView = Effect.gen(function* () {
 						workspace,
 						"workspace.read",
 					);
-					const reachesBot = yield* visibility.reachesBot;
+					const reachesProject = yield* visibility.reachesProject;
 					const rows = yield* query((db) =>
 						db
-							.select({ automation, bot })
+							.select({
+								automation,
+								bot,
+								defaultProjectId: project.id,
+								pinned: pinnedBy(bot.id, actor.userId),
+							})
 							.from(automation)
-							.innerJoin(bot, eq(bot.id, automation.botId))
+							.innerJoin(project, eq(project.id, automation.projectId))
+							// A bot's own automation, in its default project, is shown with the bot.
+							.leftJoin(bot, eq(bot.id, project.defaultOfBotId))
 							.where(
 								and(
 									eq(automation.workspaceId, workspaceId),
 									isNull(automation.deletedAt),
-									reachesBot(bot.id),
+									reachesProject(project.id),
 								),
 							)
 							.orderBy(asc(automation.name), asc(automation.id)),
 					);
 					const triggers = yield* triggersOf(rows.map((row) => row.automation.id));
-					return rows.flatMap((row): WorkspaceAutomation[] => {
-						const bot = personFacingBotRow(row.bot);
-						const automationTriggers = triggers.get(row.automation.id) ?? [];
-						return bot
-							? [
-									{
-										automation: toAutomation(row.automation, automationTriggers),
-										bot: toBot(bot, { actor }),
-									},
-								]
-							: [];
+					return rows.map((row): WorkspaceAutomation => {
+						const owner = row.bot && personFacingBotRow(row.bot);
+						return {
+							automation: toAutomation(row.automation, triggers.get(row.automation.id) ?? []),
+							bot: owner
+								? toBot(
+										{ ...owner, defaultProjectId: row.defaultProjectId },
+										{ actor, pinned: row.pinned },
+									)
+								: null,
+						};
 					});
 				}),
 			),
 
-		list: ({ botId }) =>
+		list: ({ projectId }) =>
 			operation(
 				"list",
 				Effect.gen(function* () {
-					const { bot: owner } = yield* authorization.bot(botId, "automation.read");
+					const { project: owner } = yield* authorization.project(projectId, "automation.read");
 					const rows = yield* query((db) =>
 						db
 							.select()
@@ -79,7 +92,7 @@ export const makeView = Effect.gen(function* () {
 							.where(
 								and(
 									eq(automation.workspaceId, owner.workspaceId),
-									eq(automation.botId, owner.id),
+									eq(automation.projectId, owner.id),
 									isNull(automation.deletedAt),
 								),
 							)
@@ -117,7 +130,7 @@ export const makeView = Effect.gen(function* () {
 								and(
 									eq(automation.id, scope.automationId),
 									eq(automation.workspaceId, scope.workspaceId),
-									eq(automation.botId, scope.botId),
+									eq(automation.projectId, scope.projectId),
 								),
 							)
 							.limit(1),

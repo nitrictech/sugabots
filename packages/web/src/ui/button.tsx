@@ -3,29 +3,17 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 
 /*
- * The button.
- *
- * The variant and size names are shadcn's, not ours, and that is deliberate:
- * AI Elements is a shadcn registry, and every component we install from it
- * reaches for `<Button variant="outline" size="icon">`. Keeping the API
- * identical means an installed component uses *this* button — styled to the
- * design — instead of the CLI overwriting it with the library's default and
- * quietly introducing a second look.
+ * The button. The variant and size names are shadcn's, so a component installed
+ * from a shadcn registry, such as AI Elements, uses this button rather than
+ * bringing a look of its own.
  *
  * The design draws buttons as pills: the accent primary, a neutral chip for
  * everything secondary (`muted` where it sits on a card's fill), and bare
- * text for links and destructive actions. The rest are here to satisfy the
- * contract and are mapped onto those so they cannot drift into a palette of
- * their own. `bare` is the one addition, for a link with no padding.
+ * text for links, quiet actions and destructive ones. `outline` is mapped onto
+ * `secondary`, so it can't drift into a palette of its own.
  *
- * An icon-only control should still be `IconButton`, which requires a label.
- * `size="icon"` exists for registry components that do not know about it.
- *
- * To render something other than a `<button>` with this styling, pass the
- * element as `render` — Base UI's replacement for Radix's `asChild` — and
- * `nativeButton={false}` if it is not a button. Base UI then gives it the
- * button role, so a link is not rendered this way: give the `<a>`
- * `buttonStyles(...)` instead, and it stays a link.
+ * An icon-only control is an `IconButton`, which requires a label. A link
+ * styled as a button gets `buttonStyles(...)` on its `<a>`, so it stays a link.
  */
 
 export const buttonStyles = cva(
@@ -43,13 +31,16 @@ export const buttonStyles = cva(
 					"font-medium text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-50",
 				link: "rounded-md font-medium text-link hover:opacity-80 disabled:text-disabled-foreground",
 				destructive: "font-medium text-destructive-text hover:opacity-80 disabled:opacity-50",
+				/** Text that brightens under the pointer, for a small action beside a list, such as View all. */
+				quiet: "font-normal text-subtle-foreground hover:text-foreground disabled:opacity-50",
 			},
 			size: {
 				sm: "h-7.25 px-3.5 text-xs",
 				default: "h-9 px-4 text-sm",
 				lg: "h-12 px-5 text-sm",
-				icon: "size-8.5 [&_svg]:size-3.75",
 				bare: "h-auto p-0",
+				/** Bare, in the small text of a row's end or a note. */
+				text: "h-auto p-0 text-xs",
 			},
 		},
 		defaultVariants: { variant: "default", size: "default" },

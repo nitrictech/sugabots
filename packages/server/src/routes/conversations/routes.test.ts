@@ -18,7 +18,7 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 const BOT = "0199a3a0-0000-7000-8000-000000000003";
-const TASK = "0199a3a0-0000-7000-8000-000000000004";
+const THREAD = "0199a3a0-0000-7000-8000-000000000004";
 const USER = "0199a3a0-0000-7000-8000-000000000005";
 const OUTSIDER = "0199a3a0-0000-7000-8000-000000000006";
 
@@ -33,13 +33,13 @@ const resolveUser: UserResolver = async (headers) => {
 	return user ?? null;
 };
 
-const task = {
-	id: TASK,
+const thread = {
+	id: THREAD,
 	workspaceId: WORKSPACE,
-	channelId: null,
+	projectId: null,
 	botId: BOT,
-	rootConversationId: TASK,
-	kind: "task" as const,
+	rootConversationId: THREAD,
+	kind: "project_thread" as const,
 	title: "Check the release",
 	status: "running" as const,
 	parentConversationId: null,
@@ -50,9 +50,9 @@ const task = {
 };
 
 const details: ConversationDetails = {
-	conversation: task,
+	conversation: thread,
 	automationRun: null,
-	channelBots: [],
+	projectBots: [],
 	members: [],
 	participants: [
 		testPerson({ id: USER, name: "Sam" }),
@@ -72,24 +72,24 @@ const details: ConversationDetails = {
 	messages: [
 		{
 			id: "0199a3a0-0000-7000-8000-000000000007",
-			conversationId: TASK,
+			conversationId: THREAD,
 			author: testPerson({ id: USER, name: "Sam" }),
 			kind: "text",
 			status: "complete",
 			parts: [{ type: "text", text: "Check the release" }],
 			content: "Check the release",
-			createdAt: task.createdAt,
+			createdAt: thread.createdAt,
 		},
 	],
 };
 
 /**
- * Answers as the view would for Sam, who can see `TASK`, and hides
+ * Answers as the view would for Sam, who can see `THREAD`, and hides
  * everything from anybody else, so a case can tell who it was asked as.
  */
 const seenBy = <A>(conversationId: string, seen: A) =>
 	Effect.flatMap(CurrentActor.Service, ({ userId }) =>
-		conversationId === TASK && userId === USER
+		conversationId === THREAD && userId === USER
 			? Effect.succeed(seen)
 			: Effect.fail(new ResourceHidden({ resource: "conversation" })),
 	);
@@ -107,7 +107,7 @@ beforeEach(() => {
 		list: () =>
 			Effect.flatMap(CurrentActor.Service, ({ userId }) =>
 				userId === USER
-					? Effect.succeed([task])
+					? Effect.succeed([thread])
 					: Effect.fail(new ResourceHidden({ resource: "workspace" })),
 			),
 		get: (conversationId, history) => {
@@ -131,7 +131,7 @@ const app = () =>
 				add: (messageId, emoji) => {
 					reacted.push({ change: "add", messageId, emoji });
 					return Effect.succeed([
-						{ emoji, people: [{ id: USER, name: "Sam", at: task.createdAt }] },
+						{ emoji, people: [{ id: USER, name: "Sam", at: thread.createdAt }] },
 					]);
 				},
 				remove: (messageId, emoji) => {
@@ -144,7 +144,7 @@ const app = () =>
 					Effect.flatMap(CurrentActor.Service, ({ userId }) => {
 						cancellation = { turnId, userId };
 						return userId === USER
-							? Effect.succeed(turnId === TASK)
+							? Effect.succeed(turnId === THREAD)
 							: Effect.fail(new ResourceHidden({ resource: "turn" }));
 					}),
 			}),
@@ -166,38 +166,38 @@ describe("conversation routes", () => {
 		expect(response.status).toBe(200);
 		expect(
 			Schema.decodeUnknownSync(Schema.Array(placedConversationSchema))(await response.json()),
-		).toEqual([task]);
+		).toEqual([thread]);
 		expect(
 			(await app().request(`/workspaces/${WORKSPACE}/conversations`, as("outsider-token"))).status,
 		).toBe(404);
 	});
 
 	it("returns scoped conversation history and hides an unavailable id", async () => {
-		const response = await app().request(`/conversations/${TASK}`, as("member-token"));
+		const response = await app().request(`/conversations/${THREAD}`, as("member-token"));
 		expect(Schema.decodeUnknownSync(conversationDetailsSchema)(await response.json())).toEqual(
 			details,
 		);
 		expect(requestedHistory).toEqual({ limit: 50 });
 
-		const hidden = await app().request(`/conversations/${TASK}`, as("outsider-token"));
+		const hidden = await app().request(`/conversations/${THREAD}`, as("outsider-token"));
 		expect(hidden.status).toBe(404);
 	});
 
 	it("returns a visible conversation's activity and hides an unavailable id", async () => {
-		const response = await app().request(`/conversations/${TASK}/activity`, as("member-token"));
+		const response = await app().request(`/conversations/${THREAD}/activity`, as("member-token"));
 		expect(Schema.decodeUnknownSync(conversationActivitySchema)(await response.json())).toEqual({
 			summary: null,
 			context: null,
 		});
 
-		const hidden = await app().request(`/conversations/${TASK}/activity`, as("outsider-token"));
+		const hidden = await app().request(`/conversations/${THREAD}/activity`, as("outsider-token"));
 		expect(hidden.status).toBe(404);
 	});
 
 	it("answers HEAD without loading a full history page", async () => {
-		const get = await app().request(`/conversations/${TASK}`, as("member-token"));
+		const get = await app().request(`/conversations/${THREAD}`, as("member-token"));
 		const head = await app().request(
-			`/conversations/${TASK}`,
+			`/conversations/${THREAD}`,
 			as("member-token", { method: "HEAD" }),
 		);
 
@@ -210,17 +210,17 @@ describe("conversation routes", () => {
 	it("accepts a bounded history cursor and rejects limit boundaries", async () => {
 		const cursor = "opaque-cursor";
 		const response = await app().request(
-			`/conversations/${TASK}?cursor=${cursor}&limit=100`,
+			`/conversations/${THREAD}?cursor=${cursor}&limit=100`,
 			as("member-token"),
 		);
 
 		expect(response.status).toBe(200);
 		expect(requestedHistory).toEqual({ cursor, limit: 100 });
-		expect((await app().request(`/conversations/${TASK}?limit=0`, as("member-token"))).status).toBe(
-			400,
-		);
 		expect(
-			(await app().request(`/conversations/${TASK}?limit=101`, as("member-token"))).status,
+			(await app().request(`/conversations/${THREAD}?limit=0`, as("member-token"))).status,
+		).toBe(400);
+		expect(
+			(await app().request(`/conversations/${THREAD}?limit=101`, as("member-token"))).status,
 		).toBe(400);
 	});
 
@@ -234,7 +234,7 @@ describe("conversation routes", () => {
 		);
 		expect(added.status).toBe(200);
 		expect(await added.json()).toEqual([
-			{ emoji: "👍🏽", people: [{ id: USER, name: "Sam", at: task.createdAt }] },
+			{ emoji: "👍🏽", people: [{ id: USER, name: "Sam", at: thread.createdAt }] },
 		]);
 		const removed = await app().request(
 			`/messages/${message}/reactions/${thumbsUp}`,
@@ -258,11 +258,11 @@ describe("conversation routes", () => {
 
 	it("requests cancellation only for a visible active turn", async () => {
 		const accepted = await app().request(
-			`/turns/${TASK}/cancel`,
+			`/turns/${THREAD}/cancel`,
 			as("member-token", { method: "POST" }),
 		);
 		expect(accepted.status).toBe(202);
-		expect(cancellation).toEqual({ turnId: TASK, userId: USER });
+		expect(cancellation).toEqual({ turnId: THREAD, userId: USER });
 
 		const ended = await app().request(
 			`/turns/${BOT}/cancel`,

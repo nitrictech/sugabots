@@ -33,7 +33,6 @@ const placeholder = {
 	workspaceId: WORKSPACE,
 	name: "Personal Assistant",
 	handle: "personal-assistant",
-	systemBotKey: null,
 	description: "Your private assistant.",
 	color: "sky",
 	face: "pill",
@@ -79,7 +78,7 @@ function Preview({
 			defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 		});
 		client.setQueryData(["workspaces"], stage === "new" ? [] : [workspace]);
-		client.setQueryData(["channels", WORKSPACE], []);
+		client.setQueryData(["projects", WORKSPACE], []);
 		client.setQueryData(["bots", WORKSPACE], [placeholder]);
 		client.setQueryData(["models", WORKSPACE], {
 			models: stage === "model" ? [enabledModel] : [],
@@ -345,7 +344,7 @@ export const Invites = meta.story({
 	},
 });
 
-/** The first bot's hello, in its own colour, and the way into its chat. */
+/** The first bot's hello, in its own colour, and the way into its thread. */
 export const Ready = meta.story({
 	render: (args) => (
 		<Preview stage="model">
@@ -362,7 +361,7 @@ export const Ready = meta.story({
 			await canvas.findByRole("heading", { name: "Chief is ready" }),
 		).toBeInTheDocument();
 		await expect(canvas.getByText(/help me work out what I'm for/i)).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Start chatting" })).toBeEnabled();
+		await expect(canvas.getByRole("button", { name: "Start talking" })).toBeEnabled();
 	},
 });
 

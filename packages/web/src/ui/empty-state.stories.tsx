@@ -7,11 +7,11 @@ const meta = preview.meta({
 	component: EmptyState,
 	tags: ["ai-generated"],
 	args: {
-		title: "No channels yet",
+		title: "No projects yet",
 		children: "Its bots, its people and the apps they share are here.",
 	},
 	render: (args) => (
-		<div style={{ display: "flex", minHeight: 320 }}>
+		<div className="flex min-h-80">
 			<EmptyState {...args} />
 		</div>
 	),
@@ -20,7 +20,7 @@ const meta = preview.meta({
 /** What is missing, and the one line that says what would fill it. */
 export const WithNextStep = meta.story({
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText("No channels yet")).toBeInTheDocument();
+		await expect(canvas.getByText("No projects yet")).toBeInTheDocument();
 		await expect(canvas.getByText(/apps they share/)).toBeInTheDocument();
 	},
 });

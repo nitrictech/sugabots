@@ -18,6 +18,7 @@ import {
 } from "../../providers/connections/connection-repository.ts";
 import { ConnectionSignIn } from "../../providers/connections/connection-sign-in.ts";
 import type { ConnectionTarget } from "../../providers/connections/connection-target.ts";
+import type { Connected } from "../../providers/connections/github/connected.ts";
 import { GitHubConnections } from "../../providers/connections/github/github-connections.ts";
 import {
 	connectServer,
@@ -38,7 +39,10 @@ import { httpTools } from "./http/tools.ts";
 import type { UploadSide } from "./signed-upload/tool.ts";
 
 /**
- * The tools a bot has through its connections for one turn.
+ * The tools a bot has through connections for one turn: those of the project
+ * the turn works in, and its own, its default project's. When both have a
+ * connection with the same handle, the project's is used and the bot's left
+ * out, so a name always means one connection.
  *
  * A connection's tool list is kept between turns while fresh and unedited;
  * its session opens when a turn first needs it. Each tool is keyed by
@@ -86,16 +90,29 @@ export interface ConnectionToolSet {
 	instructions: Record<string, string>;
 	/** Catalog servers the bot has not added. */
 	addable: readonly ConnectionPreset[];
+	/**
+	 * Whether the tools are a project's and the bot's own together, so a
+	 * handle both have is the project's.
+	 */
+	fromProjectAndBot: boolean;
 	/** Ends every session behind these tools. */
 	close(): Promise<void>;
 }
 
 export interface Interface {
-	forBot(
+	forTurn(
 		workspaceId: string,
-		botId: string,
+		projects: TurnProjects,
 		turn: TurnSide,
 	): Effect.Effect<ConnectionToolSet, never, Database>;
+}
+
+/** Whose connections a turn uses. */
+interface TurnProjects {
+	/** The project the turn works in, whose computer it uses; none for a system bot. */
+	readonly projectId: string | null;
+	/** The bot's own default project, whose connections it brings; none for a system bot. */
+	readonly ownProjectId: string | null;
 }
 
 /** What a turn's tools work for and through, for the kinds whose tools are Sugabots' own. */
@@ -105,7 +122,7 @@ interface TurnSide {
 	readonly conversationId: string;
 	/** The conversation's files, which a connection's upload tool sends from. */
 	readonly files: Pick<ConversationFiles.Interface, "read">;
-	/** The bot's computer, while the turn may use it. */
+	/** The computer of the project the turn works in, while the turn may use it. */
 	readonly workspace: Workspace | undefined;
 	/** Whether the computer's provider signs its requests in, outside it. */
 	readonly computerSignsIn: boolean;
@@ -150,7 +167,7 @@ interface KeptListing {
 }
 
 export interface Parts {
-	connections: Pick<ConnectionRepository.Interface, "targetsForBot">;
+	connections: Pick<ConnectionRepository.Interface, "targetsForProject">;
 	/** Bound egress clients, so a session goes only to the connection's own address. */
 	httpClients: EgressHttpClients;
 	/** Opens a session with a server; the real one speaks MCP. */
@@ -160,8 +177,8 @@ export interface Parts {
 	 * read once per turn, and the client their calls go through.
 	 */
 	oauth?: { clients: Effect.Effect<OAuthProviders>; fetch: EgressHttpClient };
-	/** The bot's GitHub app; a case without one offers no GitHub tools. */
-	github?: Pick<GitHubConnections.Interface, "forBot">;
+	/** The projects' GitHub apps; a case without one offers no GitHub tools. */
+	github?: Pick<GitHubConnections.Interface, "forProject">;
 }
 
 /** The tools built from `parts`, for `make` and for a case that supplies its own. */
@@ -175,10 +192,12 @@ export function from({
 	const kept = new Map<string, KeptListing>();
 	const failedAt = new Map<string, number>();
 
-	/** The bot's GitHub app's tools, and what the model is told of them. */
-	const gitHubOffered = (workspaceId: string, botId: string, turn: TurnSide) =>
+	/**
+	 * The GitHub app's tools, and what the model is told of them. The computer
+	 * is signed in only to the app of the project the turn works in.
+	 */
+	const gitHubOffered = (connected: Connected | undefined, signsIn: boolean, turn: TurnSide) =>
 		Effect.gen(function* () {
-			const connected = github ? yield* github.forBot({ workspaceId, botId }) : undefined;
 			if (!connected || everyToolOff(connected.connection)) {
 				return { tools: {}, instructions: {} };
 			}
@@ -188,32 +207,73 @@ export function from({
 			return {
 				tools: gitHubTools({ connected, ...turn, run }),
 				instructions: {
-					[connected.connection.handle]: gitHubNote(connected, turn.computerSignsIn),
+					[connected.connection.handle]: gitHubNote(connected, signsIn),
 				},
 			};
 		});
 
+	/**
+	 * The connections of each of `projectIds`, earliest first, leaving out
+	 * those whose handle an earlier one has.
+	 */
+	const connectionsOf = (workspaceId: string, projectIds: readonly string[]) =>
+		Effect.gen(function* () {
+			const taken = new Set<string>();
+			const reached: ConnectionTarget[] = [];
+			const expired: Pick<ConnectionTarget, "handle" | "url">[] = [];
+			let gitHub: { connected: Connected; projectId: string } | undefined;
+			for (const projectId of projectIds) {
+				const found = yield* connections.targetsForProject(workspaceId, projectId);
+				const connected = github ? yield* github.forProject({ workspaceId, projectId }) : undefined;
+				const isFree = (connection: { handle: string }) => !taken.has(connection.handle);
+				reached.push(...found.targets.filter(isFree));
+				expired.push(...found.signInExpired.filter(isFree));
+				if (!gitHub && connected && isFree(connected.connection)) {
+					gitHub = { connected, projectId };
+				}
+				for (const connection of [
+					...found.targets,
+					...found.signInExpired,
+					...(connected ? [connected.connection] : []),
+				]) {
+					taken.add(connection.handle);
+				}
+			}
+			return { reached, expired, gitHub };
+		});
+
 	return {
-		forBot: (workspaceId, botId, turn) =>
+		forTurn: (workspaceId, { projectId, ownProjectId }, turn) =>
 			Effect.gen(function* () {
-				const { targets: reached, signInExpired: expired } = yield* connections.targetsForBot(
-					workspaceId,
-					botId,
-				);
-				// One waiting on a sign-in is still the bot's, so it isn't offered to be added again.
+				if (projectId === null) return nothingOffered;
+				const projectIds =
+					ownProjectId === null || ownProjectId === projectId
+						? [projectId]
+						: [projectId, ownProjectId];
+				const fromProjectAndBot = projectIds.length > 1;
+				const {
+					reached,
+					expired,
+					gitHub: foundGitHub,
+				} = yield* connectionsOf(workspaceId, projectIds);
+				// One waiting on a sign-in is still connected, so it isn't offered to be added again.
 				const addable = presetsAddableTo([...reached, ...expired]);
 				const signInExpired = expired.map((connection) => connection.handle);
 				const endpointTools = reached
 					.filter((target) => target.kind === "http")
 					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
-				const gitHub = yield* gitHubOffered(workspaceId, botId, turn);
+				const gitHub = yield* gitHubOffered(
+					foundGitHub?.connected,
+					turn.computerSignsIn && foundGitHub?.projectId === projectId,
+					turn,
+				);
 				const ownTools = {
 					tools: Object.assign({}, ...endpointTools, gitHub.tools),
 					instructions: gitHub.instructions,
 				};
 				const targets = reached.filter((target) => target.kind === "mcp");
 				if (targets.length === 0) {
-					return { ...nothingOffered, ...ownTools, signInExpired, addable };
+					return { ...nothingOffered, ...ownTools, signInExpired, addable, fromProjectAndBot };
 				}
 				const uploadSide: UploadSide = {
 					conversationId: turn.conversationId,
@@ -331,6 +391,7 @@ export function from({
 						...ownTools.instructions,
 					},
 					addable,
+					fromProjectAndBot,
 					close: async () => {
 						await Promise.allSettled(
 							[...sessions.values()].map((session) => session.then((open) => open.close())),
@@ -341,7 +402,7 @@ export function from({
 	};
 }
 
-/** Catalog servers whose host does not match any of the bot's `connections`. */
+/** Catalog servers whose host does not match any of the turn's `connections`. */
 function presetsAddableTo(connections: readonly { url: string }[]): readonly ConnectionPreset[] {
 	const installed = new Set(
 		connections.flatMap((connection) => {
@@ -387,10 +448,11 @@ const nothingOffered: ConnectionToolSet = {
 	signInExpired: [],
 	instructions: {},
 	addable: [],
+	fromProjectAndBot: false,
 	close: async () => undefined,
 };
 
 /** No connections at all, for a case that offers a turn none. */
 export const none: Interface = {
-	forBot: () => Effect.succeed(nothingOffered),
+	forTurn: () => Effect.succeed(nothingOffered),
 };

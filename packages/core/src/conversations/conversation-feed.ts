@@ -76,6 +76,14 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 			),
 			listedConversationChanged(workspaceId, conversationId),
 		],
+		// Its empty reply is gone, so the conversation is fetched again without it.
+		TurnStayedSilent: ({ conversationId, workspaceId, turnId }) => [
+			onConversation(
+				conversationId,
+				streamEvent("turn.completed", { conversationId, turnId, status: "done" }),
+			),
+			...conversationChanged(workspaceId, conversationId),
+		],
 		TurnSuspended: ({ conversationId, workspaceId }) => [
 			listedConversationChanged(workspaceId, conversationId),
 		],
@@ -155,15 +163,15 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				}),
 			),
 		],
-		TaskStarted: ({ workspaceId, conversationId }) => [
+		ThreadStarted: ({ workspaceId, conversationId }) => [
 			listedConversationChanged(workspaceId, conversationId),
 		],
-		BriefedTaskStarted: ({ workspaceId, conversationId }) => [
+		BriefedThreadStarted: ({ workspaceId, conversationId }) => [
 			listedConversationChanged(workspaceId, conversationId),
 		],
 		ConversationDoneChanged: ({ workspaceId, conversationId }) =>
 			conversationChanged(workspaceId, conversationId),
-		ChannelConversationChanged: ({ workspaceId, conversationId }) =>
+		ProjectThreadChanged: ({ workspaceId, conversationId }) =>
 			conversationChanged(workspaceId, conversationId),
 		ConversationSummarised: ({ workspaceId, conversationId }) =>
 			conversationChanged(workspaceId, conversationId),

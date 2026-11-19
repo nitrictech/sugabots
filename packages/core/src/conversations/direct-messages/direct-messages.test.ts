@@ -1,13 +1,14 @@
 import { MAX_DIRECT_MESSAGE_PEOPLE } from "@sugabots/contracts";
 
 import { and, eq } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { noComputers } from "../../computers/testing.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
-import { channel, channelMember, user, workspace, workspaceMember } from "../../database/schema.ts";
+import { project, projectMember, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
-import { ChannelAdministration } from "../../workspaces/channels/channel-administration.ts";
+import { ProjectAdministration } from "../../workspaces/projects/project-administration.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatView } from "../chats/chat-view.ts";
 import { Chats } from "../chats/chats.ts";
@@ -18,8 +19,11 @@ const eventStore = await runOnPostgres(EventStore.make);
 
 describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", async () => {
 	const conversations = await conversationsForTests(EventBus.inProcess({ store: eventStore }));
-	const channelAdministration = await runOnPostgres(
-		Effect.provide(ChannelAdministration.Service, ChannelAdministration.layer),
+	const projectAdministration = await runOnPostgres(
+		Effect.provide(
+			ProjectAdministration.Service,
+			ProjectAdministration.layer.pipe(Layer.provide(noComputers)),
+		),
 	);
 
 	/** The chat services as one person, and what they can see. */
@@ -27,18 +31,18 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 		chats: onPostgresAs(userId)(Context.get(conversations, Chats.Service)),
 		view: onPostgresAs(userId)(Context.get(conversations, ChatView.Service)),
 		conversations: onPostgresAs(userId)(Context.get(conversations, ConversationView.Service)),
-		channels: onPostgresAs(userId)(channelAdministration),
+		projects: onPostgresAs(userId)(projectAdministration),
 	});
 
 	let workspaceId: string;
-	let channelId: string;
-	/** In the channel. */
+	let projectId: string;
+	/** In the project. */
 	let member: { id: string; name: string };
-	/** In the channel too. */
+	/** In the project too. */
 	let colleague: { id: string; name: string };
-	/** An administrator, in every channel. */
+	/** An administrator, in every project. */
 	let administrator: { id: string; name: string };
-	/** In the workspace, not the channel. */
+	/** In the workspace, not the project. */
 	let outsider: { id: string; name: string };
 
 	afterAll(async () => {
@@ -79,16 +83,16 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 		);
 		const [room] = await onDatabase((db) =>
 			db
-				.insert(channel)
+				.insert(project)
 				.values({ workspaceId, name: "Ops", slug: `ops-${suffix}` })
 				.returning(),
 		);
-		if (!room) throw new Error("Could not create the channel");
-		channelId = room.id;
+		if (!room) throw new Error("Could not create the project");
+		projectId = room.id;
 		await onDatabase((db) =>
-			db.insert(channelMember).values([
-				{ workspaceId, channelId, userId: member.id },
-				{ workspaceId, channelId, userId: colleague.id },
+			db.insert(projectMember).values([
+				{ workspaceId, projectId, userId: member.id },
+				{ workspaceId, projectId, userId: colleague.id },
 			]),
 		);
 	});
@@ -156,7 +160,7 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 			expect(await as(colleague.id).view.directMessage(conversation.id)).toEqual(items[0]);
 		});
 
-		it("tells the other person in their inbox, as a message in no channel", async () => {
+		it("tells the other person in their inbox, as a message in no project", async () => {
 			const { conversation } = await send(member.id, [colleague.id], "Ping");
 
 			const { items } = await as(colleague.id).view.inbox(workspaceId);
@@ -164,7 +168,7 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 			expect(items).toEqual([
 				expect.objectContaining({
 					rootConversationId: conversation.id,
-					channelId: null,
+					projectId: null,
 					unread: true,
 				}),
 			]);
@@ -247,13 +251,13 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 			]);
 		});
 
-		it("is in no channel, so the channels its people reach are unchanged", async () => {
+		it("is in no project, so the projects its people reach are unchanged", async () => {
 			const { conversation } = await send(member.id, [colleague.id], "Hello");
 
-			const channels = await as(member.id).channels.list({ workspace: workspaceId });
+			const projects = await as(member.id).projects.list({ workspace: workspaceId });
 
-			expect(conversation).not.toHaveProperty("channelId");
-			expect(channels.map((listed) => listed.id)).toEqual([channelId]);
+			expect(conversation).not.toHaveProperty("projectId");
+			expect(projects.map((listed) => listed.id)).toEqual([projectId]);
 		});
 
 		it("refuses a direct message with yourself, or with somebody outside the workspace", async () => {

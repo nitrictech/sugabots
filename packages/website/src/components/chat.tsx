@@ -14,12 +14,25 @@ import { Button } from "@/components/ui/button";
  * everyone's on the same side.
  */
 
-/** Who wrote a message: a bot with its face, or a person with their initials. */
-export type ChatAuthor =
-	| { kind: "bot"; name: string; look: BotLook }
-	| { kind: "person"; name: string; initials: string };
+export interface ChatBot {
+	kind: "bot";
+	name: string;
+	look: BotLook;
+}
 
-function ChatAvatar({
+export interface ChatPerson {
+	kind: "person";
+	name: string;
+	initials: string;
+	/** A licensed photo, which the landing page's demos show in place of the initials. */
+	photo?: string;
+}
+
+/** Who wrote a message: a bot with its face, or a person. */
+export type ChatAuthor = ChatBot | ChatPerson;
+
+/** A bot's face, or a person's initials. */
+export function ChatAvatar({
 	author,
 	size,
 }: {

@@ -71,7 +71,7 @@ export const make = Effect.gen(function* () {
 								reason: "collaboration",
 							});
 						// The brief is a bot's message, which gives nobody the floor by itself.
-						case "BriefedTaskStarted":
+						case "BriefedThreadStarted":
 							return turns.ask({
 								conversationId: event.conversationId,
 								botId: event.hostBotId,

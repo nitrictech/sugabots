@@ -10,14 +10,29 @@ import { FLOATING_ON_PHONE, iconButtonClassName } from "@/ui/icon-button.tsx";
  * the button, so where there are several on a page say whose it is
  * ("More for Wiki").
  */
-export function MoreMenu({ label = "More", children }: { label?: string; children: ReactNode }) {
+export function MoreMenu({
+	label = "More",
+	variant = "round",
+	className,
+	children,
+}: {
+	label?: string;
+	/** `round` on a card or page; `bar` in a header bar, as `IconButton`'s `bar`. On a phone either floats as glass. */
+	variant?: "round" | "bar";
+	className?: string;
+	children: ReactNode;
+}) {
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				aria-label={label}
-				className={cn(iconButtonClassName("round"), FLOATING_ON_PHONE)}
+				className={cn(iconButtonClassName(variant), FLOATING_ON_PHONE, className)}
 			>
-				<Ellipsis aria-hidden />
+				{variant === "bar" ? (
+					<Ellipsis aria-hidden size={18} strokeWidth={2} />
+				) : (
+					<Ellipsis aria-hidden />
+				)}
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-48">
 				{children}

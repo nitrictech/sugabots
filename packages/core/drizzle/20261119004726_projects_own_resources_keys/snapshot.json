@@ -1,0 +1,934 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "8c70d9b8-f70b-4ddf-bdb0-980aed3b3845",
+  "prevIds": [
+    "53e243f3-ede0-458f-aa2a-c2ca8b0d2bda"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_view",
+      "statementTarget": [
+        "view",
+        "public",
+        "placed_conversation"
+      ],
+      "writes": [
+        "s|view|public.placed_conversation",
+        "n|view|public.placed_conversation",
+        "e|view|public.placed_conversation",
+        "n|rel|public.placed_conversation",
+        "n|type|public.placed_conversation"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "computer"
+      ],
+      "writes": [
+        "s|fk|public.computer.computer_bot_workspace_fkey",
+        "n|fk|public.computer.computer_bot_workspace_fkey",
+        "e|fk|public.computer.computer_bot_workspace_fkey",
+        "n|con|public.computer.computer_bot_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public",
+        "e|col|public.computer.bot_id",
+        "e|col|public.computer.workspace_id"
+      ]
+    },
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "automation"
+      ],
+      "writes": [
+        "s|fk|public.automation.automation_bot_workspace_fkey",
+        "n|fk|public.automation.automation_bot_workspace_fkey",
+        "e|fk|public.automation.automation_bot_workspace_fkey",
+        "n|con|public.automation.automation_bot_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public",
+        "e|col|public.automation.bot_id",
+        "e|col|public.automation.workspace_id"
+      ]
+    },
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "run"
+      ],
+      "writes": [
+        "s|fk|public.run.routine_execution_routine_id_routine_id_fkey",
+        "n|fk|public.run.routine_execution_routine_id_routine_id_fkey",
+        "e|fk|public.run.routine_execution_routine_id_routine_id_fkey",
+        "n|con|public.run.routine_execution_routine_id_routine_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.run",
+        "n|sch|public",
+        "e|col|public.run.automation_id"
+      ]
+    },
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "connection"
+      ],
+      "writes": [
+        "s|fk|public.connection.connection_bot_workspace_fkey",
+        "n|fk|public.connection.connection_bot_workspace_fkey",
+        "e|fk|public.connection.connection_bot_workspace_fkey",
+        "n|con|public.connection.connection_bot_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "e|col|public.connection.bot_id",
+        "e|col|public.connection.workspace_id"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "bot_allowed_host"
+      ],
+      "writes": [
+        "s|tbl|public.bot_allowed_host",
+        "n|tbl|public.bot_allowed_host",
+        "e|tbl|public.bot_allowed_host",
+        "n|rel|public.bot_allowed_host",
+        "n|type|public.bot_allowed_host"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "automation"
+      ],
+      "writes": [
+        "s|ck|public.automation.automation_created_by_bot_valid",
+        "n|ck|public.automation.automation_created_by_bot_valid",
+        "e|ck|public.automation.automation_created_by_bot_valid",
+        "n|con|public.automation.automation_created_by_bot_valid"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public",
+        "e|col|public.automation.created_by_bot_id",
+        "e|col|public.automation.bot_id"
+      ]
+    },
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "computer",
+        "computer_bot_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.computer_bot_id_idx",
+        "n|idx|public.computer_bot_id_idx",
+        "e|idx|public.computer_bot_id_idx",
+        "n|rel|public.computer_bot_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public",
+        "e|col|public.computer.bot_id"
+      ],
+      "sharedWrites": [
+        "e|uniqueness|public.computer.bot_id"
+      ]
+    },
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "automation",
+        "automation_bot_name_idx"
+      ],
+      "writes": [
+        "s|idx|public.automation_bot_name_idx",
+        "n|idx|public.automation_bot_name_idx",
+        "e|idx|public.automation_bot_name_idx",
+        "n|rel|public.automation_bot_name_idx"
+      ],
+      "reads": [
+        "e|tbl|public.automation",
+        "n|sch|public",
+        "e|col|public.automation.bot_id",
+        "e|col|public.automation.name"
+      ],
+      "sharedWrites": []
+    },
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "connection",
+        "connection_github_bot_idx"
+      ],
+      "writes": [
+        "s|idx|public.connection_github_bot_idx",
+        "n|idx|public.connection_github_bot_idx",
+        "e|idx|public.connection_github_bot_idx",
+        "n|rel|public.connection_github_bot_idx"
+      ],
+      "reads": [
+        "e|tbl|public.connection",
+        "n|sch|public",
+        "e|col|public.connection.bot_id"
+      ],
+      "sharedWrites": []
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "automation",
+        "bot_id"
+      ],
+      "writes": [
+        "s|col|public.automation.bot_id",
+        "n|col|public.automation.bot_id",
+        "e|col|public.automation.bot_id"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connection",
+        "bot_id"
+      ],
+      "writes": [
+        "s|col|public.connection.bot_id",
+        "n|col|public.connection.bot_id",
+        "e|col|public.connection.bot_id"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "computer",
+        "bot_id"
+      ],
+      "writes": [
+        "s|col|public.computer.bot_id",
+        "n|col|public.computer.bot_id",
+        "e|col|public.computer.bot_id"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "computer",
+        "project_id"
+      ],
+      "writes": [
+        "s|colprop|public.computer.project_id.notNull"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public",
+        "n|col|public.computer.project_id"
+      ],
+      "sqlHash": "fe5a93b8523c0e8d"
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "automation",
+        "project_id"
+      ],
+      "writes": [
+        "s|colprop|public.automation.project_id.notNull"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public",
+        "n|col|public.automation.project_id"
+      ],
+      "sqlHash": "b428b9fcdafaffec"
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connection",
+        "project_id"
+      ],
+      "writes": [
+        "s|colprop|public.connection.project_id.notNull"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|col|public.connection.project_id"
+      ],
+      "sqlHash": "c67ce8f408bfe0b6"
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "computer",
+        "computer_project_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.computer_project_id_idx",
+        "n|idx|public.computer_project_id_idx",
+        "e|idx|public.computer_project_id_idx",
+        "n|rel|public.computer_project_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public",
+        "n|col|public.computer.project_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "automation",
+        "automation_project_name_idx"
+      ],
+      "writes": [
+        "s|idx|public.automation_project_name_idx",
+        "n|idx|public.automation_project_name_idx",
+        "e|idx|public.automation_project_name_idx",
+        "n|rel|public.automation_project_name_idx"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public",
+        "n|col|public.automation.project_id",
+        "n|col|public.automation.name"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "connection",
+        "connection_github_project_idx"
+      ],
+      "writes": [
+        "s|idx|public.connection_github_project_idx",
+        "n|idx|public.connection_github_project_idx",
+        "e|idx|public.connection_github_project_idx",
+        "n|rel|public.connection_github_project_idx"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|col|public.connection.project_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "connection",
+        "connection_name_idx"
+      ],
+      "writes": [
+        "s|idx|public.connection_name_idx",
+        "n|idx|public.connection_name_idx",
+        "e|idx|public.connection_name_idx",
+        "n|rel|public.connection_name_idx"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|col|public.connection.project_id",
+        "n|col|public.connection.name"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "connection",
+        "connection_handle_idx"
+      ],
+      "writes": [
+        "s|idx|public.connection_handle_idx",
+        "n|idx|public.connection_handle_idx",
+        "e|idx|public.connection_handle_idx",
+        "n|rel|public.connection_handle_idx"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|col|public.connection.project_id",
+        "n|col|public.connection.handle"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "computer"
+      ],
+      "writes": [
+        "s|fk|public.computer.computer_project_workspace_fkey",
+        "n|fk|public.computer.computer_project_workspace_fkey",
+        "e|fk|public.computer.computer_project_workspace_fkey",
+        "n|con|public.computer.computer_project_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public",
+        "n|tbl|public.project",
+        "n|sch|public",
+        "n|col|public.computer.project_id",
+        "n|col|public.computer.workspace_id",
+        "n|col|public.project.id",
+        "n|col|public.project.workspace_id",
+        "e|uniqueness|public.project.id.workspace_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "automation"
+      ],
+      "writes": [
+        "s|fk|public.automation.automation_created_by_bot_id_bot_id_fkey",
+        "n|fk|public.automation.automation_created_by_bot_id_bot_id_fkey",
+        "e|fk|public.automation.automation_created_by_bot_id_bot_id_fkey",
+        "n|con|public.automation.automation_created_by_bot_id_bot_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public",
+        "n|tbl|public.bot",
+        "n|sch|public",
+        "n|col|public.automation.created_by_bot_id",
+        "n|col|public.bot.id",
+        "e|uniqueness|public.bot.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "automation"
+      ],
+      "writes": [
+        "s|fk|public.automation.automation_project_workspace_fkey",
+        "n|fk|public.automation.automation_project_workspace_fkey",
+        "e|fk|public.automation.automation_project_workspace_fkey",
+        "n|con|public.automation.automation_project_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.automation",
+        "n|sch|public",
+        "n|tbl|public.project",
+        "n|sch|public",
+        "n|col|public.automation.project_id",
+        "n|col|public.automation.workspace_id",
+        "n|col|public.project.id",
+        "n|col|public.project.workspace_id",
+        "e|uniqueness|public.project.id.workspace_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "run"
+      ],
+      "writes": [
+        "s|fk|public.run.run_automation_id_automation_id_fkey",
+        "n|fk|public.run.run_automation_id_automation_id_fkey",
+        "e|fk|public.run.run_automation_id_automation_id_fkey",
+        "n|con|public.run.run_automation_id_automation_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.run",
+        "n|sch|public",
+        "n|tbl|public.automation",
+        "n|sch|public",
+        "n|col|public.run.automation_id",
+        "n|col|public.automation.id",
+        "e|uniqueness|public.automation.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "connection"
+      ],
+      "writes": [
+        "s|fk|public.connection.connection_project_workspace_fkey",
+        "n|fk|public.connection.connection_project_workspace_fkey",
+        "e|fk|public.connection.connection_project_workspace_fkey",
+        "n|con|public.connection.connection_project_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.connection",
+        "n|sch|public",
+        "n|tbl|public.project",
+        "n|sch|public",
+        "n|col|public.connection.project_id",
+        "n|col|public.connection.workspace_id",
+        "n|col|public.project.id",
+        "n|col|public.project.workspace_id",
+        "e|uniqueness|public.project.id.workspace_id"
+      ]
+    },
+    {
+      "statementType": "recreate_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "run"
+      ],
+      "writes": [
+        "s|fk|public.run.run_automation_workspace_fkey",
+        "n|fk|public.run.run_automation_workspace_fkey",
+        "e|fk|public.run.run_automation_workspace_fkey",
+        "n|con|public.run.run_automation_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.run",
+        "n|sch|public",
+        "n|tbl|public.automation",
+        "n|sch|public",
+        "n|col|public.run.automation_id",
+        "n|col|public.run.workspace_id",
+        "n|col|public.automation.id",
+        "n|col|public.automation.workspace_id",
+        "e|uniqueness|public.automation.id.workspace_id"
+      ],
+      "sqlHash": "5f186d16c483b99e"
+    },
+    {
+      "statementType": "create_view",
+      "statementTarget": [
+        "view",
+        "public",
+        "placed_conversation"
+      ],
+      "writes": [
+        "s|view|public.placed_conversation",
+        "n|view|public.placed_conversation",
+        "e|view|public.placed_conversation",
+        "n|rel|public.placed_conversation",
+        "n|type|public.placed_conversation"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer",
+        "name": "computer_project_id_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "project_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation",
+        "name": "automation_project_name_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "project_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "name",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"deleted_at\" is null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connection",
+        "name": "connection_github_project_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "project_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": "\"kind\" = 'github'",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer",
+        "name": "computer_project_workspace_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "project_id",
+          "workspace_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "project",
+        "columnsTo": [
+          "id",
+          "workspace_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation",
+        "name": "automation_created_by_bot_id_bot_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "created_by_bot_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "bot",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation",
+        "name": "automation_project_workspace_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "project_id",
+          "workspace_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "project",
+        "columnsTo": [
+          "id",
+          "workspace_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "run",
+        "name": "run_automation_id_automation_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "automation_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "automation",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connection",
+        "name": "connection_project_workspace_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "project_id",
+          "workspace_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "project",
+        "columnsTo": [
+          "id",
+          "workspace_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"bot_allowed_host\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"automation\",\"bot_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"connection\",\"bot_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"computer\",\"bot_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"bot_allowed_host\",\"workspace_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"bot_allowed_host\",\"bot_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"bot_allowed_host\",\"host\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"bot_allowed_host\",\"added_by_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"bot_allowed_host\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"automation_bot_name_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"connection_github_bot_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"computer_bot_id_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"automation\",\"automation_bot_workspace_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"run\",\"routine_execution_routine_id_routine_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"bot_allowed_host\",\"sandbox_agent_allowed_host_added_by_id_user_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"bot_allowed_host\",\"bot_allowed_host_bot_workspace_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"connection\",\"connection_bot_workspace_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"computer\",\"computer_bot_workspace_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"bot_allowed_host\",\"sandbox_agent_allowed_host_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"public\",\"automation\",\"automation_created_by_bot_valid\"]"
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"computer\",\"project_id\"]",
+      "set": {
+        "notNull": true
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"automation\",\"project_id\"]",
+      "set": {
+        "notNull": true
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"connection\",\"project_id\"]",
+      "set": {
+        "notNull": true
+      }
+    },
+    {
+      "op": "alter",
+      "key": "indexes\u0000[\"public\",\"connection_name_idx\"]",
+      "set": {
+        "columns": [
+          {
+            "value": "project_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "name",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ]
+      }
+    },
+    {
+      "op": "alter",
+      "key": "indexes\u0000[\"public\",\"connection_handle_idx\"]",
+      "set": {
+        "columns": [
+          {
+            "value": "project_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "handle",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ]
+      }
+    },
+    {
+      "op": "alter",
+      "key": "fks\u0000[\"public\",\"run\",\"run_automation_workspace_fkey\"]",
+      "set": {
+        "onDelete": "CASCADE"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "views\u0000[\"public\",\"placed_conversation\"]",
+      "set": {
+        "definition": "select\n\tc.id, c.workspace_id, c.kind, c.title, c.created_at, c.updated_at,\n\tcoalesce(p.default_of_bot_id, co.collaborator_bot_id, sc.bot_id) as bot_id,\n\tp.id as project_id,\n\tcase c.kind\n\t\twhen 'collaboration' then co.root_conversation_id\n\t\twhen 'run' then rf.conversation_id\n\t\twhen 'system' then null\n\t\telse c.id\n\tend as root_conversation_id,\n\tcoalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,\n\tcoalesce(cc.started_by_id, dm.started_by_id) as started_by_id,\n\tsc.system_bot_key,\n\tcc.done_at,\n\tf.automation_id,\n\tcc.archived_at,\n\tdm.direct_key\nfrom \"conversation\" c\nleft join \"project_thread\" cc on cc.conversation_id = c.id\nleft join \"direct_message\" dm on dm.conversation_id = c.id\nleft join \"collaboration\" co on co.conversation_id = c.id\nleft join \"run\" r on r.conversation_id = c.id\nleft join \"automation_feed\" rf on rf.automation_id = r.automation_id\nleft join \"automation_feed\" f on f.conversation_id = c.id\nleft join \"automation\" a on a.id = coalesce(r.automation_id, f.automation_id)\nleft join \"project\" p on p.id = coalesce(cc.project_id, a.project_id)\nleft join \"system_conversation\" sc on sc.conversation_id = c.id"
+      }
+    }
+  ]
+}

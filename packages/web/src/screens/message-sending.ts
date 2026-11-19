@@ -7,7 +7,7 @@ import {
 import { isApiFailure } from "@sugabots/sdk";
 import { type Dispatch, type SetStateAction, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { useSendChatMessage } from "@/lib/chats.ts";
+import { useSendMessage } from "@/lib/chats.ts";
 import { type ComposerAttachments, isFileGoneRefusal } from "@/lib/composer-attachments.ts";
 import type { ChatRecipients } from "./chat-recipients.ts";
 
@@ -50,7 +50,7 @@ export function useMessageSending({
 	scrollToLatest: () => void;
 	onSent: (() => void) | undefined;
 }): MessageSending {
-	const send = useSendChatMessage(conversationId, user);
+	const send = useSendMessage(conversationId, user);
 	const [startError, setStartError] = useState<string>();
 
 	async function submit() {

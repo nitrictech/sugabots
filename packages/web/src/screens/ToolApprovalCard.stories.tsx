@@ -60,7 +60,7 @@ const bigLinearIssue = asking({
 		assignee: "Unassigned",
 		project: "Q4 reliability",
 		description:
-			"41 events in the last 24 hours, all on POST /checkout, all hitting the 30s gateway limit. Started at 02:14 UTC, just after the 0.18.2 deploy.\n\nWhat we see\n• p95 latency on /checkout went from 1.2s to 28.4s\n• Every timeout is a cart with more than 20 items\n• The inventory reservation call is retried 6 times before giving up\n\nCustomers affected\nNorthwind (3 failed orders), Acme Retail (11), Globex (2). Two of them have opened support tickets.\n\nLikely cause\nThe batch reservation change in 0.18.2 reserves items one by one instead of in a single call. Reverting it in staging brings p95 back to 1.4s.\n\nSuggested fix\nRevert the change, or restore the batched call behind a flag and add a timeout of 10s on the reservation step.\n\nSentry: PLAT-482, PLAT-487\nRaised by Growth Desk from the Revenue channel.",
+			"41 events in the last 24 hours, all on POST /checkout, all hitting the 30s gateway limit. Started at 02:14 UTC, just after the 0.18.2 deploy.\n\nWhat we see\n• p95 latency on /checkout went from 1.2s to 28.4s\n• Every timeout is a cart with more than 20 items\n• The inventory reservation call is retried 6 times before giving up\n\nCustomers affected\nNorthwind (3 failed orders), Acme Retail (11), Globex (2). Two of them have opened support tickets.\n\nLikely cause\nThe batch reservation change in 0.18.2 reserves items one by one instead of in a single call. Reverting it in staging brings p95 back to 1.4s.\n\nSuggested fix\nRevert the change, or restore the batched call behind a flag and add a timeout of 10s on the reservation step.\n\nSentry: PLAT-482, PLAT-487\nRaised by Growth Desk from the Revenue project.",
 	},
 });
 
@@ -191,7 +191,7 @@ export const ReviewOnAPhoneAsAViewer = meta.story({
 	},
 });
 
-/** ANetworkRequest is a bot asking for its computer to reach a host, which those who manage its computer answer. */
+/** ANetworkRequest is a bot asking for the project's computer to reach a host, which those who manage the computer answer. */
 export const ANetworkRequest = meta.story({
 	args: {
 		call: asking({
@@ -210,7 +210,7 @@ export const ANetworkRequest = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			canvas.getByText("Trip Planner wants its computer to reach a new host"),
+			canvas.getByText("Trip Planner wants the project's computer to reach a new host"),
 		).toBeInTheDocument();
 		await expect(canvas.queryByText("RN")).toBeNull();
 	},

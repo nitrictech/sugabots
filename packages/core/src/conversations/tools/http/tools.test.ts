@@ -83,11 +83,11 @@ const target = (extra: Partial<ConnectionTarget> = {}): ConnectionTarget => ({
 async function toolsFor(connection: ConnectionTarget) {
 	const offered = ConnectionTools.from({
 		connections: {
-			targetsForBot: () => Effect.succeed({ targets: [connection], signInExpired: [] }),
+			targetsForProject: () => Effect.succeed({ targets: [connection], signInExpired: [] }),
 		},
 		httpClients: clients,
 	});
-	return (await run(offered.forBot("w", "p", NO_TURN))).tools;
+	return (await run(offered.forTurn("w", { projectId: "p", ownProjectId: "p" }, NO_TURN))).tools;
 }
 
 async function call(connection: ConnectionTarget, method: string, input: unknown) {

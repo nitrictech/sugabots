@@ -1,23 +1,20 @@
 import type { BotColor, BotFace } from "@sugabots/contracts";
 import { isEmailUnverified } from "@sugabots/sdk";
+import { cn } from "cn";
 import { type FormEvent, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { AuthLayout, FormRow, fieldClass } from "@/screens/AuthLayout.tsx";
+import { AuthLayout, FormRow, fieldClass, QuietLink } from "@/screens/AuthLayout.tsx";
 import { ForgotPassword } from "@/screens/ResetPassword.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 
 /**
- * Sign in, or create an account.
- *
- * The design leads with a magic link and keeps a password as the fallback. It
- * is the other way round here, and will be until there is somewhere to send
- * mail: by default `Email.layer` (`packages/core/src/email/email.ts`) logs
- * invitations rather than sending them, and a sign-in link nobody receives
- * is worse than no link at all. When email is really sent this becomes the
- * secondary action, which is a change to this file and not to the flow.
+ * Sign in, or create an account, with a password. A sign-in link by email is
+ * not offered until the server really sends email: by default `Email.layer`
+ * (`packages/core/src/email/email.ts`) logs mail rather than sending it, and a
+ * link nobody receives is worse than none.
  */
 export function Login({
 	inviteId,
@@ -192,62 +189,44 @@ export function Login({
 			</form>
 
 			<div className="flex justify-center gap-6">
-				{!isNew && (
-					<button
-						type="button"
-						onClick={() => setForgotPassword(true)}
-						className={secondaryActionClass}
-					>
-						Forgot password?
-					</button>
-				)}
-				<button type="button" onClick={() => setIsNew(!isNew)} className={secondaryActionClass}>
+				{!isNew && <QuietLink onClick={() => setForgotPassword(true)}>Forgot password?</QuietLink>}
+				<QuietLink onClick={() => setIsNew(!isNew)}>
 					{isNew ? "I already have an account" : "Create an account"}
-				</button>
+				</QuietLink>
 			</div>
 		</AuthLayout>
 	);
 }
 
-const secondaryActionClass =
-	"focus-ring rounded-md px-1.5 py-1.5 font-medium text-sm text-muted-foreground";
-
 /** A bot of each colour, each with its own eyes and a little up or down, as the design lines them up. */
-const crowd: readonly { color: BotColor; face: BotFace; drop: number }[] = [
-	{ color: "rose", face: "dot", drop: 12 },
-	{ color: "yellow", face: "pill", drop: -2 },
-	{ color: "purple", face: "arc", drop: 8 },
-	{ color: "sky", face: "pill", drop: -6 },
-	{ color: "green", face: "square", drop: 10 },
-	{ color: "orange", face: "wink", drop: 2 },
-	{ color: "ice", face: "arc", drop: -4 },
-	{ color: "teal", face: "dot", drop: 8 },
+const crowd: readonly { color: BotColor; face: BotFace; drop: string }[] = [
+	{ color: "rose", face: "dot", drop: "translate-y-3" },
+	{ color: "yellow", face: "pill", drop: "-translate-y-0.5" },
+	{ color: "purple", face: "arc", drop: "translate-y-2" },
+	{ color: "sky", face: "pill", drop: "-translate-y-1.5" },
+	{ color: "green", face: "square", drop: "translate-y-2.5" },
+	{ color: "orange", face: "wink", drop: "translate-y-0.5" },
+	{ color: "ice", face: "arc", drop: "-translate-y-1" },
+	{ color: "teal", face: "dot", drop: "translate-y-2" },
 ];
 
-/**
- * The first thing somebody new sees. Email is the one way in today; the
- * design's Google button waits for Google sign-in to exist.
- */
+/** The first thing somebody new sees. Email is the only way in until Google sign-in exists. */
 function Welcome({ onContinue }: { onContinue: () => void }) {
 	return (
 		<main className="grid h-full place-items-center overflow-x-hidden bg-background px-4 text-foreground">
 			<div className="flex w-full min-w-0 max-w-110 flex-col items-center gap-5.5 text-center">
 				<div aria-hidden className="flex justify-center gap-3 pb-2">
 					{crowd.map(({ color, face, drop }) => (
-						<span key={color} className="shrink-0" style={{ transform: `translateY(${drop}px)` }}>
+						<span key={color} className={cn("shrink-0", drop)}>
 							<BotAvatar color={color} face={face} shape="circle" size={52} />
 						</span>
 					))}
 				</div>
 				<h1 className="m-0 font-bold text-3xl leading-tight tracking-tight">Welcome to Sugabots</h1>
 				<p className="m-0 text-pretty text-sm text-muted-foreground leading-normal">
-					Bots that work alongside your team, in chats you already know how to use.
+					Bots that work alongside your team, in conversations you already know how to use.
 				</p>
-				<Button
-					size="lg"
-					className="mt-2 w-full bg-foreground text-background hover:bg-foreground/90"
-					onClick={onContinue}
-				>
+				<Button size="lg" className="mt-2 w-full" onClick={onContinue}>
 					Continue with email
 				</Button>
 			</div>

@@ -14,13 +14,13 @@ const version = {
 
 export class FilesApi extends HttpApiGroup.make("files")
 	.add(
-		/** The files uploaded or made in the channel's conversations. */
-		HttpApiEndpoint.get("listInChannel", "/channels/:channelId/files", {
-			params: { channelId: uuidSchema },
+		/** The files uploaded or made in the project's threads. */
+		HttpApiEndpoint.get("listInProject", "/projects/:projectId/files", {
+			params: { projectId: uuidSchema },
 			success: Schema.Array(fileSummarySchema),
 			error: refused,
 		}),
-		/** The files uploaded or made in the bot's tasks. */
+		/** The files uploaded or made in the bot's threads. */
 		HttpApiEndpoint.get("listForBot", "/bots/:botId/files", {
 			params: { botId: uuidSchema },
 			success: Schema.Array(fileSummarySchema),

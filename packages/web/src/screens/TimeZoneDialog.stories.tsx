@@ -11,9 +11,9 @@ const timeZoneUrl = `${import.meta.env.VITE_API_URL}/workspaces/${WORKSPACE_ID}/
 /** What the API was asked to move the workspace to. */
 const movedTo = fn<(timeZone: unknown) => void>();
 
-const answering = (scheduledAutomations: number) => [
+const answering = (automationsWithRoutines: number) => [
 	http.get(timeZoneUrl, () =>
-		HttpResponse.json({ timeZone: "Australia/Sydney", scheduledAutomations }),
+		HttpResponse.json({ timeZone: "Australia/Sydney", automationsWithRoutines }),
 	),
 	http.put(timeZoneUrl, async ({ request }) => {
 		movedTo(((await request.json()) as { timeZone: unknown }).timeZone);
@@ -96,10 +96,10 @@ export const BrowsingRegions = meta.story({
 });
 
 const MOVES_AUTOMATIONS_NOTE =
-	"All automations scheduled on Sydney time will now run in whichever zone you pick.";
+	"All routines on Sydney time will now run in whichever zone you pick.";
 
 /**
- * With automations scheduled on the workspace's time, it says from the start that
+ * With routines on the workspace's time, it says from the start that
  * they move with it, and keeps saying so while another zone is chosen.
  */
 export const MovesAutomations = meta.story({

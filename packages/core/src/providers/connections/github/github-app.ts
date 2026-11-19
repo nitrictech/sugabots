@@ -9,42 +9,47 @@ import {
 	type GitHubSetupFailure,
 } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import type { AuthorizationDenied } from "../../../authorization/access.ts";
 import { Authorization } from "../../../authorization/authorization.ts";
 import { CurrentActor } from "../../../authorization/current-actor.ts";
 import { Credentials } from "../../../credentials/credentials.ts";
 import { type Database, query, serviceOperations } from "../../../database/database.ts";
-import { connection } from "../../../database/schema.ts";
+import { bot } from "../../../database/schema.ts";
 import { Ids } from "../../../ids/ids.ts";
 import { Installation } from "../../../installation/installation.ts";
 import { Egress, isPrivateAddress } from "../../network/egress.ts";
 import { ConnectionRepository } from "../connection-repository.ts";
 import { openAppCredential, sealAppCredential } from "./credential.ts";
 import * as GitHub from "./github.ts";
-import { BotHasGitHubConnection, NotGitHubConnection } from "./github-connections.ts";
+import {
+	gitHubConnectionForProject,
+	NotGitHubConnection,
+	ProjectHasGitHubConnection,
+} from "./github-connections.ts";
 
 /**
- * Connecting a bot to GitHub: a person makes the bot its own private GitHub
- * App, from a manifest Sugabots writes, owned by the account whose
- * repositories the bot works on, then installs it there; GitHub sends the
- * browser back to Sugabots after each step. The app is the bot's GitHub
- * connection, made once GitHub has made the app, and signed in once it is
- * installed. Each step takes `connection.manage`.
+ * Connecting a project to GitHub: a person makes the project its own private
+ * GitHub App, from a manifest Sugabots writes, owned by the account whose
+ * repositories the project's bots work on, then installs it there; GitHub
+ * sends the browser back to Sugabots after each step. The app is the
+ * project's GitHub connection, made once GitHub has made the app, and signed
+ * in once it is installed. Each step takes `connection.manage` in the project;
+ * a bot's GitHub app is its default project's.
  */
 export interface Interface {
-	/** The form that makes the bot's GitHub App, owned by `organization` or by the person. */
+	/** The form that makes the project's GitHub App, owned by `organization` or by the person. */
 	readonly start: (input: {
-		botId: string;
+		projectId: string;
 		organization: string | undefined;
 	}) => Effect.Effect<
 		GitHubAppForm,
-		AuthorizationDenied | BotHasGitHubConnection,
+		AuthorizationDenied | ProjectHasGitHubConnection,
 		CurrentActor.Service
 	>;
 	/**
-	 * Makes the bot's GitHub connection to the app GitHub made from the
+	 * Makes the project's GitHub connection to the app GitHub made from the
 	 * manifest, given the `code` it sent the browser back with, and says where
 	 * to install it.
 	 */
@@ -59,7 +64,7 @@ export interface Interface {
 	}) => Effect.Effect<SetupOutcome, never, CurrentActor.Service>;
 	/** Where to install the connection's app, or to change which repositories it reaches. */
 	readonly installUrl: (input: {
-		botId: string;
+		projectId: string;
 		connectionId: string;
 	}) => Effect.Effect<string, AuthorizationDenied | NotGitHubConnection, CurrentActor.Service>;
 }
@@ -77,32 +82,25 @@ export const make = Effect.gen(function* () {
 	const apiUrl = `${installation.publicUrl}${API_BASE_PATH}`;
 	const webhooksReachable = reachableFromInternet(installation.publicUrl);
 
-	const managed = (botId: string) =>
-		Effect.map(authorization.bot(botId, "connection.manage"), ({ bot }) => bot);
+	const managed = (projectId: string) =>
+		Effect.map(authorization.project(projectId, "connection.manage"), ({ project }) => project);
 
-	const managedQuietly = (botId: string) =>
-		managed(botId).pipe(
+	const managedQuietly = (projectId: string) =>
+		managed(projectId).pipe(
 			Effect.as(true),
 			Effect.orElseSucceed(() => false),
 		);
 
-	const gitHubConnectionOf = (bot: { workspaceId: string; botId: string }) =>
-		Effect.map(
+	/** What the project is called: its own name, or its bot's for a default project. */
+	const nameOf = ({ name, defaultOfBotId }: { name: string; defaultOfBotId: string | null }) => {
+		if (defaultOfBotId === null) return Effect.succeed(name);
+		return Effect.map(
 			query((db) =>
-				db
-					.select()
-					.from(connection)
-					.where(
-						and(
-							eq(connection.workspaceId, bot.workspaceId),
-							eq(connection.botId, bot.botId),
-							eq(connection.kind, "github"),
-						),
-					)
-					.limit(1),
+				db.select({ name: bot.name }).from(bot).where(eq(bot.id, defaultOfBotId)).limit(1),
 			),
-			([row]) => row,
+			([row]) => row?.name ?? name,
 		);
+	};
 
 	const stateFor = (step: SetupStep) =>
 		Effect.gen(function* () {
@@ -134,29 +132,35 @@ export const make = Effect.gen(function* () {
 
 	const failed = (setup: SetupStep | undefined, failure: GitHubSetupFailure): SetupOutcome => ({
 		kind: "failed",
-		bot: setup && { workspaceId: setup.workspaceId, botId: setup.botId },
+		at: setup && setupProjectOf(setup),
 		failure,
 	});
 
 	return Service.of({
-		start: ({ botId, organization }) =>
+		start: ({ projectId, organization }) =>
 			operation(
 				"start",
 				Effect.gen(function* () {
-					const bot = yield* managed(botId);
-					if (yield* gitHubConnectionOf({ workspaceId: bot.workspaceId, botId: bot.id })) {
-						return yield* new BotHasGitHubConnection();
+					const project = yield* managed(projectId);
+					if (
+						yield* gitHubConnectionForProject({
+							workspaceId: project.workspaceId,
+							projectId: project.id,
+						})
+					) {
+						return yield* new ProjectHasGitHubConnection();
 					}
 					// The connection's id is in its webhook's address, so it is minted before GitHub makes the app.
 					const connectionId = yield* ids.next;
 					const state = yield* stateFor({
 						step: "make",
-						workspaceId: bot.workspaceId,
-						botId: bot.id,
+						workspaceId: project.workspaceId,
+						projectId: project.id,
+						botId: project.defaultOfBotId,
 						connectionId,
 					});
 					const manifest = GitHub.appManifest({
-						name: appName(bot.name, connectionId),
+						name: appName(yield* nameOf(project), connectionId),
 						homepageUrl: installation.webAppUrl,
 						redirectUrl: `${apiUrl}${GITHUB_APP_MADE_PATH}`,
 						setupUrl: `${apiUrl}${GITHUB_APP_INSTALLED_PATH}`,
@@ -182,7 +186,7 @@ export const make = Effect.gen(function* () {
 					const setup = yield* stepOf(state, "make");
 					if (!setup) return failed(undefined, "expired");
 					if (!code) return failed(setup, "cancelled");
-					if (!(yield* managedQuietly(setup.botId))) return failed(undefined, "expired");
+					if (!(yield* managedQuietly(setup.projectId))) return failed(undefined, "expired");
 					const made = yield* GitHub.madeApp(http, code).pipe(
 						Effect.tapError((failure) => Effect.logWarning("GitHub didn't make the app", failure)),
 						Effect.option,
@@ -191,7 +195,7 @@ export const make = Effect.gen(function* () {
 					const app = made.value;
 					const { userId } = yield* CurrentActor.Service;
 					const created = yield* connections
-						.createGitHub(setup.workspaceId, setup.botId, userId, {
+						.createGitHub(setup.workspaceId, setup.projectId, userId, {
 							id: setup.connectionId,
 							app: { appId: app.id, slug: app.slug, owner: app.owner },
 							appCredentialEncrypted: sealAppCredential(credentials, {
@@ -200,7 +204,7 @@ export const make = Effect.gen(function* () {
 							}),
 						})
 						.pipe(Effect.option);
-					// The bot was connected to GitHub another way meanwhile.
+					// The project was connected to GitHub another way meanwhile.
 					if (Option.isNone(created)) return failed(setup, "github");
 					const next = yield* stateFor({ ...setup, step: "install" });
 					return { kind: "next", url: GitHub.installAppUrl(app.slug, next) };
@@ -218,8 +222,8 @@ export const make = Effect.gen(function* () {
 					const setup = yield* stepOf(state, "install");
 					if (!setup) return failed(undefined, "expired");
 					if (installationId === undefined) return failed(setup, "cancelled");
-					const row = (yield* managedQuietly(setup.botId))
-						? yield* gitHubConnectionOf(setup)
+					const row = (yield* managedQuietly(setup.projectId))
+						? yield* gitHubConnectionForProject(setup)
 						: undefined;
 					if (!row?.settings || !row.appCredentialEncrypted || row.id !== setup.connectionId) {
 						return failed(undefined, "expired");
@@ -242,26 +246,27 @@ export const make = Effect.gen(function* () {
 					yield* connections.installed(setup.workspaceId, row.id, { installationId: id, account });
 					return {
 						kind: "done",
-						bot: { workspaceId: setup.workspaceId, botId: setup.botId },
+						at: setupProjectOf(setup),
 						connectionId: row.id,
 					};
 				}),
 			),
 
-		installUrl: ({ botId, connectionId }) =>
+		installUrl: ({ projectId, connectionId }) =>
 			operation(
 				"installUrl",
 				Effect.gen(function* () {
-					const bot = yield* managed(botId);
-					const row = yield* gitHubConnectionOf({
-						workspaceId: bot.workspaceId,
-						botId: bot.id,
+					const project = yield* managed(projectId);
+					const row = yield* gitHubConnectionForProject({
+						workspaceId: project.workspaceId,
+						projectId: project.id,
 					});
 					if (!row?.settings || row.id !== connectionId) return yield* new NotGitHubConnection();
 					const state = yield* stateFor({
 						step: "install",
-						workspaceId: bot.workspaceId,
-						botId: bot.id,
+						workspaceId: project.workspaceId,
+						projectId: project.id,
+						botId: project.defaultOfBotId,
 						connectionId,
 					});
 					return GitHub.installAppUrl(row.settings.slug, state);
@@ -277,31 +282,39 @@ export const layer = layerNoDeps.pipe(
 );
 
 /**
- * Where a GitHub setup step goes next: on to GitHub, back to the bot's
- * connection, or back with why it stopped. A failure names the bot only when
- * the step was the caller's.
+ * Where a GitHub setup step goes next: on to GitHub, back to the project's
+ * connection, or back with why it stopped. A failure names the project only
+ * when the step was the caller's.
  */
 export type SetupOutcome =
 	| { readonly kind: "next"; readonly url: string }
-	| { readonly kind: "done"; readonly bot: SetupBot; readonly connectionId: string }
+	| { readonly kind: "done"; readonly at: SetupProject; readonly connectionId: string }
 	| {
 			readonly kind: "failed";
-			readonly bot: SetupBot | undefined;
+			readonly at: SetupProject | undefined;
 			readonly failure: GitHubSetupFailure;
 	  };
 
-interface SetupBot {
+/** The project being connected, and its bot when it is the bot's default project. */
+interface SetupProject {
 	readonly workspaceId: string;
-	readonly botId: string;
+	readonly projectId: string;
+	readonly botId: string | null;
 }
+
+const setupProjectOf = ({ workspaceId, projectId, botId }: SetupProject): SetupProject => ({
+	workspaceId,
+	projectId,
+	botId,
+});
 
 /** How long a person has to finish a step on GitHub's pages. */
 const SETUP_STATE_LIFETIME_MILLISECONDS = 60 * 60 * 1000;
 
 const SETUP_STATE_PURPOSE = "github-app-setup";
 
-/** A step of setting up a bot's GitHub App, for the connection it is or will be. */
-interface SetupStep extends SetupBot {
+/** A step of setting up a project's GitHub App, for the connection it is or will be. */
+interface SetupStep extends SetupProject {
 	readonly step: "make" | "install";
 	readonly connectionId: string;
 }
@@ -314,7 +327,8 @@ const SetupStateJson = Schema.fromJsonString(
 	Schema.Struct({
 		step: Schema.Literals(["make", "install"]),
 		workspaceId: Schema.String,
-		botId: Schema.String,
+		projectId: Schema.String,
+		botId: Schema.NullOr(Schema.String),
 		connectionId: Schema.String,
 		userId: Schema.String,
 		expiresAt: Schema.Finite,
@@ -325,13 +339,16 @@ const SetupStateJson = Schema.fromJsonString(
 const APP_NAME_SUFFIX_LENGTH = 4;
 
 /**
- * The name the bot's app is made with: "Sugabots" and the bot's name, ended
- * with part of the connection's id, since an app's name is unique across
- * all of GitHub, and cut to the longest name GitHub takes.
+ * The name the project's app is made with: "Sugabots" and the project's name,
+ * or its bot's for a default project, ended with part of the connection's id,
+ * since an app's name is unique across all of GitHub, and cut to the longest
+ * name GitHub takes.
  */
-function appName(botName: string, connectionId: string): string {
+function appName(projectName: string, connectionId: string): string {
 	const suffix = ` ${connectionId.slice(-APP_NAME_SUFFIX_LENGTH)}`;
-	const name = `Sugabots ${botName}`.slice(0, GitHub.MAX_APP_NAME_LENGTH - suffix.length).trim();
+	const name = `Sugabots ${projectName}`
+		.slice(0, GitHub.MAX_APP_NAME_LENGTH - suffix.length)
+		.trim();
 	return `${name}${suffix}`;
 }
 

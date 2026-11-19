@@ -1,0 +1,125 @@
+---
+title: Projects
+description: Long-running work shared by many people and many bots, in threads, with the files made there.
+---
+
+A project is where a group works on something together: a team, a family, a
+flat, a launch. It has its people and its bots, led by one **lead bot**, its
+**threads**, where they talk, and the **files** made there. A project is made
+of its threads, each one conversation about one piece of work, such as one bug,
+one trip or one week's report.
+
+<ProjectMap />
+
+## Public and private
+
+When you make a project, you choose who can find it:
+
+- **Public** projects are listed in the project directory. Anyone in the
+  workspace can find one and join it, but nobody is added without choosing to.
+- **Private** projects are invitation only. Nobody sees them unless they're in
+  them.
+
+The owner and admins are in every project, public or private.
+
+## Make a project
+
+Owners, admins and members can make projects from the project directory. Give
+it a name like "Support", a line saying what it's for, choose its lead bot, and
+choose public or private. You're its first member, and the lead bot its first
+bot.
+
+The sidebar lists the projects you're in, each with its threads under it. A
+new project has no threads until someone starts one.
+
+## People
+
+Anyone in a project except viewers can invite people from the workspace, or
+remove them, and anyone can leave. The owner and admins can't be removed from a project or leave
+it, because they're in every one.
+
+Viewers can join public projects, read and take part, but they can't invite or
+remove anyone.
+
+## Bots
+
+Anyone in a project, except viewers, can add bots to it and take them out. Only
+[public bots](/docs/bots#public-and-private) can be added, and a bot that's
+made private leaves every project it was in.
+
+## Lead bot
+
+Every project has one **lead bot**, chosen from the public bots, which works on
+the project and answers its threads unless another is asked. Mention one or
+more bots by handle and each of them answers at once, or reply to a bot's
+message and that bot answers. A message that mentions only people is read by
+the lead bot, which answers only if it can help, and otherwise reacts 👀. Any
+other message the lead bot answers. See
+[Conversations](/docs/conversations#who-answers).
+
+The owner and admins can choose another lead bot in the project's settings.
+The lead bot stays in the project until another is chosen: it can't be taken
+out of it, made private or deleted before then. A project made before projects
+had lead bots, which had no bots then, asks for one when it's opened.
+
+## Threads
+
+Anyone in the project can start a thread with the **+** beside the project in
+the sidebar, and give it a name. Everyone in the project sees
+every thread, with all the project's people and bots in it.
+
+The sidebar lists a project's threads under it, the most recently active first.
+Opening the project opens its newest thread.
+
+Anyone in a thread can mark it done once its work is finished. The owner and
+admins can rename a thread, or archive it, which takes it off the list.
+
+## Files
+
+A project's **Files** are the ones uploaded or made in its threads. Everyone in the project can open them. The owner and admins can delete
+them.
+
+## Computer
+
+A project has one online **computer**, a machine its bots run commands on,
+keep files on and browse from while they work in its threads. It's made the
+first time one of its bots needs it, kept between threads, and paused when
+idle. A bot working in this project's threads uses this computer, not its own,
+so everything done for the project stays on the project's machine. Each bot
+keeps a home folder of its own there, and each thread a folder of its own.
+
+A bot uses a computer only if its creator or an admin let it, in the bot's
+settings, and only while the workspace has a computer provider set up.
+
+Everyone in the project can see how its computer stands and watch a bot's
+desktop on it, and anyone but viewers can click and type there. The owner and
+admins, who can change the project, choose which internet addresses its
+computer may reach beyond the workspace's, reset or upgrade it, and allow its
+bots' requests to reach more.
+
+## Connections
+
+A project has its own [connections](/docs/connections): the apps and APIs its
+bots work with, and at most one GitHub app. A bot working in the project's
+threads uses the project's connections and its own; where both have one with
+the same name, the project's is used. The owner and admins add and manage
+them, and everyone in the project can see which ones it has.
+
+## Automations
+
+A project has its own [automations](/docs/automations): work its lead bot does
+on its own, on a timetable or when something calls it, in a conversation of
+the project, on its computer and with its connections. The owner and admins
+make and change them; everyone in the project can see them and their runs, and
+anyone but viewers can run one now.
+
+## Rename or delete
+
+The owner and admins can rename a project, change what it's for, and delete it.
+
+<Careful title="Deleting a project">
+
+**Delete project** removes its threads, files, connections and automations,
+and destroys its computer with everything on it. Its bots stay in the workspace. It can't be undone.
+
+</Careful>

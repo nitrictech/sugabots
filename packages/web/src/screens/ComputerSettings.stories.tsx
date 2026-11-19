@@ -1,18 +1,18 @@
 import type {
-	BotComputerDisk,
 	ComputerNetworkSettings,
 	ComputerProvider,
 	ComputerProviderUpdate,
+	ProjectComputerDisk,
 } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyBots, storyWorkspace } from "../story-app.tsx";
+import { appHandlers, StoryApp, storyBots, storyProjects, storyWorkspace } from "../story-app.tsx";
 
 /*
- * Computers, as the app shows them in settings: the switch for whether bots
- * get one, the provider and its account, what the computers may reach, and
- * the bots using one.
+ * Computers, as the app shows them in settings: the switch for whether
+ * projects and bots get one, the provider and its account, what the
+ * computers may reach, the bots using one, and how full each one's disk is.
  */
 
 const computers = `/${storyWorkspace.slug}/settings/computers`;
@@ -108,7 +108,7 @@ export const BotsUsingAComputer = meta.story({
 		const row = await within(using).findByRole("link", { name: new RegExp(`^${first?.name}`) });
 		await expect(row).toHaveAttribute(
 			"href",
-			expect.stringMatching(/\/settings\/channels\/.+\/bots\//),
+			expect.stringMatching(/\/settings\/projects\/.+\/bots\//),
 		);
 		await expect(within(using).getAllByRole("link")).toHaveLength(2);
 	},
@@ -314,9 +314,9 @@ export const E2bCustomSize = meta.story({
 
 const GB = 1024 ** 3;
 
-/** A bot's 20 GB disk with `usedGB` of it used. */
-const botDisk = (botId: string, usedGB: number): BotComputerDisk => ({
-	botId,
+/** A project's 20 GB disk, with `usedGB` of it used. */
+const projectDisk = (projectId: string, usedGB: number): ProjectComputerDisk => ({
+	projectId,
 	disk: {
 		usedBytes: Math.round(usedGB * GB),
 		totalBytes: 20 * GB,
@@ -325,28 +325,40 @@ const botDisk = (botId: string, usedGB: number): BotComputerDisk => ({
 	},
 });
 
-/** How full each bot's computer's disk is, fullest first, each opening the bot's Computer page. */
-export const DiskUseByBot = meta.story({
+/**
+ * How full each computer's disk is, fullest first, named by its project or
+ * by the bot whose default project it is, each opening that Computer page.
+ */
+export const DiskUse = meta.story({
 	beforeEach({ msw }) {
 		const [first, second] = storyBots;
 		msw.use(
 			answers([{ ...opensandbox, enabled: true, hasApiKey: true, status: "connected" }]),
 			http.get(disksUrl, () =>
-				HttpResponse.json([botDisk(first?.id ?? "", 4.1), botDisk(second?.id ?? "", 18.6)]),
+				HttpResponse.json([
+					projectDisk(first?.defaultProjectId ?? "", 4.1),
+					projectDisk(second?.defaultProjectId ?? "", 18.6),
+					projectDisk(storyProjects[0]?.id ?? "", 9.3),
+				]),
 			),
 		);
 	},
 	play: async ({ canvas }) => {
-		const disks = await canvas.findByRole("region", { name: "Disk use by bot" });
+		const disks = await canvas.findByRole("region", { name: "Disk use" });
 		const [first, second] = storyBots;
 		const rows = within(disks).getAllByRole("link");
-		await expect(rows).toHaveLength(2);
+		await expect(rows).toHaveLength(3);
 		await expect(rows[0]).toHaveTextContent(second?.name ?? "");
 		await expect(rows[0]).toHaveTextContent("93%");
-		await expect(rows[1]).toHaveTextContent(first?.name ?? "");
+		await expect(rows[1]).toHaveTextContent(storyProjects[0]?.name ?? "");
+		await expect(rows[2]).toHaveTextContent(first?.name ?? "");
 		await expect(rows[0]).toHaveAttribute(
 			"href",
-			expect.stringMatching(/\/settings\/channels\/.+\/bots\/.+\/computer$/),
+			expect.stringMatching(/\/settings\/bots\/.+\/computer$/),
+		);
+		await expect(rows[1]).toHaveAttribute(
+			"href",
+			expect.stringMatching(/\/settings\/projects\/.+\/computer$/),
 		);
 	},
 });

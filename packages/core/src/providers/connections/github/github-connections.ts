@@ -24,18 +24,18 @@ import * as GitHub from "./github.ts";
 import { activityOf, type RepositoryActivity } from "./github-events.ts";
 
 /**
- * A bot's GitHub app (see `github-app.ts`), installed on the account the bot
- * works on: the repositories it works on there, read in its computer and
- * changed through the connection's tools, which are Sugabots' own, and what
- * happens there, which its app delivers. A bot has at most one, since its
- * computer can be signed in to only one account at GitHub. Seeing a
- * connection's repositories takes `bot.read`; choosing them takes
- * `connection.manage`.
+ * A project's GitHub app (see `github-app.ts`), installed on the account the
+ * project works on: the repositories its bots work on there, read in its
+ * computer and changed through the connection's tools, which are Sugabots'
+ * own, and what happens there, which its app delivers. A project has at most
+ * one, since its computer can be signed in to only one account at GitHub; a
+ * bot's is its default project's. Seeing a connection's repositories takes
+ * `connection.read`; choosing them takes `connection.manage`.
  */
 export interface Interface {
-	/** What the connection's app reaches, for the bot to choose from. */
+	/** What the connection's app reaches, to choose the project's repositories from. */
 	readonly reachableRepositories: (input: {
-		botId: string;
+		projectId: string;
 		connectionId: string;
 	}) => Effect.Effect<
 		readonly AccountRepository[],
@@ -43,7 +43,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	readonly repositories: (input: {
-		botId: string;
+		projectId: string;
 		connectionId: string;
 	}) => Effect.Effect<
 		ConnectionRepositories,
@@ -52,7 +52,7 @@ export interface Interface {
 	>;
 	/** Adds a repository the connection's app reaches. */
 	readonly addRepository: (input: {
-		botId: string;
+		projectId: string;
 		connectionId: string;
 		repository: string;
 	}) => Effect.Effect<
@@ -66,7 +66,7 @@ export interface Interface {
 	>;
 	/** Removing one the connection doesn't have changes nothing. */
 	readonly removeRepository: (input: {
-		botId: string;
+		projectId: string;
 		connectionId: string;
 		repository: string;
 	}) => Effect.Effect<
@@ -74,8 +74,11 @@ export interface Interface {
 		AuthorizationDenied | NotGitHubConnection,
 		CurrentActor.Service
 	>;
-	/** The bot's GitHub app, for its turns and computer; undefined until its app is installed. */
-	readonly forBot: (bot: Bot) => Effect.Effect<Connected | undefined>;
+	/**
+	 * The project's GitHub app, for the turns in it and its computer;
+	 * undefined until its app is installed.
+	 */
+	readonly forProject: (project: Project) => Effect.Effect<Connected | undefined>;
 	/**
 	 * What a delivery to the connection's webhook says happened at one of its
 	 * account's repositories, once its app proves it sent it; `activity` is
@@ -98,11 +101,11 @@ export const make = Effect.gen(function* () {
 	const egress = yield* Egress.Service;
 	const http = egress.providers.for({ baseUrl: GitHub.API_URL });
 
-	const managed = (botId: string) =>
-		Effect.map(authorization.bot(botId, "connection.manage"), botOf);
+	const managed = (projectId: string) =>
+		Effect.map(authorization.project(projectId, "connection.manage"), projectOf);
 
-	/** The bot's GitHub connection `connectionId`, with its app's settings. */
-	const connectionOf = (bot: Bot, connectionId: string) =>
+	/** The project's GitHub connection `connectionId`, with its app's settings. */
+	const connectionOf = (project: Project, connectionId: string) =>
 		Effect.gen(function* () {
 			const [row] = yield* query((db) =>
 				db
@@ -111,8 +114,8 @@ export const make = Effect.gen(function* () {
 					.where(
 						and(
 							eq(connection.id, connectionId),
-							eq(connection.workspaceId, bot.workspaceId),
-							eq(connection.botId, bot.botId),
+							eq(connection.workspaceId, project.workspaceId),
+							eq(connection.projectId, project.projectId),
 							eq(connection.kind, "github"),
 						),
 					)
@@ -123,9 +126,9 @@ export const make = Effect.gen(function* () {
 		});
 
 	/** The connection's app at the account it is installed on. */
-	const installedAppOf = (bot: Bot, connectionId: string) =>
+	const installedAppOf = (project: Project, connectionId: string) =>
 		Effect.gen(function* () {
-			const { row } = yield* connectionOf(bot, connectionId);
+			const { row } = yield* connectionOf(project, connectionId);
 			const app = installedApp(credentials, row);
 			if (!app) return yield* new AppNotInstalled();
 			return app;
@@ -159,7 +162,7 @@ export const make = Effect.gen(function* () {
 
 	/** Changes the connection's repositories, answering them as people are shown them after. */
 	const changed = (
-		bot: Bot,
+		project: Project,
 		connectionId: string,
 		settings: GitHubConnectionSettings,
 		change: (
@@ -168,7 +171,7 @@ export const make = Effect.gen(function* () {
 	) =>
 		Effect.gen(function* () {
 			const repositories = yield* connections.changeGitHubRepositories(
-				bot.workspaceId,
+				project.workspaceId,
 				connectionId,
 				change,
 			);
@@ -177,34 +180,34 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		reachableRepositories: ({ botId, connectionId }) =>
+		reachableRepositories: ({ projectId, connectionId }) =>
 			operation(
 				"reachableRepositories",
 				Effect.gen(function* () {
-					const bot = yield* managed(botId);
-					const app = yield* installedAppOf(bot, connectionId);
+					const project = yield* managed(projectId);
+					const app = yield* installedAppOf(project, connectionId);
 					const reached = yield* GitHub.repositories(http, app);
 					return reached.map((one) => ({ repository: one.fullName, private: one.private }));
 				}),
 			),
 
-		repositories: ({ botId, connectionId }) =>
+		repositories: ({ projectId, connectionId }) =>
 			operation(
 				"repositories",
 				Effect.gen(function* () {
-					const bot = botOf(yield* authorization.bot(botId, "connection.read"));
-					const { settings } = yield* connectionOf(bot, connectionId);
+					const project = projectOf(yield* authorization.project(projectId, "connection.read"));
+					const { settings } = yield* connectionOf(project, connectionId);
 					return yield* shown(settings);
 				}),
 			),
 
-		addRepository: ({ botId, connectionId, repository }) =>
+		addRepository: ({ projectId, connectionId, repository }) =>
 			operation(
 				"addRepository",
 				Effect.gen(function* () {
-					const bot = yield* managed(botId);
-					const { settings } = yield* connectionOf(bot, connectionId);
-					const app = yield* installedAppOf(bot, connectionId);
+					const project = yield* managed(projectId);
+					const { settings } = yield* connectionOf(project, connectionId);
+					const app = yield* installedAppOf(project, connectionId);
 					const reached = yield* GitHub.repositories(http, app);
 					// GitHub's paths ignore case.
 					const found = reached.find(
@@ -214,7 +217,7 @@ export const make = Effect.gen(function* () {
 					const { userId } = yield* CurrentActor.Service;
 					const addedAt = DateTime.formatIso(yield* DateTime.now);
 					const pathOf = new Map(reached.map((one) => [one.id, one.fullName]));
-					return yield* changed(bot, connectionId, settings, (repositories) => [
+					return yield* changed(project, connectionId, settings, (repositories) => [
 						// GitHub has just said what each is called now, so those renamed since are kept up.
 						...repositories.map((one) => ({ ...one, path: pathOf.get(one.id) ?? one.path })),
 						...(repositories.some((one) => one.id === found.id)
@@ -224,35 +227,23 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		removeRepository: ({ botId, connectionId, repository }) =>
+		removeRepository: ({ projectId, connectionId, repository }) =>
 			operation(
 				"removeRepository",
 				Effect.gen(function* () {
-					const bot = yield* managed(botId);
-					const { settings } = yield* connectionOf(bot, connectionId);
-					return yield* changed(bot, connectionId, settings, (repositories) =>
+					const project = yield* managed(projectId);
+					const { settings } = yield* connectionOf(project, connectionId);
+					return yield* changed(project, connectionId, settings, (repositories) =>
 						repositories.filter((one) => one.path.toLowerCase() !== repository.toLowerCase()),
 					);
 				}),
 			),
 
-		forBot: (bot) =>
+		forProject: (project) =>
 			operation(
-				"forBot",
+				"forProject",
 				Effect.gen(function* () {
-					const [row] = yield* query((db) =>
-						db
-							.select()
-							.from(connection)
-							.where(
-								and(
-									eq(connection.workspaceId, bot.workspaceId),
-									eq(connection.botId, bot.botId),
-									eq(connection.kind, "github"),
-								),
-							)
-							.limit(1),
-					);
+					const row = yield* gitHubConnectionForProject(project);
 					const app = row && installedApp(credentials, row);
 					if (!row?.settings || !app) return undefined;
 					return new Connected(row, app, row.settings, { api: http, storage: egress.webFetch });
@@ -301,14 +292,34 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([Authorization.layer, ConnectionRepository.layer]),
 );
 
-interface Bot {
+/** A project, by its workspace and its own id. */
+export interface Project {
 	readonly workspaceId: string;
-	readonly botId: string;
+	readonly projectId: string;
 }
 
-const botOf = (standing: { bot: { id: string; workspaceId: string } }): Bot => ({
-	workspaceId: standing.bot.workspaceId,
-	botId: standing.bot.id,
+/** The project's GitHub app as stored, whether or not it is installed yet; each project has at most one. */
+export const gitHubConnectionForProject = (project: Project) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select()
+				.from(connection)
+				.where(
+					and(
+						eq(connection.workspaceId, project.workspaceId),
+						eq(connection.projectId, project.projectId),
+						eq(connection.kind, "github"),
+					),
+				)
+				.limit(1),
+		),
+		([row]) => row,
+	);
+
+const projectOf = (standing: { project: { id: string; workspaceId: string } }): Project => ({
+	workspaceId: standing.project.workspaceId,
+	projectId: standing.project.id,
 });
 
 /** The connection's app at the account it is installed on; undefined until it is installed. */
@@ -349,25 +360,25 @@ export class NotGitHubConnection
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "No such GitHub connection on the bot";
+		return "No such GitHub connection in the project";
 	}
 	get userMessage() {
-		return userText`This bot has no such GitHub app. It may have been removed.`;
+		return userText`There's no such GitHub app here. It may have been removed.`;
 	}
 }
 
-/** A second GitHub app for a bot, whose computer can be signed in to only one account there. */
-export class BotHasGitHubConnection
-	extends Schema.TaggedError<BotHasGitHubConnection>()("BotHasGitHubConnection", {})
+/** A second GitHub app for a project, whose computer can be signed in to only one account there. */
+export class ProjectHasGitHubConnection
+	extends Schema.TaggedError<ProjectHasGitHubConnection>()("ProjectHasGitHubConnection", {})
 	implements DomainError
 {
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "The bot already has a GitHub app";
+		return "The project already has a GitHub app";
 	}
 	get userMessage() {
-		return userText`This bot already has a GitHub app. Add repositories to it, or remove it first to connect another account.`;
+		return userText`There's a GitHub app here already. Add repositories to it, or remove it first to connect another account.`;
 	}
 }
 

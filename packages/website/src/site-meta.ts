@@ -16,7 +16,7 @@ export const siteMeta = {
 /** What the docs home says about the docs, in its page head and in its Markdown version. */
 export const docsMeta = {
 	title: "Sugabots docs",
-	description: "How Sugabots works: bots, channels, tools and models, and how to run it yourself.",
+	description: "How Sugabots works: bots, projects, tools and models, and how to run it yourself.",
 } as const;
 
 /**

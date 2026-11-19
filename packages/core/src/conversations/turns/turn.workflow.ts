@@ -28,6 +28,7 @@ export const StoredTurn = Schema.Struct({
 		"mention",
 		"reply",
 		"default",
+		"optional",
 		"collaboration",
 		// Stored in the payloads of running turns: see `TurnReason`.
 		"routine",

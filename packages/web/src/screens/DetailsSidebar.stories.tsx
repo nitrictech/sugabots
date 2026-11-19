@@ -63,11 +63,11 @@ function automation(id: string, name: string, expression: string): Automation {
 	return {
 		id,
 		workspaceId: WORKSPACE,
-		botId: growthDesk.id,
+		projectId: growthDesk.defaultProjectId,
 		name,
 		instructions: "Do the thing.",
 		triggers: automationTriggers(id, {
-			kind: "schedule",
+			kind: "routine",
 			schedule: { repeat: "cron", expression },
 			timezone: "Australia/Sydney",
 			nextScheduledAt: null,
@@ -90,7 +90,7 @@ function connection(id: string, name: string, url: string): Connection {
 	return {
 		id,
 		workspaceId: WORKSPACE,
-		botId: growthDesk.id,
+		projectId: growthDesk.id,
 		name,
 		handle: name.toLowerCase(),
 		url,
@@ -165,7 +165,7 @@ const meta = preview.meta({
 					],
 				);
 				client.setQueryData(
-					["built-in-bots", WORKSPACE],
+					["system-bots", WORKSPACE],
 					[summariserHasModel ? summariser : { ...summariser, model: null }],
 				);
 				client.setQueryData(
@@ -187,8 +187,8 @@ const meta = preview.meta({
 });
 
 /**
- * Default is a bot beside its task from a tablet up: floating cards of what
- * it works with, the files shared in the task, and its computer.
+ * Default is a bot beside its thread from a tablet up: floating cards of what
+ * it works with, the files shared in the thread, and its computer.
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
@@ -211,7 +211,7 @@ export const CardFolded = meta.story({
 	},
 });
 
-/** On a phone, the bot heads them, its name and model, with what the task is about under it. */
+/** On a phone, the bot heads them, its name and model, with what the thread is about under it. */
 export const OnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {

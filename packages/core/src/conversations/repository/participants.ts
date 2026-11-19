@@ -12,7 +12,7 @@ import type { UserText } from "@sugabots/errors";
 import { and, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
-import { bot, channelBot, message, user } from "../../database/schema.ts";
+import { bot, message, projectBot, user } from "../../database/schema.ts";
 import { toCollaborationPart } from "./collaboration-parts.ts";
 import { type AttachedFileRow, fileColumns, toFilePart } from "./file-parts.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
@@ -181,26 +181,40 @@ export function withReplyTo(shown: Message, replyTo: MessageReplyTo | undefined)
 export const reactionColumns = {
 	columns: { emoji: true, createdAt: true },
 	orderBy: { createdAt: "asc", id: "asc" },
-	with: { user: { columns: { id: true, name: true } } },
+	with: { user: { columns: { id: true, name: true } }, bot: { columns: { id: true, name: true } } },
 } as const;
 
-/** A reaction read with {@link reactionColumns}. */
+/** A reaction read with {@link reactionColumns}: a person's or a bot's. */
 interface ReactionRow {
 	emoji: string;
 	createdAt: Date;
-	user: { id: string; name: string };
+	user: { id: string; name: string } | null;
+	bot: { id: string; name: string } | null;
 }
 
-/** Reactions, earliest first, grouped by emoji in the order each was first used. */
+/**
+ * Reactions, earliest first, grouped by emoji in the order each was first
+ * used, people's and bots' apart.
+ */
 export function toReactions(rows: readonly ReactionRow[]): MessageReaction[] {
-	const byEmoji = new Map<string, MessageReaction>();
+	type Reactor = MessageReaction["people"][number];
+	const byEmoji = new Map<string, { people: Reactor[]; bots: Reactor[] }>();
 	for (const row of rows) {
-		const person = { id: row.user.id, name: row.user.name, at: row.createdAt.toISOString() };
-		const reaction = byEmoji.get(row.emoji);
-		if (reaction) reaction.people.push(person);
-		else byEmoji.set(row.emoji, { emoji: row.emoji, people: [person] });
+		const reactor = row.user ?? row.bot;
+		if (!reactor) continue;
+		const reaction = byEmoji.get(row.emoji) ?? { people: [], bots: [] };
+		byEmoji.set(row.emoji, reaction);
+		(row.user ? reaction.people : reaction.bots).push({
+			id: reactor.id,
+			name: reactor.name,
+			at: row.createdAt.toISOString(),
+		});
 	}
-	return [...byEmoji.values()];
+	return [...byEmoji].map(([emoji, { people, bots }]) => ({
+		emoji,
+		people,
+		...(bots.length > 0 ? { bots } : {}),
+	}));
 }
 
 /** The relations a relational query follows to read a message as the API shows it. */
@@ -337,11 +351,11 @@ export const recentParticipantsOf = (conversationId: SQLWrapper) => sql<Particip
 	) as recent
 )`;
 
-/** The condition on `bot` that selects the bots added to the channel `channelId`. */
-export const inChannel = (channelId: SQLWrapper | string) =>
+/** The condition on `bot` that selects the bots added to the project `projectId`. */
+export const inProject = (projectId: SQLWrapper | string) =>
 	inArray(
 		bot.id,
-		sql`(select ${channelBot.botId} from ${channelBot} where ${channelBot.channelId} = ${channelId})`,
+		sql`(select ${projectBot.botId} from ${projectBot} where ${projectBot.projectId} = ${projectId})`,
 	);
 
 /**

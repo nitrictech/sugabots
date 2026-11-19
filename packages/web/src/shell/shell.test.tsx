@@ -19,20 +19,21 @@ import {
 	apiAnswers,
 	bots,
 	builtInBots,
-	channels,
 	compaction,
 	controlledEventStream,
 	juno,
 	linear,
+	listedThread,
 	MODELS,
 	modelProviders,
 	mount,
 	onWideScreen,
 	open,
 	personalAssistant,
+	projects,
 	sam,
 	TestApp,
-	taskWith,
+	threadWith,
 	triager,
 	workspace,
 } from "@/test-api.tsx";
@@ -64,7 +65,7 @@ async function openWorkspaceMenu() {
 describe("the shell", () => {
 	it("ignores a panel name it does not know rather than failing the route", async () => {
 		// `bot` and `history` were panels until the design made a bot a page
-		// of its own and the tasks list the history. A link from then lands in
+		// of its own and the threads list the history. A link from then lands in
 		// the app rather than in an error.
 		mount(`${linearPage}?panel=bot`);
 
@@ -165,7 +166,7 @@ describe("the workspace choice", () => {
 		client.api.workspaces.list.mockReturnValue(
 			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
 		);
-		client.api.channels.list.mockReturnValue(Effect.succeed([]));
+		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
 		);
@@ -180,7 +181,7 @@ describe("the workspace choice", () => {
 		client.api.workspaces.list.mockReturnValue(
 			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
 		);
-		client.api.channels.list.mockReturnValue(Effect.succeed([]));
+		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		const made = firstBotMade("Chief");
 		client.api.onboarding.complete.mockImplementation(() => {
@@ -194,7 +195,7 @@ describe("the workspace choice", () => {
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Chief" } });
 		fireEvent.click(screen.getByRole("button", { name: "Create bot" }));
 		fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
-		fireEvent.click(await screen.findByRole("button", { name: "Start chatting" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Start talking" }));
 
 		expect(await screen.findByRole("navigation", { name: "Sidebar" })).toBeDefined();
 		expect(router.state.location.pathname.startsWith(`/suga/bots/${made.handle}`)).toBe(true);
@@ -207,7 +208,7 @@ describe("the workspace choice", () => {
 		client.api.workspaceAccess.mockReturnValueOnce(
 			Effect.fail(new Forbidden({ message: userText`Unavailable` })),
 		);
-		client.api.channels.list.mockReturnValue(Effect.succeed([]));
+		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
 		);
@@ -220,16 +221,36 @@ describe("the workspace choice", () => {
 		expect(router.state.location.pathname).toBe("/onboarding");
 	});
 
-	it("opens an unfinished workspace as it is for somebody invited part way", async () => {
-		apiAnswers({ role: "member" });
-		client.api.workspaces.list.mockReturnValue(
-			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
-		);
-		const router = mount(linearPage);
+	it.each([
+		{
+			opened: "at one of its pages",
+			address: linearPage,
+			landsAt: linearPage,
+			unfinished: workspace,
+			alongside: [],
+		},
+		{
+			opened: "from the root, beside their own",
+			address: "/",
+			landsAt: "/nitric",
+			unfinished: other,
+			alongside: [workspace],
+		},
+	])(
+		"opens an unfinished workspace as it is $opened, for somebody invited part way",
+		async ({ address, landsAt, unfinished, alongside }) => {
+			apiAnswers({ role: "member" });
+			client.api.workspaces.list.mockReturnValue(
+				Effect.succeed([...alongside, { ...unfinished, setupCompletedAt: null }]),
+			);
+			chooseWorkspace(unfinished.id);
+			const router = mount(address);
 
-		expect(await screen.findByRole("navigation", { name: "Sidebar" })).toBeDefined();
-		expect(router.state.location.pathname).toBe(linearPage);
-	});
+			expect(await screen.findByRole("navigation", { name: "Sidebar" })).toBeDefined();
+			await waitFor(() => expect(router.state.location.pathname.startsWith(landsAt)).toBe(true));
+			expect(screen.queryByRole("heading", { name: "Connect a provider" })).toBeNull();
+		},
+	);
 
 	it("cancels an unfinished workspace's setup into another workspace, keeping it for an admin, who may not delete it", async () => {
 		const unfinished = { ...other, setupCompletedAt: null };
@@ -250,17 +271,6 @@ describe("the workspace choice", () => {
 
 		expect(await screen.findByRole("navigation", { name: "Sidebar" })).toBeDefined();
 		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/suga(\/|$)/));
-	});
-
-	it("opens an unfinished workspace from the root for somebody invited part way, who has their own", async () => {
-		apiAnswers({ role: "member" });
-		const joined = { ...other, setupCompletedAt: null };
-		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, joined]));
-		chooseWorkspace(joined.id);
-		const router = mount("/");
-
-		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric(\/|$)/));
-		expect(screen.queryByRole("heading", { name: "Connect a provider" })).toBeNull();
 	});
 
 	it("comes back to a workspace whose save a reload interrupted", async () => {
@@ -478,7 +488,7 @@ describe("the workspace while the API is not answering", () => {
 });
 
 describe("the sidebar", () => {
-	it("lists the channels you are in, then your Personal Assistant first among the bots you pinned", async () => {
+	it("lists the projects you are in, then your Personal Assistant first among the bots you pinned", async () => {
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed([
 				{ ...linear, pinned: true },
@@ -486,16 +496,15 @@ describe("the sidebar", () => {
 				personalAssistant,
 			]),
 		);
-		mount("/suga/channels");
+		mount("/suga/projects");
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-		const channels = within(sidebar).getByRole("region", { name: "Channels" });
-		await within(channels).findByRole("group", { name: "Sales" });
-		expect(
-			within(channels)
-				.getAllByRole("group")
-				.map((channel) => channel.getAttribute("aria-label")),
-		).toEqual(["Suga-Team", "Sales"]);
+		const projects = within(sidebar).getByRole("region", { name: "Projects" });
+		// One row each, as a bot has: their threads are in the project's own sidebar.
+		const sales = await within(projects).findByRole("link", { name: "Sales" });
+		const team = within(projects).getByRole("link", { name: "Suga-Team" });
+		expect(team.compareDocumentPosition(sales) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(within(projects).queryByRole("group")).toBeNull();
 		const bots = within(sidebar).getByRole("region", { name: "Bots" });
 		await within(bots).findByRole("link", { name: personalAssistant.name });
 		const listed = within(within(bots).getByRole("list")).getAllByRole("link");
@@ -504,15 +513,15 @@ describe("the sidebar", () => {
 
 	it("says what waits in the Personal Assistant's row, as a bot's row does", async () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([linear, personalAssistant]));
-		client.api.chats.channelMarkers.mockReturnValue(
+		client.api.chats.projectMarkers.mockReturnValue(
 			Effect.succeed({
-				channels: {},
+				projects: {},
 				bots: {
 					[personalAssistant.id]: { unreadMessages: 2, needsApproval: true, failedAutomations: 0 },
 				},
 			}),
 		);
-		mount("/suga/channels");
+		mount("/suga/projects");
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
 		expect(
@@ -523,7 +532,7 @@ describe("the sidebar", () => {
 		).toBeDefined();
 	});
 
-	it("gives an open bot a sidebar of its own, listing its tasks", async () => {
+	it("gives an open bot a sidebar of its own, listing its threads", async () => {
 		onWideScreen();
 		mount(linearPage);
 
@@ -533,16 +542,16 @@ describe("the sidebar", () => {
 		).toBeDefined();
 		const work = await within(sidebar).findByRole("list", { name: `${linear.name}'s work` });
 		expect(
-			await within(work).findByRole("link", { name: new RegExp(taskWith(linear).title) }),
+			await within(work).findByRole("link", { name: new RegExp(threadWith(linear).title) }),
 		).toBeDefined();
-		expect(within(sidebar).queryByRole("region", { name: "Channels" })).toBeNull();
+		expect(within(sidebar).queryByRole("region", { name: "Projects" })).toBeNull();
 	});
 
-	it("goes back to the channels and bots from a bot's sidebar", async () => {
+	it("goes back to the projects and bots from a bot's sidebar", async () => {
 		onWideScreen();
 		const router = mount(linearPage);
 
-		fireEvent.click(await screen.findByRole("link", { name: "All bots" }));
+		fireEvent.click(await screen.findByRole("link", { name: "All projects and bots" }));
 
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga"));
 		expect(await screen.findByRole("region", { name: "Bots" })).toBeDefined();
@@ -555,19 +564,24 @@ describe("the sidebar", () => {
 		await waitFor(() => expect(client.api.bots.ensureAssistant).toHaveBeenCalled());
 	});
 
-	it("keeps listing every channel while you are away from them", async () => {
-		const router = mount("/suga/channels/sales");
+	it("narrows to a rail beside a project's own sidebar, and lists every project again away from it", async () => {
+		const router = mount("/suga/projects/sales");
 
-		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-		await within(sidebar).findByRole("group", { name: "Sales" });
+		const rail = await screen.findByRole("navigation", { name: "Projects and bots" });
+		expect(
+			(await within(rail).findByRole("link", { name: "Sales" })).getAttribute("aria-current"),
+		).toBe("page");
+		expect(await screen.findByRole("navigation", { name: "Sales's pages" })).toBeDefined();
 		await router.navigate({ to: "/$workspace/inbox", params: { workspace: "suga" } });
 
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/inbox"));
-		expect(within(sidebar).getByRole("group", { name: "Sales" })).toBeDefined();
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		expect(await within(sidebar).findByRole("link", { name: "Sales" })).toBeDefined();
+		expect(screen.queryByRole("navigation", { name: "Projects and bots" })).toBeNull();
 	});
 
 	it("makes a new bot from the + beside Bots", async () => {
-		mount("/suga/channels");
+		mount("/suga/projects");
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
 		fireEvent.click(await within(sidebar).findByRole("button", { name: "New bot" }));
@@ -593,7 +607,7 @@ describe("someone else's private bot an administrator sees listed", () => {
 		permissions: { ...triager.permissions, talk: false },
 	};
 
-	it("shows that it exists, with its settings, but none of its tasks", async () => {
+	it("shows that it exists, with its settings, but none of its threads", async () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([linear, theirs, personalAssistant]));
 		mount(`/suga/bots/${theirs.handle}`);
 
@@ -601,7 +615,7 @@ describe("someone else's private bot an administrator sees listed", () => {
 		expect(screen.getByRole("link", { name: "Open its settings" }).getAttribute("href")).toBe(
 			`/suga/settings/bots/${theirs.handle}`,
 		);
-		expect(client.api.chats.botTasks).not.toHaveBeenCalledWith({
+		expect(client.api.chats.botThreads).not.toHaveBeenCalledWith({
 			params: { botId: theirs.id },
 		});
 	});
@@ -619,43 +633,45 @@ describe("someone else's private bot an administrator sees listed", () => {
 	});
 });
 
-describe("a public channel you're not in", () => {
+describe("a public project you're not in", () => {
 	const notIn = () =>
-		client.api.channels.list.mockReturnValue(
+		client.api.projects.list.mockReturnValue(
 			Effect.succeed(
-				channels.map((channel) =>
-					channel.slug === "sales"
+				projects.map((project) =>
+					project.slug === "sales"
 						? {
-								...channel,
+								...project,
 								isMember: false,
-								permissions: { ...channel.permissions, join: true, leave: false },
+								permissions: { ...project.permissions, join: true, leave: false },
 							}
-						: channel,
+						: project,
 				),
 			),
 		);
 
 	it("shows what it is, with Join, rather than failing to open it", async () => {
 		notIn();
-		client.api.channels.join.mockReturnValue(Effect.succeed(channels[1]));
-		mount("/suga/channels/sales");
+		client.api.projects.join.mockReturnValue(Effect.succeed(projects[1]));
+		mount("/suga/projects/sales");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Join Sales" }));
 
 		await waitFor(() =>
-			expect(client.api.channels.join).toHaveBeenCalledWith({
-				params: { channelId: channels[1]?.id },
+			expect(client.api.projects.join).toHaveBeenCalledWith({
+				params: { projectId: projects[1]?.id },
 			}),
 		);
-		expect(client.api.chats.openMainChat).not.toHaveBeenCalled();
+		expect(client.api.chats.list).not.toHaveBeenCalledWith(
+			expect.objectContaining({ query: { project: "sales" } }),
+		);
 	});
 
 	it("joins it from the directory by its name, and says why when joining fails", async () => {
 		notIn();
-		client.api.channels.join.mockReturnValue(
+		client.api.projects.join.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Could not join` })),
 		);
-		mount("/suga/channels");
+		mount("/suga/projects");
 
 		const group = await screen.findByRole("region", { name: "To join" });
 		fireEvent.click(within(group).getByRole("button", { name: "Join Sales" }));
@@ -665,41 +681,127 @@ describe("a public channel you're not in", () => {
 
 	it("keeps its settings closed", async () => {
 		notIn();
-		mount("/suga/settings/channels/sales");
+		mount("/suga/settings/projects/sales");
 
-		expect(await screen.findByText("You're not in this channel")).toBeDefined();
+		expect(await screen.findByText("You're not in this project")).toBeDefined();
+	});
+});
+
+describe("a project's threads", () => {
+	const sales = projects[1] as (typeof projects)[number];
+	const threadIn = (id: string, title: string) =>
+		listedThread({
+			kind: "project_thread",
+			id,
+			workspaceId: workspace.id,
+			projectId: sales.id,
+			botId: null,
+			title,
+			archivedAt: null,
+			doneAt: null,
+			createdAt: "2026-09-18T06:00:00.000Z",
+			updatedAt: "2026-09-18T06:00:00.000Z",
+		});
+
+	it("opens the project at its newest thread", async () => {
+		onWideScreen();
+		const newest = threadIn("0199a3a0-0000-7000-8000-0000000000f1", "Launch");
+		client.api.chats.list.mockReturnValue(
+			Effect.succeed({
+				chats: [newest, threadIn("0199a3a0-0000-7000-8000-0000000000f2", "Pricing")],
+			}),
+		);
+		const router = mount(`/suga/projects/${sales.slug}`);
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				`/suga/projects/${sales.slug}/${newest.conversation.id}`,
+			),
+		);
+	});
+
+	it("asks whoever may change a project with no lead bot yet to choose one", async () => {
+		onWideScreen();
+		const leaderless = { ...sales, leadBotId: null };
+		client.api.projects.list.mockReturnValue(
+			Effect.succeed(projects.map((one) => (one.id === sales.id ? leaderless : one))),
+		);
+		client.api.projects.update.mockReturnValue(Effect.succeed(sales));
+		mount(`/suga/projects/${sales.slug}`);
+
+		await screen.findByText(`Choose a lead bot for ${sales.name}`);
+		fireEvent.click(screen.getByRole("button", { name: "Choose a lead bot" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Customer Research" }));
+
+		await waitFor(() =>
+			expect(client.api.projects.update).toHaveBeenCalledWith({
+				params: { projectId: sales.id },
+				payload: { leadBotId: "0199a3a0-0000-7000-8000-0000000000b1" },
+			}),
+		);
+	});
+
+	it("starts the first thread of a project with none from its first message, as a bot's page does", async () => {
+		onWideScreen();
+		const started = threadIn("0199a3a0-0000-7000-8000-0000000000f3", "Plan the kickoff");
+		client.api.chats.startProjectThread.mockImplementation(
+			({ payload }: { payload: { id: string; message: string } }) =>
+				Effect.succeed({
+					conversation: started.conversation,
+					message: { id: payload.id, conversationId: started.conversation.id },
+				}),
+		);
+		const router = mount(`/suga/projects/${sales.slug}`);
+
+		expect(await screen.findByText("What do you need done?")).toBeDefined();
+		const composer = await screen.findByLabelText(`Message ${sales.name}`);
+		composer.textContent = "Plan the kickoff";
+		fireEvent.input(composer);
+		fireEvent.click(screen.getByRole("button", { name: "Start thread" }));
+
+		await waitFor(() =>
+			expect(client.api.chats.startProjectThread).toHaveBeenCalledWith({
+				params: { projectId: sales.id },
+				payload: { id: expect.any(String), message: "Plan the kickoff" },
+			}),
+		);
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				`/suga/projects/${sales.slug}/${started.conversation.id}`,
+			),
+		);
 	});
 });
 
 describe("the settings navigation", () => {
 	/*
-	 * The workspace's sections, then each channel with its own pages, then you. The
+	 * The workspace's sections, then each project with its own pages, then you. The
 	 * sections an administrator alone may open are left out for a member, so
 	 * their list simply ends rather than showing gaps.
 	 */
 
-	it("lists a channel's General, People and Bots, leaving connections and computers to its bots", async () => {
+	it("lists a project's General, People, Bots, Connections and Computer, as a bot has its own", async () => {
 		client.api.computerProviders.access.mockReturnValue(Effect.succeed({ enabled: true }));
-		mount("/suga/settings/channels/suga-team");
+		mount("/suga/settings/projects/suga-team");
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
-		const channels = await within(rail).findByRole("group", { name: "Channels" });
-		expect(await within(channels).findByRole("link", { name: /^Bots/ })).toBeDefined();
-		expect(within(channels).queryByRole("link", { name: /^Connections/ })).toBeNull();
-		expect(within(channels).queryByRole("link", { name: "Computer" })).toBeNull();
+		const projects = await within(rail).findByRole("group", { name: "Projects" });
+		expect(await within(projects).findByRole("link", { name: /^Bots/ })).toBeDefined();
+		expect(within(projects).getByRole("link", { name: "Connections" })).toBeDefined();
+		expect(within(projects).getByRole("link", { name: "Computer" })).toBeDefined();
 	});
 
-	it("remembers a channel closed, even while one of its pages is open", async () => {
+	it("remembers a project closed, even while one of its pages is open", async () => {
 		localStorage.clear();
-		mount("/suga/settings/channels/suga-team");
+		mount("/suga/settings/projects/suga-team");
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
-		const channel = await within(rail).findByRole("button", { name: "Suga-Team" });
-		expect(channel.getAttribute("aria-expanded")).toBe("true");
+		const project = await within(rail).findByRole("button", { name: "Suga-Team" });
+		expect(project.getAttribute("aria-expanded")).toBe("true");
 
-		fireEvent.click(channel);
-		expect(channel.getAttribute("aria-expanded")).toBe("false");
+		fireEvent.click(project);
+		expect(project.getAttribute("aria-expanded")).toBe("false");
 		cleanup();
 
-		mount("/suga/settings/channels/suga-team");
+		mount("/suga/settings/projects/suga-team");
 		const again = await screen.findByRole("navigation", { name: "Settings" });
 		expect(
 			(await within(again).findByRole("button", { name: "Suga-Team" })).getAttribute(
@@ -709,7 +811,7 @@ describe("the settings navigation", () => {
 		localStorage.clear();
 	});
 
-	it("lists your settings first, then the workspace's sections and its channels", async () => {
+	it("lists your settings first, then the workspace's sections and its projects", async () => {
 		onWideScreen();
 		const router = mount("/suga/settings");
 
@@ -733,36 +835,36 @@ describe("the settings navigation", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/profile"));
 	});
 
-	it("opens a channel onto its pages, and keeps the open channel's open", async () => {
+	it("opens a project onto its pages, and keeps the open project's open", async () => {
 		onWideScreen();
 		const router = mount("/suga/settings");
 
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
-		const channel = await within(rail).findByRole("button", { name: "Suga-Team" });
-		expect(channel.getAttribute("aria-expanded")).toBe("false");
+		const project = await within(rail).findByRole("button", { name: "Suga-Team" });
+		expect(project.getAttribute("aria-expanded")).toBe("false");
 
-		fireEvent.click(channel);
+		fireEvent.click(project);
 		fireEvent.click(await within(rail).findByRole("link", { name: "People" }));
 
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe("/suga/settings/channels/suga-team/people"),
+			expect(router.state.location.pathname).toBe("/suga/settings/projects/suga-team/people"),
 		);
 		const opened = within(await settingsNavigation()).getByRole("button", { name: "Suga-Team" });
 		expect(opened.getAttribute("aria-expanded")).toBe("true");
 		expect(await screen.findByRole("heading", { name: "People" })).toBeDefined();
 	});
 
-	it("counts what each section and channel page holds, beside its name", async () => {
-		mount("/suga/settings/channels/suga-team");
+	it("counts what each section and project page holds, beside its name", async () => {
+		mount("/suga/settings/projects/suga-team");
 
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
 
 		// The name carries the count, so it is read as a pair rather than "People2".
 		expect(await within(rail).findByRole("link", { name: "People, 2" })).toBeDefined();
-		// The channel's bots only: the Summariser and Compaction belong to the workspace rather
-		// than to a channel, so they are not counted among its bots.
+		// The project's bots only: the Summariser and Compaction belong to the workspace rather
+		// than to a project, so they are not counted among its bots.
 		expect(await within(rail).findByRole("link", { name: "Bots, 2" })).toBeDefined();
-		// General holds nothing to count: yours, the workspace's or the channel's.
+		// General holds nothing to count: yours, the workspace's or the project's.
 		expect(within(rail).getAllByRole("link", { name: "General" })).toHaveLength(3);
 	});
 
@@ -792,7 +894,7 @@ describe("the settings navigation", () => {
 		mount("/suga/settings");
 
 		// General counts the members too, so once it does the roster has answered.
-		await screen.findByText("Workspace with 1 member and 2 channels");
+		await screen.findByText("Workspace with 1 member and 2 projects");
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
 
 		// The one member is you. "1" tells nobody anything they did not know.
@@ -825,21 +927,21 @@ describe("the settings navigation", () => {
 	const pageBack = async (name: string) =>
 		within(await screen.findByRole("main")).findByRole("link", { name });
 
-	/** Opens Linear's settings from its channel's Bots, as a person would. */
-	async function openLinearFromItsChannel() {
+	/** Opens Linear's settings from its project's Bots, as a person would. */
+	async function openLinearFromItsProject() {
 		const main = await screen.findByRole("main");
 		fireEvent.click(await within(main).findByRole("link", { name: new RegExp(linear.name) }));
 		await screen.findByRole("heading", { name: linear.name });
 	}
 
-	it("goes back to the channel's Bots a bot was opened from", async () => {
-		const router = mount("/suga/settings/channels/suga-team/bots");
-		await openLinearFromItsChannel();
+	it("goes back to the project's Bots a bot was opened from", async () => {
+		const router = mount("/suga/settings/projects/suga-team/bots");
+		await openLinearFromItsProject();
 
 		fireEvent.click(await pageBack("Bots"));
 
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe("/suga/settings/channels/suga-team/bots"),
+			expect(router.state.location.pathname).toBe("/suga/settings/projects/suga-team/bots"),
 		);
 		expect(await screen.findByText("2 bots in Suga-Team")).toBeDefined();
 	});
@@ -858,8 +960,8 @@ describe("the settings navigation", () => {
 
 	it("starts over when a section is picked from the navigation", async () => {
 		onWideScreen();
-		const router = mount("/suga/settings/channels/suga-team/bots");
-		await openLinearFromItsChannel();
+		const router = mount("/suga/settings/projects/suga-team/bots");
+		await openLinearFromItsProject();
 
 		fireEvent.click(within(await settingsNavigation()).getByRole("link", { name: "People, 2" }));
 
@@ -869,19 +971,21 @@ describe("the settings navigation", () => {
 		expect(screen.queryByRole("link", { name: "Bots" })).toBeNull();
 	});
 
-	it("starts over when a new channel opens", async () => {
+	it("starts over when a new project opens", async () => {
 		onWideScreen();
-		const made = { ...channels[0], id: "new", name: "Platform", slug: "platform" };
-		client.api.channels.create.mockReturnValue(Effect.succeed(made));
-		mount("/suga/settings/channels/suga-team/bots");
-		await openLinearFromItsChannel();
+		const made = { ...projects[0], id: "new", name: "Platform", slug: "platform" };
+		client.api.projects.create.mockReturnValue(Effect.succeed(made));
+		mount("/suga/settings/projects/suga-team/bots");
+		await openLinearFromItsProject();
 
 		fireEvent.click(
-			await within(await settingsNavigation()).findByRole("button", { name: "New channel" }),
+			await within(await settingsNavigation()).findByRole("button", { name: "New project" }),
 		);
-		const dialog = await screen.findByRole("dialog", { name: "New channel" });
+		const dialog = await screen.findByRole("dialog", { name: "New project" });
 		fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Platform" } });
-		client.api.channels.list.mockReturnValue(Effect.succeed([...channels, made]));
+		fireEvent.click(within(dialog).getByRole("button", { name: "Choose a lead bot" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Customer Research" }));
+		client.api.projects.list.mockReturnValue(Effect.succeed([...projects, made]));
 		fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
 
 		await screen.findByRole("heading", { name: "Platform" });
@@ -959,7 +1063,7 @@ describe("routes", () => {
 	});
 
 	it("walks a new workspace from its first bot to its chat", async () => {
-		client.api.channels.list.mockReturnValue(Effect.succeed([]));
+		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		const made = firstBotMade("Chief");
 		client.api.onboarding.complete.mockReturnValue(Effect.void);
@@ -992,7 +1096,7 @@ describe("routes", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
 
 		expect(await screen.findByRole("heading", { name: "Chief is ready" })).toBeDefined();
-		fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start talking" }));
 
 		await waitFor(() =>
 			expect(client.api.onboarding.complete).toHaveBeenCalledWith({
@@ -1005,7 +1109,7 @@ describe("routes", () => {
 	});
 
 	it("invites the addresses typed, and says how many it will send", async () => {
-		client.api.channels.list.mockReturnValue(Effect.succeed([]));
+		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		firstBotMade("Chief");
 		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
@@ -1033,7 +1137,7 @@ describe("routes", () => {
 	});
 
 	it("starts at the model step while the first bot has no model, and will not skip it", async () => {
-		client.api.channels.list.mockReturnValue(Effect.succeed([]));
+		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
 		);
@@ -1044,7 +1148,7 @@ describe("routes", () => {
 	});
 
 	it("adds the first provider from the Models picker, then switches on the model chosen for the first bot", async () => {
-		client.api.channels.list.mockReturnValue(Effect.succeed([]));
+		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		client.api.modelProviders.listEnabledModels.mockReturnValue(
 			Effect.succeed({ models: [], defaultModel: null }),
@@ -1112,19 +1216,6 @@ describe("routes", () => {
 		});
 		expect(client.api.modelProviders.setModelsEnabled).not.toHaveBeenCalled();
 		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
-	});
-
-	it("still honours the older ?invite= link shape", async () => {
-		client.api.workspaces.invitation.mockReturnValue(
-			Effect.succeed({ status: "pending", workspaceName: "Nitric", inviterName: "Sam" }),
-		);
-
-		const router = mount("/?invite=an-invitation");
-
-		await waitFor(() => {
-			expect(router.state.location.pathname).toBe("/invite/an-invitation");
-		});
-		expect(await screen.findByText("You have been invited to Nitric.")).toBeDefined();
 	});
 
 	it("asks somebody with an invitation to log in first, keeping the invitation", async () => {
@@ -1336,14 +1427,14 @@ describe("routes", () => {
 		expect(screen.queryByText("No such bot here")).toBeNull();
 	});
 
-	it("says so when the channel in the address is not there", async () => {
-		mount("/suga/channels/missing");
+	it("says so when the project in the address is not there", async () => {
+		mount("/suga/projects/missing");
 
-		expect(await screen.findByText("No such channel here")).toBeDefined();
+		expect(await screen.findByText("No such project here")).toBeDefined();
 	});
 });
 
-describe("creating a channel", () => {
+describe("creating a project", () => {
 	/*
 	 * NIT-1799. The API refuses a member either way, so what these are about is
 	 * whether the control is *drawn*: a control that cannot work teaches people
@@ -1355,52 +1446,68 @@ describe("creating a channel", () => {
 		apiAnswers({ role: "viewer" });
 		mount("/suga/settings");
 
-		// Waiting on the channels waits on the answers the controls beside them are drawn from.
+		// Waiting on the projects waits on the answers the controls beside them are drawn from.
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
 		await within(rail).findByRole("button", { name: "Suga-Team" });
 
-		expect(screen.queryByRole("button", { name: "New channel" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "New project" })).toBeNull();
 	});
 
-	/** Opens New channel, beside Channels in the settings navigation. */
-	async function openNewChannel() {
+	/** Opens New project, beside Projects in the settings navigation. */
+	async function openNewProject() {
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
-		fireEvent.click(await within(rail).findByRole("button", { name: "New channel" }));
+		fireEvent.click(await within(rail).findByRole("button", { name: "New project" }));
 	}
 
-	it("waits for a name before it can make a channel", async () => {
+	/** Chooses Customer Research to lead the project the dialog makes. */
+	async function chooseLead(dialog: HTMLElement) {
+		fireEvent.click(within(dialog).getByRole("button", { name: "Choose a lead bot" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Customer Research" }));
+		await within(dialog).findByRole("button", { name: "Lead bot: Customer Research" });
+	}
+
+	it("waits for a name and a lead bot before it can make a project", async () => {
 		onWideScreen();
 		mount("/suga/settings");
-		await openNewChannel();
+		await openNewProject();
 
-		const dialog = await screen.findByRole("dialog", { name: "New channel" });
+		const dialog = await screen.findByRole("dialog", { name: "New project" });
 		const create = within(dialog).getByRole("button", { name: "Create" });
 		expect(create.hasAttribute("disabled")).toBe(true);
 		fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Platform Team" } });
+		expect(create.hasAttribute("disabled")).toBe(true);
+		await chooseLead(dialog);
 		expect(create.hasAttribute("disabled")).toBe(false);
 	});
 
-	it("creates one in a colour no other channel has, and opens it", async () => {
+	it("creates one in a colour no other project has, and opens it", async () => {
 		onWideScreen();
-		const made = { ...channels[0], id: "new", name: "Platform", slug: "platform" };
-		client.api.channels.create.mockReturnValue(Effect.succeed(made));
+		const made = { ...projects[0], id: "new", name: "Platform", slug: "platform" };
+		client.api.projects.create.mockReturnValue(Effect.succeed(made));
 
 		mount("/suga/settings");
-		await openNewChannel();
+		await openNewProject();
 
-		const dialog = await screen.findByRole("dialog", { name: "New channel" });
+		const dialog = await screen.findByRole("dialog", { name: "New project" });
 		fireEvent.change(within(dialog).getByLabelText("Name"), {
 			target: { value: "Platform" },
 		});
+		await chooseLead(dialog);
 
-		client.api.channels.list.mockReturnValue(Effect.succeed([...channels, made]));
+		client.api.projects.list.mockReturnValue(Effect.succeed([...projects, made]));
 		within(dialog).getByRole("button", { name: "Create" }).click();
 
 		await waitFor(() => {
-			expect(client.api.channels.create).toHaveBeenCalledWith({
+			expect(client.api.projects.create).toHaveBeenCalledWith({
 				params: { workspace: workspace.id },
-				// Its colour is the one the workspace's green and blue channels leave first.
-				payload: { name: "Platform", color: "plum", visibility: "public", description: null },
+				// Its colour is the one the workspace's green and blue projects leave first.
+				payload: {
+					name: "Platform",
+					color: "plum",
+					visibility: "public",
+					description: null,
+					leadBotId: "0199a3a0-0000-7000-8000-0000000000b1",
+				},
 			});
 		});
 		expect(await screen.findByRole("heading", { name: "Platform" })).toBeDefined();
@@ -1408,21 +1515,22 @@ describe("creating a channel", () => {
 
 	it("says so when the address is already taken, and keeps the form open", async () => {
 		onWideScreen();
-		client.api.channels.create.mockReturnValue(
+		client.api.projects.create.mockReturnValue(
 			Effect.fail(new Conflict({ message: userText`already exists` })),
 		);
 
 		mount("/suga/settings");
-		await openNewChannel();
+		await openNewProject();
 
-		const dialog = await screen.findByRole("dialog", { name: "New channel" });
+		const dialog = await screen.findByRole("dialog", { name: "New project" });
 		fireEvent.change(within(dialog).getByLabelText("Name"), {
 			target: { value: "Sales" },
 		});
+		await chooseLead(dialog);
 		within(dialog).getByRole("button", { name: "Create" }).click();
 
 		expect(await within(dialog).findByRole("alert")).toBeDefined();
-		expect(screen.getByRole("dialog", { name: "New channel" })).toBeDefined();
+		expect(screen.getByRole("dialog", { name: "New project" })).toBeDefined();
 	});
 });
 
@@ -1440,21 +1548,21 @@ describe("creating a bot", () => {
 		expect(await screen.findByRole("button", { name: "New bot" })).toBeDefined();
 	});
 
-	it("keeps deleting channels, and making them, to those allowed them", async () => {
-		mount(`/suga/settings/channels/${channels[0]?.slug}`);
+	it("keeps deleting projects, and making them, to those allowed them", async () => {
+		mount(`/suga/settings/projects/${projects[0]?.slug}`);
 
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
-		expect(await within(rail).findByRole("button", { name: "New channel" })).toBeDefined();
-		expect(await screen.findByRole("button", { name: "Delete channel" })).toBeDefined();
+		expect(await within(rail).findByRole("button", { name: "New project" })).toBeDefined();
+		expect(await screen.findByRole("button", { name: "Delete project" })).toBeDefined();
 		cleanup();
 		vi.clearAllMocks();
 
 		apiAnswers({ role: "viewer" });
-		mount(`/suga/settings/channels/${channels[0]?.slug}`);
-		await screen.findByRole("heading", { name: channels[0]?.name });
+		mount(`/suga/settings/projects/${projects[0]?.slug}`);
+		await screen.findByRole("heading", { name: projects[0]?.name });
 
-		expect(screen.queryByRole("button", { name: "New channel" })).toBeNull();
-		expect(screen.queryByRole("button", { name: "Delete channel" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "New project" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Delete project" })).toBeNull();
 	});
 
 	it("creates a bot in the look and colour chosen, and opens it", async () => {
@@ -1545,20 +1653,20 @@ describe("creating a bot", () => {
 });
 
 describe("workspace settings", () => {
-	it("opens the first channel when none is chosen", async () => {
-		mount("/suga/settings/channels");
+	it("opens the first project when none is chosen", async () => {
+		mount("/suga/settings/projects");
 
-		expect(await screen.findByRole("heading", { name: channels[0]?.name })).toBeDefined();
-		expect(screen.queryByText("Choose a channel")).toBeNull();
+		expect(await screen.findByRole("heading", { name: projects[0]?.name })).toBeDefined();
+		expect(screen.queryByText("Choose a project")).toBeNull();
 	});
 
-	it("picks out the open channel's page in the navigation", async () => {
-		const channel = channels[0] as (typeof channels)[number];
-		mount(`/suga/settings/channels/${channel.slug}`);
+	it("picks out the open project's page in the navigation", async () => {
+		const project = projects[0] as (typeof projects)[number];
+		mount(`/suga/settings/projects/${project.slug}`);
 
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
 		expect(
-			(await within(rail).findByRole("button", { name: channel.name })).getAttribute(
+			(await within(rail).findByRole("button", { name: project.name })).getAttribute(
 				"aria-expanded",
 			),
 		).toBe("true");
@@ -1566,7 +1674,7 @@ describe("workspace settings", () => {
 			.getAllByRole("link")
 			.filter((link) => link.getAttribute("aria-current") === "page");
 		expect(current.map((link) => link.getAttribute("href"))).toEqual([
-			`/suga/settings/channels/${channel.slug}`,
+			`/suga/settings/projects/${project.slug}`,
 		]);
 	});
 
@@ -1928,11 +2036,11 @@ describe("workspace settings", () => {
 			target: { value: "juno@example.com, kim@example.com" },
 		});
 		expect(
-			within(panel).getByText("Makes bots and channels, and works with the public bots."),
+			within(panel).getByText("Makes bots and projects, and works with the public bots."),
 		).toBeDefined();
 		fireEvent.click(within(panel).getByRole("radio", { name: "Viewer" }));
 		expect(
-			within(panel).getByText("Reads and takes part in channels and with public bots."),
+			within(panel).getByText("Reads and takes part in projects and with public bots."),
 		).toBeDefined();
 		fireEvent.click(within(panel).getByRole("button", { name: "Send" }));
 
@@ -1993,18 +2101,18 @@ describe("workspace settings", () => {
 		});
 	});
 
-	it("puts somebody in a channel from their page", async () => {
-		client.api.channels.addMember.mockReturnValue(Effect.void);
+	it("puts somebody in a project from their page", async () => {
+		client.api.projects.addMember.mockReturnValue(Effect.void);
 		mount(junoPage);
 
 		const toggle = await screen.findByRole("switch", { name: `${juno.name} is in Suga-Team` });
-		// Disabled until the channel's people have loaded.
+		// Disabled until the project's people have loaded.
 		await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
 		fireEvent.click(toggle);
 
 		await waitFor(() =>
-			expect(client.api.channels.addMember).toHaveBeenCalledWith({
-				params: { channelId: channels[0]?.id },
+			expect(client.api.projects.addMember).toHaveBeenCalledWith({
+				params: { projectId: projects[0]?.id },
 				payload: { userId: juno.id },
 			}),
 		);
@@ -2016,7 +2124,7 @@ describe("workspace settings", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Remove from workspace" }));
 
 		expect(await screen.findByRole("heading", { name: `Remove ${juno.name}?` })).toBeDefined();
-		expect(screen.getByText(/their Personal Assistant and its tasks are deleted/)).toBeDefined();
+		expect(screen.getByText(/their Personal Assistant and its threads are deleted/)).toBeDefined();
 		expect(client.api.workspaces.removeMember).not.toHaveBeenCalled();
 
 		fireEvent.click(screen.getByRole("button", { name: "Remove" }));
@@ -2198,12 +2306,12 @@ describe("settings on a phone", () => {
 		);
 	});
 
-	it("leads from one of a channel's pages back to the channel", async () => {
-		mount(`/suga/settings/channels/${channels[0]?.slug}/people`);
+	it("leads from one of a project's pages back to the project", async () => {
+		mount(`/suga/settings/projects/${projects[0]?.slug}/people`);
 
 		const page = await screen.findByRole("main");
-		const back = await within(page).findByRole("link", { name: "Channel" });
-		expect(back.getAttribute("href")).toBe(`/suga/settings/channels/${channels[0]?.slug}`);
+		const back = await within(page).findByRole("link", { name: "Project" });
+		expect(back.getAttribute("href")).toBe(`/suga/settings/projects/${projects[0]?.slug}`);
 	});
 
 	it("leads from a bot back to the workspace's Bots", async () => {
@@ -2315,32 +2423,32 @@ describe("your profile", () => {
 	});
 });
 
-describe("channel settings", () => {
-	const [suga] = channels;
+describe("project settings", () => {
+	const [suga] = projects;
 	if (!suga) throw new Error("fixture");
-	const channelPage = `/suga/settings/channels/${suga.slug}`;
-	const botsPage = `${channelPage}/bots`;
-	const peoplePage = `${channelPage}/people`;
-	const samInChannel = {
+	const projectPage = `/suga/settings/projects/${suga.slug}`;
+	const botsPage = `${projectPage}/bots`;
+	const peoplePage = `${projectPage}/people`;
+	const samInProject = {
 		userId: sam.id,
 		name: sam.name,
 		email: sam.email,
 		image: null,
 		addedAt: "2026-09-09T00:00:00.000Z",
-		// Sam administers the workspace, so is in every channel for good.
+		// Sam administers the workspace, so is in every project for good.
 		removable: false,
 	};
-	const junoInChannel = {
-		...samInChannel,
+	const junoInProject = {
+		...samInProject,
 		userId: juno.id,
 		name: juno.name,
 		email: juno.email,
 		removable: true,
 	};
-	it("lists only the channel's own bots, with nothing to say about built-in bots", async () => {
+	it("lists only the project's own bots, with nothing to say about built-in bots", async () => {
 		mount(botsPage);
 
-		// The sidebar names each bot too, by a link to its channel.
+		// The sidebar names each bot too, by a link to its project.
 		const settings = await screen.findByRole("main");
 		// Each row reads as the bot's name, then what it does.
 		expect(
@@ -2351,8 +2459,8 @@ describe("channel settings", () => {
 		expect(screen.queryByRole("link", { name: new RegExp(compaction.name) })).toBeNull();
 	});
 
-	it("takes a bot out of the channel with a button beside its name, not inside its link", async () => {
-		client.api.channels.removeBot.mockReturnValue(Effect.void);
+	it("takes a bot out of the project with a button beside its name, not inside its link", async () => {
+		client.api.projects.removeBot.mockReturnValue(Effect.void);
 		mount(botsPage);
 
 		const remove = await screen.findByRole("button", { name: `Remove ${linear.name}` });
@@ -2360,32 +2468,32 @@ describe("channel settings", () => {
 		fireEvent.click(remove);
 
 		await waitFor(() =>
-			expect(client.api.channels.removeBot).toHaveBeenCalledWith({
-				params: { channelId: suga.id, botId: linear.id },
+			expect(client.api.projects.removeBot).toHaveBeenCalledWith({
+				params: { projectId: suga.id, botId: linear.id },
 			}),
 		);
 	});
 
 	it("adds somebody from the workspace", async () => {
-		client.api.channels.addMember.mockReturnValue(Effect.void);
+		client.api.projects.addMember.mockReturnValue(Effect.void);
 		mount(peoplePage);
 
 		open(await screen.findByRole("button", { name: "Add people" }));
 		fireEvent.click(await screen.findByRole("menuitem", { name: sam.name }));
 
 		await waitFor(() =>
-			expect(client.api.channels.addMember).toHaveBeenCalledWith({
-				params: { channelId: suga.id },
+			expect(client.api.projects.addMember).toHaveBeenCalledWith({
+				params: { projectId: suga.id },
 				payload: { userId: sam.id },
 			}),
 		);
 	});
 
-	it("asks before removing somebody from the channel", async () => {
-		client.api.channels.listMembers.mockImplementation(() =>
-			Effect.succeed([samInChannel, junoInChannel]),
+	it("asks before removing somebody from the project", async () => {
+		client.api.projects.listMembers.mockImplementation(() =>
+			Effect.succeed([samInProject, junoInProject]),
 		);
-		client.api.channels.removeMember.mockReturnValue(Effect.void);
+		client.api.projects.removeMember.mockReturnValue(Effect.void);
 		mount(peoplePage);
 
 		fireEvent.click(await screen.findByRole("button", { name: `Remove ${juno.name}` }));
@@ -2393,21 +2501,21 @@ describe("channel settings", () => {
 		expect(
 			await screen.findByRole("dialog", { name: `Remove ${juno.name} from ${suga.name}?` }),
 		).toBeDefined();
-		expect(client.api.channels.removeMember).not.toHaveBeenCalled();
+		expect(client.api.projects.removeMember).not.toHaveBeenCalled();
 
 		fireEvent.click(screen.getByRole("button", { name: "Remove" }));
 
 		await waitFor(() =>
-			expect(client.api.channels.removeMember).toHaveBeenCalledWith({
-				params: { channelId: suga.id, userId: juno.id },
+			expect(client.api.projects.removeMember).toHaveBeenCalledWith({
+				params: { projectId: suga.id, userId: juno.id },
 			}),
 		);
 	});
 
 	// Sam is signed in, and an administrator unless a case says otherwise.
-	it("gives an administrator no way off a channel", async () => {
-		client.api.channels.listMembers.mockImplementation(() =>
-			Effect.succeed([samInChannel, junoInChannel]),
+	it("gives an administrator no way off a project", async () => {
+		client.api.projects.listMembers.mockImplementation(() =>
+			Effect.succeed([samInProject, junoInProject]),
 		);
 		mount(peoplePage);
 
@@ -2416,12 +2524,12 @@ describe("channel settings", () => {
 		expect(screen.queryByRole("button", { name: `Remove ${sam.name}` })).toBeNull();
 	});
 
-	it("lets a member leave a channel, and nothing more", async () => {
+	it("lets a member leave a project, and nothing more", async () => {
 		apiAnswers({ role: "member" });
-		client.api.channels.listMembers.mockImplementation(() =>
-			Effect.succeed([samInChannel, junoInChannel]),
+		client.api.projects.listMembers.mockImplementation(() =>
+			Effect.succeed([samInProject, junoInProject]),
 		);
-		client.api.channels.leave.mockReturnValue(Effect.void);
+		client.api.projects.leave.mockReturnValue(Effect.void);
 		mount(peoplePage);
 
 		fireEvent.click(await screen.findByRole("button", { name: `Leave ${suga.name}` }));
@@ -2431,13 +2539,13 @@ describe("channel settings", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Leave" }));
 
 		await waitFor(() =>
-			expect(client.api.channels.leave).toHaveBeenCalledWith({ params: { channelId: suga.id } }),
+			expect(client.api.projects.leave).toHaveBeenCalledWith({ params: { projectId: suga.id } }),
 		);
 	});
 
 	it("says when everyone in the workspace is already in", async () => {
-		client.api.channels.listMembers.mockImplementation(() =>
-			Effect.succeed([samInChannel, junoInChannel]),
+		client.api.projects.listMembers.mockImplementation(() =>
+			Effect.succeed([samInProject, junoInProject]),
 		);
 		mount(peoplePage);
 
@@ -2452,7 +2560,7 @@ describe("channel settings", () => {
 
 	it("offers a viewer the lists and none of the controls", async () => {
 		apiAnswers({ role: "viewer" });
-		client.api.channels.listMembers.mockImplementation(() => Effect.succeed([samInChannel]));
+		client.api.projects.listMembers.mockImplementation(() => Effect.succeed([samInProject]));
 		mount(botsPage);
 		expect(await within(await screen.findByRole("main")).findByText(linear.name)).toBeDefined();
 		cleanup();
@@ -2463,35 +2571,35 @@ describe("channel settings", () => {
 		expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull();
 		cleanup();
 
-		mount(channelPage);
+		mount(projectPage);
 		await screen.findByRole("heading", { name: suga.name });
-		expect(screen.queryByRole("button", { name: "Delete channel" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Delete project" })).toBeNull();
 		expect(screen.queryByLabelText("Name")).toBeNull();
 	});
 
-	it("deletes the channel after asking, and returns to the list", async () => {
-		client.api.channels.remove.mockReturnValue(Effect.void);
-		const router = mount(channelPage);
+	it("deletes the project after asking, and returns to the list", async () => {
+		client.api.projects.remove.mockReturnValue(Effect.void);
+		const router = mount(projectPage);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Delete channel" }));
-		expect(client.api.channels.remove).not.toHaveBeenCalled();
+		fireEvent.click(await screen.findByRole("button", { name: "Delete project" }));
+		expect(client.api.projects.remove).not.toHaveBeenCalled();
 		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
 		await waitFor(() =>
-			expect(client.api.channels.remove).toHaveBeenCalledWith({
-				params: { channelId: suga.id },
+			expect(client.api.projects.remove).toHaveBeenCalledWith({
+				params: { projectId: suga.id },
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/channels"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/projects"));
 	});
 
-	it("says so when a channel with threads cannot be deleted", async () => {
-		client.api.channels.remove.mockReturnValue(
-			Effect.fail(new Conflict({ message: userText`The channel still has threads` })),
+	it("says so when a project with threads cannot be deleted", async () => {
+		client.api.projects.remove.mockReturnValue(
+			Effect.fail(new Conflict({ message: userText`The project still has threads` })),
 		);
-		mount(channelPage);
+		mount(projectPage);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Delete channel" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Delete project" }));
 		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
 		expect(await screen.findByRole("alert")).toBeDefined();
@@ -2499,7 +2607,7 @@ describe("channel settings", () => {
 });
 
 describe("the app's badge", () => {
-	const channel = channels[0] as (typeof channels)[number];
+	const project = projects[0] as (typeof projects)[number];
 	const waitingApproval: ApprovalRequest = {
 		call: {
 			type: "tool_call",
@@ -2524,7 +2632,7 @@ describe("the app's badge", () => {
 			face: linear.face,
 			shape: "circle",
 		},
-		channelId: channel.id,
+		projectId: project.id,
 		conversationId: "0199a3a0-0000-7000-8000-0000000004b1",
 		rootConversationId: "0199a3a0-0000-7000-8000-0000000004b1",
 	};
@@ -2591,18 +2699,19 @@ describe("the app's badge", () => {
 	it("leaves the icon and the title alone for unread messages that are not for you", async () => {
 		const { setAppBadge } = badging();
 		pageTitle();
-		client.api.chats.channelMarkers.mockReturnValue(
+		client.api.chats.projectMarkers.mockReturnValue(
 			Effect.succeed({
-				channels: {
-					[channel.id]: { unreadMessages: 2, needsApproval: false },
+				projects: {
+					[project.id]: { unreadMessages: 2, needsApproval: false },
 				},
 				bots: {},
 			}),
 		);
-		mount("/suga/channels");
+		mount("/suga/projects");
 
-		fireEvent.click(await screen.findByRole("button", { name: "Suga-Team" }));
-		await within(screen.getByRole("group", { name: "Suga-Team" })).findByText(/2 unread messages/);
+		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
+		const projects = within(sidebar).getByRole("region", { name: "Projects" });
+		await within(projects).findByText(/2 unread messages/);
 		expect(document.title).toBe("Sugabots | Suga Workspace");
 		expect(setAppBadge).not.toHaveBeenCalled();
 	});

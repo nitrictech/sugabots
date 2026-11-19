@@ -1,3 +1,4 @@
+import { useRender } from "@base-ui/react/use-render";
 import { botPalettes } from "@sugabots/avatars";
 import {
 	BOT_NAME_MAX_LENGTH,
@@ -11,15 +12,17 @@ import {
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { Link, linkOptions, useRouter } from "@tanstack/react-router";
-import { ArrowUpRight, ChevronDown, Pencil, X } from "lucide-react";
-import { type FormEvent, useId, useState } from "react";
+import { ArrowUpRight, ChevronDown, Pencil } from "lucide-react";
+import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { useDeleteBot, useModels, useUpdateBot } from "@/lib/bots.ts";
+import { characterCount } from "@/lib/character-count.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { botSettingsPageLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { modelLogoOf } from "@/lib/model-logo.ts";
+import { countOf } from "@/lib/name-list.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useSession } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -28,8 +31,9 @@ import { BotAvatar } from "@/shell/Bot.tsx";
 import { type Look, LookStep, type Part } from "@/shell/NewBot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
-import { BACK_BUTTON, useLeave } from "@/ui/back-button.tsx";
+import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
+import { CloseButton } from "@/ui/close-button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
@@ -40,6 +44,7 @@ import {
 	DropdownMenuRadioItem,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
+import { InstructionsField } from "@/ui/instructions-field.tsx";
 import {
 	SettingsDanger,
 	SettingsGroup,
@@ -48,6 +53,7 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import { BotAutomations } from "./AutomationEditing.tsx";
 
 /*
@@ -60,30 +66,8 @@ import { BotAutomations } from "./AutomationEditing.tsx";
  */
 export function BotSettingsPage({ bot }: { bot: Bot }) {
 	const update = useUpdateBot(bot.id);
-	const failure = update.error ? failureMessage(update.error) : undefined;
-	return (
-		<ContactCard
-			bot={bot}
-			save={update.mutateAsync}
-			savePending={update.isPending}
-			failure={failure}
-		/>
-	);
-}
-
-type Save = (change: BotUpdate) => Promise<unknown>;
-
-function ContactCard({
-	bot,
-	save,
-	savePending,
-	failure,
-}: {
-	bot: Bot;
-	save: Save;
-	savePending: boolean;
-	failure: string | undefined;
-}) {
+	const save: Save = update.mutateAsync;
+	const savePending = update.isPending;
 	const may = bot.permissions;
 	// A Personal Assistant's prompt, model and tools are ours: its person changes its look (name, colour, face, shape) and connections.
 	const fixed = bot.assistant;
@@ -123,7 +107,7 @@ function ContactCard({
 			title={bot.name}
 			description={bot.description || undefined}
 		>
-			{failure && <Alert>{failure}</Alert>}
+			{update.error && <Alert>{failureMessage(update.error)}</Alert>}
 			<SettingsGroup label="Profile">
 				<ProfileField
 					label="Name"
@@ -168,7 +152,7 @@ function ContactCard({
 			{may.delete && !fixed && (
 				<SettingsDanger
 					label="Delete bot"
-					description="Its tasks, automations and settings go with it."
+					description="Its threads, automations and settings go with it."
 					action="Delete"
 					onClick={() => setConfirmingDelete(true)}
 				/>
@@ -177,7 +161,7 @@ function ContactCard({
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
 				title={`Delete ${bot.name}?`}
-				description="Its tasks, automations and settings go with it. This can't be undone."
+				description="Its threads, automations and settings go with it. This can't be undone."
 				pending={remove.isPending}
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={deleteBot}
@@ -185,6 +169,8 @@ function ContactCard({
 		</SettingsPage>
 	);
 }
+
+type Save = (change: BotUpdate) => Promise<unknown>;
 
 /**
  * The bot's face, which opens its look when clicked, as the pencil on its
@@ -293,9 +279,7 @@ function LookEditor({
 						style={stage}
 					>
 						<span className="flex justify-self-start">
-							<button type="button" aria-label="Cancel" onClick={done} className={BACK_BUTTON}>
-								<X aria-hidden size={20} strokeWidth={2.25} />
-							</button>
+							<CloseButton label="Cancel" onClick={done} />
 						</span>
 						<span className="font-semibold text-base text-foreground">Look</span>
 						<span className="flex justify-self-end">
@@ -416,18 +400,11 @@ function ProfileField({
 	savePending: boolean;
 	onCommit: (value: string) => Promise<unknown>;
 }) {
-	const [draft, setDraft] = useState(value);
+	const { fieldProps } = useCommittedDraft(value, onCommit, {
+		allowEmpty: !required,
+		pending: savePending,
+	});
 	const id = useId();
-
-	function commit() {
-		const next = draft.trim();
-		if (savePending || next === value || (required && next === "")) {
-			setDraft(value);
-			return;
-		}
-		setDraft(next);
-		void onCommit(next).catch(() => setDraft(value));
-	}
 
 	return (
 		<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5 last:border-b-0">
@@ -439,13 +416,7 @@ function ProfileField({
 				<div className="min-w-0 flex-1">
 					<input
 						id={id}
-						value={draft}
-						onChange={(event) => setDraft(event.target.value)}
-						onBlur={commit}
-						onKeyDown={(event) => {
-							if (event.key === "Enter") event.currentTarget.blur();
-							if (event.key === "Escape") setDraft(value);
-						}}
+						{...fieldProps}
 						placeholder={placeholder}
 						maxLength={maxLength}
 						className="h-8 w-full min-w-0 rounded-md border border-border-strong bg-settings-row-hover px-2.5 text-xs text-foreground outline-none placeholder:text-subtle-foreground focus-visible:border-ring"
@@ -460,8 +431,6 @@ function ProfileField({
 	);
 }
 
-const countFormat = new Intl.NumberFormat("en");
-
 /** How the bot should work, written straight into on its card and saved when you leave the box. */
 function Instructions({
 	bot,
@@ -474,38 +443,28 @@ function Instructions({
 	save: Save;
 	savePending: boolean;
 }) {
-	const [draft, setDraft] = useState(bot.prompt);
-	const id = useId();
-
-	// Saved when you leave the box, as the profile's fields are; a failed save puts them back.
-	function commit() {
-		if (savePending || draft === bot.prompt) return;
-		void save({ prompt: draft }).catch(() => setDraft(bot.prompt));
-	}
+	const { draft, fieldProps } = useCommittedDraft(bot.prompt, (prompt) => save({ prompt }), {
+		allowEmpty: true,
+		pending: savePending,
+	});
 
 	return (
 		<SettingsGroup
 			label="Instructions"
-			description={`How ${bot.name} should work. It follows these in every task.`}
+			description={`How ${bot.name} should work. It follows these in every thread.`}
 			className="p-1"
 			note={
 				editable
-					? `Write it like a note to a new teammate: what it's for, how to sound, and what to never do. ${countFormat.format(draft.length)} of ${countFormat.format(PROMPT_MAX_LENGTH)} characters.${savePending ? " Saving…" : ""}`
+					? `Write it like a note to a new teammate: what it's for, how to sound, and what to never do. ${characterCount(draft.length, PROMPT_MAX_LENGTH)}.${savePending ? " Saving…" : ""}`
 					: undefined
 			}
 		>
-			<label htmlFor={id} className="sr-only">
-				Instructions
-			</label>
-			<textarea
-				id={id}
-				value={draft}
-				onChange={(event) => setDraft(event.target.value)}
-				onBlur={commit}
+			<InstructionsField
+				{...fieldProps}
 				readOnly={!editable}
 				maxLength={PROMPT_MAX_LENGTH}
 				placeholder="No instructions yet."
-				className="block min-h-75 w-full resize-y rounded-xl bg-transparent p-3.5 text-xs text-foreground leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+				className="min-h-75"
 			/>
 		</SettingsGroup>
 	);
@@ -600,20 +559,17 @@ const WEB_TOOLS: readonly BuiltInToolKey[] = builtInToolCatalog
  */
 function BotConnections({ bot }: { bot: Bot }) {
 	const backToBot = useBackToHere(bot.name);
-	const connections = useConnections(bot.id);
+	const connections = useConnections(bot.defaultProjectId);
 	const reachable = connections.data?.filter((connection) => usableToolCount(connection) > 0);
 	return (
 		<SettingsGroup
 			label="Connections"
 			action={
-				<Link
-					{...botSettingsPageLink(bot, "connections")}
-					state={backToBot}
-					className="focus-ring flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground"
+				<SettingsGroupLink
+					render={<Link {...botSettingsPageLink(bot, "connections")} state={backToBot} />}
 				>
 					Manage
-					<ArrowUpRight aria-hidden size={13} strokeWidth={2} />
-				</Link>
+				</SettingsGroupLink>
 			}
 		>
 			{connections.isError && (
@@ -637,7 +593,7 @@ function BotConnections({ bot }: { bot: Bot }) {
 							/>
 						}
 						label={connection.name}
-						sub={`${tools} ${tools === 1 ? "tool" : "tools"}`}
+						sub={countOf(tools, "tool", "tools")}
 					/>
 				);
 			})}
@@ -680,14 +636,11 @@ function BuiltInTools({
 			action={
 				bot.usesComputer &&
 				!computersOff && (
-					<Link
-						{...botSettingsPageLink(bot, "computer")}
-						state={backToBot}
-						className="focus-ring flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground"
+					<SettingsGroupLink
+						render={<Link {...botSettingsPageLink(bot, "computer")} state={backToBot} />}
 					>
 						Its computer
-						<ArrowUpRight aria-hidden size={13} strokeWidth={2} />
-					</Link>
+					</SettingsGroupLink>
 				)
 			}
 		>
@@ -800,7 +753,7 @@ function VisibilityRow({
 			label="Public"
 			sub={
 				isPublic
-					? "Everyone in the workspace can see it, talk to it and add it to channels. Making it private takes it out of its channels"
+					? "Everyone in the workspace can see it, talk to it and add it to projects. Making it private takes it out of its projects"
 					: mine
 						? "Only you can see it and talk to it"
 						: "Only the person who made it can see it and talk to it"
@@ -821,4 +774,28 @@ function VisibilityRow({
 			}
 		/>
 	);
+}
+
+/** A link beside a group's label, to the page its rows are changed on, such as Manage ↗. */
+function SettingsGroupLink({
+	render,
+	children,
+}: {
+	/** The link it is: `render={<Link … />}`. */
+	render: useRender.RenderProp;
+	children: ReactNode;
+}) {
+	return useRender({
+		render,
+		props: {
+			className:
+				"focus-ring flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground",
+			children: (
+				<>
+					{children}
+					<ArrowUpRight aria-hidden size={13} strokeWidth={2} />
+				</>
+			),
+		},
+	});
 }

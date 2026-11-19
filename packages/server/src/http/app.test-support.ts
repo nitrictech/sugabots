@@ -2,9 +2,9 @@ import type { SessionUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { BotComputerSetup } from "@sugabots/core/computers/bot-computer-setup";
 import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
 import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
+import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
 import { Automations } from "@sugabots/core/conversations/automations/automations";
 import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
@@ -28,9 +28,9 @@ import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/mod
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import { unimplemented } from "@sugabots/core/testing";
 import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
-import { ChannelAdministration } from "@sugabots/core/workspaces/channels/channel-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
+import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
 import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import { Effect, Layer } from "effect";
 import { Cookies, HttpRouter, HttpServer } from "effect/unstable/http";
@@ -110,7 +110,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Accounts.Service),
 	// `/me` answers with these beside the user; a case about them supplies its own.
 	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
-	unimplemented(ChannelAdministration.Service),
+	unimplemented(ProjectAdministration.Service),
 	unimplemented(WorkspaceTimeZone.Service),
 	unimplemented(Files.Service),
 	unimplemented(FilePages.Service),
@@ -121,7 +121,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(ComputerProviderSetup.Service),
 	unimplemented(ComputerNetwork.Service),
 	unimplemented(DesktopViewer.Service),
-	unimplemented(BotComputerSetup.Service),
+	unimplemented(ProjectComputerSetup.Service),
 	unimplemented(GitHubApps.Service),
 	unimplemented(GitHubConnections.Service),
 	unimplemented(ConnectionSetup.Service),

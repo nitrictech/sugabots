@@ -27,7 +27,7 @@ export interface TriggerKindChoice {
 
 /** Every kind of trigger, Sugabots' own first, in the order the dialog lists them. */
 export const TRIGGER_KINDS: readonly TriggerKindChoice[] = [
-	{ kind: "schedule", label: "Schedule", sub: "On the days and at the times you pick" },
+	{ kind: "routine", label: "Routine", sub: "On the days and at the times you pick" },
 	{ kind: "webhook", label: "Webhook", sub: "When something calls its address" },
 	{
 		kind: "github",

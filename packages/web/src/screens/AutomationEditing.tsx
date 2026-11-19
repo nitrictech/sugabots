@@ -1,7 +1,15 @@
 import type { Bot } from "@sugabots/contracts";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useAutomations } from "@/lib/automations.ts";
-import { automationFeedLink, automationsLink, botLink } from "@/lib/links.ts";
+import { botAutomationsLink } from "@/lib/links.ts";
+import {
+	ownerLink,
+	ownerName,
+	type ResourceOwner,
+	resourcePermissions,
+	resourceProjectId,
+	useNavigateToOwnerPage,
+} from "@/lib/resource-owner.tsx";
 import { useListedAutomations } from "@/shell/Automations.tsx";
 import { AutomationsCrumb } from "@/shell/BotCrumb.tsx";
 import { PageHeader } from "@/shell/Page.tsx";
@@ -12,45 +20,48 @@ import { NewAutomationPage } from "./AutomationEditor.tsx";
 import { AutomationPanel } from "./AutomationPanel.tsx";
 
 /*
- * Making automations among a bot's pages rather than in settings: an
- * automation belongs to a bot, so the bot's pages are where its automations
- * are kept.
+ * Making automations among a bot's or a project's pages rather than in
+ * settings: an automation belongs to a project, a bot's to its default one,
+ * so the bot's or project's pages are where its automations are kept.
  */
 
-/** An automation being made for `bot`, under its breadcrumb. Once made, its own page opens. */
-export function NewAutomation({ bot }: { bot: Bot }) {
-	const navigate = useNavigate();
+/** An automation being made for `owner`, under its breadcrumb. Once made, its own page opens. */
+export function NewAutomation({ owner }: { owner: ResourceOwner }) {
+	const navigateToOwnerPage = useNavigateToOwnerPage();
 	const { leave } = useLeave();
 	// Leaving without making one goes back as Back does, so the automations' own Back doesn't
-	// return here. With nothing before it, the bot's page takes its place: its automations
-	// would bring a bot with none straight back here.
+	// return here. With nothing before it, the bot's or project's page takes its place: its
+	// automations would bring one with none straight back here.
 	const cancel = () => {
-		leave(() => void navigate({ ...botLink(bot), replace: true }));
+		leave(() => void navigateToOwnerPage(owner, { page: "home" }, { replace: true }));
 	};
-	if (!bot.permissions.manageAutomations) {
+	if (!resourcePermissions(owner).manageAutomations) {
 		return (
 			<EmptyState title="No automation can be made here">
-				Only people who manage {bot.name} can make one.
+				Only people who manage {ownerName(owner)} can make one.
 			</EmptyState>
 		);
 	}
 	return (
 		// A group, so its Back can stand aside for one a page inside draws itself, as Instructions does.
 		<div className="group/automation tab-bar-clearance min-h-0 flex-1 overflow-y-auto">
-			<BackToAutomations bot={bot} />
+			<BackToAutomations owner={owner} />
 			<div className="max-md:hidden">
 				<PageHeader
 					title="New automation"
-					parent={<AutomationsCrumb bot={bot} />}
-					place={{ kind: "bot", bot }}
+					parent={<AutomationsCrumb owner={owner} />}
+					place={{ kind: "owner", owner }}
 				/>
 			</div>
 			<NewAutomationPage
-				choices={[{ bot }]}
-				initialBotId={bot.id}
+				owner={owner}
 				onCancel={cancel}
 				onCreated={(automation) =>
-					void navigate({ ...automationFeedLink(bot, automation.id), replace: true })
+					void navigateToOwnerPage(
+						owner,
+						{ page: "automation", automationId: automation.id },
+						{ replace: true },
+					)
 				}
 			/>
 		</div>
@@ -58,15 +69,21 @@ export function NewAutomation({ bot }: { bot: Bot }) {
 }
 
 /**
- * One of `bot`'s automations as its own page: how it is set up, under its
+ * One of `owner`'s automations as its own page: how it is set up, under its
  * breadcrumb, with whether it runs and Run now at the top. Somebody who
  * manages its automations without reaching the bot, as an administrator does
  * another person's private bot, changes it the same way, but how it ran is
  * not theirs to read.
  */
-export function AutomationSetup({ bot, automationId }: { bot: Bot; automationId: string }) {
-	const automations = useAutomations(bot.id);
-	const listed = useListedAutomations(bot).automations?.find(
+export function AutomationSetup({
+	owner,
+	automationId,
+}: {
+	owner: ResourceOwner;
+	automationId: string;
+}) {
+	const automations = useAutomations(resourceProjectId(owner));
+	const listed = useListedAutomations(owner).automations?.find(
 		(row) => row.automation.id === automationId,
 	);
 	if (automations.isPending) return null;
@@ -84,13 +101,13 @@ export function AutomationSetup({ bot, automationId }: { bot: Bot; automationId:
 	}
 	return (
 		<div className="group/automation flex min-h-0 flex-1 flex-col">
-			<BackToAutomations bot={bot} />
+			<BackToAutomations owner={owner} />
 			<AutomationPanel
-				bot={bot}
+				owner={owner}
 				conversationId={listed?.conversation?.id}
 				standing={{
 					id: automation.id,
-					botId: automation.botId,
+					projectId: automation.projectId,
 					state: automation.state,
 					failed: listed?.automation.failed ?? false,
 					pausedAfterFailures: listed?.automation.pausedAfterFailures ?? false,
@@ -101,12 +118,12 @@ export function AutomationSetup({ bot, automationId }: { bot: Bot; automationId:
 	);
 }
 
-/** On a phone, where the automation covers the list, the way back to the bot's automations. */
-function BackToAutomations({ bot }: { bot: Bot }) {
+/** On a phone, where the automation covers the list, the way back to the owner's automations. */
+function BackToAutomations({ owner }: { owner: ResourceOwner }) {
 	return (
 		<CompactBackBar
 			label="Automations"
-			render={<Link {...automationsLink(bot)} />}
+			render={ownerLink(owner, { page: "automations" })}
 			className="group-has-[[data-page-back]]/automation:hidden md:hidden"
 		/>
 	);
@@ -117,7 +134,7 @@ function BackToAutomations({ bot }: { bot: Bot }) {
  * changed on the bot's Automations page, which the row opens.
  */
 export function BotAutomations({ bot }: { bot: Bot }) {
-	const automations = useAutomations(bot.id);
+	const automations = useAutomations(bot.defaultProjectId);
 	const count = automations.data?.length;
 	return (
 		<SettingsGroup>
@@ -128,7 +145,7 @@ export function BotAutomations({ bot }: { bot: Bot }) {
 					count !== undefined && <SettingsValue>{count === 0 ? "None" : count}</SettingsValue>
 				}
 				chevron
-				render={<Link {...automationsLink(bot)} />}
+				render={<Link {...botAutomationsLink(bot)} />}
 			/>
 		</SettingsGroup>
 	);

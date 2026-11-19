@@ -7,29 +7,32 @@ import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 /** A message's author who has a page: a person or a bot. */
 export type PagedAuthor = Exclude<Participant, { kind: "automation_trigger" }>;
 
-type BackState = { state: (state: HistoryState) => HistoryState };
-
-/** Kept apart by kind, because a `Link` takes one route's options, not either of two. */
-export type AuthorLink =
-	| { kind: "bot"; options: ReturnType<typeof botSettingsLink> & BackState }
-	| { kind: "person"; options: ReturnType<typeof memberSettingsLink> & BackState };
+/**
+ * Where an author's name leads, to spread into a `Link`, with its route
+ * forgotten: a `Link` takes one route's options, not either of two, and
+ * `botSettingsLink` and `memberSettingsLink` have already checked each.
+ */
+export interface AuthorLink {
+	from: "/$workspace";
+	to: string;
+	params: Readonly<Record<string, string>>;
+	state: (state: HistoryState) => HistoryState;
+}
 
 /**
- * Where an author's name in a conversation leads, with Back returning to it:
- * a person's page among the workspace's members, or a bot's settings.
- * Undefined until the members are loaded, and for a person who has left the
- * workspace.
+ * Where an author's name in a conversation leads, with Back returning to it
+ * under `backLabel`: a person's page among the workspace's members, or a bot's
+ * settings. Undefined until the members are loaded, and for a person who has
+ * left the workspace.
  */
-export function useAuthorLinks(): (author: PagedAuthor) => AuthorLink | undefined {
+export function useAuthorLinks(backLabel: string): (author: PagedAuthor) => AuthorLink | undefined {
 	const { workspace } = useWorkspace();
 	const members = useWorkspaceMembers(workspace?.id);
-	const backToChat = useBackToHere("Chat");
+	const backHere = useBackToHere(backLabel);
 	return (author) => {
-		if (author.kind === "bot") {
-			return { kind: "bot", options: { ...botSettingsLink(author), state: backToChat } };
-		}
+		if (author.kind === "bot") return { ...botSettingsLink(author), state: backHere };
 		const membership = members.data?.find((member) => member.user.id === author.id);
 		if (!membership) return undefined;
-		return { kind: "person", options: { ...memberSettingsLink(membership), state: backToChat } };
+		return { ...memberSettingsLink(membership), state: backHere };
 	};
 }

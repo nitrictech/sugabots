@@ -128,11 +128,7 @@ function Plan({ name, summary, badge, children }: PlanProps) {
 			{/* A glow under the pointer, faded in while it's over the card. */}
 			<span
 				aria-hidden
-				className="pointer-events-none absolute inset-0 -z-10 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-				style={{
-					background:
-						"radial-gradient(420px circle at var(--pointer-x, 50%) var(--pointer-y, 50%), color-mix(in oklch, var(--color-landing-accent) 22%, transparent), transparent 70%)",
-				}}
+				className="pointer-events-none absolute inset-0 -z-10 bg-pointer-glow opacity-0 transition-opacity duration-300 group-hover:opacity-100"
 			/>
 			<div className="flex flex-col gap-2">
 				<div className="flex items-start justify-between gap-4">

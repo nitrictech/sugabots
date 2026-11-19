@@ -100,7 +100,7 @@ function details(
 		conversation: {
 			id: conversation.id,
 			workspaceId: conversation.workspaceId,
-			channelId: null,
+			projectId: null,
 			botId: null,
 			rootConversationId: conversation.id,
 			kind: conversation.kind,
@@ -115,7 +115,7 @@ function details(
 		capabilities: { approveToolCalls: true },
 		automationRun: null,
 		participants: people,
-		channelBots: [],
+		projectBots: [],
 		members: people,
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -154,8 +154,8 @@ function directMessageAnswers({ unread = 0 }: { unread?: number } = {}) {
 				nextCursor: null,
 			}),
 	);
-	// The bots' channels as `apiAnswers` has them, and the direct messages.
-	const channelOf = client.api.conversations.get.getMockImplementation();
+	// The bots' projects as `apiAnswers` has them, and the direct messages.
+	const projectOf = client.api.conversations.get.getMockImplementation();
 	client.api.conversations.get.mockImplementation(
 		(request: { params: { conversationId: string } }) => {
 			const { conversationId } = request.params;
@@ -164,7 +164,7 @@ function directMessageAnswers({ unread = 0 }: { unread?: number } = {}) {
 				return Effect.succeed(details(withJunoAndTheo, [], [junoParticipant, theo]));
 			}
 			return (
-				channelOf?.(request) ??
+				projectOf?.(request) ??
 				Effect.fail(new NotFound({ message: userText`No such conversation` }))
 			);
 		},
@@ -477,9 +477,9 @@ describe("direct messages", () => {
 	it("lists who is in a group, and offers no way to add anybody", async () => {
 		mount(`/suga/dm/${withJunoAndTheo.id}`);
 
-		fireEvent.click(await screen.findByRole("button", { name: /^3 members/ }));
+		fireEvent.click(await screen.findByRole("button", { name: /^3 people/ }));
 
-		const members = await screen.findByRole("list", { name: "Members" });
+		const members = await screen.findByRole("list", { name: "People" });
 		expect(within(members).getByText("Juno")).toBeDefined();
 		expect(within(members).getByText("Theo")).toBeDefined();
 		expect(within(members).getByText("You")).toBeDefined();
@@ -495,7 +495,7 @@ describe("direct messages", () => {
 						messageId: fromJuno.id,
 						author: junoParticipant,
 						preview: fromJuno.content,
-						channelId: null,
+						projectId: null,
 						rootConversationId: withJuno.id,
 						at: fromJuno.createdAt,
 						unread: true,
@@ -511,7 +511,7 @@ describe("direct messages", () => {
 		expect(row.getAttribute("href")).toBe(`/suga/dm/${withJuno.id}?message=${fromJuno.id}`);
 	});
 
-	it("waits for the direct messages before opening a message from Inbox that is in none of the channels", async () => {
+	it("waits for the direct messages before opening a message from Inbox that is in none of the projects", async () => {
 		client.api.chats.inbox.mockReturnValue(
 			Effect.succeed({
 				items: [
@@ -520,7 +520,7 @@ describe("direct messages", () => {
 						messageId: fromJuno.id,
 						author: junoParticipant,
 						preview: fromJuno.content,
-						channelId: null,
+						projectId: null,
 						rootConversationId: withJuno.id,
 						at: fromJuno.createdAt,
 						unread: true,
@@ -533,7 +533,7 @@ describe("direct messages", () => {
 		mount("/suga/inbox");
 
 		await screen.findByText(fromJuno.content);
-		// Not yet a way into a task with a bot, which it may not be.
+		// Not yet a way into a thread with a bot, which it may not be.
 		expect(screen.queryByRole("link", { name: new RegExp(`${juno.name} wrote`) })).toBeNull();
 		directMessages.answer(Effect.succeed({ items: [junoItem(1)] }));
 

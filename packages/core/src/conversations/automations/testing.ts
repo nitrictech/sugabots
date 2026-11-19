@@ -5,7 +5,7 @@ import { query } from "../../database/database.ts";
 import {
 	automationRun,
 	bot,
-	channel,
+	project,
 	user,
 	workspace,
 	workspaceMember,
@@ -51,8 +51,9 @@ export const releaseRun = (run: AutomationRun) =>
 	);
 
 /**
- * A person administering a new workspace with a bot that
- * owns automations, and the queued runs other cases left cancelled, so an
+ * A person administering a new workspace with a project, which has no bots
+ * yet, and a bot whose default project (`ownProjectId`) holds its own
+ * automations; and the queued runs other cases left cancelled, so an
  * automation's next run is the one a case asks for.
  */
 export async function anAutomationOwner() {
@@ -83,17 +84,17 @@ export async function anAutomationOwner() {
 	);
 	const [room] = await onDatabase((db) =>
 		db
-			.insert(channel)
+			.insert(project)
 			.values({
 				workspaceId,
-				name: "Automation channel",
+				name: "Automation project",
 				slug: `automation-${suffix}`,
 				createdById: userId,
 			})
 			.returning(),
 	);
-	if (!room) throw new Error("Could not create automation test channel");
-	const channelId = room.id;
+	if (!room) throw new Error("Could not create automation test project");
+	const projectId = room.id;
 	const [owner] = await onDatabase((db) =>
 		db
 			.insert(bot)
@@ -109,7 +110,22 @@ export async function anAutomationOwner() {
 			.returning(),
 	);
 	if (!owner) throw new Error("Could not create automation test bot");
-	return { userId, workspaceId, channelId, botId: owner.id };
+	return {
+		userId,
+		workspaceId,
+		projectId,
+		botId: owner.id,
+		ownProjectId: await defaultProjectOf(owner.id),
+	};
+}
+
+/** The default project of the bot `botId`, which holds its own automations. */
+export async function defaultProjectOf(botId: string) {
+	const [own] = await onDatabase((db) =>
+		db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, botId)),
+	);
+	if (!own) throw new Error("The bot has no default project");
+	return own.id;
 }
 
 /** Starts the automation's run holding its lane, as its workflow's first step does. */

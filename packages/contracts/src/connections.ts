@@ -56,7 +56,7 @@ export const connectionAccesses = ["off", "ask", "allow"] as const;
 const connectionAccessSchema = Schema.Literals(connectionAccesses);
 export type ConnectionAccess = typeof connectionAccessSchema.Type;
 
-/** A connection's tool as the server described it, with what the bot may do with it. */
+/** A connection's tool as the server described it, with what bots may do with it. */
 const connectionToolWithAccessSchema = Schema.Struct({
 	...connectionToolSchema.fields,
 	access: connectionAccessSchema,
@@ -96,8 +96,9 @@ export function toolAccessCountsOf(
 export const CONNECTION_SIGN_IN_CALLBACK_PATH = "/connections/oauth/callback";
 
 /**
- * The web page a connection's OAuth sign-in returns to, with the bot's ids
- * and, when it did not finish, an `oauth_error` code from
+ * The web page a connection's OAuth sign-in returns to, with `workspace` and
+ * `project` naming its project, `bot` the bot when that is the bot's default
+ * project, and, when it did not finish, an `oauth_error` code from
  * {@link connectionSignInFailures}.
  */
 export const CONNECTION_SIGN_IN_RETURN_PATH = "/connections/oauth/return";
@@ -125,7 +126,8 @@ export type ConnectionSignInFailure = typeof connectionSignInFailureSchema.Type;
 export const connectionSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	botId: uuidSchema,
+	/** The project it belongs to; a bot's are its default project's. */
+	projectId: uuidSchema,
 	name: Schema.String,
 	/** Prefixes the server's tool names for the model: `exa.web_search_exa`. */
 	handle: handleSchema,
@@ -163,7 +165,7 @@ export const connectionSchema = Schema.Struct({
 
 export type Connection = typeof connectionSchema.Type;
 
-/** One connection with its tools, each with what the bot may do with it. */
+/** One connection with its tools, each with what bots may do with it. */
 export const connectionWithToolsSchema = Schema.Struct({
 	...connectionSchema.fields,
 	tools: Schema.Array(connectionToolSettingSchema),

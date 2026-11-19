@@ -1,5 +1,5 @@
-import { BookOpen, Lock, Search, X } from "lucide-react";
-import { type FormEvent, useDeferredValue, useId, useState } from "react";
+import { BookOpen, Lock, X } from "lucide-react";
+import { type FormEvent, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	useConnectionRepositories,
@@ -18,6 +18,7 @@ import {
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import {
 	SettingsAddRow,
 	SettingsControlRow,
@@ -27,23 +28,23 @@ import {
 } from "@/ui/settings-page.tsx";
 
 /**
- * Connecting a bot to GitHub: the bot gets a private GitHub App of its own,
- * made on GitHub from Sugabots' manifest, owned by the organization named or
- * by the person, then installed there; its repositories are chosen on its
- * page once it is. A bot connects to one account, since its computer can be
+ * Connecting a project to GitHub: the project gets a private GitHub App of its
+ * own, made on GitHub from Sugabots' manifest, owned by the organization named
+ * or by the person, then installed there; its repositories are chosen on its
+ * page once it is. A project connects to one account, since its computer can be
  * signed in to only one at GitHub.
  */
 export function GitHubConnectStep({
-	botId,
+	projectId,
 	onBack,
 	done,
 }: {
-	botId: string;
+	projectId: string;
 	onBack: () => void;
 	done: () => void;
 }) {
 	const id = useId();
-	const make = useMakeGitHubApp(botId);
+	const make = useMakeGitHubApp(projectId);
 	const [organization, setOrganization] = useState("");
 
 	function submit(event: FormEvent) {
@@ -58,11 +59,11 @@ export function GitHubConnectStep({
 				<div className="flex flex-col items-center gap-1.5 pb-1 text-center">
 					<ConnectionMark presetId="github" name="GitHub" />
 					<span className="text-xs text-muted-foreground">
-						The bot gets a private GitHub App of its own: you make it on GitHub, then install it on
-						the account it works on.
+						The project gets a private GitHub App of its own: you make it on GitHub, then install it
+						on the account it works on.
 					</span>
 				</div>
-				<SettingsGroup note="The organization whose repositories the bot works on. Leave it empty for your own account. Making an app for an organization takes an owner or app manager there.">
+				<SettingsGroup note="The organization whose repositories the project works on. Leave it empty for your own account. Making an app for an organization takes an owner or app manager there.">
 					<SettingsControlRow label="Organization" htmlFor={id}>
 						<input
 							id={id}
@@ -90,24 +91,28 @@ export function GitHubConnectStep({
 
 /**
  * A GitHub connection's repositories, on its page: who added each, and, for
- * someone who manages the bot's connections, removing one or adding another
+ * someone who manages the project's connections, removing one or adding another
  * the connection's app reaches. Nothing until the app is installed.
  */
 export function GitHubRepositoriesGroup({
-	botId,
+	projectId,
 	connectionId,
 	appSettingsUrl,
 	canManage,
 }: {
-	botId: string;
+	projectId: string;
 	connectionId: string;
 	/** Where the app's owner changes it on GitHub. */
 	appSettingsUrl: string;
 	canManage: boolean;
 }) {
-	const { repositories, add, remove } = useConnectionRepositories(botId, connectionId);
+	const { repositories, add, remove } = useConnectionRepositories(projectId, connectionId);
 	// Listing what the app reaches takes GitHub a while, so it starts before Add repository is chosen.
-	usePrefetchReachableRepositories(botId, connectionId, canManage && !!repositories.data?.account);
+	usePrefetchReachableRepositories(
+		projectId,
+		connectionId,
+		canManage && !!repositories.data?.account,
+	);
 	const [choosing, setChoosing] = useState(false);
 	if (repositories.isPending) return null;
 	if (repositories.isError) return <Alert>{failureMessage(repositories.error)}</Alert>;
@@ -119,15 +124,15 @@ export function GitHubRepositoriesGroup({
 				label="Repositories"
 				note={
 					<>
-						The bot reads these from its computer, and works on them with the tools below. They come
-						from {account} on GitHub, through{" "}
+						The project's bots read these from its computer, and work on them with the tools below.
+						They come from {account} on GitHub, through{" "}
 						<a
 							href={appSettingsUrl}
 							target="_blank"
 							rel="noreferrer"
 							className="focus-ring rounded-sm font-medium text-link"
 						>
-							the bot's app
+							the project's app
 						</a>
 						.
 					</>
@@ -158,7 +163,7 @@ export function GitHubRepositoriesGroup({
 			<Dialog open={choosing} onOpenChange={setChoosing}>
 				{choosing && (
 					<AddRepositoryDialog
-						botId={botId}
+						projectId={projectId}
 						connectionId={connectionId}
 						account={account}
 						accountRepositories={listed.map((one) => one.repository.toLowerCase())}
@@ -173,14 +178,14 @@ export function GitHubRepositoriesGroup({
 
 /** Adding one of the repositories the connection's app reaches that the connection doesn't have yet. */
 function AddRepositoryDialog({
-	botId,
+	projectId,
 	connectionId,
 	account,
 	accountRepositories,
 	onAdd,
 	done,
 }: {
-	botId: string;
+	projectId: string;
 	connectionId: string;
 	account: string;
 	/** The connection's repositories, lowercased, which aren't offered again. */
@@ -188,16 +193,18 @@ function AddRepositoryDialog({
 	onAdd: (repository: string) => Promise<unknown>;
 	done: () => void;
 }) {
-	const reached = useReachableRepositories(botId, connectionId);
-	const [query, setQuery] = useState("");
+	const reached = useReachableRepositories(projectId, connectionId);
 	const [adding, setAdding] = useState<string>();
 	const [error, setError] = useState<unknown>();
-	const needle = useDeferredValue(query.trim().toLowerCase());
-	const shown = (reached.data ?? []).filter(
-		(one) =>
-			!accountRepositories.includes(one.repository.toLowerCase()) &&
-			(needle === "" || one.repository.toLowerCase().includes(needle)),
+	const addable = (reached.data ?? []).filter(
+		(one) => !accountRepositories.includes(one.repository.toLowerCase()),
 	);
+	const {
+		query,
+		setQuery,
+		searching,
+		matches: shown,
+	} = useSearchFilter(addable, (one) => [one.repository]);
 
 	async function addOne(repository: string) {
 		setAdding(repository);
@@ -216,17 +223,7 @@ function AddRepositoryDialog({
 			<DialogFormStep onSubmit={(event) => event.preventDefault()}>
 				<DialogFormHeader title={`Add from ${account}`} />
 				<DialogFormBody>
-					<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-						<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-						<input
-							type="search"
-							value={query}
-							onChange={(event) => setQuery(event.target.value)}
-							placeholder="Search repositories"
-							aria-label="Search repositories"
-							className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-						/>
-					</label>
+					<SearchField label="Search repositories" value={query} onChange={setQuery} />
 					{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 					{reached.error && <Alert>{failureMessage(reached.error)}</Alert>}
 					<div className="-mx-1 max-h-repos overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
@@ -256,7 +253,7 @@ function AddRepositoryDialog({
 						) : (
 							!reached.isError && (
 								<p className="m-0 px-1 text-muted-foreground text-xs">
-									{needle === ""
+									{!searching
 										? `The connection has every repository the app reaches on ${account}.`
 										: `No repository matches “${query.trim()}”.`}
 								</p>

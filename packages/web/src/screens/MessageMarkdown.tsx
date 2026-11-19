@@ -52,7 +52,7 @@ export function MessageMarkdown({
 	text: string;
 	/** Everyone a mention in the text could name. */
 	mentionable: readonly MentionTarget[];
-	/** A bot, an automation or a document a bot wrote is markdown on purpose; a person writes chat. See `WRITERS`. */
+	/** A bot, an automation or a file a bot wrote is markdown on purpose; a person writes chat. See `WRITERS`. */
 	writer: MarkdownWriter;
 }) {
 	const { className, remarkPlugins, components, completesUnclosedMarkup } = WRITERS[writer];
@@ -183,7 +183,7 @@ const remarkOnlyWebLinks: Plugin<[], MdastRoot> = () => (tree, file) => {
  * nothing strips the `<mention>` elements `remarkMentions` adds. Streamdown's
  * `allowedTags` only reaches the sanitiser when its own plugins are in use.
  * Without its `rehype-raw` either, HTML in a message is drawn as text, which
- * keeps anyone in a channel from putting markup in front of the others: never
+ * keeps anyone in a project from putting markup in front of the others: never
  * add it. Nothing filters link addresses; React refuses `javascript:` ones.
  * `rehypeImagesAsLinks` keeps every writer's images from loading, so never
  * drop it either.
@@ -333,7 +333,7 @@ export function writerOf(author: MessageAuthor): MarkdownWriter {
  * they send is finished as written: a lone backtick or `**` stays as typed
  * rather than being closed for them, and a single `~`, as in "~5 min", is not
  * strikethrough. A bot's page colours, which reach a person's message in its
- * channel, are kept off their links and code.
+ * project, are kept off their links and code.
  *
  * Links are `MarkdownLink`s, as Streamdown's own becomes a button when it
  * warns before leaving, losing middle-click and the hover preview.

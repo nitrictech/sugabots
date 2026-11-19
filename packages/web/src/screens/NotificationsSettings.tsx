@@ -1,11 +1,9 @@
 import type {
 	AutomationRunNotifications,
-	NotificationPreferences,
 	NotificationSettings,
 	QuietHours,
 } from "@sugabots/contracts";
 import { useId } from "react";
-import { useChannels } from "@/lib/channels.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	DEFAULT_QUIET_HOURS,
@@ -16,9 +14,10 @@ import {
 	formatUntil,
 	MUTE_DURATIONS,
 	useBrowserNotifications,
+	useChangeNotificationPreferences,
 	useNotificationSettings,
-	useUpdateNotificationPreferences,
 } from "@/lib/notifications.ts";
+import { useProjects } from "@/lib/projects.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import {
@@ -51,7 +50,7 @@ export function NotificationsSettings() {
 					<AlsoNotifyAbout settings={settings} />
 					<Pause settings={settings} />
 					<QuietHoursSettings settings={settings} />
-					<ChannelLevels settings={settings} />
+					<ProjectLevels settings={settings} />
 				</>
 			)}
 		</SettingsPage>
@@ -117,36 +116,25 @@ const LEVEL_OPTIONS = (["all", "mentions", "nothing"] as const).map((value) => (
 	label: NOTIFICATION_LEVEL_LABELS[value],
 }));
 
-function preferencesOf(settings: NotificationSettings): NotificationPreferences {
-	return {
-		level: settings.level,
-		pausedUntil: settings.pausedUntil,
-		quietHours: settings.quietHours,
-		turnFailures: settings.turnFailures,
-		automationRuns: settings.automationRuns,
-	};
-}
-
 function NotifyAbout({ settings }: { settings: NotificationSettings }) {
-	const update = useUpdateNotificationPreferences();
+	const change = useChangeNotificationPreferences(settings);
 	return (
 		<SettingsGroup label="Notify me about" note={NOTIFICATION_LEVEL_NOTES[settings.level]}>
 			<SettingsChoiceRow
 				label="Notify me about"
 				options={LEVEL_OPTIONS}
 				value={settings.level}
-				onChange={(level) => update.mutate({ ...preferencesOf(settings), level })}
+				onChange={(level) => change({ level })}
 			/>
 		</SettingsGroup>
 	);
 }
 
 function Pause({ settings }: { settings: NotificationSettings }) {
-	const update = useUpdateNotificationPreferences();
+	const change = useChangeNotificationPreferences(settings);
 	const pausedUntil = settings.pausedUntil ? new Date(settings.pausedUntil) : null;
 	const paused = pausedUntil !== null && pausedUntil > new Date();
-	const pauseUntil = (until: Date | null) =>
-		update.mutate({ ...preferencesOf(settings), pausedUntil: until?.toISOString() ?? null });
+	const pauseUntil = (until: Date | null) => change({ pausedUntil: until?.toISOString() ?? null });
 
 	return (
 		<SettingsGroup>
@@ -189,11 +177,11 @@ const AUTOMATION_RUN_OPTIONS: { value: AutomationRunNotifications; label: string
 
 /** What besides messages the person hears of, unless their level is Nothing. */
 function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
-	const update = useUpdateNotificationPreferences();
+	const change = useChangeNotificationPreferences(settings);
 	return (
 		<SettingsGroup
 			label="Also notify me when"
-			note="Runs of automations you made or started. Muting a channel or bot quiets these too."
+			note="Runs of automations you made or started. Muting a project or bot quiets these too."
 		>
 			<SettingsRow
 				label="A bot can't finish its reply to me"
@@ -201,7 +189,7 @@ function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
 					<Toggle
 						label="A bot can't finish its reply to me"
 						checked={settings.turnFailures}
-						onChange={(turnFailures) => update.mutate({ ...preferencesOf(settings), turnFailures })}
+						onChange={(turnFailures) => change({ turnFailures })}
 					/>
 				}
 			/>
@@ -209,19 +197,18 @@ function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
 				label="My automations run"
 				options={AUTOMATION_RUN_OPTIONS}
 				value={settings.automationRuns}
-				onChange={(automationRuns) => update.mutate({ ...preferencesOf(settings), automationRuns })}
+				onChange={(automationRuns) => change({ automationRuns })}
 			/>
 		</SettingsGroup>
 	);
 }
 
 function QuietHoursSettings({ settings }: { settings: NotificationSettings }) {
-	const update = useUpdateNotificationPreferences();
+	const change = useChangeNotificationPreferences(settings);
 	const fromId = useId();
 	const toId = useId();
 	const quietHours = settings.quietHours;
-	const save = (next: QuietHours | null) =>
-		update.mutate({ ...preferencesOf(settings), quietHours: next });
+	const save = (next: QuietHours | null) => change({ quietHours: next });
 	const thisDevicesTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 	return (
@@ -288,24 +275,24 @@ function TimeInput({
 	);
 }
 
-/** A level for each channel, in place of the person's own, as Slack sets one per channel. */
-function ChannelLevels({ settings }: { settings: NotificationSettings }) {
-	const { data: channels } = useChannels();
-	if (!channels || channels.length === 0) return null;
+/** A level for each project, in place of the person's own. */
+function ProjectLevels({ settings }: { settings: NotificationSettings }) {
+	const { data: projects } = useProjects();
+	if (!projects || projects.length === 0) return null;
 	return (
 		<SettingsGroup
-			label="Channels"
-			note="A channel or bot set to Default follows what you chose above. Right-click a channel or a bot in the sidebar to change it there."
+			label="Projects"
+			note="A project or bot set to Default follows what you chose above. Right-click a project or a bot in the sidebar to change it there."
 		>
-			{channels.map((channel) => (
+			{projects.map((project) => (
 				<SettingsRow
-					key={channel.id}
-					label={channel.name}
+					key={project.id}
+					label={project.name}
 					trailing={
 						<NotificationLevelPicker
 							settings={settings}
-							place={{ kind: "channel", id: channel.id }}
-							name={channel.name}
+							place={{ kind: "project", id: project.id }}
+							name={project.name}
 						/>
 					}
 				/>

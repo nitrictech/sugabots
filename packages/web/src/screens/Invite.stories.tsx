@@ -34,7 +34,7 @@ const meta = preview.meta({
 	),
 });
 
-/** Whose workspace it is, and Accept. */
+/** Whose workspace it is, who invited you, and Accept. */
 export const Invited = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
@@ -47,6 +47,7 @@ export const Invited = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { name: "You have been invited to Nitric." }),
 		).toBeInTheDocument();
+		await expect(canvas.getByText(/^Jay Young invited you/)).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Accept invite" })).toBeEnabled();
 	},
 });

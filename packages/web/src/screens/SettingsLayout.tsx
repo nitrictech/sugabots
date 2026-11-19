@@ -1,4 +1,5 @@
-import type { Bot, Channel } from "@sugabots/contracts";
+import { useRender } from "@base-ui/react/use-render";
+import type { Bot, Project } from "@sugabots/contracts";
 import {
 	type HistoryState,
 	Link,
@@ -21,33 +22,33 @@ import {
 	useState,
 } from "react";
 import { findBot, useBots } from "@/lib/bots.ts";
-import { findChannel, useChannelBots, useChannelMembers, useChannels } from "@/lib/channels.ts";
 import { useConnections } from "@/lib/connections.ts";
 import {
 	botSettingsLink,
 	botSettingsPageLink,
-	channelSettingsLink,
-	channelSettingsPageLink,
+	projectSettingsLink,
+	projectSettingsPageLink,
 } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
+import { findProject, useProjectBots, useProjectMembers, useProjects } from "@/lib/projects.ts";
 import { useSession } from "@/lib/session.ts";
 import { useBackTarget, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
 import {
 	botSettingsPage,
 	botSettingsPages,
-	channelSettingsPage,
-	channelSettingsPages,
+	projectSettingsPage,
+	projectSettingsPages,
 	type SettingSection,
 	workspaceSettingSection,
 	workspaceSettingSections,
 	yourSettingSections,
 } from "@/lib/workspace-settings.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { NewChannelDialog } from "@/shell/NewChannel.tsx";
-import { ChannelInitial } from "@/shell/SidebarChannel.tsx";
+import { NewProjectDialog } from "@/shell/NewProject.tsx";
+import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -60,11 +61,10 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * Settings, from a tablet up as a dialog over the dimmed app: the workspace's
- * sections, each channel's pages and each bot down the left, the open page
+ * sections, each project's pages and each bot down the left, the open page
  * beside them under a trail of where it sits. Below a laptop's width there is no room for both, so
  * settings drill down as a phone's do: the sections as one list, and each
  * opening with a way back to it.
@@ -149,18 +149,7 @@ function SettingsClose({ backdrop = false }: { backdrop?: boolean }) {
 	const to = back?.render ?? (
 		<Link to="/$workspace" params={{ workspace: workspace?.slug ?? "" }} />
 	);
-	if (backdrop) {
-		return (
-			<IconButton
-				label="Close settings"
-				render={to}
-				tabIndex={-1}
-				className="absolute inset-0 hidden size-auto cursor-default rounded-none bg-scrim hover:bg-scrim md:block"
-			>
-				{null}
-			</IconButton>
-		);
-	}
+	if (backdrop) return <SettingsBackdrop render={to} />;
 	return (
 		<IconButton
 			ref={close}
@@ -171,6 +160,18 @@ function SettingsClose({ backdrop = false }: { backdrop?: boolean }) {
 			<X aria-hidden />
 		</IconButton>
 	);
+}
+
+/** The dimmed app around the settings dialog, which closes it when clicked, as the × does. */
+function SettingsBackdrop({ render }: { render: useRender.RenderProp }) {
+	return useRender({
+		render,
+		props: {
+			"aria-label": "Close settings",
+			tabIndex: -1,
+			className: "absolute inset-0 hidden cursor-default bg-scrim md:block",
+		},
+	});
 }
 
 /**
@@ -200,14 +201,14 @@ function parentPage(pathname: string): BackTarget {
 			render: <Link {...botSettingsLink({ handle: item })} />,
 		};
 	}
-	if (sectionId === "channels" && item !== undefined && page !== undefined) {
+	if (sectionId === "projects" && item !== undefined && page !== undefined) {
 		return {
-			label: "Channel",
-			render: <Link {...channelSettingsLink({ slug: item })} />,
+			label: "Project",
+			render: <Link {...projectSettingsLink({ slug: item })} />,
 		};
 	}
-	// A channel's own page is one of the navigation's, so it sits under the list itself.
-	if (sectionId !== undefined && sectionId !== "channels" && item !== undefined) {
+	// A project's own page is one of the navigation's, so it sits under the list itself.
+	if (sectionId !== undefined && sectionId !== "projects" && item !== undefined) {
 		const section = workspaceSettingSection(sectionId);
 		if (section) {
 			return {
@@ -256,13 +257,13 @@ function useWorkspaceSections() {
 	return { sections, counts };
 }
 
-/** The channels you are in and the bots you reach, as the navigation lists them. */
+/** The projects you are in and the bots you reach, as the navigation lists them. */
 function useListed() {
-	const { data: channels } = useChannels();
+	const { data: projects } = useProjects();
 	const { bots } = useBots();
 	return {
-		channels: channels?.filter((channel) => channel.isMember) ?? [],
-		bots: bots?.filter((bot) => bot.systemBotKey === null) ?? [],
+		projects: projects?.filter((project) => project.isMember) ?? [],
+		bots: bots ?? [],
 	};
 }
 
@@ -271,7 +272,7 @@ const NAVIGATION_MAX_WIDTH = "33vw";
 
 function SettingsNavigation() {
 	const { sections, counts } = useWorkspaceSections();
-	const { channels, bots } = useListed();
+	const { projects, bots } = useListed();
 	const may = useWorkspacePermissions();
 	const session = useSession();
 	const pathname = useSettingsPath();
@@ -319,10 +320,10 @@ function SettingsNavigation() {
 						/>
 					))}
 				</NavigationGroup>
-				{(channels.length > 0 || may.createChannels) && (
-					<NavigationGroup label="Channels" action={may.createChannels && <NewChannelButton />}>
-						{channels.map((channel) => (
-							<ChannelNavigation key={channel.id} channel={channel} pathname={pathname} />
+				{(projects.length > 0 || may.createProjects) && (
+					<NavigationGroup label="Projects" action={may.createProjects && <NewProjectButton />}>
+						{projects.map((project) => (
+							<ProjectNavigation key={project.id} project={project} pathname={pathname} />
 						))}
 					</NavigationGroup>
 				)}
@@ -365,7 +366,7 @@ function NavigationGroup({
 }
 
 /**
- * What sits at a line's right: a count, a channel's chevron, the + beside Channels.
+ * What sits at a line's right: a count, a project's chevron, the + beside Projects.
  * One width for all, centred in it, so they line up down the navigation.
  */
 const TRAILING_SLOT = "grid w-5.5 shrink-0 place-items-center";
@@ -413,16 +414,16 @@ function BotNavigation({ bot, pathname }: { bot: Bot; pathname: string }) {
 }
 
 /**
- * A channel in the navigation, opening onto its pages. The channel you are
+ * A project in the navigation, opening onto its pages. The project you are
  * on stays open; the others open and close as you choose.
  */
-function ChannelNavigation({ channel, pathname }: { channel: Channel; pathname: string }) {
-	const openPage = channelPageAt(pathname, channel);
-	const [chosenOpen, setChosenOpen] = useRememberedOpen(channel.id);
+function ProjectNavigation({ project, pathname }: { project: Project; pathname: string }) {
+	const openPage = projectPageAt(pathname, project);
+	const [chosenOpen, setChosenOpen] = useRememberedOpen(project.id);
 	// Opened or closed as last chosen on this device; until then, open while you are on one of its pages.
 	const open = chosenOpen ?? openPage !== undefined;
-	const counts = useChannelCounts(channel, open);
-	const listId = `settings-channel-${channel.id}`;
+	const counts = useProjectCounts(project, open);
+	const listId = `settings-project-${project.id}`;
 	return (
 		<div className="flex flex-col gap-px">
 			<button
@@ -435,8 +436,8 @@ function ChannelNavigation({ channel, pathname }: { channel: Channel; pathname: 
 					openPage ? "text-foreground" : "text-muted-foreground",
 				)}
 			>
-				<ChannelInitial channel={channel} size="sm" />
-				<span className="min-w-0 flex-1 truncate">{channel.name}</span>
+				<ProjectInitial project={project} size="sm" />
+				<span className="min-w-0 flex-1 truncate">{project.name}</span>
 				<span aria-hidden className={TRAILING_SLOT}>
 					<ChevronRight
 						size={12}
@@ -450,7 +451,7 @@ function ChannelNavigation({ channel, pathname }: { channel: Channel; pathname: 
 					id={listId}
 					className="mb-1 ml-4 flex flex-col gap-px border-border-strong border-l pl-2"
 				>
-					{channelSettingsPages.map((page) => {
+					{projectSettingsPages.map((page) => {
 						const selected = openPage === page.id;
 						const className = cn(NAVIGATION_ITEM, navigationItemState(selected));
 						const count = counts[page.id];
@@ -459,7 +460,7 @@ function ChannelNavigation({ channel, pathname }: { channel: Channel; pathname: 
 						return (
 							<Link
 								key={page.id}
-								{...channelSettingsPageLink(channel, page.id)}
+								{...projectSettingsPageLink(project, page.id)}
 								aria-label={label}
 								aria-current={current}
 								className={className}
@@ -474,22 +475,21 @@ function ChannelNavigation({ channel, pathname }: { channel: Channel; pathname: 
 	);
 }
 
-// The name browsers already hold the choices under.
-const OPEN_CHANNELS_KEY = "sugabots-settings-open-pods";
+const OPEN_PROJECTS_KEY = "sugabots-settings-open-projects";
 
 /**
- * Whether `channelId` was last opened or closed in the navigation on this device,
+ * Whether `projectId` was last opened or closed in the navigation on this device,
  * and the way to choose: undefined until somebody does. Kept in the browser,
  * like a pane's width, so it survives leaving settings and reloading.
  */
-function useRememberedOpen(channelId: string): [boolean | undefined, (open: boolean) => void] {
-	const [chosen, setChosen] = useState(() => storedOpenChannels()[channelId]);
+function useRememberedOpen(projectId: string): [boolean | undefined, (open: boolean) => void] {
+	const [chosen, setChosen] = useState(() => storedOpenProjects()[projectId]);
 	const choose = (open: boolean) => {
 		setChosen(open);
 		try {
 			localStorage.setItem(
-				OPEN_CHANNELS_KEY,
-				JSON.stringify({ ...storedOpenChannels(), [channelId]: open }),
+				OPEN_PROJECTS_KEY,
+				JSON.stringify({ ...storedOpenProjects(), [projectId]: open }),
 			);
 		} catch {
 			// Storage can be off. The choice still holds until the page is left.
@@ -498,9 +498,9 @@ function useRememberedOpen(channelId: string): [boolean | undefined, (open: bool
 	return [chosen, choose];
 }
 
-function storedOpenChannels(): Record<string, boolean> {
+function storedOpenProjects(): Record<string, boolean> {
 	try {
-		const stored: unknown = JSON.parse(localStorage.getItem(OPEN_CHANNELS_KEY) ?? "{}");
+		const stored: unknown = JSON.parse(localStorage.getItem(OPEN_PROJECTS_KEY) ?? "{}");
 		if (typeof stored !== "object" || stored === null) return {};
 		return Object.fromEntries(
 			Object.entries(stored).filter(
@@ -512,40 +512,38 @@ function storedOpenChannels(): Record<string, boolean> {
 	}
 }
 
-/** What each of a channel's pages holds, counted once the channel is open in the navigation. */
-function useChannelCounts(channel: Channel, open: boolean): Partial<Record<string, number>> {
-	const members = useChannelMembers(open ? channel.id : undefined);
-	const bots = useChannelBots(open ? channel.id : undefined);
+/** What each of a project's pages holds, counted once the project is open in the navigation. */
+function useProjectCounts(project: Project, open: boolean): Partial<Record<string, number>> {
+	const members = useProjectMembers(open ? project.id : undefined);
+	const bots = useProjectBots(open ? project.id : undefined);
 	return {
 		people: members.data?.length || undefined,
 		bots: bots.data?.length || undefined,
 	};
 }
 
-/** Makes a channel and opens its settings: the + beside Channels in the navigation. */
-function NewChannelButton() {
+/** Makes a project and opens its settings: the + beside Projects in the navigation. */
+function NewProjectButton() {
 	const navigate = useNavigate();
 	const [creating, setCreating] = useState(false);
 	return (
 		<>
-			<Tooltip label="New channel">
-				<button
-					type="button"
-					aria-label="New channel"
-					onClick={() => setCreating(true)}
-					className={cn(
-						TRAILING_SLOT,
-						"focus-ring h-5.5 rounded-xs text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground",
-					)}
-				>
-					<Plus size={13} strokeWidth={2} />
-				</button>
-			</Tooltip>
+			<IconButton
+				label="New project"
+				size="sm"
+				onClick={() => setCreating(true)}
+				className={cn(
+					TRAILING_SLOT,
+					"h-5.5 rounded-xs text-subtle-foreground hover:bg-row-hover [&_svg]:size-3.25",
+				)}
+			>
+				<Plus strokeWidth={2} />
+			</IconButton>
 			<Dialog open={creating} onOpenChange={setCreating}>
-				<NewChannelDialog
-					onCreated={async (channel) => {
+				<NewProjectDialog
+					onCreated={async (project) => {
 						setCreating(false);
-						await navigate(channelSettingsLink(channel));
+						await navigate(projectSettingsLink(project));
 					}}
 				/>
 			</Dialog>
@@ -572,7 +570,7 @@ function CompactSettingsList() {
 
 /**
  * The groups of the list of settings: you, the workspace's sections, its
- * channels and its bots. A phone's You tab lists them too, with `linkState`
+ * projects and its bots. A phone's You tab lists them too, with `linkState`
  * saying where each page's Back returns.
  */
 export function SettingsListGroups({
@@ -581,7 +579,7 @@ export function SettingsListGroups({
 	linkState?: (state: HistoryState) => HistoryState;
 }) {
 	const { sections, counts } = useWorkspaceSections();
-	const { channels, bots } = useListed();
+	const { projects, bots } = useListed();
 	const { user } = useSession();
 	return (
 		<>
@@ -629,15 +627,15 @@ export function SettingsListGroups({
 					/>
 				))}
 			</SettingsGroup>
-			{channels.length > 0 && (
-				<SettingsGroup label="Channels" headingLevel={2}>
-					{channels.map((channel) => (
+			{projects.length > 0 && (
+				<SettingsGroup label="Projects" headingLevel={2}>
+					{projects.map((project) => (
 						<SettingsRow
-							key={channel.id}
-							icon={<ChannelInitial channel={channel} size="sm" />}
-							label={channel.name}
+							key={project.id}
+							icon={<ProjectInitial project={project} size="sm" />}
+							label={project.name}
 							chevron
-							render={<Link {...channelSettingsLink(channel)} state={linkState} />}
+							render={<Link {...projectSettingsLink(project)} state={linkState} />}
 						/>
 					))}
 				</SettingsGroup>
@@ -733,7 +731,7 @@ function sectionCrumb(id: SettingSection["id"]): Crumb {
 /** The trail to the open page, read from its address. */
 function useSettingsCrumbs(): Crumb[] {
 	const pathname = useSettingsPath();
-	const { data: channels } = useChannels();
+	const { data: projects } = useProjects();
 	const { bots } = useBots();
 	const [, sectionId, item, page, detail] = pathname.split("/").filter(Boolean);
 	if (sectionId === undefined || sectionId === "general") {
@@ -743,9 +741,9 @@ function useSettingsCrumbs(): Crumb[] {
 	if (yours) {
 		return [{ label: "Your settings" }, { label: yours.label }];
 	}
-	if (sectionId === "channels" && item !== undefined) {
-		const channel = findChannel(channels, item);
-		return channel ? channelCrumbs(channel, page) : [];
+	if (sectionId === "projects" && item !== undefined) {
+		const project = findProject(projects, item);
+		return project ? projectCrumbs(project, page) : [];
 	}
 	if (sectionId === "bots" && item !== undefined) {
 		const bot = findBot(bots, item);
@@ -763,14 +761,14 @@ function useSettingsCrumbs(): Crumb[] {
 	return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
 }
 
-/** A channel's part of the trail: its settings, then the page. */
-function channelCrumbs(channel: Channel, page: string | undefined): Crumb[] {
-	const channelCrumb = {
-		label: `${channel.name} settings`,
-		link: <Link {...channelSettingsLink(channel)} />,
+/** A project's part of the trail: its settings, then the page. */
+function projectCrumbs(project: Project, page: string | undefined): Crumb[] {
+	const projectCrumb = {
+		label: `${project.name} settings`,
+		link: <Link {...projectSettingsLink(project)} />,
 	};
-	const label = channelSettingsPages.find((one) => one.id === (page ?? "general"))?.label;
-	return [channelCrumb, { label: label ?? page }];
+	const label = projectSettingsPages.find((one) => one.id === (page ?? "general"))?.label;
+	return [projectCrumb, { label: label ?? page }];
 }
 
 /** A bot's part of the trail: its settings, then the page, down to one of its connections. */
@@ -790,12 +788,12 @@ function botCrumbs(bot: Bot, page: string | undefined, connection: string | unde
 	return [
 		...trail,
 		{ label: pageLabel, link: <Link {...botSettingsPageLink(bot, shown)} /> },
-		{ label: <ConnectionName botId={bot.id} connectionId={connection} /> },
+		{ label: <ConnectionName projectId={bot.defaultProjectId} connectionId={connection} /> },
 	];
 }
 
-function ConnectionName({ botId, connectionId }: { botId: string; connectionId: string }) {
-	return useConnections(botId).data?.find((one) => one.id === connectionId)?.name ?? null;
+function ConnectionName({ projectId, connectionId }: { projectId: string; connectionId: string }) {
+	return useConnections(projectId).data?.find((one) => one.id === connectionId)?.name ?? null;
 }
 
 function MemberName({ membershipId }: { membershipId: string }) {
@@ -818,12 +816,12 @@ function useSettingsPath(): string {
 	return useLocation({ select: (location) => location.pathname.slice(workspacePath.length) });
 }
 
-/** Which of `channel`'s pages the address is on. */
-function channelPageAt(pathname: string, channel: Channel) {
+/** Which of `project`'s pages the address is on. */
+function projectPageAt(pathname: string, project: Project) {
 	const [, section, slug, page] = pathname.split("/").filter(Boolean);
-	if (section !== "channels" || slug !== channel.slug) return undefined;
+	if (section !== "projects" || slug !== project.slug) return undefined;
 	if (page === undefined) return "general";
-	return channelSettingsPage(page);
+	return projectSettingsPage(page);
 }
 
 /** `/settings` is General, so it matches itself alone; the rest stay selected while you are inside one of their pages. */

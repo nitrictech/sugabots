@@ -56,7 +56,6 @@ DROP INDEX "bot_name_idx";--> statement-breakpoint
 CREATE UNIQUE INDEX "bot_name_idx" ON "bot" ("workspace_id",lower("name")) WHERE "system_bot_key" is null and "assistant_of" is null;--> statement-breakpoint
 DROP INDEX "bot_handle_idx";--> statement-breakpoint
 CREATE UNIQUE INDEX "bot_handle_idx" ON "bot" ("workspace_id","handle") WHERE "system_bot_key" is null and "assistant_of" is null;--> statement-breakpoint
--- A bot's turn's model requests, by the purpose's new name.
 ALTER TABLE "model_request" DROP CONSTRAINT "model_request_purpose_valid";--> statement-breakpoint
 UPDATE "model_request" SET "purpose" = 'bot-turn' WHERE "purpose" = 'agent-turn';--> statement-breakpoint
 ALTER TABLE "model_request" ADD CONSTRAINT "model_request_purpose_valid" CHECK ("purpose" in ('bot-turn', 'facilitation', 'summary', 'compaction', 'trial', 'provider-check'));--> statement-breakpoint
@@ -65,7 +64,6 @@ ALTER TABLE "thread_participant" DROP CONSTRAINT "thread_participant_one_identit
 ALTER TABLE "automation" DROP CONSTRAINT "automation_created_by_bot_valid", ADD CONSTRAINT "automation_created_by_bot_valid" CHECK ("created_by_bot_id" is null or "created_by_bot_id" = "bot_id");--> statement-breakpoint
 ALTER TABLE "thread" DROP CONSTRAINT "thread_host_valid", ADD CONSTRAINT "thread_host_valid" CHECK (("type" in ('pod_chat', 'direct')) = ("host_bot_id" is null));--> statement-breakpoint
 ALTER TABLE "notification_override" DROP CONSTRAINT "notification_override_one_place", ADD CONSTRAINT "notification_override_one_place" CHECK (num_nonnulls("channel_id", "bot_id") = 1);--> statement-breakpoint
--- The files bots attach to their replies, by the kind's new name.
 ALTER TABLE "file" DROP CONSTRAINT "file_kind_valid";--> statement-breakpoint
 ALTER TABLE "file" DROP CONSTRAINT "file_source_valid";--> statement-breakpoint
 UPDATE "file" SET "kind" = 'bot_attachment' WHERE "kind" = 'agent_attachment';--> statement-breakpoint
@@ -110,7 +108,7 @@ BEGIN
 		);
 	END LOOP;
 END $$;--> statement-breakpoint
--- The system bot that writes summaries is the Summariser now, where it still has its old name.
+-- A Summariser someone renamed keeps the name they gave it.
 UPDATE "bot" SET "name" = 'Summariser', "handle" = 'summariser'
 WHERE "system_bot_key" = 'summarise' AND "name" = 'Scribe' AND "handle" = 'scribe';--> statement-breakpoint
 -- The folders a computer's disk was last measured with name each home's bot as `botId`.

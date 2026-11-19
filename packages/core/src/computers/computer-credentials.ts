@@ -4,22 +4,25 @@ import { Context, type DateTime, Effect, Layer } from "effect";
 import type { Computers } from "./computers.ts";
 
 /**
- * What a bot's computer is signed in to the services it uses with, such
+ * What a project's computer is signed in to the services it uses with, such
  * as its repositories. The provider adds these outside the computer, so the
  * computer only ever holds placeholders. Computers don't know where they come
  * from: entry points provide the implementation (see
- * `git-hosts/repository-sign-in.ts`).
+ * `providers/connections/github/github-sign-in.ts`).
  */
 export interface Interface {
-	/** The bot's sign-ins now. One that can't be had is left out, and logged. */
-	readonly forBot: (bot: { workspaceId: string; botId: string }) => Effect.Effect<SignedIn>;
+	/** The project's sign-ins now. One that can't be had is left out, and logged. */
+	readonly forProject: (project: {
+		workspaceId: string;
+		projectId: string;
+	}) => Effect.Effect<SignedIn>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ComputerCredentials",
 ) {}
 
-/** Sign-ins for a bot's computer, and when they must be replaced. */
+/** Sign-ins for a project's computer, and when they must be replaced. */
 export interface SignedIn {
 	readonly credentials: readonly Computers.Credential[];
 	/** Placeholders that tell command-line tools they are signed in. */
@@ -30,7 +33,7 @@ export interface SignedIn {
 
 export const NOT_SIGNED_IN: SignedIn = { credentials: [], environment: {}, expiresAt: undefined };
 
-/** For a bot whose computer is signed in to nothing. */
+/** For a project whose computer is signed in to nothing. */
 export const none = Layer.succeed(Service, {
-	forBot: () => Effect.succeed(NOT_SIGNED_IN),
+	forProject: () => Effect.succeed(NOT_SIGNED_IN),
 });

@@ -121,7 +121,7 @@ describe("the Exa backend", () => {
 						title: "Sugabots",
 						url: "https://example.com/sugabots",
 						publishedDate: "2026-09-01T00:00:00.000Z",
-						highlights: ["People and bots", "in channels."],
+						highlights: ["People and bots", "in projects."],
 					},
 					{ title: null, url: "https://example.com/untitled" },
 				],
@@ -142,7 +142,7 @@ describe("the Exa backend", () => {
 				{
 					title: "Sugabots",
 					url: "https://example.com/sugabots",
-					snippet: "People and bots in channels.",
+					snippet: "People and bots in projects.",
 					published: "2026-09-01T00:00:00.000Z",
 				},
 				{

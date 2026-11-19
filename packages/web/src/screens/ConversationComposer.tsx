@@ -6,7 +6,6 @@ import type {
 	SessionUser,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { cn } from "cn";
 import { type Dispatch, type SetStateAction, useMemo } from "react";
 import { useBot, useModelName } from "@/lib/bots.ts";
 import type { ComposerAttachments } from "@/lib/composer-attachments.ts";
@@ -21,10 +20,10 @@ import { groupMentionsBy, mentionableIn } from "./mentions.tsx";
 import type { MessageSending } from "./message-sending.ts";
 import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
 
-/** Shown when marking a task done, or reopening it, did not save. */
-const DONE_FAILURE_MESSAGE = "This task was not marked done or reopened. Try again.";
-/** Names the bots a channel message asks, as "Ada, Bea and Cy". */
-const BOT_LIST = new Intl.ListFormat("en", { type: "conjunction" });
+/** Shown when marking a thread done, or reopening it, did not save. */
+const DONE_FAILURE_MESSAGE = "This thread was not marked done or reopened. Try again.";
+/** Every bot a message goes to is named, however many: "Ada, Bea and Cy". */
+const EVERY_NAME = { maxNamed: Number.POSITIVE_INFINITY };
 
 /**
  * The foot of a chat: the composer, saying whom the message goes to, and
@@ -48,15 +47,14 @@ export function ConversationComposer({
 	sending,
 	doneFailed,
 	typers,
-	pill = false,
 }: {
-	/** The chat's own bot; null in a channel or a direct message. */
+	/** The bot whose thread it is; null in a project's thread or a direct message. */
 	bot: Bot | null;
-	/** The bot the task is with, as the conversation lists it. */
+	/** The bot whose thread it is, as the conversation lists it. */
 	host: BotParticipant | undefined;
 	details: ConversationDetails;
 	user: SessionUser;
-	/** Whether the bots people name reply here, as in a channel. */
+	/** Whether the bots people name reply here, as in a project. */
 	namedBotsReply: boolean;
 	/** Whom the composer says a message goes to while the draft names nobody. */
 	chatName: string;
@@ -68,18 +66,16 @@ export function ConversationComposer({
 	audience: DraftAudience;
 	recipients: ChatRecipients;
 	sending: MessageSending;
-	/** Whether marking the task done, or reopening it, last failed. */
+	/** Whether marking the thread done, or reopening it, last failed. */
 	doneFailed: boolean;
 	typers: readonly Typer[];
-	/** One rounded line in a centred column, as a bot's task has it, rather than the draft over a row of tools. */
-	pill?: boolean;
 }) {
-	// The model of the bot a message here goes to: the one named in the channel, else this task's own.
+	// The model of the bot a message here goes to: the one named in the project, else this thread's own.
 	const firstAnswering = useBot(recipients.answering[0]?.id);
 	const answeringModel = useModelName(
 		(namedBotsReply ? firstAnswering?.model : bot?.model) ?? null,
 	);
-	// Everyone here and the channel's bots, not yourself. Naming a bot has it reply where
+	// Everyone here and the project's bots, not yourself. Naming a bot has it reply where
 	// people talk among themselves, and asks this chat's own bot to bring it in elsewhere.
 	const mentionable = useMemo(
 		() => [
@@ -94,15 +90,13 @@ export function ConversationComposer({
 	);
 	const hint = replyHint({ namedBotsReply, answering: recipients.answering, audience, host });
 	return (
-		<div
-			className={cn("w-full shrink-0 px-4 max-md:pb-tab-bar md:px-5", pill && "mx-auto max-w-200")}
-		>
+		<div className="mx-auto w-full max-w-200 shrink-0 px-4 max-md:pb-tab-bar md:px-5">
 			{bot?.model === null ? (
 				<BotNotSetUp bot={bot} />
 			) : (
 				<ChatComposer
 					label={composerLabel({ audience, automation: !!details.automation, bot, chatName })}
-					pill={pill}
+					pill
 					model={audience.botStaysOut ? undefined : (answeringModel ?? undefined)}
 					value={draft}
 					onValueChange={onDraftChange}
@@ -110,7 +104,6 @@ export function ConversationComposer({
 					submitLabel="Send message"
 					sending={sending.pending}
 					error={sending.error ?? (doneFailed ? DONE_FAILURE_MESSAGE : undefined)}
-					className="w-full"
 					mentionable={mentionable}
 					replyingTo={
 						replyingTo && { message: replyingTo, onCancel: () => onReplyingToChange(undefined) }
@@ -163,7 +156,7 @@ function composerLabel({
 
 /**
  * Under the composer while nobody is typing: which bots will reply. In a
- * channel, those the message goes to; in a task, whether its bot stays out,
+ * project, those the message goes to; in a bot's thread, whether its bot stays out,
  * or which bots it will ask for help.
  */
 function replyHint({
@@ -179,13 +172,19 @@ function replyHint({
 }): string | undefined {
 	if (namedBotsReply) {
 		return answering.length > 0
-			? `${BOT_LIST.format(answering.map((bot) => bot.name))} will reply here.`
+			? `${listNames(
+					answering.map((bot) => bot.name),
+					EVERY_NAME,
+				)} will reply here.`
 			: "Mention a bot to have it reply here.";
 	}
 	if (!host) return undefined;
 	if (audience.botStaysOut) return `${host.name} won't reply.`;
 	if (audience.askedForHelp.length > 0) {
-		return `${host.name} will ask ${BOT_LIST.format(audience.askedForHelp.map((bot) => bot.name))} for help.`;
+		return `${host.name} will ask ${listNames(
+			audience.askedForHelp.map((bot) => bot.name),
+			EVERY_NAME,
+		)} for help.`;
 	}
 	return undefined;
 }
@@ -196,7 +195,7 @@ function replyHint({
  * Only somebody who may edit the bot is offered the way to fix it.
  */
 function BotNotSetUp({ bot }: { bot: Bot }) {
-	const backToChat = useBackToHere("Chat");
+	const backToThread = useBackToHere("Thread");
 	return (
 		<p className="mx-auto m-0 w-full max-w-190 rounded-2xl border border-border-strong px-4 py-3.5 text-sm text-muted-foreground leading-relaxed">
 			{bot.name} has no model yet, so it cannot answer.{" "}
@@ -204,7 +203,7 @@ function BotNotSetUp({ bot }: { bot: Bot }) {
 				<>
 					<Link
 						{...botSettingsLink(bot)}
-						state={backToChat}
+						state={backToThread}
 						className={buttonStyles({ variant: "link", size: "bare" })}
 					>
 						Choose a model

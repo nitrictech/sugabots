@@ -25,7 +25,6 @@ const bot: Bot = {
 	workspaceId: WORKSPACE,
 	name: "Triage",
 	handle: "triage",
-	systemBotKey: null,
 	description: null,
 	color: "teal",
 	face: "pill",
@@ -39,6 +38,7 @@ const bot: Bot = {
 	visibility: "public",
 	assistant: false,
 	pinned: false,
+	defaultProjectId: "0199a3a0-0000-7000-8000-0000000002b1",
 	permissions: {
 		update: true,
 		delete: true,

@@ -123,5 +123,5 @@ function canDraw(emoji: string): boolean {
 	const blue = inColour("#00f");
 	const red = inColour("#f00");
 	// An emoji keeps its own colours whatever the text colour is.
-	return blue.every((channel, index) => index % 4 === 3 || channel === red[index]);
+	return blue.every((project, index) => index % 4 === 3 || project === red[index]);
 }

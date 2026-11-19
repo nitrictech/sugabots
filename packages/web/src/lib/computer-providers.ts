@@ -6,8 +6,8 @@ import type {
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
-import { NotReadyError } from "@/lib/failure.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
+import type { ResourceOwner } from "@/lib/resource-owner.tsx";
+import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
 /** The computer providers the workspace has configured, oldest first. */
 export function useComputerProviders() {
@@ -59,15 +59,25 @@ export function useComputerAccess() {
 	});
 }
 
+/**
+ * What stands between the owner and a computer: the workspace has none set
+ * up, or the owner is a bot that doesn't use one. A project always has one
+ * once the workspace does. Null when nothing does, undefined until known.
+ */
+export function useComputerGap(owner: ResourceOwner): "workspace" | "bot" | null | undefined {
+	const computers = useComputerAccess().data;
+	if (computers === undefined) return undefined;
+	if (!computers.enabled) return "workspace";
+	if ("bot" in owner && !owner.bot.usesComputer) return "bot";
+	return null;
+}
+
 export function useComputerProviderActions() {
 	const workspaceId = useWorkspace().workspace?.id;
+	const requiredWorkspace = useRequiredWorkspaceId();
 	const queryClient = useQueryClient();
 	const refresh = () =>
 		queryClient.invalidateQueries({ queryKey: ["computer-providers", workspaceId] });
-	function requiredWorkspace() {
-		if (!workspaceId) throw new NotReadyError();
-		return workspaceId;
-	}
 
 	return {
 		create: useMutation({
@@ -141,16 +151,15 @@ export function useComputerTemplate(providerId: string | undefined) {
 
 export function usePrepareComputerTemplate(providerId: string) {
 	const workspaceId = useWorkspace().workspace?.id;
+	const requiredWorkspace = useRequiredWorkspaceId();
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: () => {
-			if (!workspaceId) throw new NotReadyError();
-			return Effect.runPromise(
+		mutationFn: () =>
+			Effect.runPromise(
 				client.api.computerProviders.prepareTemplate({
-					params: { workspace: workspaceId, providerId },
+					params: { workspace: requiredWorkspace(), providerId },
 				}),
-			);
-		},
+			),
 		onSuccess: (data) =>
 			queryClient.setQueryData(["computer-providers", workspaceId, providerId, "template"], data),
 	});
@@ -165,10 +174,7 @@ export function useComputerNetwork() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();
 	const queryKey = ["computer-providers", workspaceId, "network"];
-	function requiredWorkspace() {
-		if (!workspaceId) throw new NotReadyError();
-		return workspaceId;
-	}
+	const requiredWorkspace = useRequiredWorkspaceId();
 	const settings = useQuery({
 		queryKey,
 		queryFn: workspaceId

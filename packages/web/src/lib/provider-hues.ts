@@ -1,4 +1,4 @@
-import type { ChannelColor } from "@sugabots/contracts";
+import type { ProjectColor } from "@sugabots/contracts";
 
 /*
  * Plain data, which the native apps' copies are generated from. apps/codegen
@@ -7,9 +7,9 @@ import type { ChannelColor } from "@sugabots/contracts";
 
 /**
  * The hues a provider's models are drawn in on the usage breakdown, from the
- * channel colours so its views read as one family, ordered so neighbours differ.
+ * project colours so its views read as one family, ordered so neighbours differ.
  */
-export const PROVIDER_HUES: readonly ChannelColor[] = [
+export const PROVIDER_HUES: readonly ProjectColor[] = [
 	"blue",
 	"purple",
 	"teal",

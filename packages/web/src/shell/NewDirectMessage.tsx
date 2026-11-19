@@ -6,28 +6,26 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
 import { MessageCircle, X } from "lucide-react";
-import {
-	type KeyboardEvent,
-	useDeferredValue,
-	useEffect,
-	useEffectEvent,
-	useId,
-	useRef,
-	useState,
-} from "react";
-import { addToChatDraft, joinDrafts, splitDraft, takeChatDraft } from "@/lib/chat-draft.ts";
+import { type KeyboardEvent, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { personParticipantOf, useDirectMessages, useSendDirectMessage } from "@/lib/chats.ts";
 import { useComposerAttachments } from "@/lib/composer-attachments.ts";
+import {
+	addToConversationDraft,
+	joinDrafts,
+	splitDraft,
+	takeConversationDraft,
+} from "@/lib/conversation-draft.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { directMessageLink } from "@/lib/links.ts";
 import { listNames } from "@/lib/name-list.ts";
 import { useSession } from "@/lib/session.ts";
 import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 import { ChatComposer } from "@/screens/ChatComposer.tsx";
-import { PeopleChatHeader } from "@/screens/ChatHeader.tsx";
+import { PlainChatHeader } from "@/screens/ChatHeader.tsx";
 import { ConversationPage } from "@/screens/ConversationPage.tsx";
 import { DirectPeopleAvatar } from "@/shell/DirectMessages.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { useSearchFilter } from "@/ui/search-field.tsx";
 
 /** The most others a direct message holds: everyone in it but the sender. */
 const MAX_OTHERS = MAX_DIRECT_MESSAGE_PEOPLE - 1;
@@ -55,8 +53,6 @@ export function NewDirectMessagePage() {
 	// message is words alone, and files go in once it is open.
 	const attachments = { ...useComposerAttachments(undefined), attach: undefined };
 	const [chosen, setChosen] = useState<readonly PersonParticipant[]>([]);
-	const [query, setQuery] = useState("");
-	const needle = useDeferredValue(query.trim().toLowerCase());
 	const [active, setActive] = useState(0);
 	const [draft, setDraft] = useState("");
 	const [browsing, setBrowsing] = useState(false);
@@ -68,17 +64,20 @@ export function NewDirectMessagePage() {
 	const chosenIds = new Set(chosen.map((person) => person.id));
 	const full = chosen.length >= MAX_OTHERS;
 	const recency = recentOneToOnes(directMessages.data?.items ?? []);
-	const suggestions = full
+	const candidates = full
 		? []
 		: (members.data ?? [])
 				.map((member) => personParticipantOf(member.user))
-				.filter((person) => person.id !== user?.id && !chosenIds.has(person.id))
-				.filter((person) => matches(needle, person))
-				.sort(
-					(left, right) =>
-						(recency.get(left.id) ?? Infinity) - (recency.get(right.id) ?? Infinity) ||
-						left.name.localeCompare(right.name),
-				);
+				.filter((person) => person.id !== user?.id && !chosenIds.has(person.id));
+	const { query, setQuery, matches } = useSearchFilter(candidates, (person) => [
+		person.name,
+		person.email,
+	]);
+	const suggestions = [...matches].sort(
+		(left, right) =>
+			(recency.get(left.id) ?? Infinity) - (recency.get(right.id) ?? Infinity) ||
+			left.name.localeCompare(right.name),
+	);
 	// Until somebody is chosen it offers everybody; after that, whoever the viewer types, or browses for with the arrow keys.
 	const suggesting = browsing || query.trim() !== "" || chosen.length === 0;
 	const shown = suggesting ? suggestions : [];
@@ -104,15 +103,18 @@ export function NewDirectMessagePage() {
 		if (from !== to) {
 			let written = draft;
 			if (from) {
-				const { kept, added } = splitDraft(homeBefore.current, takeChatDraft(viewerId, null, from));
-				addToChatDraft(viewerId, null, from, kept);
+				const { kept, added } = splitDraft(
+					homeBefore.current,
+					takeConversationDraft(viewerId, null, from),
+				);
+				addToConversationDraft(viewerId, null, from, kept);
 				written = added;
 			} else {
 				setDraft("");
 			}
 			if (to) {
-				homeBefore.current = takeChatDraft(viewerId, null, to);
-				addToChatDraft(viewerId, null, to, joinDrafts(homeBefore.current, written));
+				homeBefore.current = takeConversationDraft(viewerId, null, to);
+				addToConversationDraft(viewerId, null, to, joinDrafts(homeBefore.current, written));
 			} else {
 				setDraft((current) => joinDrafts(current, written));
 			}
@@ -243,7 +245,7 @@ export function NewDirectMessagePage() {
 	);
 	return (
 		<div className="flex min-w-0 flex-1 flex-col">
-			<PeopleChatHeader
+			<PlainChatHeader
 				title="New message"
 				back={{ to: "directMessages" }}
 				face={
@@ -305,12 +307,14 @@ export function NewDirectMessagePage() {
 				<div className="relative flex min-h-0 flex-1 flex-col">
 					{ready === existing.conversation.id && (
 						<ConversationPage
-							conversation={{
-								kind: "directMessage",
-								people: existing.people,
-								formerMembers: existing.formerMembers,
+							conversationPlace={{
+								project: null,
+								conversation: {
+									kind: "directMessage",
+									people: existing.people,
+									formerMembers: existing.formerMembers,
+								},
 							}}
-							channel={null}
 							conversationId={existing.conversation.id}
 							user={user}
 							onItemChange={openConversation}
@@ -350,7 +354,6 @@ export function NewDirectMessagePage() {
 									? `Message not sent. ${failureMessage(start.error)}. Your draft is still here.`
 									: undefined
 							}
-							className="w-full"
 							mentionable={[...chosen]}
 							attachments={attachments}
 						/>
@@ -395,15 +398,6 @@ function NewConversationNote({
 					: "Your message starts a conversation that only the people in it can see."}
 			</p>
 		</div>
-	);
-}
-
-/** Whether `person` has `needle`, already lower-cased, in their name or email; an empty needle matches everybody. */
-function matches(needle: string, person: { name: string; email: string }): boolean {
-	return (
-		needle === "" ||
-		person.name.toLowerCase().includes(needle) ||
-		person.email.toLowerCase().includes(needle)
 	);
 }
 

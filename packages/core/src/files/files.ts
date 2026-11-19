@@ -41,25 +41,25 @@ import { Ids, isUuid } from "../ids/ids.ts";
 
 /**
  * Reading files, for people. A file is reached through the conversation it
- * was uploaded or made in: a channel's by the people in the channel, a bot's
+ * was uploaded or made in: a project's by the people in the project, a bot's
  * by whoever reaches the bot. One made in a collaboration or an automation's
  * run belongs to the conversation that was opened from. Only a file a bot
  * wrote is read here, with its versions; a file on a message is read through
  * its conversation (see `conversations/chats/chat-files.ts`). Deleting a
- * written file takes changing the channel or the bot.
+ * written file takes changing the project or the bot.
  */
 export interface Interface {
 	/**
-	 * The files uploaded or made in the channel's conversations, and what was
+	 * The files uploaded or made in the project's threads, and what was
 	 * opened from them, newest change first.
 	 */
-	readonly listInChannel: (input: {
-		channelId: string;
+	readonly listInProject: (input: {
+		projectId: string;
 	}) => Effect.Effect<FileSummary[], AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * The files uploaded or made in the bot's own tasks and automation feeds,
+	 * The files uploaded or made in the bot's own threads and automation feeds,
 	 * and what was opened from them, newest change first: not those it made in
-	 * a channel or when another bot asked it.
+	 * a project or when another bot asked it.
 	 */
 	readonly listForBot: (input: {
 		botId: string;
@@ -88,8 +88,8 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 /**
  * Making and changing written files, for a bot's tools. A bot reaches the
  * files written in the conversation it is working in, and what was opened
- * from it; in a channel's conversation, every file written in the channel;
- * and in its own task or automation feed, every file written in its own tasks
+ * from it; in a project's thread, every file written in the project;
+ * and in its own thread or automation feed, every file written in its own threads
  * and feeds, which whoever reaches the bot sees. Never the files it wrote
  * elsewhere, which the people of the conversation it is working in may not
  * see. Every change names the version it was based on and is refused with
@@ -156,11 +156,11 @@ export const make = Effect.gen(function* () {
 		});
 
 	return Service.of({
-		listInChannel: ({ channelId }) =>
+		listInProject: ({ projectId }) =>
 			operation(
-				"listInChannel",
-				Effect.flatMap(authorization.channel(channelId, "channel.read"), () =>
-					listedWhere(eq(madeInConversation.channelId, channelId)),
+				"listInProject",
+				Effect.flatMap(authorization.project(projectId, "project.read"), () =>
+					listedWhere(eq(madeInConversation.projectId, projectId)),
 				),
 			),
 
@@ -209,14 +209,8 @@ export const make = Effect.gen(function* () {
 				"remove",
 				Effect.gen(function* () {
 					const { found, standing } = yield* inReachedConversation(fileId);
-					const mayRemove =
-						standing.kind === "channel"
-							? standing.standing.may("channel.update")
-							: standing.kind === "bot" && standing.standing.may("bot.update");
-					if (!mayRemove) {
-						return yield* new ActionForbidden({
-							permission: standing.kind === "channel" ? "channel.update" : "bot.update",
-						});
+					if (standing.kind !== "project" || !standing.standing.may("project.threads.manage")) {
+						return yield* new ActionForbidden({ permission: "project.threads.manage" });
 					}
 					// The versions go with it, and the `file_blob_deletion` trigger queues its blobs.
 					yield* query((db) => db.delete(file).where(eq(file.id, found.file.id)));
@@ -308,7 +302,7 @@ const makeAuthoring = Effect.gen(function* () {
 			operation(
 				"list",
 				Effect.flatMap(conversationOf(by.conversationId), (working) =>
-					writtenSummariesWhere(reachedByBot(by.botId, working)),
+					writtenSummariesWhere(reachedByBot(working)),
 				),
 			),
 
@@ -458,7 +452,6 @@ export interface InFile {
 
 /** The bot a tool acts for, in the conversation it is working in, which a new file records it was made in. */
 export interface BotInConversation {
-	workspaceId: string;
 	botId: string;
 	conversationId: string;
 }
@@ -547,10 +540,16 @@ const conversationOfMadeIn = eq(
 	sql`coalesce(${placedConversation.rootConversationId}, ${placedConversation.id})`,
 );
 
-/** A bot's own conversations: its tasks and automation feeds, which whoever reaches it sees. */
-const OWN_CONVERSATION_KINDS = ["task", "automation_feed"] as const satisfies ConversationKind[];
+/**
+ * A bot's own conversations: its threads, which are its default project's,
+ * and its automations' feeds, which whoever reaches it sees.
+ */
+const OWN_CONVERSATION_KINDS = [
+	"project_thread",
+	"automation_feed",
+] as const satisfies ConversationKind[];
 
-/** Files made in `botId`'s own tasks and automation feeds, and what was opened from them. */
+/** Files made in `botId`'s own threads and automation feeds, and what was opened from them. */
 const madeInOwnConversationOf = (botId: string) =>
 	and(
 		eq(madeInConversation.botId, botId),
@@ -560,22 +559,19 @@ const madeInOwnConversationOf = (botId: string) =>
 /** The conversation a bot is working in, by the conversation its turn is in. */
 interface WorkingConversation {
 	id: string;
-	kind: ConversationKind;
-	channelId: string | null;
-	botId: string | null;
+	projectId: string | null;
 }
 
-/** The files a bot working in `working` reaches: see `AuthoringInterface`. */
-const reachedByBot = (botId: string, working: WorkingConversation | undefined): SQL => {
+/**
+ * The files a bot working in `working` reaches: see `AuthoringInterface`. In
+ * the bot's own threads and automation feeds, its default project's files.
+ */
+const reachedByBot = (working: WorkingConversation | undefined): SQL => {
 	if (!working) return sql`false`;
-	const isOwn =
-		working.botId === botId &&
-		(OWN_CONVERSATION_KINDS as readonly ConversationKind[]).includes(working.kind);
 	return (
 		or(
 			eq(madeInConversation.id, working.id),
-			working.channelId === null ? undefined : eq(madeInConversation.channelId, working.channelId),
-			isOwn ? madeInOwnConversationOf(botId) : undefined,
+			working.projectId === null ? undefined : eq(madeInConversation.projectId, working.projectId),
 		) ?? sql`false`
 	);
 };
@@ -585,12 +581,7 @@ const conversationOf = (conversationId: string) =>
 	Effect.map(
 		query((db) =>
 			db
-				.select({
-					id: madeInConversation.id,
-					kind: madeInConversation.kind,
-					channelId: madeInConversation.channelId,
-					botId: madeInConversation.botId,
-				})
+				.select({ id: madeInConversation.id, projectId: madeInConversation.projectId })
 				.from(placedConversation)
 				.innerJoin(madeInConversation, conversationOfMadeIn)
 				.where(eq(placedConversation.id, conversationId))
@@ -601,7 +592,7 @@ const conversationOf = (conversationId: string) =>
 
 const fileReachedBy = (by: BotInConversation, fileId: string, options: { lock?: boolean } = {}) =>
 	Effect.flatMap(conversationOf(by.conversationId), (working) =>
-		writtenFileWhere(fileId, reachedByBot(by.botId, working), options),
+		writtenFileWhere(fileId, reachedByBot(working), options),
 	);
 
 const writtenSummariesWhere = (scope: SQL | undefined) =>

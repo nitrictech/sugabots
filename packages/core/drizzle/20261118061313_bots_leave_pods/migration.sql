@@ -29,8 +29,8 @@ ALTER TABLE "pinned_agent" ADD CONSTRAINT "pinned_agent_workspace_member_fkey" F
 ALTER TABLE "pinned_agent" ADD CONSTRAINT "pinned_agent_agent_workspace_fkey" FOREIGN KEY ("agent_id","workspace_id") REFERENCES "agent"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "pod_agent" ADD CONSTRAINT "pod_agent_pod_workspace_fkey" FOREIGN KEY ("pod_id","workspace_id") REFERENCES "pod"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "pod_agent" ADD CONSTRAINT "pod_agent_agent_workspace_fkey" FOREIGN KEY ("agent_id","workspace_id") REFERENCES "agent"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
--- A Personal pod's bots become its owner's private bots, and its Personal
--- Assistant becomes theirs by `assistant_of`.
+-- The bots of a `pod` of kind `personal` become its owner's private bots, and
+-- its Personal Assistant becomes theirs by `assistant_of`.
 UPDATE "agent" SET "visibility" = 'private'
 FROM "pod" WHERE "pod"."id" = "agent"."pod_id" AND "pod"."kind" = 'personal';--> statement-breakpoint
 UPDATE "agent" SET "assistant_of" = "pod"."owner_id"
@@ -38,8 +38,8 @@ FROM "pod"
 WHERE "pod"."id" = "agent"."pod_id" AND "pod"."kind" = 'personal'
 	AND "agent"."provisioned_key" = 'personal-assistant';--> statement-breakpoint
 -- Sugabots manages a Personal Assistant, which has no automations: nobody can
--- change or run one now, nor would its runs reach its person in a task. Any an
--- assistant had are paused, with no next time, rather than running unmanaged.
+-- change or run one now, nor would its runs reach its person in a thread. Any
+-- an assistant had are paused, with no next time, rather than running unmanaged.
 UPDATE "routine" SET "state" = 'paused'
 FROM "agent"
 WHERE "agent"."id" = "routine"."agent_id" AND "agent"."assistant_of" IS NOT NULL
@@ -102,13 +102,14 @@ BEGIN
 		UPDATE "agent" SET "name" = candidate WHERE "id" = clashing.id;
 	END LOOP;
 END $$;--> statement-breakpoint
--- A shared pod becomes a channel with its bots in it.
+-- A `pod` of kind `shared` keeps its people and gains its bots, as projects
+-- have them.
 INSERT INTO "pod_agent" ("workspace_id", "pod_id", "agent_id")
 SELECT "agent"."workspace_id", "agent"."pod_id", "agent"."id"
 FROM "agent" JOIN "pod" ON "pod"."id" = "agent"."pod_id"
 WHERE "pod"."kind" = 'shared';--> statement-breakpoint
--- Everyone keeps the bots they saw in their sidebar: a pod's members pin its
--- bots, and a Personal pod's owner their own.
+-- Everyone keeps the bots they saw in their sidebar: each `pod_member` pins
+-- the bots of that `pod`, and the owner of a `personal` one pins its bots.
 INSERT INTO "pinned_agent" ("workspace_id", "user_id", "agent_id")
 SELECT "agent"."workspace_id", "pod_member"."user_id", "agent"."id"
 FROM "agent"
@@ -123,16 +124,17 @@ JOIN "workspace_member" ON "workspace_member"."workspace_id" = "pod"."workspace_
 	AND "workspace_member"."user_id" = "pod"."owner_id"
 WHERE "pod"."kind" = 'personal' AND "agent"."assistant_of" IS NULL
 ON CONFLICT DO NOTHING;--> statement-breakpoint
--- A thread between people started from a pod's chat becomes one of the
--- channel's threads; everything else a bot hosts leaves the pod.
+-- A `conversation` row between people with a `pod_id` stays with that `pod`,
+-- as a thread of the project it becomes; every conversation a bot hosts
+-- becomes one of that bot's threads, outside any project.
 UPDATE "thread" SET "type" = 'pod_chat'
 WHERE "type" = 'conversation' AND "host_agent_id" IS NULL AND "pod_id" IS NOT NULL;--> statement-breakpoint
 UPDATE "thread" SET "type" = 'conversation', "pod_id" = NULL WHERE "type" = 'bot_channel';--> statement-breakpoint
 UPDATE "thread" SET "pod_id" = NULL WHERE "type" NOT IN ('pod_chat', 'direct');--> statement-breakpoint
--- A file is reached through the conversation it was made in. A file whose
--- conversation is gone, which its pod's Files still listed, moves to a
--- conversation of that pod's: a shared pod's to its channel's main chat,
--- opened for it if the pod never opened one.
+-- A file is reached through the thread it was made in. A file whose thread
+-- is gone, which its `pod`'s Files still listed, moves to a thread there: a
+-- `shared` one's goes to the `pod_chat` row marked `main`, which is opened for
+-- it, titled General, if the `pod` never opened one.
 INSERT INTO "thread" ("id", "workspace_id", "pod_id", "conversation_id", "type", "main", "title")
 SELECT "opened"."id", "opened"."workspace_id", "opened"."pod_id", "opened"."id", 'pod_chat', true, 'General'
 FROM (
@@ -150,11 +152,11 @@ FROM "thread" AS "main_chat"
 JOIN "pod" ON "pod"."id" = "main_chat"."pod_id"
 WHERE "main_chat"."main" AND "pod"."kind" = 'shared'
 	AND "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL;--> statement-breakpoint
--- A Personal pod's goes to a task of the bot that made it, or else of the
--- pod's oldest bot other than its Personal Assistant, which only when it is
--- the pod's only bot: the bot's latest task, or a new one with the pod's owner
--- when it has none. A Personal pod with no bots left has no conversation to
--- give its files, and no channel survives it, so they're deleted with it.
+-- A `personal` one's goes to a thread of the bot that made it, or else of the
+-- `pod`'s oldest bot other than its Personal Assistant, which only when it is
+-- its only bot: the bot's latest thread, or a new one with the `pod`'s owner
+-- when it has none. A `personal` `pod` with no bots left has no thread to give
+-- its files, and no project is kept for it, so they're deleted with it.
 DO $$
 DECLARE
 	orphan record;
@@ -191,7 +193,7 @@ BEGIN
 END $$;--> statement-breakpoint
 DELETE FROM "artifact" WHERE "created_in_thread_id" IS NULL;--> statement-breakpoint
 UPDATE "agent" SET "pod_id" = NULL;--> statement-breakpoint
--- A Personal pod admitted its owner alone; channels have no such rule.
+-- A `personal` `pod` admitted its owner alone; projects have no such rule.
 DROP TRIGGER "personal_pod_owner_membership" ON "pod_member";--> statement-breakpoint
 DROP FUNCTION enforce_personal_pod_owner_membership();--> statement-breakpoint
 DROP TRIGGER "shared_pod_administrators" ON "pod";--> statement-breakpoint

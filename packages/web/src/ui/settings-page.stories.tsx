@@ -64,7 +64,7 @@ export const Hero = meta.story({
 			</SettingsGroup>
 			<SettingsDanger
 				label="Delete workspace"
-				description="Removes every channel, bot and conversation in Nitric."
+				description="Removes every project, bot and conversation in Nitric."
 				action="Delete"
 				onClick={fn()}
 			/>

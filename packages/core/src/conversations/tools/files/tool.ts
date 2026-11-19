@@ -108,7 +108,7 @@ export function fileTools({
 	return {
 		[FILE_LIST_TOOL]: tool({
 			description:
-				"List the documents and pages you can read, newest first: those you wrote, and those written in the channel you are in.",
+				"List the documents and pages you can read, newest first: those you wrote, and those written in the project you are in.",
 			inputSchema: noInputSchema,
 			execute: async (): Promise<{ files: FileListing[] }> => ({
 				files: (await run(authoring.list(by))).map(listing),

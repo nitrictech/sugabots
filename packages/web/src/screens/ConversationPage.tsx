@@ -1,55 +1,26 @@
 import { botColorVariables } from "@sugabots/avatars";
-import type { Channel, SessionUser } from "@sugabots/contracts";
-import type { ReactNode } from "react";
-import type { ConversationPlaceKind } from "@/lib/chats.ts";
+import type { ComponentProps, ReactNode } from "react";
+import { placeBot } from "@/lib/chats.ts";
 import { useDetailsOpen } from "@/lib/details-open.ts";
 import { usePresence } from "@/lib/notifications.ts";
 import type { BackTo } from "./ChatHeader.tsx";
 import { ConversationChat } from "./ConversationChat.tsx";
-import type { Staged, StagedChange } from "./staged.ts";
 
-interface ConversationPageProps {
-	/** Which kind of conversation it is, and its bot when it has one. */
-	conversation: ConversationPlaceKind;
-	/** The channel it is in; null for a bot's task or a direct message, which are in none. */
-	channel: Channel | null;
-	/** The conversation shown. */
-	conversationId: string;
-	user: SessionUser;
-	itemConversationId?: string;
-	/** A message to jump to and point out, such as the mention it was opened from. */
-	focusMessageId?: string;
+type ConversationPageProps = Omit<ComponentProps<typeof ConversationChat>, "place"> & {
 	/**
 	 * Shown away from the chat's own page, as Inbox shows it: no Details,
 	 * and the header's Back and right-hand link in their places.
 	 */
 	away?: { back: BackTo; trailing: ReactNode };
-	onItemChange: (itemConversationId: string | undefined) => void;
-	/** What is open large beside the chat. */
-	staged?: Staged;
-	onStagedChange: StagedChange;
-	/** Without its header, as New message shows a conversation under its To field. */
-	headerless?: boolean;
-	/** Once a message written here has been sent. */
-	onSent?: () => void;
-	/**
-	 * Hidden under something else on the page, as New message's suggestions
-	 * cover the conversation under them: the viewer is not looking at it, so
-	 * it is neither read nor kept from notifying them.
-	 */
-	covered?: boolean;
-}
+};
 
 export function ConversationPage({ away, ...chat }: ConversationPageProps) {
 	usePresence(chat.covered ? undefined : chat.conversationId);
+	const bot = placeBot(chat.conversationPlace);
 	return (
 		<div
 			className="relative flex min-h-0 flex-1 overflow-hidden"
-			style={
-				chat.conversation.kind === "botConversation"
-					? botColorVariables(chat.conversation.bot.color)
-					: undefined
-			}
+			style={bot ? botColorVariables(bot.color) : undefined}
 		>
 			{away ? (
 				<ConversationChat key={chat.conversationId} {...chat} place={{ kind: "away", ...away }} />

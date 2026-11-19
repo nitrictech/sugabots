@@ -21,8 +21,8 @@ export const SeveralLines = meta.story({
 	args: {
 		children: (
 			<>
-				<span style={{ display: "block" }}>kim@example.com: Offline</span>
-				<span style={{ display: "block" }}>jay@example.com: Already a member</span>
+				<span className="block">kim@example.com: Offline</span>
+				<span className="block">jay@example.com: Already a member</span>
 			</>
 		),
 	},

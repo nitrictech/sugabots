@@ -4,8 +4,6 @@ import {
 	acceptedAutomationWebhookSchema,
 	acceptedRunSchema,
 	automationCurrentSecretSchema,
-	automationScheduleOccurrencesSchema,
-	automationSchedulePreviewSchema,
 	automationSchema,
 	automationSecretReplacementSchema,
 	automationSecretSchema,
@@ -16,6 +14,8 @@ import {
 	ignoredAutomationWebhookSchema,
 	manualAutomationRunSchema,
 	newAutomationSchema,
+	routineScheduleOccurrencesSchema,
+	routineSchedulePreviewSchema,
 	runPageQuerySchema,
 	runPageSchema,
 	workspaceAutomationListSchema,
@@ -25,8 +25,9 @@ import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, refused, Unauthorized } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
-const bot = { botId: uuidSchema };
-const automation = { botId: uuidSchema, automationId: Schema.String };
+/** A project's automations: a bot's own are its default project's. */
+const inProject = { projectId: uuidSchema };
+const automation = { projectId: uuidSchema, automationId: Schema.String };
 const trigger = { ...automation, triggerId: uuidSchema };
 
 /** A run queued, a call its trigger's filter turned away, or Slack's address check. */
@@ -47,45 +48,45 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 		success: workspaceAutomationListSchema,
 		error: refused,
 	}).middleware(Session),
-	HttpApiEndpoint.get("list", "/bots/:botId/automations", {
-		params: bot,
+	HttpApiEndpoint.get("list", "/projects/:projectId/automations", {
+		params: inProject,
 		success: Schema.Array(automationSchema),
 		error: refused,
 	}).middleware(Session),
-	HttpApiEndpoint.post("create", "/bots/:botId/automations", {
-		params: bot,
+	HttpApiEndpoint.post("create", "/projects/:projectId/automations", {
+		params: inProject,
 		payload: newAutomationSchema,
 		success: automationWriteResultSchema.pipe(HttpApiSchema.status(201)),
 		error: [Conflict, ...refused],
 	}).middleware(Session),
-	HttpApiEndpoint.post("previewSchedule", "/bots/:botId/automations/schedule-preview", {
-		params: bot,
-		payload: automationSchedulePreviewSchema,
-		success: automationScheduleOccurrencesSchema,
+	HttpApiEndpoint.post("previewSchedule", "/projects/:projectId/automations/schedule-preview", {
+		params: inProject,
+		payload: routineSchedulePreviewSchema,
+		success: routineScheduleOccurrencesSchema,
 		error: refused,
 	}).middleware(Session),
-	HttpApiEndpoint.get("get", "/bots/:botId/automations/:automationId", {
+	HttpApiEndpoint.get("get", "/projects/:projectId/automations/:automationId", {
 		params: automation,
 		success: automationSchema,
 		error: refused,
 	}).middleware(Session),
-	HttpApiEndpoint.patch("update", "/bots/:botId/automations/:automationId", {
+	HttpApiEndpoint.patch("update", "/projects/:projectId/automations/:automationId", {
 		params: automation,
 		payload: automationUpdateSchema,
 		success: automationWriteResultSchema,
 		error: [Conflict, ...refused],
 	}).middleware(Session),
-	HttpApiEndpoint.delete("remove", "/bots/:botId/automations/:automationId", {
+	HttpApiEndpoint.delete("remove", "/projects/:projectId/automations/:automationId", {
 		params: automation,
 		error: refused,
 	}).middleware(Session),
-	HttpApiEndpoint.post("run", "/bots/:botId/automations/:automationId/run", {
+	HttpApiEndpoint.post("run", "/projects/:projectId/automations/:automationId/run", {
 		params: automation,
 		payload: manualAutomationRunSchema,
 		success: acceptedRunSchema.pipe(HttpApiSchema.status(202)),
 		error: [Conflict, ...refused],
 	}).middleware(Session),
-	HttpApiEndpoint.post("addTrigger", "/bots/:botId/automations/:automationId/triggers", {
+	HttpApiEndpoint.post("addTrigger", "/projects/:projectId/automations/:automationId/triggers", {
 		params: automation,
 		payload: automationTriggerInputSchema,
 		success: automationWriteResultSchema.pipe(HttpApiSchema.status(201)),
@@ -93,7 +94,7 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 	}).middleware(Session),
 	HttpApiEndpoint.put(
 		"updateTrigger",
-		"/bots/:botId/automations/:automationId/triggers/:triggerId",
+		"/projects/:projectId/automations/:automationId/triggers/:triggerId",
 		{
 			params: trigger,
 			payload: automationTriggerInputSchema,
@@ -103,17 +104,17 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 	).middleware(Session),
 	HttpApiEndpoint.delete(
 		"removeTrigger",
-		"/bots/:botId/automations/:automationId/triggers/:triggerId",
+		"/projects/:projectId/automations/:automationId/triggers/:triggerId",
 		{ params: trigger, success: automationSchema, error: [Conflict, ...refused] },
 	).middleware(Session),
 	HttpApiEndpoint.get(
 		"getSecret",
-		"/bots/:botId/automations/:automationId/triggers/:triggerId/secret",
+		"/projects/:projectId/automations/:automationId/triggers/:triggerId/secret",
 		{ params: trigger, success: automationCurrentSecretSchema, error: refused },
 	).middleware(Session),
 	HttpApiEndpoint.post(
 		"rotateSecret",
-		"/bots/:botId/automations/:automationId/triggers/:triggerId/secret",
+		"/projects/:projectId/automations/:automationId/triggers/:triggerId/secret",
 		{
 			params: trigger,
 			payload: automationSecretReplacementSchema,
@@ -121,7 +122,7 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 			error: refused,
 		},
 	).middleware(Session),
-	HttpApiEndpoint.get("runs", "/bots/:botId/automations/:automationId/runs", {
+	HttpApiEndpoint.get("runs", "/projects/:projectId/automations/:automationId/runs", {
 		params: automation,
 		query: runPageQuerySchema,
 		success: runPageSchema,

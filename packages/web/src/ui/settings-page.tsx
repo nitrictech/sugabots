@@ -1,11 +1,12 @@
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "cn";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useId } from "react";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE, usePhoneBack } from "@/ui/back-button.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 
 /*
  * The pieces a settings page is made of, as the design draws them: a centred
@@ -337,45 +338,43 @@ export function SettingsNameRow({
 	name,
 	maxLength,
 	optional = false,
-	savePending,
+	placeholder,
+	mono = false,
+	savePending = false,
 	error,
 	onCommit,
 }: {
 	label?: string;
 	name: string;
-	maxLength: number;
+	maxLength?: number;
 	optional?: boolean;
-	savePending: boolean;
+	placeholder?: string;
+	/** For addresses, keys and header names. */
+	mono?: boolean;
+	savePending?: boolean;
 	error?: string | undefined;
-	onCommit: (name: string) => Promise<unknown>;
+	onCommit: (name: string) => unknown;
 }) {
-	const [draft, setDraft] = useState(name);
+	const { fieldProps } = useCommittedDraft(name, onCommit, {
+		allowEmpty: optional,
+		pending: savePending,
+	});
 	const id = useId();
-
-	function commit() {
-		const next = draft.trim();
-		if (savePending || next === name || (next === "" && !optional)) {
-			setDraft(name);
-			return;
-		}
-		setDraft(next);
-		void onCommit(next).catch(() => setDraft(name));
-	}
 
 	return (
 		<>
 			<SettingsControlRow label={label} htmlFor={id}>
 				<input
 					id={id}
-					value={draft}
-					onChange={(event) => setDraft(event.target.value)}
-					onBlur={commit}
-					onKeyDown={(event) => {
-						if (event.key === "Enter") event.currentTarget.blur();
-						if (event.key === "Escape") setDraft(name);
-					}}
+					{...fieldProps}
 					maxLength={maxLength}
-					className="-ml-2.5 h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2.5 text-xs text-foreground outline-none hover:border-border-strong focus-visible:border-ring focus-visible:bg-settings-row-hover"
+					placeholder={placeholder}
+					autoComplete="off"
+					spellCheck={mono ? false : undefined}
+					className={cn(
+						"-ml-2.5 h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2.5 text-xs text-foreground outline-none placeholder:text-subtle-foreground hover:border-border-strong focus-visible:border-ring focus-visible:bg-settings-row-hover",
+						mono && "font-mono",
+					)}
 				/>
 			</SettingsControlRow>
 			{error && (
@@ -423,8 +422,8 @@ export function SettingsControlRow({
 }
 
 /**
- * A field row whose control is a pick-one row of options, such as Schedule /
- * Webhook. On a phone the options go on a line of their own under the label,
+ * A field row whose control is a pick-one row of options, such as Daily /
+ * Weekly / Monthly. On a phone the options go on a line of their own under the label,
  * across the row's width, so a long row of them is never cut off.
  */
 export function SettingsChoiceRow<Value extends string>({
@@ -622,7 +621,7 @@ export function SettingsAddMark() {
 	);
 }
 
-/** The foot of a page for something that cannot be undone: Delete channel, Sign out. */
+/** The foot of a page for something that cannot be undone: Delete project, Sign out. */
 export function SettingsDanger({
 	label,
 	description,
@@ -630,7 +629,7 @@ export function SettingsDanger({
 	onClick,
 	disabledReason,
 }: {
-	/** What the action does, in full: Delete channel. */
+	/** What the action does, in full: Delete project. */
 	label: string;
 	/** What follows from it: Removes its bots, conversations and files. */
 	description: ReactNode;

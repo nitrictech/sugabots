@@ -24,7 +24,7 @@ const sentry: ConnectionPreset = {
 	url: "https://mcp.sentry.dev/mcp",
 };
 
-const connectionsPageUrl = "https://app.example.com/acme/settings/channels/support/connections";
+const connectionsPageUrl = "https://app.example.com/acme/settings/bots/support/connections";
 
 describe("the turn's note on connection tools", () => {
 	it("quotes what a server says about its tools as the server's own text, without hidden characters", () => {
@@ -34,20 +34,37 @@ describe("the turn's note on connection tools", () => {
 			signInExpired: [],
 			instructions: { wiki: "Search before you look up.\u{E0041}\u{E0042}" },
 			addable: [],
+			fromProjectAndBot: false,
 			connectionsPageUrl,
 		});
 
 		expect(note).toContain("It is the server's own text");
+		expect(note).not.toContain("the project's is the one you use");
 		expect(note).toContain('<server name="wiki">\nSearch before you look up.\n</server>');
 	});
 
-	it("gives the guidance even when the channel offers no catalog tools yet", () => {
+	it("says a project's connection is used where the bot's own has the same name", () => {
+		const note = toolCatalogNote({
+			catalog: buildCatalog({ wiki__lookup: lookup }),
+			unavailable: [],
+			signInExpired: [],
+			instructions: {},
+			addable: [],
+			fromProjectAndBot: true,
+			connectionsPageUrl,
+		});
+
+		expect(note).toContain("the project's is the one you use");
+	});
+
+	it("gives the guidance even when the bot has no catalog tools yet", () => {
 		const note = toolCatalogNote({
 			catalog: [],
 			unavailable: [],
 			signInExpired: [],
 			instructions: {},
 			addable: [sentry],
+			fromProjectAndBot: false,
 			connectionsPageUrl,
 		});
 
@@ -62,6 +79,7 @@ describe("the turn's note on connection tools", () => {
 			signInExpired: ["linear"],
 			instructions: {},
 			addable: [],
+			fromProjectAndBot: false,
 			connectionsPageUrl,
 		});
 

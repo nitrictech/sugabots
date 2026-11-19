@@ -10,6 +10,7 @@ import { Authorization } from "../../authorization/authorization.ts";
 import {
 	bot as botTable,
 	connection,
+	project,
 	user,
 	workspace,
 	workspaceMember,
@@ -70,6 +71,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 	let adminId: string;
 	let memberId: string;
 	let botId: string;
+	let projectId: string;
 
 	/**
 	 * The setup as `as`, by default the workspace's administrator, under an
@@ -121,14 +123,14 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 			)
 		)(options.as ?? adminId);
 
-	const ofBot = () => ({ botId });
+	const ofProject = () => ({ projectId });
 
 	/**
 	 * An OAuth connection to `url` waiting on the sign-in whose state is
 	 * `state`, which `startedByUserId`, by default the administrator, started.
 	 */
 	const waitingOnSignIn = async (url: string, state: string, startedByUserId = adminId) => {
-		const made = await connections.create(workspaceId, botId, adminId, {
+		const made = await connections.create(workspaceId, projectId, adminId, {
 			name: `Signs in ${state}`,
 			url,
 			auth: "oauth",
@@ -186,13 +188,19 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		);
 		if (!bot) throw new Error("fixture");
 		botId = bot.id;
+		// A bot's connections are its default project's.
+		const [own] = await onDatabase((db) =>
+			db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, bot.id)),
+		);
+		if (!own) throw new Error("default project fixture");
+		projectId = own.id;
 	});
 
 	it("learns a server's tools as soon as it is added", async () => {
 		const setup = await setupWith();
 
 		const made = await setup.create({
-			...ofBot(),
+			...ofProject(),
 			connection: {
 				name: "Wiki",
 				url: `${serverUrl}/mcp`,
@@ -208,12 +216,12 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		const setup = await setupWith();
 
 		const tested = await setup.testUnsaved({
-			...ofBot(),
+			...ofProject(),
 			server: { url: `${serverUrl}/mcp`, secretHeader: "x-fixture-key", secret: "open-sesame" },
 		});
 
 		expect(tested).toMatchObject({ reachable: true, tools: 1 });
-		expect(await setup.list(ofBot())).toEqual([]);
+		expect(await setup.list(ofProject())).toEqual([]);
 	});
 
 	it("refuses an address the network policy forbids, and stores nothing", async () => {
@@ -221,21 +229,21 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		await expect(
 			setup.create({
-				...ofBot(),
+				...ofProject(),
 				connection: { name: "Local", url: `${serverUrl}/mcp` },
 			}),
 		).rejects.toMatchObject({ _tag: "UrlNotAllowed" });
-		expect(await setup.list(ofBot())).toEqual([]);
+		expect(await setup.list(ofProject())).toEqual([]);
 	});
 
 	it("records a server it cannot reach in its own words, keeping the network's out", async () => {
 		const setup = await setupWith();
 		const made = await setup.create({
-			...ofBot(),
+			...ofProject(),
 			connection: { name: "Gone", url: "http://127.0.0.1:9/mcp" },
 		});
 
-		const tested = await setup.test({ ...ofBot(), connectionId: made.id });
+		const tested = await setup.test({ ...ofProject(), connectionId: made.id });
 
 		expect(tested).toMatchObject({
 			reachable: false,
@@ -258,7 +266,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 		const before = requestsReceived;
 
 		const made = await setup.create({
-			...ofBot(),
+			...ofProject(),
 			connection: {
 				kind: "http",
 				name: "Alerts",
@@ -270,22 +278,22 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		expect(made).toMatchObject({ kind: "http", status: "connected", hasSecret: true });
 		expect(
-			(await setup.get({ ...ofBot(), connectionId: made.id })).tools.map((tool) => tool.access),
+			(await setup.get({ ...ofProject(), connectionId: made.id })).tools.map((tool) => tool.access),
 		).toEqual(["allow", "ask", "ask", "ask", "off"]);
 		expect(requestsReceived).toBe(before);
 	});
 
 	it("records an HTTP endpoint's address the network policy no longer allows", async () => {
 		const made = await (await setupWith()).create({
-			...ofBot(),
+			...ofProject(),
 			connection: { kind: "http", name: "Local", url: `${serverUrl}/v2` },
 		});
 		const setup = await setupWith({ allowPrivateNetwork: false });
 
-		const tested = await setup.test({ ...ofBot(), connectionId: made.id });
+		const tested = await setup.test({ ...ofProject(), connectionId: made.id });
 
 		expect(tested).toMatchObject({ reachable: false, error: expect.any(String) });
-		expect(await setup.get({ ...ofBot(), connectionId: made.id })).toMatchObject({
+		expect(await setup.get({ ...ofProject(), connectionId: made.id })).toMatchObject({
 			status: "error",
 		});
 	});
@@ -307,7 +315,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		await expect(
 			setup.connectFromCatalog({
-				...ofBot(),
+				...ofProject(),
 				server: { name: "GitHub", url: "https://api.githubcopilot.com/mcp/" },
 			}),
 		).rejects.toMatchObject({
@@ -315,7 +323,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 			userMessage:
 				"Sugabots can't use this server's sign-in, because the server doesn't let new apps register themselves. Connect it with an access token from the server instead.",
 		});
-		expect(await setup.list(ofBot())).toEqual([]);
+		expect(await setup.list(ofProject())).toEqual([]);
 	});
 
 	it("keeps no connection for a catalogued server that needed no sign-in", async () => {
@@ -325,21 +333,21 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 
 		await expect(
 			setup.connectFromCatalog({
-				...ofBot(),
+				...ofProject(),
 				server: { name: "Open", url: `${serverUrl}/open` },
 			}),
 		).rejects.toMatchObject({ _tag: "ConnectionNeededNoSignIn" });
-		expect(await setup.list(ofBot())).toEqual([]);
+		expect(await setup.list(ofProject())).toEqual([]);
 	});
 
 	it("lets a member who reaches the bot see its connections, and change none of them", async () => {
 		const setup = await setupWith({ as: memberId });
 
-		expect(await setup.list(ofBot())).toEqual([]);
+		expect(await setup.list(ofProject())).toEqual([]);
 		await expect(
-			setup.create({ ...ofBot(), connection: { name: "Wiki", url: `${serverUrl}/mcp` } }),
+			setup.create({ ...ofProject(), connection: { name: "Wiki", url: `${serverUrl}/mcp` } }),
 		).rejects.toBeInstanceOf(ActionForbidden);
-		expect(await setup.list(ofBot())).toEqual([]);
+		expect(await setup.list(ofProject())).toEqual([]);
 	});
 
 	describe("finishing a sign-in", () => {
@@ -351,8 +359,8 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 				callback: { code: "the-code", state: "state-ok" },
 			});
 
-			expect(outcome).toEqual({ bot: { workspaceId, botId } });
-			expect(await setup.get({ ...ofBot(), connectionId: made.id })).toMatchObject({
+			expect(outcome).toEqual({ at: { workspaceId, projectId, botId } });
+			expect(await setup.get({ ...ofProject(), connectionId: made.id })).toMatchObject({
 				tools: [{ name: "lookup" }],
 			});
 		});
@@ -377,7 +385,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 			expect(
 				await setup.completeOAuth({ callback: { code: "the-code", state: "state-other" } }),
 			).toEqual({ failure: "not_allowed" });
-			expect(await setup.get({ ...ofBot(), connectionId: made.id })).toMatchObject({
+			expect(await setup.get({ ...ofProject(), connectionId: made.id })).toMatchObject({
 				signedIn: false,
 				tools: [],
 			});
@@ -406,7 +414,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 						errorDescription: "Visit evil.example to continue",
 					},
 				}),
-			).toEqual({ failure: "refused", bot: { workspaceId, botId } });
+			).toEqual({ failure: "refused", at: { workspaceId, projectId, botId } });
 		});
 
 		it("gives a code when the code could not be exchanged for tokens", async () => {
@@ -427,7 +435,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 				await setup.completeOAuth({
 					callback: { code: "stale", state: "state-bad-code" },
 				}),
-			).toEqual({ failure: "not_completed", bot: { workspaceId, botId } });
+			).toEqual({ failure: "not_completed", at: { workspaceId, projectId, botId } });
 		});
 	});
 });

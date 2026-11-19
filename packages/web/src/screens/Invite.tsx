@@ -35,7 +35,7 @@ function invitationFailureMessage(failure: unknown): string {
 
 export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void> }) {
 	const queries = useQueryClient();
-	const [workspace, setWorkspace] = useState<string>();
+	const [pending, setPending] = useState<{ workspaceName: string; inviterName: string }>();
 	const [error, setError] = useState<string>();
 	const [busy, setBusy] = useState(false);
 	/** The workspace joined, once it has been, so continuing after a failure does not accept again. */
@@ -49,7 +49,7 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 				if (!current) return;
 				// A link opened again after accepting leads back into the workspace.
 				if (invitation.status === "accepted") void enterAccepted(invitation.workspaceId);
-				else setWorkspace(invitation.workspaceName);
+				else setPending(invitation);
 			},
 			(failure: unknown) => {
 				if (current) setError(invitationFailureMessage(failure));
@@ -126,10 +126,15 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 
 	return (
 		<AuthLayout
-			title={workspace ? `You have been invited to ${workspace}.` : "Reading the invitation…"}
-			subtitle="You will join as a member. Conversations in a channel are visible to everyone in it."
+			title={
+				pending ? `You have been invited to ${pending.workspaceName}.` : "Reading the invitation…"
+			}
+			subtitle={
+				pending &&
+				`${pending.inviterName} invited you. A project's threads are seen by everyone in it.`
+			}
 		>
-			<Button size="lg" onClick={accept} disabled={busy || !workspace} className="w-full">
+			<Button size="lg" onClick={accept} disabled={busy || !pending} className="w-full">
 				Accept invite
 			</Button>
 		</AuthLayout>

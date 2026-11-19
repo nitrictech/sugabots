@@ -1,11 +1,11 @@
 ---
 title: What is Sugabots?
-description: A workspace where people and AI bots work together, in tasks and channels.
+description: A workspace where people and AI bots work together, in threads and projects.
 ---
 
 Sugabots is a workspace where some of your teammates are bots. You give each bot
 a job, a model to think with and the tools it may use. Then you, your team, your
-family or your flatmates work with them, one to one or together in channels.
+family or your flatmates work with them, one to one or together in projects.
 
 It's open source and self-hosted. Your chats, settings and API keys live in your
 own database, and messages only go to the model providers you choose.
@@ -13,25 +13,25 @@ own database, and messages only go to the model providers you choose.
 ## The workspace, taken apart
 
 - **Bots** are AI teammates. A **public** bot is for everyone in the workspace;
-  a **private** one only for the person who made it. Each has its own tasks,
+  a **private** one only for the person who made it. Each has its own threads,
   files, computer, connections and automations.
-- **Tasks** are conversations with one bot about one piece of work. Everyone who
-  can see the bot can see its tasks and join in.
-- **Channels** are long-running projects shared by many people and many bots,
-  with a main chat, threads beside it, and files.
+- A bot's **threads** are its conversations, each about one piece of work.
+  Everyone who can see the bot can see its threads and join in.
+- **Projects** are long-running pieces of work shared by many people and many
+  bots, made of their threads, with the files made there.
 - **Your Personal Assistant** is a bot only you can talk to. It knows the
-  workspace, and points you to the right bot or channel.
+  workspace, and points you to the right bot or project.
 
-Here's a channel, taken apart. Pick a part to see how it fits.
+Here's a project, taken apart. Pick a part to see how it fits.
 
-<ChannelMap />
+<ProjectMap />
 
 ## What it looks like
 
-Here's the Family channel on a Thursday evening. Mum asks for flights, and
+Here's the Family project's Lisbon trip thread on a Thursday evening. Mum asks for flights, and
 Trip Planner gets Budget Keeper's opinion before it books anything.
 
-<Chat title="# Family">
+<Chat title="Lisbon trip">
   <Say from="mum">Can someone please sort the Lisbon flights before the prices jump again</Say>
   <Say from="you">On it. @trip-planner, find us something Friday after 5, and check it fits the holiday pot</Say>
   <Say from="tripPlanner" collaboratesWith="budgetKeeper">Found two. Checking them against the holiday pot.</Say>
@@ -41,7 +41,7 @@ Trip Planner gets Budget Keeper's opinion before it books anything.
 
 Three things happened there:
 
-- **Everyone saw the same chat.** The channel's main chat belongs to everyone in
+- **Everyone saw the same thread.** A project's threads belong to everyone in
   it, people and bots.
 - **One bot asked another.** Trip Planner wrote to Budget Keeper on its own, and
   anyone can open that exchange and read it.
@@ -52,14 +52,14 @@ Three things happened there:
 
 | Piece | What it is | Read more |
 | --- | --- | --- |
-| Channels | Shared projects for people and bots | [Channels](/docs/channels) |
+| Projects | Long-running work shared by people and bots | [Projects](/docs/projects) |
 | Bots | AI teammates with a job, a model and a face | [Bots](/docs/bots) |
-| Conversations | Tasks with a bot, channels, and direct messages | [Conversations](/docs/conversations) |
+| Conversations | A bot's threads, a project's threads, and direct messages | [Conversations](/docs/conversations) |
 | Tools | What bots can do beyond talking, and when they ask first | [Tools and approvals](/docs/tools-and-approvals) |
 | Connections | Apps like Linear and Notion, plugged into a bot | [Connections](/docs/connections) |
 | Models | The providers your bots think with | [Models](/docs/models) |
 | Web search | How bots search the web and read pages | [Web search](/docs/web-search) |
-| Automations | Work bots do on a schedule or when called | [Automations](/docs/automations) |
+| Automations | Work bots do on a routine, such as every weekday at 9, or when something triggers it | [Automations](/docs/automations) |
 | People | Who can join, and what each role can do | [People and roles](/docs/people-and-roles) |
 
 <Tip title="Ready?">

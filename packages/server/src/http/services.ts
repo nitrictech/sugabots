@@ -1,8 +1,8 @@
 import type { Usage } from "@sugabots/core/accounting/usage";
 import type { Accounts } from "@sugabots/core/accounts/accounts";
-import type { BotComputerSetup } from "@sugabots/core/computers/bot-computer-setup";
 import type { ComputerNetwork } from "@sugabots/core/computers/computer-network";
 import type { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
+import type { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
 import type { Automations } from "@sugabots/core/conversations/automations/automations";
 import type { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import type { ChatView } from "@sugabots/core/conversations/chats/chat-view";
@@ -21,9 +21,9 @@ import type { GitHubConnections } from "@sugabots/core/providers/connections/git
 import type { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import type { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
 import type { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
-import type { ChannelAdministration } from "@sugabots/core/workspaces/channels/channel-administration";
 import type { Membership } from "@sugabots/core/workspaces/membership/membership";
 import type { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
+import type { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
 import type { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import type { StreamAccess } from "../routes/events/access.ts";
 
@@ -45,14 +45,14 @@ export type HttpServices =
 	| Membership.Service
 	| Onboarding.Service
 	| WorkspaceTimeZone.Service
-	| ChannelAdministration.Service
+	| ProjectAdministration.Service
 	| BotAdministration.Service
 	| ModelProviderSetup.Service
 	| SearchProviderSetup.Service
 	| ComputerProviderSetup.Service
 	| ComputerNetwork.Service
 	| DesktopViewer.Service
-	| BotComputerSetup.Service
+	| ProjectComputerSetup.Service
 	| GitHubApps.Service
 	| GitHubConnections.Service
 	| ConnectionSetup.Service

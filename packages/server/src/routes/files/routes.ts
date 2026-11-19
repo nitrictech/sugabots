@@ -11,8 +11,8 @@ export const fileRoutes = HttpApiBuilder.group(ServerApi, "files", (handlers) =>
 		const files = yield* Files.Service;
 		const pages = yield* FilePages.Service;
 		return handlers
-			.handle("listInChannel", ({ params }) =>
-				files.listInChannel(params).pipe(asSessionUser, asHttpError(refusals)),
+			.handle("listInProject", ({ params }) =>
+				files.listInProject(params).pipe(asSessionUser, asHttpError(refusals)),
 			)
 			.handle("listForBot", ({ params }) =>
 				files.listForBot(params).pipe(asSessionUser, asHttpError(refusals)),

@@ -66,13 +66,14 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: {
 		label: "Message Growth Desk",
+		pill: true,
 		value: "",
 		onValueChange: fn(),
 		onSubmit: fn(),
 		submitLabel: "Send message",
 		mentionable: [
 			...mentionable,
-			...groupMentionsBy({ kind: "person", id: WRITER_ID }, [sam], "task"),
+			...groupMentionsBy({ kind: "person", id: WRITER_ID }, [sam], "project_thread"),
 		],
 		attachments: withFiles([]),
 	},
@@ -179,7 +180,7 @@ export const SelectGroupMention = meta.story({
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Heads up @cha");
 		await expect(canvas.getAllByRole("option")).toHaveLength(1);
-		// Sam is everyone else in the channel.
+		// Sam is everyone else in the project.
 		await expect(canvas.getByRole("option", { name: /Notifies 1 person/ })).toBeVisible();
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Heads up @channel ");
@@ -242,9 +243,12 @@ export const EditMention = meta.story({
 	},
 });
 
-/** The @ starts a mention where the cursor is, opening the same list as typing `@`. */
+/**
+ * In New message, whose composer has a row of tools under the draft, the @
+ * starts a mention where the cursor is, opening the same list as typing `@`.
+ */
 export const MentionButton = meta.story({
-	args: { value: "Can you ask" },
+	args: { pill: false, value: "Can you ask" },
 	play: async ({ args, canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("textbox", { name: "Message Growth Desk" }));
 		await userEvent.click(canvas.getByRole("button", { name: "Mention a bot or person" }));
@@ -285,9 +289,9 @@ export const ClosedShortcode = meta.story({
 	},
 });
 
-/** The smile opens the emoji picker, and the emoji chosen goes in at the cursor. */
+/** In New message the smile opens the emoji picker, and the emoji chosen goes in at the cursor. */
 export const EmojiButton = meta.story({
-	args: { value: "Nice work" },
+	args: { pill: false, value: "Nice work" },
 	play: async ({ args, canvas, userEvent }) => {
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.click(canvas.getByRole("button", { name: "Add emoji" }));
@@ -491,8 +495,9 @@ export const ReplyingTo = meta.story({
 	},
 });
 
-/** The paperclip sits left of the @ and opens the system's file picker straight away. */
+/** In New message the paperclip sits left of the @ and opens the system's file picker straight away. */
 export const AttachFiles = meta.story({
+	args: { pill: false },
 	play: async ({ canvas, canvasElement, userEvent }) => {
 		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
 		if (!picker) throw new Error("The composer has no file picker");
@@ -504,11 +509,11 @@ export const AttachFiles = meta.story({
 });
 
 /**
- * Before the chat exists there is nowhere to upload to: the paperclip is off,
- * and a pasted file writes nothing into the draft.
+ * Before New message's conversation exists there is nowhere to upload to: the
+ * paperclip is off, and a pasted file writes nothing into the draft.
  */
 export const BeforeTheChatExists = meta.story({
-	args: { attachments: { ...withFiles([]), attach: undefined } },
+	args: { pill: false, attachments: { ...withFiles([]), attach: undefined } },
 	play: async ({ canvas, canvasElement, userEvent }) => {
 		const attachButton = canvas.getByRole("button", { name: "Attach files" });
 		await expect(attachButton).toHaveAttribute("aria-disabled", "true");
@@ -719,18 +724,19 @@ export const FilesOnly = meta.story({
 
 /**
  * FileLimit: 23 files dropped and the first 20 attached. The note says what
- * was left out, the tray scrolls past two rows, and the paperclip turns off.
+ * was left out, the tray scrolls past two rows, and the + menu's upload turns off.
  */
 export const FileLimit = meta.story({
 	args: { attachments: withFiles(invoicesAtLimit, 3) },
-	play: async ({ canvas }) => {
+	play: async ({ canvas, userEvent }) => {
 		await expect(
 			canvas.getByText("3 files weren't added. A message can have 20 at most."),
 		).toBeVisible();
-		await expect(canvas.getByRole("button", { name: "Attach files" })).toHaveAttribute(
-			"aria-disabled",
-			"true",
-		);
+		await userEvent.click(canvas.getByRole("button", { name: "Add" }));
+		await expect(
+			await within(document.body).findByRole("menuitem", { name: "20 files is the most" }),
+		).toHaveAttribute("aria-disabled", "true");
+		await userEvent.keyboard("{Escape}");
 		await expect(canvas.getByText("20 of 20 files")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Send message" })).toBeEnabled();
 	},

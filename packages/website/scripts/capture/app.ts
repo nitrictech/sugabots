@@ -107,14 +107,14 @@ export async function click(stage: Stage, locator: Locator) {
 }
 
 /**
- * Starts a task with the bot named `bot` from its row in the sidebar, whose +
- * shows while the pointer is over the row, and waits for the new task's page.
+ * Opens the bot named `bot` from its row in the sidebar, whose page starts a
+ * new thread with it, and waits for that page's composer.
  */
-export async function openNewTask(stage: Stage, bot: string) {
-	const newTask = stage.app.getByRole("link", { name: `New task with ${bot}` });
-	await newTask.waitFor({ timeout: 20_000 });
-	await click(stage, newTask);
-	await stage.app.getByRole("heading", { name: `What should ${bot} work on?` }).waitFor();
+export async function openNewThread(stage: Stage, bot: string) {
+	const row = stage.app.getByRole("link", { name: bot, exact: true }).first();
+	await row.waitFor({ timeout: 20_000 });
+	await click(stage, row);
+	await stage.app.getByPlaceholder(`Ask ${bot} to…`).waitFor();
 	await wait(stage, 800);
 }
 

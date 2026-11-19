@@ -15,18 +15,22 @@ import type {
 } from "./automation.ts";
 import type { AutomationRun } from "./automation.workflow.ts";
 import { AutomationRepository } from "./repository.ts";
-import { type InvalidAutomationSchedule, latestMissedAndNextOccurrence } from "./schedule.ts";
+import { type InvalidRoutineSchedule, latestMissedAndNextOccurrence } from "./schedule.ts";
 
 /**
- * The automation work nobody asks for: the scheduler accepting scheduled runs as they
+ * The automation work nobody asks for: the scheduler accepting routines' runs as they
  * fall due, and a run's workflow starting it. Neither acts for a person, so
  * this asks for no actor and is never handed to a route.
  */
 export interface Interface {
-	/** Accepts the run of the schedule due soonest, if one is due, and schedules its next. */
+	/**
+	 * Accepts the run of the routine due soonest, if one is due, and sets when
+	 * it runs next. A routine of a project with no lead bot is skipped to its
+	 * next time.
+	 */
 	readonly processNextDue: () => Effect.Effect<
 		AcceptedRun | undefined,
-		| InvalidAutomationSchedule
+		| InvalidRoutineSchedule
 		| AutomationNotFound
 		| AutomationTriggerConflict
 		| AutomationTriggerRejected
@@ -55,8 +59,8 @@ export const make = Effect.gen(function* () {
 						const due = yield* repository.lockNextDue(now);
 						if (!due) return undefined;
 						const { settings } = due.trigger;
-						if (settings.kind !== "schedule") {
-							return yield* Effect.die(new Error("A trigger that isn't a schedule fell due"));
+						if (settings.kind !== "routine") {
+							return yield* Effect.die(new Error("A trigger that isn't a routine fell due"));
 						}
 						const occurrence = yield* latestMissedAndNextOccurrence(
 							settings.schedule,
@@ -66,12 +70,22 @@ export const make = Effect.gen(function* () {
 						const scheduledAt = occurrence.latest.toISOString();
 						const accepted = yield* acceptTrigger({
 							workspaceId: due.automation.workspaceId,
-							botId: due.automation.botId,
+							projectId: due.automation.projectId,
 							automationId: due.automation.id,
 							triggerId: due.trigger.id,
 							triggerIdentity: scheduledAt,
-							trigger: { kind: "schedule", scheduledAt, acceptedAt: now.toISOString() },
-						});
+							trigger: { kind: "routine", scheduledAt, acceptedAt: now.toISOString() },
+						}).pipe(
+							// Refused before anything is written, so the routine moves on to its next time.
+							Effect.catchTag("AutomationProjectHasNoLead", () =>
+								Effect.as(
+									Effect.logWarning(
+										`Skipped a routine of automation ${due.automation.id}: its project has no lead bot`,
+									),
+									undefined,
+								),
+							),
+						);
 						yield* repository.scheduleNext([{ triggerId: due.trigger.id, at: occurrence.next }]);
 						return accepted;
 					}),

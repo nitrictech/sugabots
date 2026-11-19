@@ -11,15 +11,15 @@ import { useEffect } from "react";
 import { client } from "@/api.ts";
 
 /**
- * Leaves for GitHub to make the bot its own GitHub App, owned by
+ * Leaves for GitHub to make the project its own GitHub App, owned by
  * `organization` or by the person; GitHub comes back to install it.
  */
-export function useMakeGitHubApp(botId: string) {
+export function useMakeGitHubApp(projectId: string) {
 	return useMutation({
 		mutationFn: async (organization: string | undefined) => {
 			const form = await Effect.runPromise(
 				client.api.gitHubConnections.start({
-					params: { botId },
+					params: { projectId },
 					payload: organization ? { organization } : {},
 				}),
 			);
@@ -29,64 +29,68 @@ export function useMakeGitHubApp(botId: string) {
 }
 
 /** Leaves for GitHub to install the connection's app, or to change which repositories it reaches. */
-export function useInstallGitHubApp(botId: string) {
+export function useInstallGitHubApp(projectId: string) {
 	return useMutation({
 		mutationFn: async (connectionId: string) => {
 			const { url } = await Effect.runPromise(
-				client.api.gitHubConnections.installUrl({ params: { botId, connectionId } }),
+				client.api.gitHubConnections.installUrl({ params: { projectId, connectionId } }),
 			);
 			window.location.assign(url);
 		},
 	});
 }
 
-const reachableRepositories = (botId: string, connectionId: string) =>
+const reachableRepositories = (projectId: string, connectionId: string) =>
 	queryOptions({
-		queryKey: ["github-reachable-repositories", botId, connectionId],
+		queryKey: ["github-reachable-repositories", projectId, connectionId],
 		queryFn: ({ signal }) =>
 			Effect.runPromise(
-				client.api.gitHubConnections.reachableRepositories({ params: { botId, connectionId } }),
+				client.api.gitHubConnections.reachableRepositories({ params: { projectId, connectionId } }),
 				{ signal },
 			),
 		staleTime: 60_000,
 	});
 
 /** What a GitHub connection's app reaches, to choose the connection's repositories from. */
-export function useReachableRepositories(botId: string, connectionId: string) {
-	return useQuery(reachableRepositories(botId, connectionId));
+export function useReachableRepositories(projectId: string, connectionId: string) {
+	return useQuery(reachableRepositories(projectId, connectionId));
 }
 
 /** Starts listing what the connection's app reaches, while `wanted`, so choosing from it is quick. */
 export function usePrefetchReachableRepositories(
-	botId: string,
+	projectId: string,
 	connectionId: string,
 	wanted: boolean,
 ) {
 	const queryClient = useQueryClient();
 	useEffect(() => {
-		if (wanted) void queryClient.prefetchQuery(reachableRepositories(botId, connectionId));
-	}, [queryClient, botId, connectionId, wanted]);
+		if (wanted) void queryClient.prefetchQuery(reachableRepositories(projectId, connectionId));
+	}, [queryClient, projectId, connectionId, wanted]);
 }
 
 /** A GitHub connection's repositories, and changing them. */
-export function useConnectionRepositories(botId: string, connectionId: string | undefined) {
+export function useConnectionRepositories(
+	projectId: string | undefined,
+	connectionId: string | undefined,
+) {
 	const queryClient = useQueryClient();
-	const queryKey = ["connection-repositories", botId, connectionId];
+	const queryKey = ["connection-repositories", projectId, connectionId];
 	const store = { onSuccess: (data: unknown) => queryClient.setQueryData(queryKey, data) };
 	const params = () => {
-		if (!connectionId) throw new Error("No GitHub connection");
-		return { botId, connectionId };
+		if (!projectId || !connectionId) throw new Error("No GitHub connection");
+		return { projectId, connectionId };
 	};
 	return {
 		repositories: useQuery({
 			queryKey,
-			queryFn: connectionId
-				? ({ signal }) =>
-						Effect.runPromise(
-							client.api.gitHubConnections.repositories({ params: { botId, connectionId } }),
-							{ signal },
-						)
-				: skipToken,
+			queryFn:
+				projectId && connectionId
+					? ({ signal }) =>
+							Effect.runPromise(
+								client.api.gitHubConnections.repositories({ params: { projectId, connectionId } }),
+								{ signal },
+							)
+					: skipToken,
 		}),
 		add: useMutation({
 			mutationFn: (repository: string) =>

@@ -50,7 +50,7 @@ export function searchHistoryTool({
 	conversationId: string;
 	/** Where the history the bot reads word for word starts, once compacted; nothing from then on is searched. */
 	before: Date | undefined;
-	/** Whether the bot works in the bot's computer, so is told it can copy attachments into it. */
+	/** Whether the turn works in its project's computer, so the bot is told it can copy attachments into it. */
 	usesComputer: boolean;
 	run: RunEffect;
 }) {

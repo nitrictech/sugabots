@@ -9,12 +9,8 @@ import { modelIdSchema, systemBotKeySchema } from "./bots.ts";
  * is right, which is what a trial reports.
  */
 
-/** The jobs a model can be tried on: the system bots, by their own keys. */
-const trialSystemBotSchema = systemBotKeySchema;
-export type TrialSystemBot = typeof trialSystemBotSchema.Type;
-
 export const newModelTrialSchema = Schema.Struct({
-	systemBotKey: trialSystemBotSchema,
+	systemBotKey: systemBotKeySchema,
 	model: modelIdSchema,
 });
 export type NewModelTrial = typeof newModelTrialSchema.Type;
@@ -61,7 +57,7 @@ export const trialSpeedSchema = Schema.Struct({
 export type TrialSpeed = typeof trialSpeedSchema.Type;
 
 export const modelTrialSchema = Schema.Struct({
-	systemBotKey: trialSystemBotSchema,
+	systemBotKey: systemBotKeySchema,
 	model: modelIdSchema,
 	/** The worse of the two: a system bot that is slow is no use, however right. */
 	rating: trialRatingSchema,

@@ -10,8 +10,8 @@ import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 
 /*
- * What a repository automation runs on: one of its bot's GitHub
- * connection's repositories, and what happening there starts a run.
+ * What a repository automation runs on: one of the repositories its project's
+ * GitHub app reaches, and what happening there starts a run.
  */
 
 /** What a repository automation runs on until somebody chooses. */
@@ -37,23 +37,24 @@ export function repositoryTrigger(draft: RepositoryDraft) {
 export const PICK_AN_EVENT_NOTE = "Pick at least one thing for it to run on.";
 
 /**
- * The repository and events groups, for an automation on the bot `botId`.
+ * The repository and events groups, for an automation in the project
+ * `projectId`, a bot's default one or one people made, called `ownerName`.
  * Its GitHub app's repositories are the ones to choose from.
  */
 export function RepositoryGroups({
-	botId,
-	botName,
+	projectId,
+	ownerName,
 	draft,
 	onChange,
 }: {
-	botId: string;
-	botName: string;
+	projectId: string;
+	ownerName: string;
 	draft: RepositoryDraft;
 	onChange: (draft: RepositoryDraft) => void;
 }) {
-	const connections = useConnections(botId);
+	const connections = useConnections(projectId);
 	const connectionId = connections.data?.find((one) => one.kind === "github")?.id;
-	const { repositories } = useConnectionRepositories(botId, connectionId);
+	const { repositories } = useConnectionRepositories(projectId, connectionId);
 	if (connections.isPending) return null;
 	if (connections.isError) return <Alert>{failureMessage(connections.error)}</Alert>;
 	if (connectionId && repositories.isPending) return null;
@@ -62,7 +63,7 @@ export function RepositoryGroups({
 	if (!connectionId || choices.length === 0) {
 		return (
 			<Note>
-				{botName} isn't connected to any GitHub repositories yet. Someone who manages its
+				{ownerName} isn't connected to any GitHub repositories yet. Someone who manages its
 				connections can connect GitHub in its settings.
 			</Note>
 		);
@@ -73,7 +74,7 @@ export function RepositoryGroups({
 		choice.repository.toLowerCase() === chosen.repository.toLowerCase();
 	return (
 		<>
-			<SettingsGroup label="Repository" note={`${botName}'s repositories.`}>
+			<SettingsGroup label="Repository" note={`${ownerName}'s repositories.`}>
 				{choices.map((choice) => (
 					<SettingsRow
 						key={choice.repository}
@@ -101,26 +102,26 @@ export function RepositoryGroups({
 				}
 			>
 				{REPOSITORY_EVENTS.map((event) => (
-					<div
+					<SettingsRow
 						key={event}
-						className="flex min-h-11.5 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0"
-					>
-						<span className="flex-1 text-sm text-foreground">{REPOSITORY_EVENT_LABELS[event]}</span>
-						<Toggle
-							label={REPOSITORY_EVENT_LABELS[event]}
-							checked={draft.events.includes(event)}
-							onChange={(on) =>
-								onChange({
-									...draft,
-									events: on
-										? REPOSITORY_EVENTS.filter(
-												(candidate) => candidate === event || draft.events.includes(candidate),
-											)
-										: draft.events.filter((candidate) => candidate !== event),
-								})
-							}
-						/>
-					</div>
+						label={REPOSITORY_EVENT_LABELS[event]}
+						trailing={
+							<Toggle
+								label={REPOSITORY_EVENT_LABELS[event]}
+								checked={draft.events.includes(event)}
+								onChange={(on) =>
+									onChange({
+										...draft,
+										events: on
+											? REPOSITORY_EVENTS.filter(
+													(candidate) => candidate === event || draft.events.includes(candidate),
+												)
+											: draft.events.filter((candidate) => candidate !== event),
+									})
+								}
+							/>
+						}
+					/>
 				))}
 			</SettingsGroup>
 		</>

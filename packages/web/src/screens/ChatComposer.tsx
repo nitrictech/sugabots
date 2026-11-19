@@ -1,4 +1,3 @@
-import { Popover } from "@base-ui/react/popover";
 import {
 	type BotParticipant,
 	canStartMention,
@@ -27,20 +26,21 @@ import {
 	sendReadiness,
 } from "@/lib/composer-attachments.ts";
 import { useAvailableEmoji } from "@/lib/emoji.ts";
+import { countOf } from "@/lib/name-list.ts";
 import { rememberEmoji } from "@/lib/recent-emoji.ts";
-import { BotAvatar } from "@/shell/Bot.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
-import { EmojiPicker } from "@/ui/emoji-picker.tsx";
+import { EmojiPickerPopover } from "@/ui/emoji-picker-popover.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { AttachmentTray, LeftOutNote } from "./ComposerAttachments.tsx";
 import { MentionEditor, type MentionEditorHandle } from "./MentionEditor.tsx";
 import { MentionChip, type MentionTarget, mentionTargetKey } from "./mentions.tsx";
+import { ParticipantAvatar } from "./ParticipantAvatar.tsx";
 
 /**
  * Whether the one-line composer's draft has run past a line, so it takes the
@@ -137,9 +137,8 @@ function textWidthIn(box: HTMLElement, text: string): number {
 	return context.measureText(text).width;
 }
 
-/** A 30px icon button on the row beneath the draft, such as the paperclip, the @ and the smile. */
-const toolButtonClassName =
-	"focus-ring grid size-7.5 place-items-center rounded-tail text-muted-foreground transition-colors hover:bg-chip";
+/** Merged over a `bar` `IconButton` on the row beneath the draft, such as the paperclip, the @ and the smile. */
+const TOOL_BUTTON = "rounded-tail text-muted-foreground";
 
 /**
  * Where a message is written: a box that grows with its text and sends on
@@ -172,7 +171,6 @@ export function ChatComposer({
 	submitLabel,
 	sending = false,
 	error,
-	className,
 	mentionable,
 	replyingTo,
 	addressed,
@@ -188,9 +186,9 @@ export function ChatComposer({
 	/** The model of the bot the message goes to, named by Send while nothing holds the message back. */
 	model?: string;
 	/**
-	 * One rounded line, as a bot's task has it, with the model under it. Without
-	 * it, a tablet up has the draft over a row of tools, as direct messages and
-	 * channels do; a phone always has the line.
+	 * One rounded line, as every conversation has it, with the model under it.
+	 * Without it, as New message has it, a tablet up has the draft over a row of
+	 * tools; a phone always has the line.
 	 */
 	pill?: boolean;
 	/** As a page's one box to start from, as a bot's page has it: the draft over its buttons, a few lines tall. */
@@ -202,7 +200,6 @@ export function ChatComposer({
 	/** A message is on its way, so another cannot be sent yet. */
 	sending?: boolean;
 	error?: ReactNode;
-	className?: string;
 	/** Who the draft can mention, offered in this order. */
 	mentionable: readonly MentionTarget[];
 	/** The message the draft answers, quoted when it is sent. */
@@ -217,7 +214,7 @@ export function ChatComposer({
 	};
 	/** The files attached to the message, and what attaches, removes and retries them. */
 	attachments: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
-	/** Send is off until the draft has words, as for a message that starts a task, which is titled from them. */
+	/** Send is off until the draft has words, as for a message that starts a thread, which is titled from them. */
 	needsText?: boolean;
 	/** Whether the message has anybody to go to: Send is off until it does, as in New message until somebody is chosen. */
 	hasRecipients?: boolean;
@@ -348,7 +345,7 @@ export function ChatComposer({
 				event.preventDefault();
 				void onSubmit();
 			}}
-			className={cn("relative flex shrink-0 flex-col", className)}
+			className="relative flex w-full shrink-0 flex-col"
 		>
 			{menu?.kind === "mention" && (
 				<SuggestionList
@@ -397,7 +394,7 @@ export function ChatComposer({
 					"focus-ring-within flex cursor-text border border-border-strong transition-colors max-md:flex-row max-md:flex-wrap max-md:items-end max-md:gap-x-1 max-md:rounded-3xl max-md:p-1",
 					pill
 						? // Its lines sit at its foot, so as it grows up + and Send stay put and the draft is uncovered above them.
-							"flex-row flex-wrap content-end items-end gap-x-1 overflow-hidden rounded-composer bg-zinc-50 p-1.5 dark:bg-zinc-800"
+							"flex-row flex-wrap content-end items-end gap-x-1 overflow-hidden rounded-composer bg-composer p-1.5"
 						: "flex-col rounded-xl bg-panel",
 				)}
 			>
@@ -438,7 +435,7 @@ export function ChatComposer({
 						ref={editor}
 						id={id}
 						label={label}
-						placeholder={placeholder}
+						placeholder={placeholder ?? label}
 						value={value}
 						mentionable={mentionable}
 						maxLength={MESSAGE_MAX_LENGTH}
@@ -478,16 +475,15 @@ export function ChatComposer({
 					{/* The one-line composer leaves mentions and emoji to typing, as a phone does. */}
 					{!pill && (
 						<>
-							<Tooltip label="Mention a bot or person" side="top">
-								<button
-									type="button"
-									aria-label="Mention a bot or person"
-									onClick={startMention}
-									className={cn(toolButtonClassName, "max-md:hidden")}
-								>
-									<AtSign size={16} strokeWidth={2} />
-								</button>
-							</Tooltip>
+							<IconButton
+								label="Mention a bot or person"
+								side="top"
+								variant="bar"
+								onClick={startMention}
+								className={cn(TOOL_BUTTON, "max-md:hidden")}
+							>
+								<AtSign size={16} strokeWidth={2} />
+							</IconButton>
 							{/* A phone's own keyboard has emoji. */}
 							<span className="contents max-md:hidden">
 								<EmojiButton onChoose={insertEmoji} />
@@ -717,29 +713,25 @@ function AttachButton({
 	return (
 		<>
 			{input}
-			<Tooltip
+			<IconButton
 				label={
 					full ? `${MAX_ATTACHMENTS_PER_MESSAGE} files is the most for one message` : "Attach files"
 				}
 				side="top"
+				variant="bar"
+				aria-disabled={unavailable || undefined}
+				onClick={() => {
+					if (!unavailable) picker.current?.click();
+				}}
+				className={cn(
+					TOOL_BUTTON,
+					"max-md:order-1 max-md:size-9 max-md:rounded-full",
+					unavailable && "opacity-40 hover:bg-transparent",
+				)}
 			>
-				<button
-					type="button"
-					aria-label="Attach files"
-					aria-disabled={unavailable || undefined}
-					onClick={() => {
-						if (!unavailable) picker.current?.click();
-					}}
-					className={cn(
-						toolButtonClassName,
-						"max-md:order-1 max-md:size-9 max-md:rounded-full",
-						unavailable && "opacity-40 hover:bg-transparent",
-					)}
-				>
-					<Paperclip aria-hidden size={16} strokeWidth={2} className="max-md:hidden" />
-					<Plus aria-hidden size={20} strokeWidth={2} className="md:hidden" />
-				</button>
-			</Tooltip>
+				<Paperclip aria-hidden size={16} strokeWidth={2} className="max-md:hidden" />
+				<Plus aria-hidden size={20} strokeWidth={2} className="md:hidden" />
+			</IconButton>
 		</>
 	);
 }
@@ -755,11 +747,7 @@ function filesNote(items: readonly ComposerAttachment[]): string | undefined {
 			? `${action} the file that failed`
 			: `${action} the ${readiness.failed} files that failed`;
 	}
-	if (!readiness.ready) {
-		return readiness.uploading === 1
-			? "1 file uploading"
-			: `${readiness.uploading} files uploading`;
-	}
+	if (!readiness.ready) return `${countOf(readiness.uploading, "file", "files")} uploading`;
 	if (items.length >= MAX_ATTACHMENTS_PER_MESSAGE) {
 		return `${MAX_ATTACHMENTS_PER_MESSAGE} of ${MAX_ATTACHMENTS_PER_MESSAGE} files`;
 	}
@@ -772,46 +760,20 @@ function filesNote(items: readonly ComposerAttachment[]): string | undefined {
  * the smile.
  */
 function EmojiButton({ onChoose }: { onChoose: (emoji: string) => void }) {
-	const [open, setOpen] = useState(false);
-	const chose = useRef(false);
 	return (
-		<Popover.Root
-			open={open}
-			onOpenChange={(next) => {
-				if (next) chose.current = false;
-				setOpen(next);
-			}}
-		>
-			<Tooltip label="Add emoji" side="top">
-				<Popover.Trigger aria-label="Add emoji" className={toolButtonClassName}>
+		<EmojiPickerPopover
+			label="Add emoji"
+			trigger={
+				<IconButton label="Add emoji" side="top" variant="bar" className={TOOL_BUTTON}>
 					<Smile aria-hidden size={16} strokeWidth={2} />
-				</Popover.Trigger>
-			</Tooltip>
-			<Popover.Portal>
-				<Popover.Positioner
-					side="top"
-					align="start"
-					sideOffset={6}
-					collisionPadding={16}
-					className="isolate z-50 outline-none"
-				>
-					<Popover.Popup
-						aria-label="Add emoji"
-						// Choosing one has already put the focus back in the draft.
-						finalFocus={() => !chose.current}
-						className="origin-(--transform-origin) overflow-hidden rounded-lg border border-border-strong bg-panel text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95"
-					>
-						<EmojiPicker
-							onSelect={(emoji) => {
-								chose.current = true;
-								setOpen(false);
-								onChoose(emoji);
-							}}
-						/>
-					</Popover.Popup>
-				</Popover.Positioner>
-			</Popover.Portal>
-		</Popover.Root>
+				</IconButton>
+			}
+			returnsFocus={false}
+			onSelect={(emoji) => {
+				onChoose(emoji);
+				return true;
+			}}
+		/>
 	);
 }
 
@@ -912,8 +874,7 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 				<span className="flex min-w-0 flex-1 flex-col gap-px">
 					<span className="truncate font-medium text-sm">@{suggestion.handle}</span>
 					<span className="truncate text-muted-foreground text-xs">
-						Notifies {suggestion.notifies.length}{" "}
-						{suggestion.notifies.length === 1 ? "person" : "people"}
+						Notifies {countOf(suggestion.notifies.length, "person", "people")}
 					</span>
 				</span>
 			</>
@@ -922,16 +883,7 @@ function MentionOption({ suggestion }: { suggestion: MentionTarget }) {
 	const participant = suggestion;
 	return (
 		<>
-			{participant.kind === "bot" ? (
-				<BotAvatar
-					color={participant.color}
-					face={participant.face}
-					shape={participant.shape}
-					size={26}
-				/>
-			) : (
-				<PersonAvatar person={participant} size={26} />
-			)}
+			<ParticipantAvatar participant={participant} size={26} />
 			<span className="flex min-w-0 flex-1 flex-col gap-px">
 				<span className="truncate font-medium text-sm">{participant.name}</span>
 				<span className="truncate text-muted-foreground text-xs">

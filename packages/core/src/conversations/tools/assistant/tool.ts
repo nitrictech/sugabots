@@ -6,9 +6,9 @@ import type { Request } from "../computer.ts";
 import { noInputSchema } from "../no-input.ts";
 
 export const WORKSPACE_GUIDE_TOOL = "workspace_guide";
-export const CREATE_CHANNEL_TOOL = "create_channel";
-export const JOIN_CHANNEL_TOOL = "join_channel";
-export const ADD_BOT_TO_CHANNEL_TOOL = "add_bot_to_channel";
+export const CREATE_PROJECT_TOOL = "create_project";
+export const JOIN_PROJECT_TOOL = "join_project";
+export const ADD_BOT_TO_PROJECT_TOOL = "add_bot_to_project";
 export const PIN_BOT_TOOL = "pin_bot";
 
 /** What the assistant is told of something it did for its person, or why it couldn't. */
@@ -16,7 +16,7 @@ type ActedResult = { done: AssistantGuide.Place } | { refused: string };
 
 /**
  * The `workspace_guide` tool, a Personal Assistant's view of its person's
- * workspace: its channels, the bots they can reach with what each has been
+ * workspace: its projects, the bots they can reach with what each has been
  * doing lately, and what is waiting on them.
  */
 export function workspaceGuideTool({
@@ -30,7 +30,7 @@ export function workspaceGuideTool({
 }) {
 	return tool({
 		description:
-			"See the workspace as your person does: its channels, the bots they can reach with what each is for and what it has been doing lately, and what is waiting on them (approvals, unread mentions, failing automations), each with its link.",
+			"See the workspace as your person does: its projects, the bots they can reach with what each is for and what it has been doing lately, and what is waiting on them (approvals, unread mentions, failing automations), each with its link.",
 		inputSchema: noInputSchema,
 		execute: (): Promise<AssistantGuide.Guide> => run(guide.guide(person)),
 	});
@@ -62,42 +62,43 @@ export function assistantRequests({
 		);
 	const asked = (made: Request["tool"]): Request => ({ tool: made, refusal: () => undefined });
 	return {
-		[CREATE_CHANNEL_TOOL]: asked(
+		[CREATE_PROJECT_TOOL]: asked(
 			tool({
 				description:
-					"Make a channel for your person, with them in it. Public channels are listed for anyone in the workspace to join; private ones only for the people added.",
+					"Make a project for your person, with them in it, led by a public bot of their choosing, which answers its threads unless another bot is mentioned. Public projects are listed for anyone in the workspace to join; private ones only for the people added.",
 				inputSchema: Schema.Struct({
-					name: nameSchema("What the channel is called, like Launch."),
+					name: nameSchema("What the project is called, like Launch."),
+					lead: nameSchema("The handle of the public bot to lead it, like @support."),
 					description: Schema.optional(
 						Schema.Trim.check(Schema.isMaxLength(500)).annotate({
-							description: "What the channel is for, in a sentence.",
+							description: "What the project is for, in a sentence.",
 						}),
 					),
 					private: Schema.optional(
 						Schema.Boolean.annotate({ description: "Only people added can find it." }),
 					),
 				}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-				execute: (channel): Promise<ActedResult> => acted(guide.createChannel(person, channel)),
+				execute: (project): Promise<ActedResult> => acted(guide.createProject(person, project)),
 			}),
 		),
-		[JOIN_CHANNEL_TOOL]: asked(
+		[JOIN_PROJECT_TOOL]: asked(
 			tool({
-				description: "Put your person in a public channel, by its address from workspace_guide.",
+				description: "Put your person in a public project, by its address from workspace_guide.",
 				inputSchema: Schema.Struct({
-					channel: nameSchema("The channel's address, like launch."),
+					project: nameSchema("The project's address, like launch."),
 				}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-				execute: ({ channel }): Promise<ActedResult> => acted(guide.joinChannel(person, channel)),
+				execute: ({ project }): Promise<ActedResult> => acted(guide.joinProject(person, project)),
 			}),
 		),
-		[ADD_BOT_TO_CHANNEL_TOOL]: asked(
+		[ADD_BOT_TO_PROJECT_TOOL]: asked(
 			tool({
 				description:
-					"Add a public bot to a channel your person is in, so people there can mention it.",
+					"Add a public bot to a project your person is in, so people there can mention it.",
 				inputSchema: Schema.Struct({
-					channel: nameSchema("The channel's address, like launch."),
+					project: nameSchema("The project's address, like launch."),
 					bot: nameSchema("The bot's handle, like @support."),
 				}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-				execute: (target): Promise<ActedResult> => acted(guide.addBotToChannel(person, target)),
+				execute: (target): Promise<ActedResult> => acted(guide.addBotToProject(person, target)),
 			}),
 		),
 		[PIN_BOT_TOOL]: asked(

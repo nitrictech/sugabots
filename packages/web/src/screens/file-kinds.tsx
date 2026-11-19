@@ -5,6 +5,7 @@ import { type ReactNode, useRef, useState } from "react";
 import { FILE_KIND_DOWNLOADS, FILE_KIND_LABELS } from "@/lib/file-kind-catalog.ts";
 import type { PageAt } from "@/lib/files.ts";
 import { FIT_HEIGHT_PX } from "@/lib/page-frame.ts";
+import { Button } from "@/ui/button.tsx";
 import { HtmlFrame, withContentPolicy } from "./HtmlFrame.tsx";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 
@@ -63,8 +64,6 @@ export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
 	},
 };
 
-const DOCUMENT_PREVIEW_HEIGHT_PX = 168;
-
 /** The start of a document, faded out, opening it in full when clicked. */
 function DocumentPreview({
 	title,
@@ -81,8 +80,7 @@ function DocumentPreview({
 			type="button"
 			onClick={onOpen}
 			aria-label={`Open ${title}`}
-			style={{ maxHeight: DOCUMENT_PREVIEW_HEIGHT_PX }}
-			className="focus-ring relative block w-full cursor-zoom-in overflow-hidden px-3.5 py-2 text-left text-xs mask-b-from-60%"
+			className="focus-ring relative block max-h-42 w-full cursor-zoom-in overflow-hidden px-3.5 py-2 text-left text-xs mask-b-from-60%"
 		>
 			<MessageMarkdown text={content} mentionable={[]} writer="bot" />
 		</button>
@@ -130,14 +128,19 @@ function LivePage({
 							"absolute inset-x-0 bottom-0 bg-gradient-to-t from-panel to-transparent pt-10",
 					)}
 				>
-					<button
-						type="button"
+					<Button
+						variant="secondary"
+						size="sm"
 						onClick={expanded ? collapse : () => setExpanded(true)}
-						className="focus-ring flex h-8 items-center gap-1.5 rounded-md border border-border-strong bg-panel px-3.5 font-semibold text-xs text-foreground shadow-popover transition-colors hover:bg-hover"
+						className="h-8 border border-border-strong bg-panel shadow-popover"
 					>
-						{expanded ? <ChevronUp aria-hidden size={15} /> : <ChevronDown aria-hidden size={15} />}
+						{expanded ? (
+							<ChevronUp aria-hidden className="size-3.75" />
+						) : (
+							<ChevronDown aria-hidden className="size-3.75" />
+						)}
 						{expanded ? "Show less" : "Show all"}
-					</button>
+					</Button>
 				</div>
 			)}
 		</div>

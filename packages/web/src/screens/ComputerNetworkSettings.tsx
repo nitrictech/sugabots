@@ -4,13 +4,14 @@ import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { useComputerNetwork } from "@/lib/computer-providers.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { Alert } from "@/ui/alert.tsx";
+import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsControlRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
  * What every computer may connect to. On the allowlist, the trusted
- * hosts every workspace has, and the ones this workspace allowed, and each bot
- * adds its own in its settings; open, every host. The workspace's blocked
+ * hosts every workspace has, and the ones this workspace allowed, and each
+ * project or bot adds its own in its settings; open, every host. The workspace's blocked
  * hosts are out of every computer's reach, unless the computers are open at a
  * provider that can't block hosts. `modeRow` leads the Network group: the
  * switch between open and the allowlist, which is the provider's.
@@ -77,7 +78,7 @@ export function ComputerNetworkGroups({
 			) : (
 				<SettingsGroup
 					label="Network"
-					note="Every bot's computer connects to these hosts, and each bot adds its own under Computer in its settings. Blocked hosts still apply. When a bot needs another, it asks in its task, and someone who manages the bot decides."
+					note="Every computer connects to these hosts, and each project or bot adds its own under Computer in its settings. Blocked hosts still apply. When a bot needs another, it asks in a thread, and someone who manages the project or bot decides."
 				>
 					{modeRow}
 					{settings.addedHosts.map((added) => (
@@ -106,8 +107,8 @@ export function ComputerNetworkGroups({
 					label="Blocked hosts"
 					note={
 						open
-							? "No bot's computer connects to these, or to their subdomains."
-							: "No bot's computer connects to these, whatever it allows, and bots' requests for them are refused. Blocking a host also keeps out any wildcard that covers it."
+							? "No computer connects to these, or to their subdomains."
+							: "No computer connects to these, whatever its project allows, and bots' requests for them are refused. Blocking a host also keeps out any wildcard that covers it."
 					}
 				>
 					{settings.blockedHosts.map((blocked) => (
@@ -216,13 +217,9 @@ export function AddHostRow({
 					placeholder="api.example.com or *.example.com"
 					className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
 				/>
-				<button
-					type="submit"
-					disabled={disabled || draft.trim() === ""}
-					className="focus-ring shrink-0 rounded-md font-medium text-xs text-link disabled:opacity-50"
-				>
+				<Button type="submit" variant="link" size="text" disabled={disabled || draft.trim() === ""}>
 					{action}
-				</button>
+				</Button>
 			</SettingsControlRow>
 		</form>
 	);

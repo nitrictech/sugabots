@@ -15,9 +15,8 @@ import { and, desc, eq, getColumns, isNull, type SQLWrapper, sql } from "drizzle
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import {
 	type AuthorizationDenied,
-	type BotStanding,
-	botStandingFor,
 	type ConversationStanding,
+	computerProjectStandingFor,
 	mayDecideToolCall,
 	ResourceHidden,
 } from "../authorization/access.ts";
@@ -129,22 +128,15 @@ export const make = Effect.gen(function* () {
 						loadConversation(db, standing.conversation, history.limit, before),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
-					const host = yield* hostStandingOf(standing);
-					const computerDeciders = yield* computerRequestDecidersIn(row);
-					const details = toConversationDetails(
-						row,
-						standing,
-						host,
-						computerDeciders,
-						history.limit,
-					);
+					const computerDeciders = yield* computerRequestDecidersIn(row, standing);
+					const details = toConversationDetails(row, standing, computerDeciders, history.limit);
 					const { automationId } = row;
 					if (!automationId) return details;
 					const [owned] = yield* query((db) =>
 						db
 							.select({
 								id: automation.id,
-								botId: automation.botId,
+								projectId: automation.projectId,
 								state: automation.state,
 								failed: latestRunFailed(automation.id),
 								pausedAfterFailuresAt: automation.pausedAfterFailuresAt,
@@ -218,7 +210,7 @@ export class InvalidConversationHistoryCursor
 
 /**
  * The conversation `place`, a page of its messages with their authors and the parts
- * placed in them, its participants and its channel's bots and people, or a direct
+ * placed in them, its participants and its project's bots and people, or a direct
  * message's people: one statement. In a direct message, who has left the
  * workspace keeps their rows, to have the conversation back should they rejoin,
  * but is left out of who is in it, who joined in and who read it.
@@ -240,7 +232,7 @@ const loadConversation = Effect.fn("ConversationView.loadConversation")(function
 			runId: (row) => runIdOf(row.id),
 		},
 		with: {
-			channel: {
+			project: {
 				columns: {},
 				with: {
 					bots: {
@@ -296,39 +288,29 @@ const loadConversation = Effect.fn("ConversationView.loadConversation")(function
 type Conversation = NonNullable<Effect.Success<ReturnType<typeof loadConversation>>>;
 
 /**
- * The caller's standing towards the bot a conversation is with, whose
- * computer its requests are about: the conversation's own standing, except
- * on a collaboration, which is reached through the conversation it was
- * opened from.
- */
-const hostStandingOf = Effect.fn("ConversationView.hostStandingOf")(function* (
-	standing: ConversationStanding,
-) {
-	if (standing.kind === "bot" && standing.conversation.kind !== "collaboration") {
-		return standing.standing;
-	}
-	const { botId } = standing.conversation;
-	if (!botId) return undefined;
-	const { userId } = yield* CurrentActor.Service;
-	return yield* query((db) => botStandingFor(db, botId, userId));
-});
-
-/**
  * The bots that speak in the conversation, its own and any taking part, whose
- * requests to change their computers the caller may decide: each bot's
- * creator or an admin, so in a channel it differs from bot to bot.
+ * requests to change the computer they work on the caller may decide: those
+ * who manage that computer's project, the conversation's, or in a
+ * collaboration the bot's own default project. Outside a collaboration every
+ * bot works on the conversation's project, in which the caller's `standing`
+ * is already known.
  */
 const computerRequestDecidersIn = Effect.fn("ConversationView.computerRequestDecidersIn")(
-	function* (row: Conversation) {
+	function* (row: Conversation, standing: ConversationStanding) {
 		const speakers = new Set(
 			[row.botId, ...row.participants.map(({ bot: participant }) => participant?.id)].filter(
 				(id): id is string => typeof id === "string",
 			),
 		);
+		if (row.kind !== "collaboration") {
+			const managesComputer =
+				standing.kind === "project" && standing.standing.may("computer.request.decide");
+			return managesComputer ? [...speakers] : [];
+		}
 		const { userId } = yield* CurrentActor.Service;
 		const deciding: string[] = [];
 		for (const botId of speakers) {
-			const standing = yield* query((db) => botStandingFor(db, botId, userId));
+			const standing = yield* query((db) => computerProjectStandingFor(db, row.id, botId, userId));
 			if (standing?.may("computer.request.decide")) deciding.push(botId);
 		}
 		return deciding;
@@ -338,7 +320,6 @@ const computerRequestDecidersIn = Effect.fn("ConversationView.computerRequestDec
 function toConversationDetails(
 	row: Conversation,
 	standing: ConversationStanding,
-	host: BotStanding | undefined,
 	computerDeciders: readonly string[],
 	limit: number,
 ): ConversationDetails {
@@ -350,7 +331,7 @@ function toConversationDetails(
 		// What this person may do with the approvals this conversation raises, decided
 		// once here so the conversation does not have to work it out from a role.
 		capabilities: {
-			approveToolCalls: mayDecideToolCall(standing, host, inAutomation, "conversation"),
+			approveToolCalls: mayDecideToolCall(standing, undefined, inAutomation, "conversation"),
 			approveComputerRequestsOf: computerDeciders,
 		},
 		// A run is always listed in its automation's feed.
@@ -361,9 +342,9 @@ function toConversationDetails(
 		participants: row.participants.map(({ user: person, bot: participant }) =>
 			toParticipant(authorRow(person, participant)),
 		),
-		channelBots: (row.channel?.bots ?? []).map((bot): Participant => ({ kind: "bot", ...bot })),
-		// A direct message's people are its members, as a channel's are the channel's.
-		members: (row.channel?.members ?? row.directMessageMembers ?? []).map(toPerson),
+		projectBots: (row.project?.bots ?? []).map((bot): Participant => ({ kind: "bot", ...bot })),
+		// A direct message's people are its members, as a project's are the project's.
+		members: (row.project?.members ?? row.directMessageMembers ?? []).map(toPerson),
 		messages: page.map((stored) => messageFromRelations(stored, stored.turn)),
 		olderMessagesCursor:
 			row.messages.length > limit && oldest
@@ -442,7 +423,7 @@ function toPlacedConversation(
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
-		channelId: row.channelId,
+		projectId: row.projectId,
 		botId: row.botId,
 		rootConversationId: row.rootConversationId,
 		kind: row.kind,

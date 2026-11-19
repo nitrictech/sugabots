@@ -1,6 +1,6 @@
 import type { TimeZone } from "@sugabots/contracts";
-import { Check, Search } from "lucide-react";
-import { useDeferredValue, useMemo, useState } from "react";
+import { Check } from "lucide-react";
+import { useMemo, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
 	type TimeZoneChoice,
@@ -24,13 +24,14 @@ import {
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import { Note } from "@/ui/note.tsx";
+import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
 
 /**
  * Choosing the workspace's time zone: this device's, or one from a region,
- * or any found by typing part of its name. When automations are scheduled on its
- * time, it says from the start that they move with it, so choosing a zone
- * doesn't resize it.
+ * or any found by typing part of its name. When routines run on its time, it
+ * says from the start that they move with it, so choosing a zone doesn't
+ * resize it.
  */
 export function TimeZoneDialog({
 	workspaceId,
@@ -67,14 +68,17 @@ function TimeZoneStep({
 	current: string;
 	done: () => void;
 }) {
-	const scheduled = useWorkspaceTimeZone(workspaceId, true).data?.scheduledAutomations ?? 0;
+	const withRoutines = useWorkspaceTimeZone(workspaceId, true).data?.automationsWithRoutines ?? 0;
 	const change = useChangeWorkspaceTimeZone(workspaceId);
 	const choices = useMemo(() => timeZoneChoices(new Date()), []);
 	const regions = useMemo(() => timeZoneRegions(choices), [choices]);
 	const [region, setRegion] = useState<TimeZoneRegion | undefined>();
 	const [chosen, setChosen] = useState<TimeZone | undefined>();
-	const [query, setQuery] = useState("");
-	const needle = useDeferredValue(query.trim().toLowerCase());
+	// A zone is found by its name, read with spaces for its underscores, or by its offset.
+	const search = useSearchFilter(region?.choices ?? choices, (choice) => [
+		choice.zone.replaceAll("_", " "),
+		choice.offset,
+	]);
 	const device = browserTimeZone();
 	const deviceChoice = choices.find((choice) => choice.zone === device);
 	const selected = chosen ?? current;
@@ -92,7 +96,7 @@ function TimeZoneStep({
 
 	function browse(next: TimeZoneRegion | undefined) {
 		setRegion(next);
-		setQuery("");
+		search.setQuery("");
 	}
 
 	const zoneRow = (choice: TimeZoneChoice) => (
@@ -132,7 +136,6 @@ function TimeZoneStep({
 		);
 	};
 
-	const searched = (region?.choices ?? choices).filter((choice) => matches(choice, needle));
 	const searchLabel = `Search ${region ? region.name : "time zones"}`;
 
 	return (
@@ -147,37 +150,26 @@ function TimeZoneStep({
 				onBack={region ? () => browse(undefined) : undefined}
 			/>
 			<DialogFormBody>
-				<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-					<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-					<input
-						type="search"
-						value={query}
-						onChange={(event) => setQuery(event.target.value)}
-						placeholder={searchLabel}
-						aria-label={searchLabel}
-						className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-					/>
-				</label>
+				<SearchField label={searchLabel} value={search.query} onChange={search.setQuery} />
 				{/* One height on every step, so going into a region and back doesn't resize the dialog. */}
 				<div className="-mx-1 flex h-time-zones flex-col gap-5 overflow-y-auto px-1">
-					{needle === "" && !region ? (
+					{!search.searching && !region ? (
 						<>
 							{deviceChoice && <SettingsGroup>{zoneRow(deviceChoice)}</SettingsGroup>}
 							<SettingsGroup label="Regions">{regions.map(regionRow)}</SettingsGroup>
 						</>
 					) : (
 						<SettingsGroup>
-							{searched.map(zoneRow)}
-							{searched.length === 0 && (
-								<SettingsRow label={`No time zone matches “${query.trim()}”`} />
+							{search.matches.map(zoneRow)}
+							{search.matches.length === 0 && (
+								<SettingsRow label={`No time zone matches “${search.query.trim()}”`} />
 							)}
 						</SettingsGroup>
 					)}
 				</div>
-				{scheduled > 0 && (
+				{withRoutines > 0 && (
 					<Note>
-						All automations scheduled on {timeZonePlace(current)} time will now run in whichever
-						zone you pick.
+						All routines on {timeZonePlace(current)} time will now run in whichever zone you pick.
 					</Note>
 				)}
 				{change.error && <Alert>{failureMessage(change.error)}</Alert>}
@@ -188,14 +180,5 @@ function TimeZoneStep({
 				cancelDisabled={change.isPending}
 			/>
 		</DialogFormStep>
-	);
-}
-
-/** Whether `needle` is in the zone's name, read with spaces for its underscores, or in its offset. */
-function matches(choice: TimeZoneChoice, needle: string): boolean {
-	if (needle === "") return true;
-	return (
-		choice.zone.toLowerCase().replaceAll("_", " ").includes(needle) ||
-		choice.offset.toLowerCase().includes(needle)
 	);
 }

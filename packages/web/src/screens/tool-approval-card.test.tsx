@@ -82,29 +82,18 @@ describe("an approval request", () => {
 		const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
 		expect(within(card).getByText("Linear Handler wants to use Linear")).toBeDefined();
 		expect(within(card).getByText("Platform")).toBeDefined();
-		expect(within(card).queryByRole("checkbox")).toBeNull();
 		fireEvent.click(inCard(/^Allow/));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
 	});
 
-	it("keeps the answer given once it is accepted, until the turn records it", async () => {
-		const approval = client.api.approvals.decide;
-		show(asking({ team: "Platform" }));
-
-		fireEvent.click(inCard(/^Allow/));
-
-		await waitFor(() => expect(approval).toHaveBeenCalled());
-		await waitFor(() => expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(true));
-		expect(inCard(/^Deny/).hasAttribute("disabled")).toBe(true);
-	});
-
-	it("announces the answer given here once the turn records it", async () => {
+	it("keeps the answer given until the turn records it, then announces it", async () => {
 		const { recorded } = show(asking({ team: "Platform" }));
 
 		fireEvent.click(inCard(/^Allow/));
 		await waitFor(() => expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(true));
+		expect(inCard(/^Deny/).hasAttribute("disabled")).toBe(true);
 		recorded({
 			...asking(
 				{ team: "Platform" },

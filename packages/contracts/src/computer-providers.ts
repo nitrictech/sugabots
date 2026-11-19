@@ -4,12 +4,13 @@ import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
 /**
- * Computer providers: where a workspace's bots get the Linux machines they
- * run commands on. Experimental.
+ * Computer providers: where a workspace's projects get the Linux machines
+ * their bots run commands on. Experimental.
  *
  * A workspace may configure several, each from a preset with its own account
  * and key, but at most one is enabled at a time, and that one makes every
- * bot's computer. Bots are offered the computer tools only while one is.
+ * project's computer, a bot's default project's included. Bots are offered
+ * the computer tools only while one is.
  */
 
 /**
@@ -102,7 +103,7 @@ const nameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(5
 
 /**
  * How a provider's computers reach the internet: `allowlist`, only the
- * trusted hosts and those the workspace and each bot add; or `open`, every
+ * trusted hosts and those the workspace and each project add; or `open`, every
  * host but those the workspace blocks, as far as the provider can refuse
  * hosts by name. E2B can't, so its open computers reach every host.
  */
@@ -218,7 +219,7 @@ export const computerProviderUpdateSchema = Schema.Struct({
 export type ComputerProviderUpdate = typeof computerProviderUpdateSchema.Type;
 
 /**
- * Whether the workspace's bots can be given a computer: true while it has an
+ * Whether the workspace's projects can be given a computer: true while it has an
  * enabled computer provider with everything it needs.
  */
 export const computerAccessSchema = Schema.Struct({ enabled: Schema.Boolean });
@@ -233,9 +234,9 @@ export type ComputerProviderTestResult = typeof computerProviderTestResultSchema
 
 const byteCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-/** A folder of a bot's computer and how much of its disk it takes. */
+/** A folder of a project's computer and how much of its disk it takes. */
 const computerDiskFolderSchema = Schema.Union([
-	/** The bot's home, kept across all its conversations. */
+	/** A bot's home, kept across all its conversations on the computer. */
 	Schema.Struct({ kind: Schema.Literal("home"), botId: uuidSchema, bytes: byteCountSchema }),
 	/** Every conversation's folder together, where the bots clone and build. Named for the folder, `threads/`, as computers keep it. */
 	Schema.Struct({ kind: Schema.Literal("threads"), bytes: byteCountSchema }),
@@ -246,7 +247,7 @@ const computerDiskFolderSchema = Schema.Union([
 export type ComputerDiskFolder = typeof computerDiskFolderSchema.Type;
 
 /**
- * How full a bot's computer's disk was when last measured, which it is every
+ * How full a project's computer's disk was when last measured, which it is every
  * few minutes while it runs. A paused computer's disk doesn't change, so its
  * last measurement still holds.
  */
@@ -298,8 +299,8 @@ export function formatDiskSize(bytes: number) {
 	return `${shown} ${BYTE_UNITS[exponent]}`;
 }
 
-/** A bot's computer as the bot's settings show it. */
-const botComputerStateSchema = Schema.Union([
+/** A project's computer as its settings show it, a bot's default project's in the bot's. */
+const projectComputerStateSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("none") }),
 	Schema.Struct({
 		kind: Schema.Literal("present"),
@@ -319,23 +320,26 @@ const botComputerStateSchema = Schema.Union([
 	}),
 ]);
 
-export const botComputerSchema = Schema.Struct({
-	computer: botComputerStateSchema,
+export const projectComputerSchema = Schema.Struct({
+	computer: projectComputerStateSchema,
 	/** Whether the workspace has a computer provider enabled, without which nothing new is made. */
 	providerEnabled: Schema.Boolean,
 	/** Whether the person asking may reset or upgrade it. */
 	canManage: Schema.Boolean,
 });
 
-export type BotComputer = typeof botComputerSchema.Type;
+export type ProjectComputer = typeof projectComputerSchema.Type;
 
-/** The disk of one bot's computer, for the workspace's overview of its bots' computers. */
-export const botComputerDiskSchema = Schema.Struct({
-	botId: uuidSchema,
+/**
+ * The disk of one project's computer, for the workspace's overview of its
+ * computers. A bot's computer is its default project's.
+ */
+export const projectComputerDiskSchema = Schema.Struct({
+	projectId: uuidSchema,
 	disk: computerDiskSchema,
 });
 
-export type BotComputerDisk = typeof botComputerDiskSchema.Type;
+export type ProjectComputerDisk = typeof projectComputerDiskSchema.Type;
 
 /**
  * How a provider's template stands, for a provider that builds its computers
@@ -367,17 +371,17 @@ export const computerHostSchema = Schema.String.check(
 	),
 );
 
-/** A host a workspace let every computer reach, or a bot its own, beyond the trusted ones. */
+/** A host a workspace let every computer reach, or a project its own, beyond the trusted ones. */
 const computerAddedHostSchema = Schema.Struct({
 	host: computerHostSchema,
-	/** Who added it, or approved the bot's request for it; null once they've left. */
+	/** Who added it, or approved a bot's request for it; null once they've left. */
 	addedByName: Schema.NullOr(Schema.String),
 	addedAt: isoTimestampSchema,
 });
 
 export type ComputerAddedHost = typeof computerAddedHostSchema.Type;
 
-/** A host no computer in the workspace may reach, whatever a bot allows. */
+/** A host no computer in the workspace may reach, whatever a project allows. */
 const blockedHostSchema = Schema.Struct({
 	host: computerHostSchema,
 	/** Who blocked it; null once they've left. */
@@ -388,7 +392,7 @@ export type BlockedHost = typeof blockedHostSchema.Type;
 
 /**
  * What a workspace lets every computer connect to, and what it keeps them
- * all from. Each bot adds its own hosts; everything else is refused, so
+ * all from. Each project adds its own hosts; everything else is refused, so
  * a command that reaches for another host fails as if it weren't there.
  */
 export const computerNetworkSettingsSchema = Schema.Struct({
@@ -412,21 +416,21 @@ export const computerNetworkSettingsSchema = Schema.Struct({
 
 export type ComputerNetworkSettings = typeof computerNetworkSettingsSchema.Type;
 
-/** The workspace's block that keeps a host out of the bot's reach anyway; null when none does. */
+/** The workspace's block that keeps a host out of the computer's reach anyway; null when none does. */
 const blockedBy = Schema.NullOr(computerHostSchema);
 
-/** Where one bot's computer may connect to: what the workspace allows every bot, and its own. */
-export const botComputerNetworkSchema = Schema.Struct({
+/** Where one project's computer may connect to: what the workspace allows every computer, and its own. */
+export const projectComputerNetworkSchema = Schema.Struct({
 	/** The workspace's enabled provider's; open, the computer reaches every host the workspace didn't block. */
 	mode: computerNetworkModeSchema,
 	/** Whether the workspace's blocked hosts are kept out of the computer. */
 	blocking: Schema.Boolean,
 	/** The trusted hosts and the workspace's, which every computer is allowed. */
 	workspaceHosts: Schema.Array(Schema.Struct({ host: computerHostSchema, blockedBy })),
-	/** What was added for the bot's own computer. */
+	/** What was added for the project's own computer. */
 	addedHosts: Schema.Array(Schema.Struct({ ...computerAddedHostSchema.fields, blockedBy })),
 });
 
-export type BotComputerNetwork = typeof botComputerNetworkSchema.Type;
+export type ProjectComputerNetwork = typeof projectComputerNetworkSchema.Type;
 
 export const newComputerHostSchema = Schema.Struct({ host: computerHostSchema });

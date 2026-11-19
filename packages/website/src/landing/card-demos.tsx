@@ -5,15 +5,10 @@ import { cn } from "cn";
 import { CheckIcon, XIcon } from "lucide-react";
 import { useInView, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { cast } from "@/cast";
 import { StripeIcon } from "@/components/brand-icons";
-import { arrive, type Bot, bots, MessageRow, people } from "@/landing/chat-parts";
-
-/*
- * The four card demos. The first two open on a finished moment in the app
- * and wait for the visitor: react to a message, or answer a request. The
- * handoff card shows an exchange between two bots, and the models card steps
- * through its bots and follows the pointer.
- */
+import type { ChatBot } from "@/components/chat";
+import { arrive, MessageRow } from "@/landing/chat-parts";
 
 const demoArea =
 	// A little taller on phones, where the messages wrap onto more lines.
@@ -27,12 +22,12 @@ export function ThreadDemo() {
 		// As tall as its three messages, so there's no gap above Gary's.
 		<div className={cn(demoArea, "h-auto gap-3 overflow-hidden p-4 sm:h-auto sm:px-5")}>
 			<MessageRow
-				author={{ kind: "person", person: people.gary }}
+				author={cast.gary}
 				time="6:02"
 				text="Fernhill replied about pricing. Can someone draft the answer?"
 			/>
 			<MessageRow
-				author={{ kind: "bot", bot: bots.growthDesk }}
+				author={cast.growthDesk}
 				time="6:03"
 				text="Drafted. It’s in the thread with their usage numbers."
 			>
@@ -52,7 +47,7 @@ export function ThreadDemo() {
 				</button>
 			</MessageRow>
 			<MessageRow
-				author={{ kind: "person", person: people.lorraine }}
+				author={cast.lorraine}
 				time="6:04"
 				text="Hold it until I’ve spoken to their team tomorrow."
 			/>
@@ -70,11 +65,13 @@ export function ApprovalDemo() {
 		<div className={cn(demoArea, "justify-center p-4 sm:p-6")}>
 			<div className="flex min-w-0 flex-col gap-2.5 rounded-3xl rounded-tl-sm bg-landing-bubble py-2.5 pr-3 pb-3 pl-2.5 text-landing-text">
 				<div className="flex min-w-0 items-start gap-2.5">
-					<span className="mt-px grid size-6 shrink-0 place-items-center rounded-md bg-indigo-500 text-white">
+					<span className="mt-px grid size-6 shrink-0 place-items-center rounded-md bg-landing-stripe text-landing-text-strong">
 						<StripeIcon className="size-3.25" />
 					</span>
 					<div className="flex min-w-0 flex-col gap-0.5">
-						<span className="text-xs/snug text-landing-muted">Ticket Desk wants to use Stripe</span>
+						<span className="text-xs/snug text-landing-muted">
+							{cast.ticketDesk.name} wants to use Stripe
+						</span>
 						<span className="text-sm/snug font-medium">Refund payment</span>
 					</div>
 				</div>
@@ -89,7 +86,7 @@ export function ApprovalDemo() {
 				<div className="ml-8.5 flex min-h-8 items-center">
 					{answer === "waiting" ? (
 						<fieldset className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-							<legend className="sr-only">Answer Ticket Desk’s request</legend>
+							<legend className="sr-only">Answer {cast.ticketDesk.name}’s request</legend>
 							<button
 								type="button"
 								onClick={() => setAnswer("allowed")}
@@ -132,18 +129,18 @@ export function ApprovalDemo() {
 }
 
 /** The bots' exchange. */
-const handoffMessages: readonly { from: Bot; time: string; text: string }[] = [
+const handoffMessages: readonly { from: ChatBot; time: string; text: string }[] = [
 	{
-		from: bots.growthDesk,
+		from: cast.growthDesk,
 		time: "6:08",
 		text: "Can Brightwater have 25% off the annual tier and still clear our margin?",
 	},
 	{
-		from: bots.pricingAnalyst,
+		from: cast.pricingAnalyst,
 		time: "6:09",
 		text: "Yes: $36 a seat is a 72% margin. I’ve drafted quote Q-1182.",
 	},
-	{ from: bots.growthDesk, time: "6:09", text: "Thanks. Taking it back to Gary." },
+	{ from: cast.growthDesk, time: "6:09", text: "Thanks. Taking it back to Gary." },
 ];
 
 /** Growth Desk and Pricing Analyst's own exchange, as the app shows a collaboration. */
@@ -152,7 +149,7 @@ export function HandoffDemo() {
 		<div className={cn(demoArea, "overflow-hidden")}>
 			<div className="flex items-center gap-2 border-b border-landing-line px-4 py-2.5 sm:px-5">
 				<span aria-hidden className="flex shrink-0">
-					{[bots.growthDesk, bots.pricingAnalyst].map((bot) => (
+					{[cast.growthDesk, cast.pricingAnalyst].map((bot) => (
 						<span key={bot.name} className="-mr-1.75">
 							<StillBotFace
 								{...bot.look}
@@ -163,14 +160,14 @@ export function HandoffDemo() {
 					))}
 				</span>
 				<span className="truncate pl-2 text-xs font-semibold text-landing-text">
-					Collaboration with {bots.pricingAnalyst.name}
+					Collaboration with {cast.pricingAnalyst.name}
 				</span>
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col justify-end gap-3 p-4 sm:px-5">
 				{handoffMessages.map((message) => (
 					<MessageRow
 						key={message.text}
-						author={{ kind: "bot", bot: message.from }}
+						author={message.from}
 						time={message.time}
 						text={message.text}
 					/>
@@ -181,7 +178,7 @@ export function HandoffDemo() {
 }
 
 interface ModelChoice {
-	bot: Bot;
+	bot: ChatBot;
 	job: string;
 	model: string;
 	provider: string;
@@ -190,28 +187,28 @@ interface ModelChoice {
 
 const modelChoices: readonly ModelChoice[] = [
 	{
-		bot: bots.copywriter,
+		bot: cast.copywriter,
 		job: "Drafts replies, posts and invites",
 		model: "ChatGPT",
 		provider: "OpenAI",
 		preset: "chatgpt",
 	},
 	{
-		bot: bots.researcher,
+		bot: cast.researcher,
 		job: "Reads the long stuff so you don’t have to",
 		model: "Claude",
 		provider: "Anthropic",
 		preset: "anthropic",
 	},
 	{
-		bot: bots.inboxSorter,
+		bot: cast.inboxSorter,
 		job: "Triage, reminders and quick jobs",
 		model: "Gemini Flash",
 		provider: "Google",
 		preset: "gemini",
 	},
 	{
-		bot: bots.journal,
+		bot: cast.journal,
 		job: "Private notes that stay private",
 		model: "Llama",
 		provider: "Ollama, local",
