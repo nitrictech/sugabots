@@ -76,8 +76,9 @@ export function useCreateWorkspace() {
 
 /**
  * Deletes a workspace for good. It leaves the list at once, so `/` opens
- * another one, or onboarding when there is none. Asks `/me` again, since
- * on an installation that holds one workspace, deleting it lets another be made.
+ * another one, or onboarding when there is none. Settles only once `/me` has
+ * answered again, since on an installation that holds one workspace, deleting
+ * it lets another be made, and onboarding would otherwise turn you away.
  */
 export function useDeleteWorkspace() {
 	const queries = useQueryClient();
@@ -86,11 +87,13 @@ export function useDeleteWorkspace() {
 		mutationFn: (workspaceId: string) =>
 			Effect.runPromise(client.api.workspaces.delete({ params: { workspace: workspaceId } })),
 		onSuccess: async (_, workspaceId) => {
-			void session.refresh().catch(() => {});
 			queries.setQueryData(workspacesQuery.queryKey, (workspaces) =>
 				workspaces?.filter((workspace) => workspace.id !== workspaceId),
 			);
-			await queries.invalidateQueries({ queryKey: workspacesQuery.queryKey });
+			await Promise.all([
+				session.refresh().catch(() => {}),
+				queries.invalidateQueries({ queryKey: workspacesQuery.queryKey }),
+			]);
 		},
 	});
 }

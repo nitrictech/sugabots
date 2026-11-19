@@ -365,7 +365,8 @@ function ProfileSettings() {
 					/>
 				</SettingsGroup>
 			)}
-			<ReferralLinkSettings />
+			{/* Whoever signs up with the link would have no workspace to make: the installation's one exists. */}
+			{session.me?.mayCreateWorkspace !== false && <ReferralLinkSettings />}
 			<SettingsDanger
 				label="Sign out"
 				description="Signs you out on this device."
