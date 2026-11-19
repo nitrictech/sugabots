@@ -42,10 +42,11 @@ const placeholder = {
 	disabledTools: [],
 	usesComputer: false,
 	naturalBrowsing: false,
-	createdById: user.id,
+	createdBy: { ...user, image: null },
 	visibility: "private",
 	assistant: true,
 	pinned: false,
+	defaultProjectId: "0199a3a0-0000-7000-8000-0000000002ff",
 	permissions: BOT_PERMISSIONS,
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
@@ -53,7 +54,6 @@ const enabledModel = {
 	providerId: "0199a3a0-0000-7000-8000-000000000201",
 	providerName: "Anthropic",
 	providerPreset: "anthropic",
-	providerActive: true,
 	modelId: "claude-sonnet",
 	displayName: "Claude Sonnet",
 	capabilities: ["tools", "vision"],
@@ -189,8 +189,6 @@ const anthropic = {
 	signedIn: false,
 	customHeaders: [],
 	modelCount: 3,
-	enabledModelCount: 0,
-	lastTestedAt: null,
 	lastTestError: null,
 	connectedBy: null,
 	createdAt: "2026-09-11T00:00:00.000Z",
@@ -288,24 +286,30 @@ export const FirstBot = meta.story({
 	},
 });
 
-/** The placeholder once it has been made the first bot, as the API gives it back. */
+/** The first bot, a public one made beside the Personal Assistant, as the API gives it back. */
 const chief = {
 	...placeholder,
+	id: "0199a3a0-0000-7000-8000-000000000101",
 	name: "Chief",
 	handle: "chief",
+	description: null,
 	color: "purple",
 	face: "arc",
+	visibility: "public",
+	assistant: false,
+	pinned: true,
+	defaultProjectId: "0199a3a0-0000-7000-8000-000000000211",
 };
 
-/** Saving the first bot, and the roster after it. */
+/** Making the first bot, and the roster after it. */
 function firstBotSaved({
 	msw,
 }: {
 	msw: { use: (...handlers: ReturnType<typeof http.get>[]) => void };
 }) {
 	msw.use(
-		http.patch(`${API}/bots/:botId`, () => HttpResponse.json(chief)),
-		http.get(`${API}/workspaces/:workspace/bots`, () => HttpResponse.json([chief])),
+		http.post(`${API}/workspaces/:workspace/bots`, () => HttpResponse.json(chief, { status: 201 })),
+		http.get(`${API}/workspaces/:workspace/bots`, () => HttpResponse.json([placeholder, chief])),
 	);
 }
 

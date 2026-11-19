@@ -42,9 +42,13 @@ function connection(
 		appSettingsUrl: null,
 		status: "connected",
 		tools: tools.map((tool) => ({ ...tool, access })),
-		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
-		connectedBy: "Rowan Ellis",
+		connectedBy: {
+			id: "0199a3a0-0000-7000-8000-000000000009",
+			name: "Rowan Ellis",
+			email: "rowan@example.com",
+			image: null,
+		},
 		createdAt: "2026-09-01T00:00:00.000Z",
 		...over,
 	};
@@ -115,7 +119,6 @@ const notion = connection(3, {
 	appSettingsUrl: null,
 	status: "missing_key",
 	tools: [],
-	lastTestedAt: null,
 });
 const asana = connection(9, {
 	name: "Asana",
@@ -199,13 +202,11 @@ const appRepositories = (account: string | null) =>
 					: ["acme/web", "acme/infra"].map((repository) => ({
 							repository,
 							addedByName: "Rowan Ellis",
-							addedAt: "2026-10-05T09:30:00.000Z",
 						})),
 		}),
 	);
 
-const pagePath = (one: TestConnection) =>
-	`/nitric/settings/projects/${revenue.slug}/connections/${one.id}`;
+const pagePath = (one: TestConnection) => `/nitric/projects/${revenue.slug}/connections/${one.id}`;
 
 const meta = preview.meta({
 	title: "Views/Connection",
@@ -259,7 +260,7 @@ async function openIndividualTools() {
 export const Opened = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Linear", level: 2 }),
+			await canvas.findByRole("heading", { name: "Linear", level: 1 }),
 		).toBeInTheDocument();
 		await expect(canvas.getAllByText("Connected by Rowan Ellis")[0]).toBeInTheDocument();
 		await expect(canvas.queryByText("https://mcp.linear.app/mcp")).toBeNull();
@@ -300,15 +301,13 @@ export const SettingAKind = meta.story({
 
 /**
  * Individual tools: the one set apart first, saying its kind's setting, then
- * the rest by kind, under a title where the connection's own was.
+ * the rest by kind, with Back to the connection.
  */
 export const IndividualTools = meta.story({
 	play: async ({ canvas }) => {
-		const title = await canvas.findByRole("heading", { name: "Linear", level: 2 });
-		const { x, y } = title.getBoundingClientRect();
+		await canvas.findByRole("heading", { name: "Linear", level: 1 });
 		await openIndividualTools();
-		const toolsTitle = canvas.getByRole("heading", { name: "Individual tools", level: 2 });
-		await expect(toolsTitle.getBoundingClientRect()).toMatchObject({ x, y });
+		await expect(canvas.getByRole("button", { name: "Linear" })).toBeInTheDocument();
 		const changed = canvas.getByRole("region", { name: "Changed (1)" });
 		await expect(within(changed).getByRole("group", { name: "delete_issue" })).toBeInTheDocument();
 		await expect(within(changed).getByText("Default: ask first")).toBeInTheDocument();
@@ -349,7 +348,9 @@ export const GitHubApp = meta.story({
 	play: async ({ canvas }) => {
 		const repositories = await canvas.findByRole("region", { name: "Repositories" });
 		await expect(within(repositories).getByText("acme/web")).toBeInTheDocument();
-		await expect(within(repositories).getByRole("link", { name: "the bot's app" })).toHaveAttribute(
+		await expect(
+			within(repositories).getByRole("link", { name: "the project's app" }),
+		).toHaveAttribute(
 			"href",
 			"https://github.com/organizations/acme/settings/apps/sugabots-revenue-09a7",
 		);
@@ -477,7 +478,7 @@ export const LoadingTools = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Linear", level: 2 }),
+			await canvas.findByRole("heading", { name: "Linear", level: 1 }),
 		).toBeInTheDocument();
 		await expect(canvas.getByRole("status", { name: "Loading tools" })).toBeInTheDocument();
 	},
@@ -492,14 +493,17 @@ export const Member = meta.story({
 				role: "member",
 				projects: storyProjects.map((project) => ({
 					...project,
-					permissions: { ...project.permissions, manageConnections: false },
+					permissions: {
+						...project.permissions,
+						resources: { ...project.permissions.resources, manageConnections: false },
+					},
 				})),
 			}),
 		);
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Linear", level: 2 }),
+			await canvas.findByRole("heading", { name: "Linear", level: 1 }),
 		).toBeInTheDocument();
 		await expect(await canvas.findByText("All 2 read tools")).toBeInTheDocument();
 		await expect(canvas.queryByRole("radio")).toBeNull();
@@ -508,11 +512,12 @@ export const Member = meta.story({
 	},
 });
 
-/** On a phone: Back to the bot's Connections at the top. */
+/** On a phone: the header's own Back at the top, and no second one under it. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: "Connections" })).toBeInTheDocument();
+	play: async ({ canvas, canvasElement }) => {
+		await expect(await canvas.findByRole("link", { name: /^Back/ })).toBeInTheDocument();
+		await expect(canvasElement.querySelector("[data-page-back]")).toBeNull();
 	},
 });
 

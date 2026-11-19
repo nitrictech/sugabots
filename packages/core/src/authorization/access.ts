@@ -1,6 +1,16 @@
 import type { ToolApprovalDeciders, WorkspaceRole } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, asc, eq, getColumns, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	eq,
+	getColumns,
+	inArray,
+	isNull,
+	type SQL,
+	type SQLWrapper,
+	sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Data, Effect } from "effect";
 import type { Executor } from "../database/database.ts";
@@ -14,8 +24,10 @@ import {
 	workspace,
 	workspaceMember,
 } from "../database/schema.ts";
+import { outerColumn } from "../database/sql.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
+import { defaultProjectIdOf } from "../workspaces/bots/bot.ts";
 import {
 	type Actor,
 	type BotFacts,
@@ -224,6 +236,22 @@ function standingFromRow(row: StandingRow, userId: string): ProjectStanding {
 	);
 }
 
+/** `userId`'s standing in each project `where` picks, whether or not they reach it. */
+const standingsWhere = Effect.fn("Access.standingsWhere")(function* (
+	db: Executor,
+	userId: string,
+	where: SQL | undefined,
+) {
+	const rows = yield* db
+		.select(standingColumns)
+		.from(project)
+		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
+		.leftJoin(projectMember, projectMembershipOf(userId))
+		.leftJoin(defaultBot, defaultBotOfProject)
+		.where(where);
+	return rows.map((row) => standingFromRow(row, userId));
+});
+
 /**
  * The workspace `workspaceRef` names, by its id or its slug, and `userId`'s
  * role in it. `undefined` when there is no such workspace or they are not in
@@ -263,15 +291,22 @@ export const projectStandingFor = Effect.fn("Access.projectStandingFor")(functio
 	userId: string,
 ) {
 	if (!isUuid(projectId)) return undefined;
-	const [row] = yield* db
-		.select(standingColumns)
-		.from(project)
-		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(projectMember, projectMembershipOf(userId))
-		.leftJoin(defaultBot, defaultBotOfProject)
-		.where(eq(project.id, projectId))
-		.limit(1);
-	return row ? standingFromRow(row, userId) : undefined;
+	const [standing] = yield* standingsWhere(db, userId, eq(project.id, projectId));
+	return standing;
+});
+
+/**
+ * `userId`'s standing in each of the projects `projectIds`, whether or not
+ * they reach it, as `projectStandingFor` gives one, in one query.
+ */
+export const projectStandingsOf = Effect.fn("Access.projectStandingsOf")(function* (
+	db: Executor,
+	projectIds: readonly string[],
+	userId: string,
+) {
+	const ids = projectIds.filter(isUuid);
+	if (ids.length === 0) return [];
+	return yield* standingsWhere(db, userId, inArray(project.id, ids));
 });
 
 /**
@@ -387,14 +422,11 @@ export const projectStandingsFor = Effect.fn("Access.projectStandingsFor")(funct
 	workspaceId: string,
 	userId: string,
 ) {
-	const rows = yield* db
-		.select(standingColumns)
-		.from(project)
-		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(projectMember, projectMembershipOf(userId))
-		.leftJoin(defaultBot, defaultBotOfProject)
-		.where(and(eq(project.workspaceId, workspaceId), reachesProjectFor(project.id, userId)));
-	return rows.map((row) => standingFromRow(row, userId));
+	return yield* standingsWhere(
+		db,
+		userId,
+		and(eq(project.workspaceId, workspaceId), reachesProjectFor(project.id, userId)),
+	);
 });
 
 /**
@@ -470,7 +502,7 @@ export function computerProjectIdOf(
 	turnBotId: SQLWrapper,
 ): SQL<string | null> {
 	return sql<string | null>`case when ${row.kind} = 'collaboration'
-		then (select own_project.id from ${project} as own_project where own_project.default_of_bot_id = ${turnBotId})
+		then ${defaultProjectIdOf(turnBotId)}
 		else ${row.projectId} end`;
 }
 
@@ -484,7 +516,8 @@ export function computerProjectIdOf(
  * must be made here too.
  *
  * Aliased throughout, so it composes with a query that already joins any of
- * these tables.
+ * these tables, and it names the tables of the outer columns it is given, so
+ * it can be selected from a query over one table.
  */
 export function reachesProjectFor(
 	projectId: SQLWrapper,
@@ -495,14 +528,14 @@ export function reachesProjectFor(
 		from ${project} as reach_project
 		inner join ${workspaceMember} as reach_workspace_member
 			on reach_workspace_member.workspace_id = reach_project.workspace_id
-			and reach_workspace_member.user_id = ${userId}
-		where reach_project.id = ${projectId}
+			and reach_workspace_member.user_id = ${outerColumn(userId)}
+		where reach_project.id = ${outerColumn(projectId)}
 			and case when reach_project.default_of_bot_id is null
 				then ${roleIsOneOf(ROLES_READING_PROJECTS)} and exists (
 					select 1
 					from ${projectMember} as reach_project_member
 					where reach_project_member.project_id = reach_project.id
-						and reach_project_member.user_id = ${userId}
+						and reach_project_member.user_id = ${outerColumn(userId)}
 				)
 				else ${reachesBotFor(sql`reach_project.default_of_bot_id`, userId)}
 			end
@@ -520,12 +553,12 @@ export function reachesBotFor(botId: SQLWrapper, userId: string | SQLWrapper): S
 		from ${bot} as reach_bot
 		inner join ${workspaceMember} as reach_bot_workspace_member
 			on reach_bot_workspace_member.workspace_id = reach_bot.workspace_id
-			and reach_bot_workspace_member.user_id = ${userId}
-		where reach_bot.id = ${botId}
+			and reach_bot_workspace_member.user_id = ${outerColumn(userId)}
+		where reach_bot.id = ${outerColumn(botId)}
 			and reach_bot.system_bot_key is null
 			and case
-				when reach_bot.assistant_of is not null then reach_bot.assistant_of = ${userId}
-				when reach_bot.visibility = 'private' then reach_bot.created_by_id = ${userId}
+				when reach_bot.assistant_of is not null then reach_bot.assistant_of = ${outerColumn(userId)}
+				when reach_bot.visibility = 'private' then reach_bot.created_by_id = ${outerColumn(userId)}
 				else true
 			end
 	)`;
@@ -541,14 +574,14 @@ export interface ConversationReachColumns {
 	kind: SQLWrapper;
 	rootConversationId: SQLWrapper;
 	projectId: SQLWrapper;
-	botId: SQLWrapper;
 }
 
 /**
  * SQL for "`userId` reaches the conversation `row`": the project rule for a
- * project's thread, the bot rule for a bot's conversation, the rule of
- * the conversation it was opened from for a collaboration, and membership of
- * the direct message for one between people. Written as SQL for lists, as
+ * project's thread, an automation feed and a run, a bot's default project
+ * included; the rule of the conversation it was opened from for a
+ * collaboration; and membership of the direct message for one between
+ * people. A system bot's conversation is in no project, so nobody reaches it. Written as SQL for lists, as
  * `conversationStandingFor` decides it for one conversation.
  */
 export function reachesConversationFor(
@@ -558,10 +591,9 @@ export function reachesConversationFor(
 	return sql`(case when ${row.kind} = 'collaboration' then exists (
 		select 1
 		from ${placedConversation} as reach_opened_from
-		where reach_opened_from.id = ${row.rootConversationId}
-			and (${reachesProjectFor(sql`reach_opened_from.project_id`, userId)}
-				or ${reachesBotFor(sql`reach_opened_from.bot_id`, userId)})
-	) else (${reachesProjectFor(row.projectId, userId)} or ${reachesBotFor(row.botId, userId)} or ${reachesDirectMessageFor(row, userId)}) end)`;
+		where reach_opened_from.id = ${outerColumn(row.rootConversationId)}
+			and ${reachesProjectFor(sql`reach_opened_from.project_id`, userId)}
+	) else (${reachesProjectFor(row.projectId, userId)} or ${reachesDirectMessageFor(row, userId)}) end)`;
 }
 
 /**
@@ -578,9 +610,9 @@ function reachesDirectMessageFor(
 		from ${directMessageMember} as reach_direct_member
 		inner join ${workspaceMember} as reach_direct_workspace_member
 			on reach_direct_workspace_member.user_id = reach_direct_member.user_id
-			and reach_direct_workspace_member.workspace_id = ${row.workspaceId}
-		where reach_direct_member.conversation_id = ${row.id}
-			and reach_direct_member.user_id = ${userId}
+			and reach_direct_workspace_member.workspace_id = ${outerColumn(row.workspaceId)}
+		where reach_direct_member.conversation_id = ${outerColumn(row.id)}
+			and reach_direct_member.user_id = ${outerColumn(userId)}
 	)`;
 }
 

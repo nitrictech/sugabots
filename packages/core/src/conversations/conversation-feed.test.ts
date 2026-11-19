@@ -107,7 +107,6 @@ describe("the conversation feed", () => {
 						conversationId,
 						messageId: "m1",
 						turnId,
-						willRetry,
 						error: userMessage,
 					}),
 				},

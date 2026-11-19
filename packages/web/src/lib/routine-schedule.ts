@@ -6,6 +6,13 @@ import {
 	type RoutineSchedule,
 	type Weekday,
 } from "@sugabots/contracts";
+import {
+	calendarScheduleLabel,
+	formatTime,
+	inWeekOrder,
+	isWorkingWeek,
+	WEEKDAY_SHORT_NAMES,
+} from "@sugabots/contracts/routine-schedule-label";
 
 /*
  * A routine's timetable as people pick and read it: every so many days, weeks
@@ -15,17 +22,16 @@ import {
  */
 
 export const DAY_OPTIONS = [
-	{ value: "mon", letter: "M", short: "Mon", long: "Monday", cron: "1" },
-	{ value: "tue", letter: "T", short: "Tue", long: "Tuesday", cron: "2" },
-	{ value: "wed", letter: "W", short: "Wed", long: "Wednesday", cron: "3" },
-	{ value: "thu", letter: "T", short: "Thu", long: "Thursday", cron: "4" },
-	{ value: "fri", letter: "F", short: "Fri", long: "Friday", cron: "5" },
-	{ value: "sat", letter: "S", short: "Sat", long: "Saturday", cron: "6" },
-	{ value: "sun", letter: "S", short: "Sun", long: "Sunday", cron: "0" },
+	{ value: "mon", letter: "M", long: "Monday", cron: "1" },
+	{ value: "tue", letter: "T", long: "Tuesday", cron: "2" },
+	{ value: "wed", letter: "W", long: "Wednesday", cron: "3" },
+	{ value: "thu", letter: "T", long: "Thursday", cron: "4" },
+	{ value: "fri", letter: "F", long: "Friday", cron: "5" },
+	{ value: "sat", letter: "S", long: "Saturday", cron: "6" },
+	{ value: "sun", letter: "S", long: "Sunday", cron: "0" },
 ] as const satisfies readonly {
 	value: Weekday;
 	letter: string;
-	short: string;
 	long: string;
 	cron: string;
 }[];
@@ -122,13 +128,6 @@ function stepTime(minutesPastMidnight: number, step: number): number {
 	return (((minutesPastMidnight + step) % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
 }
 
-/** A time of day on the 24-hour clock without a leading zero, as the design writes it: "9:00", "18:30". */
-export function formatTime(minutesPastMidnight: number): string {
-	const hour = Math.floor(minutesPastMidnight / 60);
-	const minute = minutesPastMidnight % 60;
-	return `${hour}:${String(minute).padStart(2, "0")}`;
-}
-
 /** "1st", "22nd", or "last day" for the end of the month. */
 export function formatDayOfMonth(dayOfMonth: number | "last"): string {
 	if (dayOfMonth === "last") return "last day";
@@ -136,12 +135,6 @@ export function formatDayOfMonth(dayOfMonth: number | "last"): string {
 	const suffix =
 		tens >= 11 && tens <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[dayOfMonth % 10] ?? "th");
 	return `${dayOfMonth}${suffix}`;
-}
-
-/** How often, as the Every row says it: "1 day", "3 weeks". */
-export function formatEvery(schedule: CalendarSchedule): string {
-	const unit = { daily: "day", weekly: "week", monthly: "month" }[schedule.repeat];
-	return `${schedule.every} ${unit}${schedule.every === 1 ? "" : "s"}`;
 }
 
 /**
@@ -155,8 +148,8 @@ export function scheduleSummary(schedule: CalendarSchedule): string {
 		case "daily":
 			return `${every(schedule.every, "day")} ${at}`;
 		case "weekly":
-			if (schedule.every === 1 && isWeekdays(schedule.days)) return `every weekday ${at}`;
-			return `${every(schedule.every, "week")} on ${listOf(orderedDays(schedule.days).map((day) => day.short))} ${at}`;
+			if (schedule.every === 1 && isWorkingWeek(schedule.days)) return `every weekday ${at}`;
+			return `${every(schedule.every, "week")} on ${listOf(inWeekOrder(schedule.days).map((day) => WEEKDAY_SHORT_NAMES[day]))} ${at}`;
 		case "monthly":
 			return `${every(schedule.every, "month")} on the ${formatDayOfMonth(schedule.dayOfMonth)} ${at}`;
 	}
@@ -190,27 +183,7 @@ export function triggerLabel(trigger: AutomationTriggerInput): string {
 
 /** A schedule, short enough for a row's value: "Daily at 22:00", "Mon Wed Fri, 3 times". */
 function readingLabel(reading: RoutineReading): string {
-	if (reading.kind === "written") return reading.label;
-	const { schedule } = reading;
-	return schedule.times.length === 1
-		? `${repeatLabel(schedule)} at ${formatTime(schedule.times[0] ?? 0)}`
-		: `${repeatLabel(schedule)}, ${schedule.times.length} times`;
-}
-
-function repeatLabel(schedule: CalendarSchedule): string {
-	if (schedule.every > 1) return `Every ${formatEvery(schedule)}`;
-	switch (schedule.repeat) {
-		case "daily":
-			return "Daily";
-		case "weekly":
-			return isWeekdays(schedule.days)
-				? "Weekdays"
-				: orderedDays(schedule.days)
-						.map((day) => day.short)
-						.join(" ");
-		case "monthly":
-			return "Monthly";
-	}
+	return reading.kind === "written" ? reading.label : calendarScheduleLabel(reading.schedule);
 }
 
 function every(count: number, unit: string): string {
@@ -224,14 +197,6 @@ function listOf(items: readonly string[]): string {
 
 function sortedTimes(times: readonly number[]): number[] {
 	return [...times].sort((a, b) => a - b);
-}
-
-function orderedDays(days: readonly Weekday[]) {
-	return DAY_OPTIONS.filter((day) => days.includes(day.value));
-}
-
-function isWeekdays(days: readonly Weekday[]): boolean {
-	return days.length === WEEKDAYS.length && WEEKDAYS.every((day) => days.includes(day));
 }
 
 /**

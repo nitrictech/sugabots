@@ -45,7 +45,7 @@ export function ForgotPassword({
 				title="Check your email"
 				subtitle={`If ${sentTo} has an account, a link to reset its password is on its way. It works for an hour.`}
 			>
-				<Button variant="outline" size="lg" onClick={onBack} className="w-full">
+				<Button variant="secondary" size="lg" onClick={onBack} className="w-full">
 					Back to log in
 				</Button>
 			</AuthLayout>

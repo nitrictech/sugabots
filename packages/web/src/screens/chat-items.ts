@@ -9,7 +9,7 @@ type AutomationItem = Extract<ChatMessageItem, { kind: "run" | "automation_pause
 export type ChatMessage = Extract<ChatMessageItem, { kind: "message" }>["message"];
 
 /** A stretch of a chat as it is drawn; see `chatGroupsOf`. */
-export type ChatGroup = { key: string; at: string; separated: boolean } & (
+type ChatGroup = { key: string; at: string; separated: boolean } & (
 	| { kind: "messages"; messages: ChatMessage[] }
 	| { kind: "run"; item: AutomationItem }
 );

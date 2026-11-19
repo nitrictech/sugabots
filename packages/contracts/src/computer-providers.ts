@@ -188,7 +188,6 @@ export const computerProviderSchema = Schema.Struct({
 	enabled: Schema.Boolean,
 	status: providerStatusSchema,
 	hasApiKey: Schema.Boolean,
-	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: isoTimestampSchema,
 }).annotate({ identifier: "ComputerProvider" });
@@ -376,7 +375,6 @@ const computerAddedHostSchema = Schema.Struct({
 	host: computerHostSchema,
 	/** Who added it, or approved a bot's request for it; null once they've left. */
 	addedByName: Schema.NullOr(Schema.String),
-	addedAt: isoTimestampSchema,
 });
 
 export type ComputerAddedHost = typeof computerAddedHostSchema.Type;

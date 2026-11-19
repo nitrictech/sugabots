@@ -3,7 +3,7 @@ import { Check } from "lucide-react";
 import { modelName } from "@/lib/model-providers.ts";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
-export type ModelChoice = Pick<
+type ModelChoice = Pick<
 	WorkspaceModelsResponse["models"][number],
 	"modelId" | "displayName" | "providerId" | "providerName"
 >;

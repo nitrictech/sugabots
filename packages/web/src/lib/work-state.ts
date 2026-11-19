@@ -1,12 +1,15 @@
-import type { ChatHistoryEntry, CollaborationPart } from "@sugabots/contracts";
+import type { CollaborationPart, RunState } from "@sugabots/contracts";
 
 /** How a collaboration or an automation's run stands, as a thread's row or Inbox's line says it. */
 export type WorkState = "running" | "done" | "failed";
 
-/** How the collaboration or run a history entry is stands; running until the entry says otherwise. */
-export function workStateOf(entry: ChatHistoryEntry | undefined): WorkState {
-	if (entry?.status === "failed" || entry?.status === "cancelled") return "failed";
-	if (entry?.status === "completed") return "done";
+/**
+ * How a collaboration or run stands, from its status in the conversation's
+ * history or Inbox; running until a status says otherwise.
+ */
+export function workStateOf(status: RunState | undefined): WorkState {
+	if (status === "failed" || status === "cancelled") return "failed";
+	if (status === "completed") return "done";
 	return "running";
 }
 

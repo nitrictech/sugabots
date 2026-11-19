@@ -1,32 +1,30 @@
-import type { NotificationSettings, Project } from "@sugabots/contracts";
+import type { NotificationSettings, Project, ProjectMarker } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Lock, Plus } from "lucide-react";
+import { useBots, useModels } from "@/lib/bots.ts";
 import { projectLink, projectNewThreadLink, projectSettingsLink } from "@/lib/links.ts";
+import { ownerMarkTransition } from "@/lib/owner-mark.ts";
+import { ownerProblems } from "@/lib/owner-pages.ts";
 import { projectPalettes } from "@/lib/project-looks.ts";
 import type { useBackToHere } from "@/lib/settings-back.tsx";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
-import { RowAttention } from "@/shell/SidebarBot.tsx";
+import { hasNews, RowAttention } from "@/shell/SidebarBot.tsx";
+import { ProblemMark } from "@/ui/attention-dot.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { initialOf } from "@/ui/letter-tile.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 
 /** A project the viewer is in, with how its threads stand for them. */
-export interface ProjectStanding {
-	project: Project;
-	/** How many unread messages its threads hold. */
-	unreadMessages: number;
-	/** Whether a thread in it waits on the viewer. */
-	needsApproval: boolean;
-}
-
-/** How a project stands while the sidebar's markers have nothing for it, or have not loaded. */
-export const NOTHING_NEW_IN_PROJECT = { unreadMessages: 0, needsApproval: false };
+export type ProjectStanding = ProjectMarker & { project: Project };
 
 /**
  * A project in the sidebar: one row, as a bot is, whose name opens the
  * project, where its threads are listed beside the rail. It says how much is
- * new in it, and is shaded while the page open is in it. Under the pointer or
- * on focus, New thread and its settings come in at the end. Right-clicked, it
+ * new in it, with an alert beside that while something is wrong that its
+ * settings or automations set right, as a bot's row has, and is shaded while
+ * the page open is in it. Under the pointer or on focus, New thread and its
+ * settings come in at the end. Right-clicked, it
  * offers its notifications. A private project's name carries a lock.
  */
 export function SidebarProject({
@@ -44,6 +42,7 @@ export function SidebarProject({
 	notificationSettings?: NotificationSettings;
 }) {
 	const { project } = standing;
+	const problem = useProjectProblem(standing);
 	const notificationPlace = { kind: "project", id: project.id } as const;
 	const isPrivate = project.visibility === "private";
 	return (
@@ -59,7 +58,9 @@ export function SidebarProject({
 					aria-current={selected ? "page" : undefined}
 					className="focus-ring flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-sm pl-2"
 				>
-					<ProjectInitial project={project} />
+					<span style={ownerMarkTransition(project.id)} className="flex shrink-0">
+						<ProjectInitial project={project} size="nav" />
+					</span>
 					<span
 						className={cn(
 							"min-w-0 truncate text-sm",
@@ -70,14 +71,7 @@ export function SidebarProject({
 					>
 						{project.name}
 					</span>
-					{isPrivate && (
-						<Lock
-							aria-label="Private"
-							size={11}
-							strokeWidth={2.25}
-							className="shrink-0 text-subtle-foreground"
-						/>
-					)}
+					{isPrivate && <PrivateMark />}
 					<MutedMark settings={notificationSettings} place={notificationPlace} />
 				</Link>
 				<RowAttention
@@ -85,6 +79,11 @@ export function SidebarProject({
 					needsApproval={standing.needsApproval}
 					className="mr-2"
 				/>
+				{problem && (
+					<span className="mr-2 flex">
+						<ProblemMark label={problem} />
+					</span>
+				)}
 				<IconButton
 					label={`New thread in ${project.name}`}
 					size="sm"
@@ -106,8 +105,32 @@ export function SidebarProject({
 	);
 }
 
-function hasNews({ unreadMessages, needsApproval }: ProjectStanding): boolean {
-	return needsApproval || unreadMessages > 0;
+/**
+ * What is wrong with a project that its settings or automations set right,
+ * settings first: none while the bots it is checked against are loading.
+ */
+function useProjectProblem({ project, failedAutomations }: ProjectStanding): string | undefined {
+	const { bots } = useBots();
+	const lead = bots?.find((one) => one.id === project.leadBotId);
+	const enabledModels = useModels().data?.models;
+	const problems = ownerProblems(
+		{ project },
+		{ lead, enabledModels, automationFailed: failedAutomations > 0 },
+	);
+	return (bots && problems.settings) ?? problems.automations;
+}
+
+/** The lock after a private project's name. */
+export function PrivateMark() {
+	return (
+		<Lock
+			role="img"
+			aria-label="Private"
+			size={11}
+			strokeWidth={2.25}
+			className="shrink-0 text-subtle-foreground"
+		/>
+	);
 }
 
 type ProjectMarkSource = Pick<Project, "name" | "color">;
@@ -117,7 +140,7 @@ const PROJECT_INITIAL_SIZES = {
 	sm: "size-4 rounded text-3xs",
 	md: "size-5 rounded-xs text-2xs",
 	row: "size-7 rounded-sm text-xs",
-	rail: "size-8 rounded-lg text-xs",
+	nav: "size-5.5 rounded-md text-2xs",
 	lg: "size-11 rounded-xl text-sm",
 	xl: "size-22 rounded-3xl text-3xl",
 } as const;
@@ -132,8 +155,8 @@ export function ProjectInitial({
 	project: ProjectMarkSource;
 	/**
 	 * `sm` is a quieter mark for a row that names its project: the letter in the
-	 * project's colour on a tint of it. `row` heads a settings row, `rail` is
-	 * the icon rail's, `lg` stands beside the title of the project's own
+	 * project's colour on a tint of it. `row` heads a settings row, `nav` is
+	 * the sidebar row's and the icon rail's alike, `lg` stands beside the title of the project's own
 	 * settings, and `xl` heads a thread's details on a phone.
 	 */
 	size?: keyof typeof PROJECT_INITIAL_SIZES;
@@ -158,7 +181,7 @@ export function ProjectInitial({
 					: { background: palette.swatch })
 			}
 		>
-			{Array.from(project.name.trim())[0]?.toUpperCase() ?? ""}
+			{initialOf(project.name)}
 		</span>
 	);
 }

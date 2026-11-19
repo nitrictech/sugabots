@@ -3,13 +3,15 @@ import {
 	type ConnectionTool,
 	type ConnectionToolSetting,
 	type ConnectionWithTools,
+	type NamedPerson,
 	toolAccessCountsOf,
 } from "@sugabots/contracts";
 import { and, asc, eq, getColumns, type SQL, sql } from "drizzle-orm";
 import { Effect } from "effect";
+import { namedPersonColumns } from "../../conversations/repository/participants.ts";
 import type { Credentials } from "../../credentials/credentials.ts";
 import { query } from "../../database/database.ts";
-import { type ConnectionRow, connection, user } from "../../database/schema.ts";
+import { type ConnectionRow, connection, user, workspaceMember } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
 import { isSignedIn, signInExpired, toolsOf } from "./connection-repository.ts";
 import * as GitHub from "./github/github.ts";
@@ -73,9 +75,19 @@ export const connectionIn = (
 function listedRows(where: SQL | undefined) {
 	return query((db) =>
 		db
-			.select({ row: listedRow, connectedBy: user.name })
+			.select({
+				row: listedRow,
+				connectedBy: namedPersonColumns,
+			})
 			.from(connection)
-			.leftJoin(user, eq(user.id, connection.createdById))
+			.leftJoin(
+				workspaceMember,
+				and(
+					eq(workspaceMember.workspaceId, connection.workspaceId),
+					eq(workspaceMember.userId, connection.createdById),
+				),
+			)
+			.leftJoin(user, eq(user.id, workspaceMember.userId))
 			.where(where)
 			.orderBy(asc(connection.createdAt)),
 	);
@@ -83,7 +95,7 @@ function listedRows(where: SQL | undefined) {
 
 function toConnection(
 	row: ListedRow,
-	connectedBy: string | null,
+	connectedBy: NamedPerson | null,
 	cipher: Credentials.Interface,
 ): { connection: Connection; tools: ConnectionToolSetting[] } {
 	const tools = toolsOf(row).map((tool) => ({
@@ -114,7 +126,6 @@ function toConnection(
 				lastTestError: row.lastTestError,
 			}),
 			toolCounts: toolAccessCountsOf(tools),
-			lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 			lastTestError: row.lastTestError,
 			connectedBy,
 			createdAt: row.createdAt.toISOString(),

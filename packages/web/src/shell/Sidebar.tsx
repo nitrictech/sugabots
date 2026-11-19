@@ -4,7 +4,7 @@ import { cn } from "cn";
 import { Bot as BotIcon, ChevronRight, Hash, Plus } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef } from "react";
 import { findBot, useAssistant, useBots, useEnsuredAssistant } from "@/lib/bots.ts";
-import { useProjectThreadMarkers } from "@/lib/chats.ts";
+import { useProjectMarkers } from "@/lib/chats.ts";
 import { useFolded } from "@/lib/folded.ts";
 import { botsLink, projectsLink } from "@/lib/links.ts";
 import { useNotificationSettings } from "@/lib/notifications.ts";
@@ -20,12 +20,8 @@ import { HelpMenu } from "@/shell/HelpMenu.tsx";
 import { IconRail } from "@/shell/IconRail.tsx";
 import { useNewBot } from "@/shell/NewBot.tsx";
 import { OwnerSidebar, type OwnerSidebarPage } from "@/shell/OwnerSidebar.tsx";
-import { type BotStanding, NOTHING_NEW, SidebarBot } from "@/shell/SidebarBot.tsx";
-import {
-	NOTHING_NEW_IN_PROJECT,
-	type ProjectStanding,
-	SidebarProject,
-} from "@/shell/SidebarProject.tsx";
+import { type BotStanding, SidebarBot } from "@/shell/SidebarBot.tsx";
+import { type ProjectStanding, SidebarProject } from "@/shell/SidebarProject.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
@@ -43,26 +39,20 @@ export type SidebarView = "settings" | "projects";
  * project's pages (the bot or project itself, a thread, its files or its
  * automations), the workspace narrowed to `IconRail` at the far left, and
  * beside it that bot's or project's own sidebar, `OwnerSidebar`. Everywhere
- * else: the projects the person is in, then their bots,
- * the Personal Assistant first and then those they pinned, then their direct
- * messages, and you, Settings and Help at the foot. With `toggleRoom`, its top
- * is left clear for the button that puts it away, which sits over it; without
- * `resizable`, its edge does not drag. A phone has `MobileTabBar` and
+ * else: the person's Personal Assistant, the projects they are in, the bots
+ * they pinned, then their direct messages, and you, Settings and Help at the foot. Its top is always left
+ * clear for the button that puts it away, which sits over it while a chat is
+ * open, so what is under it never moves; without `resizable`, its edge does
+ * not drag. A phone has `MobileTabBar` and
  * `MobileHome` instead.
  */
-export function Sidebar({
-	toggleRoom = false,
-	resizable = true,
-}: {
-	toggleRoom?: boolean;
-	resizable?: boolean;
-}) {
+export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 	const { data: projects } = useProjects();
 	const { bots, isPending: botsPending, error: botsError } = useBots();
 	const assistant = useAssistant();
 	// The sidebar is on every page, hidden on a phone, so this makes it wherever the person lands.
 	useEnsuredAssistant(!botsPending && !botsError && !assistant);
-	const { data: markers } = useProjectThreadMarkers();
+	const { markerOf } = useProjectMarkers();
 	const { data: notificationSettings } = useNotificationSettings();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
@@ -70,21 +60,18 @@ export function Sidebar({
 	const signOut = useSignOut();
 	const place = useSidebarPlace();
 	const newBot = useNewBot();
-	// Settings opened from a chat leads back to it; opened from settings, it keeps settings' own Back.
-	const backToChat = useBackToHere("Chat");
+	// Settings opened from any page leads back to it; opened from settings, it keeps settings' own Back.
+	const backToPageLeft = useBackToHere("Back");
 	const assistantStanding = assistant && {
 		bot: assistant,
-		...(markers?.bots[assistant.id] ?? NOTHING_NEW),
+		...markerOf(assistant.defaultProjectId),
 	};
 	const projectStandings = (projects ?? [])
 		.filter((project) => project.isMember)
-		.map((project) => ({
-			project,
-			...(markers?.projects[project.id] ?? NOTHING_NEW_IN_PROJECT),
-		}));
+		.map((project) => ({ project, ...markerOf(project.id) }));
 	const botStandings = sidebarBots(bots ?? []).map((bot) => ({
 		bot,
-		...(markers?.bots[bot.id] ?? NOTHING_NEW),
+		...markerOf(bot.defaultProjectId),
 	}));
 	const owner = useOwnerInView(place);
 
@@ -101,20 +88,19 @@ export function Sidebar({
 				workspace={workspace}
 				workspaces={workspaces ?? []}
 				user={session.user ?? undefined}
-				settingsBack={place.inSettings ? undefined : backToChat}
+				settingsBack={place.inSettings ? undefined : backToPageLeft}
 				notificationSettings={notificationSettings}
 				onSignOut={() => void signOut()}
 				onNewBot={newBot.start}
-				toggleRoom={toggleRoom}
 				resizable={resizable}
 				rail={
 					owner && (
 						<IconRail
 							projects={projectStandings}
-							bots={assistantStanding ? [assistantStanding, ...botStandings] : botStandings}
+							assistant={assistantStanding}
+							bots={botStandings}
 							currentProjectSlug={place.projectSlug}
 							currentBotHandle={place.botHandle}
-							toggleRoom={toggleRoom}
 						/>
 					)
 				}
@@ -203,7 +189,10 @@ function useSidebarPlace(): SidebarPlace {
 				: matchRoute({ to: "/$workspace/bots/$bot/automations", fuzzy: true }) ||
 						matchRoute({ to: "/$workspace/projects/$project/automations", fuzzy: true })
 					? "automations"
-					: undefined,
+					: matchRoute({ to: "/$workspace/bots/$bot/connections", fuzzy: true }) ||
+							matchRoute({ to: "/$workspace/projects/$project/connections", fuzzy: true })
+						? "connections"
+						: undefined,
 		atHome: Boolean(matchRoute({ to: "/$workspace" })),
 		conversationId: conversation,
 		view,
@@ -229,7 +218,6 @@ export function SidebarView({
 	notificationSettings,
 	onSignOut,
 	onNewBot,
-	toggleRoom = false,
 	resizable = true,
 	rail,
 	focus,
@@ -260,8 +248,6 @@ export function SidebarView({
 	onSignOut: () => void;
 	/** Absent when the viewer may not make a bot. */
 	onNewBot?: () => void;
-	/** Leaves its top clear for the button that puts it away. */
-	toggleRoom?: boolean;
 	/** Whether its edge drags to change its width. */
 	resizable?: boolean;
 	/** At the far left, before it, as the workspace narrows to on a bot's or a project's pages. */
@@ -296,14 +282,22 @@ export function SidebarView({
 						onResize={setWidth}
 					/>
 				)}
-				{toggleRoom && <div aria-hidden className="h-10 shrink-0" />}
-				{focus ?? (
-					<div
-						className={cn(
-							"scrollbar-on-hover flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pb-3",
-							toggleRoom ? "pt-1" : "pt-3",
+				{!focus && <div aria-hidden className="h-10 shrink-0" />}
+				{/* Named for the view transition that slides one out and the other in. */}
+				{focus ? (
+					<div className="flex min-h-0 flex-1 flex-col view-transition-owner-sidebar">{focus}</div>
+				) : (
+					<div className="scrollbar-on-hover flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pt-1 pb-3 view-transition-workspace-sidebar">
+						{/* The Personal Assistant always leads, above everything it can help with. */}
+						{assistant && (
+							<ul className="m-0 flex list-none flex-col p-0">
+								<SidebarBot
+									standing={assistant}
+									selected={assistantOpen || assistant.bot.handle === currentBotHandle}
+									notificationSettings={notificationSettings}
+								/>
+							</ul>
 						)}
-					>
 						<FoldSection
 							title="Projects"
 							open={!folded.has(PROJECTS_FOLD)}
@@ -352,14 +346,6 @@ export function SidebarView({
 							}
 						>
 							<ul className="m-0 flex list-none flex-col gap-px p-0">
-								{/* The Personal Assistant always leads. */}
-								{assistant && (
-									<SidebarBot
-										standing={assistant}
-										selected={assistantOpen || assistant.bot.handle === currentBotHandle}
-										notificationSettings={notificationSettings}
-									/>
-								)}
 								{bots.map((standing) => (
 									<SidebarBot
 										key={standing.bot.id}
@@ -433,7 +419,10 @@ function FoldSection({
 	children: ReactNode;
 }) {
 	return (
-		<section aria-label={title} className="flex flex-col gap-px">
+		// A group rather than a region: the sidebar is already a landmark, and a page beside it
+		// may have its own region of the same name, such as a settings group of projects.
+		// biome-ignore lint/a11y/useSemanticElements: this groups links, not form controls, so a fieldset is wrong.
+		<div role="group" aria-label={title} className="flex flex-col gap-px">
 			<div className="group/section flex h-8 items-center rounded-sm pr-1.5">
 				<h2 className="m-0 flex min-w-0 flex-1 font-normal">
 					<button
@@ -464,6 +453,6 @@ function FoldSection({
 			</div>
 			{/* Level with the heading, not nested under it. */}
 			{open && <div className="flex flex-col gap-px">{children}</div>}
-		</section>
+		</div>
 	);
 }

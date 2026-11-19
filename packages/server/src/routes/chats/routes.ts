@@ -18,10 +18,16 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 		const view = yield* ChatView.Service;
 		const files = yield* ChatFiles.Service;
 		return handlers
-			.handle("list", ({ params, query }) =>
+			.handle("threads", ({ params }) =>
+				view.threads(params.projectId).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("recentThreads", ({ params, query }) =>
 				view
-					.list({ workspace: params.workspace, project: query.project })
+					.recentThreads({ workspace: params.workspace, limit: query.limit })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("attention", ({ params }) =>
+				view.attention(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("projectMarkers", ({ params }) =>
 				view.projectMarkers(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
@@ -31,18 +37,6 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			)
 			.handle("approvals", ({ params }) =>
 				view.approvals(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
-			)
-			.handle("botThreads", ({ params }) =>
-				view.botThreads(params.botId).pipe(asSessionUser, asHttpError(chatErrors)),
-			)
-			.handle("startThread", ({ params, payload }) =>
-				chats
-					.startThread({
-						botId: params.botId,
-						messageId: payload.id,
-						content: payload.message,
-					})
-					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("startProjectThread", ({ params, payload }) =>
 				chats
@@ -77,11 +71,6 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 					.openAutomationFeed({ workspace: params.workspace, automationId: params.automationId })
 					.pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("startNamedThread", ({ params, payload }) =>
-				chats
-					.startNamedThread({ projectId: params.projectId, name: payload.name })
-					.pipe(asSessionUser, asHttpError(chatErrors)),
-			)
 			.handle("renameThread", ({ params, payload }) =>
 				chats
 					.changeThread({ conversationId: params.conversationId, change: { name: payload.name } })
@@ -110,6 +99,9 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			)
 			.handle("markRead", ({ params }) =>
 				chats.markRead(params.conversationId).pipe(asSessionUser, asHttpError(chatErrors)),
+			)
+			.handle("markAllRead", ({ params }) =>
+				chats.markAllRead(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("markItemRead", ({ params }) =>
 				chats.markItemRead(params.conversationId).pipe(asSessionUser, asHttpError(chatErrors)),
@@ -179,7 +171,7 @@ const chatErrors = {
 	TooManyInDirect: BadRequest,
 	MessageIdConflict: Conflict,
 	ReplyTargetNotFound: BadRequest,
-	HostHasNoModel: Conflict,
+	BotHasNoModel: Conflict,
 	ChatArchived: Conflict,
 	InvalidPageCursor: BadRequest,
 	UploadsNotFound: BadRequest,

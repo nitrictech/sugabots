@@ -98,7 +98,7 @@ export function ItemPanel({
 		(participant): participant is BotParticipant =>
 			participant.kind === "bot" && participant.id !== mine?.id,
 	);
-	// Opened from the chat of the bot that was asked, whose conversation it is not in.
+	// Opened from a thread of the bot that was asked, which the collaboration is not in.
 	const askedOfChatBot =
 		details?.conversation.kind === "collaboration" && details.conversation.botId === chatBotId;
 
@@ -212,7 +212,7 @@ export function ItemPanel({
 			{frame.kind === "sidebar" && type === "collaboration" && mine && (
 				<p className="m-0 shrink-0 border-border border-t px-4.5 py-3 text-xs text-subtle-foreground leading-normal">
 					Bots talk here on their own.
-					{/* A message to the asked bot in its own chat starts other work, which never reaches this. */}
+					{/* A message to the asked bot in its own thread starts other work, which never reaches this. */}
 					{!askedOfChatBot && ` To weigh in, message ${mine.name} in the thread it came from.`}
 				</p>
 			)}
@@ -287,7 +287,7 @@ function ItemPage({
  * event that started it, and the way to its automation's settings.
  */
 function AutomationHeaderActions({ run, owner }: { run: Run; owner: ResourceOwner | undefined }) {
-	const backToRun = useBackToHere("Thread");
+	const backToRun = useBackToHere("Run");
 	return (
 		<>
 			{run.trigger.kind === "webhook" && (
@@ -299,7 +299,11 @@ function AutomationHeaderActions({ run, owner }: { run: Run; owner: ResourceOwne
 							</IconButton>
 						}
 					/>
-					<PopoverContent align="end" className="w-header-popover overflow-hidden text-left">
+					<PopoverContent
+						aria-label="Webhook payload"
+						align="end"
+						className="w-header-popover overflow-hidden text-left"
+					>
 						{run.trigger.idempotencyKey && (
 							<div className="flex items-baseline gap-2 border-border border-b px-4 py-2.5 text-xs">
 								<span className="text-muted-foreground">Idempotency key</span>

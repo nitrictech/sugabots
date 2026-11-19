@@ -9,7 +9,7 @@ import {
 import { Effect } from "effect";
 import { useEffect } from "react";
 import { client } from "@/api.ts";
-import { botThreadsKey } from "@/lib/chats.ts";
+import { projectThreadsKey } from "@/lib/chats.ts";
 import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
 /**
@@ -219,7 +219,7 @@ function useInvalidateBots(): () => Promise<void> {
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["bots", workspaceId] }),
 			// A bot's threads list shows it.
-			queries.invalidateQueries({ queryKey: botThreadsKey(workspaceId) }),
+			queries.invalidateQueries({ queryKey: projectThreadsKey(workspaceId) }),
 		]);
 	};
 }

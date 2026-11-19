@@ -113,6 +113,7 @@ export function useProjectMembers(projectId: string | undefined) {
  */
 export function usePlaceProjectMember(projectId: string) {
 	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
 
 	return useMutation({
 		mutationFn: ({ userId, member }: { userId: string; member: boolean }) =>
@@ -121,7 +122,7 @@ export function usePlaceProjectMember(projectId: string) {
 					? client.api.projects.addMember({ params: { projectId }, payload: { userId } })
 					: client.api.projects.removeMember({ params: { projectId, userId } }),
 			),
-		onSuccess: () => queries.invalidateQueries({ queryKey: ["project-members", projectId] }),
+		onSuccess: () => refreshMembership(queries, workspaceId, projectId),
 	});
 }
 
@@ -148,7 +149,7 @@ export function useJoinProject() {
 	});
 }
 
-/** Fetches again what shows who is in the project `projectId`: the projects, and its people. */
+/** Fetches again what shows who is in the project `projectId`: the projects, which count its people, and its people. */
 function refreshMembership(
 	queries: QueryClient,
 	workspaceId: string | undefined,
@@ -174,6 +175,7 @@ export function useProjectBots(projectId: string | undefined) {
 /** Adds a public bot to the project, or takes one out. */
 export function usePlaceProjectBot(projectId: string) {
 	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
 
 	return useMutation({
 		mutationFn: ({ botId, added }: { botId: string; added: boolean }) =>
@@ -182,6 +184,11 @@ export function usePlaceProjectBot(projectId: string) {
 					? client.api.projects.addBot({ params: { projectId }, payload: { botId } })
 					: client.api.projects.removeBot({ params: { projectId, botId } }),
 			),
-		onSuccess: () => queries.invalidateQueries({ queryKey: ["project-bots", projectId] }),
+		// The list of projects counts each one's bots.
+		onSuccess: () =>
+			Promise.all([
+				queries.invalidateQueries({ queryKey: ["projects", workspaceId] }),
+				queries.invalidateQueries({ queryKey: ["project-bots", projectId] }),
+			]),
 	});
 }

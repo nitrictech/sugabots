@@ -140,6 +140,42 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		expect(made.model).toBe(OFFERED);
 	});
 
+	it("names who added a bot, and nobody once it has no creator", async () => {
+		const made = await administration.create({
+			workspace: workspaceId,
+			bot: { name: "Triage", model: OFFERED },
+		});
+		const [creator] = await onDatabase((db) =>
+			db.select().from(user).where(eq(user.id, creatorId)),
+		);
+
+		expect(made.createdBy).toEqual({
+			id: creatorId,
+			name: "Ada",
+			email: creator?.email,
+			image: null,
+		});
+
+		await onDatabase((db) => db.update(bot).set({ createdById: null }).where(eq(bot.id, made.id)));
+		expect((await administration.get({ botId: made.id })).createdBy).toBeNull();
+	});
+
+	it("gives a bot read back its default project, listed or alone", async () => {
+		const made = await administration.create({
+			workspace: workspaceId,
+			bot: { name: "Triage", model: OFFERED },
+		});
+		const [own] = await onDatabase((db) =>
+			db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, made.id)),
+		);
+
+		expect((await administration.get({ botId: made.id })).defaultProjectId).toBe(own?.id);
+		expect(
+			(await administration.list({ workspace: workspaceId })).find((one) => one.id === made.id)
+				?.defaultProjectId,
+		).toBe(own?.id);
+	});
+
 	it.each(["unknown-model", "switched-off"])(
 		"refuses to create a bot on %s, and creates nothing",
 		async (model) => {
@@ -482,6 +518,37 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			expect(await onDatabase((db) => db.select().from(bot).where(eq(bot.id, made.id)))).toEqual(
 				[],
 			);
+		});
+
+		it("names nobody as its creator once they have left the workspace, though they are in another", async () => {
+			const memberId = await aMember();
+			const made = await administrationAs(memberId).create({
+				workspace: workspaceId,
+				bot: { name: "Triage", model: OFFERED },
+			});
+			const [elsewhere] = await onDatabase((db) =>
+				db
+					.insert(workspace)
+					.values({ name: "Elsewhere", slug: `elsewhere-${crypto.randomUUID()}` })
+					.returning(),
+			);
+			if (!elsewhere) throw new Error("could not create the other workspace");
+			await onDatabase((db) =>
+				db
+					.insert(workspaceMember)
+					.values({ workspaceId: elsewhere.id, userId: memberId, role: "member" }),
+			);
+			await onDatabase((db) =>
+				db
+					.delete(workspaceMember)
+					.where(
+						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, memberId)),
+					),
+			);
+
+			expect((await administration.get({ botId: made.id })).createdBy).toBeNull();
+			const listed = await administration.list({ workspace: workspaceId });
+			expect(listed.find((one) => one.id === made.id)?.createdBy).toBeNull();
 		});
 
 		it("lets an administrator read and change another person's private bot, but not talk to it", async () => {

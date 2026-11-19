@@ -26,7 +26,7 @@ import { ConversationFiles } from "../../files/conversation-files.ts";
 import { Files } from "../../files/files.ts";
 import { Ids } from "../../ids/ids.ts";
 import { Installation } from "../../installation/installation.ts";
-import { botConnectionsPath, searchSettingsPath } from "../../installation/web-app-paths.ts";
+import { connectionsPagePath, searchSettingsPath } from "../../installation/web-app-paths.ts";
 import { Models } from "../../providers/models/models.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
@@ -613,6 +613,14 @@ const streamReply = (
 				signal,
 			});
 
+			const { workspaceSlug, project: projectPeopleMade } = prepared.context;
+			const botConnectionsPageUrl = `${installation.webAppUrl}${connectionsPagePath({ workspaceSlug, botHandle: prepared.context.bot.handle })}`;
+			// The turn's connections are its bot's default project's and, in a
+			// project people made, that project's, which the conversation is in.
+			const connectionsPageUrlOf = (projectId: string) =>
+				projectPeopleMade && projectId !== prepared.context.bot.defaultProjectId
+					? `${installation.webAppUrl}${connectionsPagePath({ workspaceSlug, projectSlug: projectPeopleMade.slug })}`
+					: botConnectionsPageUrl;
 			const environment: TurnEnvironment = {
 				now,
 				builtInTools: [
@@ -622,11 +630,14 @@ const streamReply = (
 				toolCatalog: toolCatalogNote({
 					catalog,
 					unavailable: connections.unavailable,
-					signInExpired: connections.signInExpired,
+					signInExpired: connections.signInExpired.map(({ handle, projectId }) => ({
+						handle,
+						connectionsPageUrl: connectionsPageUrlOf(projectId),
+					})),
 					instructions: connections.instructions,
 					addable: connections.addable,
 					fromProjectAndBot: connections.fromProjectAndBot,
-					connectionsPageUrl: `${installation.webAppUrl}${botConnectionsPath(prepared.context.workspaceSlug, prepared.context.bot.handle)}`,
+					connectionsPageUrl: botConnectionsPageUrl,
 				}),
 				computer: computer.note,
 			};

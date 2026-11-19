@@ -105,7 +105,6 @@ export function storyListedThread(thread: ProjectThread): ListedThread {
 		lastMessage: null,
 		participants: [],
 		messageCount: 1,
-		waitingOn: null,
 		unreadMessages: 0,
 		needsApproval: false,
 		mentionsYou: false,
@@ -116,7 +115,6 @@ export const storyModel = {
 	providerId: "0199a3a0-0000-7000-8000-000000000201",
 	providerName: "Anthropic",
 	providerPreset: "anthropic",
-	providerActive: true,
 	modelId: "claude-sonnet-4-20250514",
 	displayName: "Claude Sonnet",
 	capabilities: ["tools", "vision", "reasoning"],
@@ -279,12 +277,11 @@ export function storyProjectThreadDetails(
 }
 
 /** What a chat's sidebar shows: a summary. */
-export function storyChatActivity(bot: Bot, messages: Message[] = []): ConversationActivity {
+export function storyChatActivity(bot: Bot): ConversationActivity {
 	const chat = storyThreadFor(bot);
 	return {
 		summary: {
 			content: `${bot.name} has been keeping things moving.`,
-			sourceMessageId: messages.at(-1)?.id ?? chat.id,
 			updatedAt: chat.updatedAt,
 		},
 		context: null,
@@ -340,7 +337,6 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 	const projects = data.projects ?? storyProjects;
 	const bots = data.bots ?? storyBots;
 	const messages = data.messages ?? {};
-	const botById = (id: string) => bots.find((bot) => bot.id === id);
 	const botForConversation = (conversationId: string) =>
 		bots.find((bot) => storyThreadFor(bot).id === conversationId);
 	const projectForChat = (conversationId: string) =>
@@ -403,7 +399,6 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			HttpResponse.json(data.providers ?? []),
 		),
 		http.get(api("/workspaces/:workspace/system-bots"), () => HttpResponse.json(systemBots)),
-		http.get(api("/workspaces/:workspace/automations"), () => HttpResponse.json({ items: [] })),
 		http.get(api("/workspaces/:workspace/search-provider"), () => HttpResponse.json(null)),
 		http.get(api("/workspaces/:workspace/events"), quietStream),
 		http.get(api("/me/events"), quietStream),
@@ -412,30 +407,34 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			HttpResponse.json({ waiting: [], answered: [] }),
 		),
 		http.get(api("/workspaces/:workspace/chats/project-markers"), () =>
-			HttpResponse.json({ projects: {}, bots: {} }),
+			HttpResponse.json({ projects: {} }),
+		),
+		http.get(api("/workspaces/:workspace/chats/attention"), () =>
+			HttpResponse.json({
+				unreadInInbox: 0,
+				waitingApprovals: 0,
+				unreadForYou: 0,
+			}),
+		),
+		http.get(api("/workspaces/:workspace/chats/recent-threads"), () =>
+			HttpResponse.json({ threads: [] }),
 		),
 		http.post(
 			api("/conversations/:conversationId/read"),
 			() => new HttpResponse(null, { status: 204 }),
 		),
 		http.post(api("/items/:conversationId/read"), () => new HttpResponse(null, { status: 204 })),
-		http.get(api("/workspaces/:workspace/chats"), ({ request }) => {
-			// By the project's id or its slug, as the API takes it.
-			const named = new URL(request.url).searchParams.get("project");
-			const project = projects.find((one) => one.id === named || one.slug === named);
-			return HttpResponse.json({
-				chats: project ? [storyListedThread(storyProjectThreadFor(project))] : [],
-			});
-		}),
-		http.get(api("/bots/:botId/threads"), ({ params }) => {
-			const bot = botById(String(params.botId));
-			if (!bot) return new HttpResponse(null, { status: 404 });
-			return HttpResponse.json({
-				bot,
-				threads: [storyListedThread(storyThreadFor(bot))],
-				automations: [],
-				summary: null,
-			});
+		http.get(api("/projects/:projectId/threads"), ({ params }) => {
+			const projectId = String(params.projectId);
+			const project = projects.find((one) => one.id === projectId);
+			const bot = bots.find((one) => one.defaultProjectId === projectId);
+			const thread = project
+				? storyProjectThreadFor(project)
+				: bot
+					? storyThreadFor(bot)
+					: undefined;
+			if (!thread) return new HttpResponse(null, { status: 404 });
+			return HttpResponse.json({ threads: [storyListedThread(thread)], automations: [] });
 		}),
 		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
 			const bot = botForConversation(String(params.conversationId));
@@ -463,7 +462,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/conversations/:conversationId/activity"), ({ params }) => {
 			const bot = botForConversation(String(params.conversationId));
 			return bot
-				? HttpResponse.json(storyChatActivity(bot, messages[bot.id]))
+				? HttpResponse.json(storyChatActivity(bot))
 				: new HttpResponse(null, { status: 404 });
 		}),
 		http.get(api("/conversations/:conversationId"), ({ params }) => {
@@ -478,6 +477,11 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				? HttpResponse.json(storyChatDetails(bot, messages[bot.id]))
 				: new HttpResponse(null, { status: 404 });
 		}),
+		http.get(api("/projects/:projectId/bots"), ({ params }) => {
+			const projectId = String(params.projectId);
+			const inProject = botsInProject.get(projectId) ?? [];
+			return HttpResponse.json(bots.filter((bot) => inProject.some((one) => one.id === bot.id)));
+		}),
 		http.get(api("/projects/:projectId/connections"), () => HttpResponse.json([])),
 		// No computers in the example workspace, so the bot's Computer section stays hidden.
 		http.get(api("/projects/:projectId/computer"), () =>
@@ -490,7 +494,6 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 					name: storyUser.name,
 					email: storyUser.email,
 					image: null,
-					addedAt: "2026-09-01T00:00:00.000Z",
 					removable: false,
 				},
 			]),
@@ -504,6 +507,9 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			HttpResponse.json({ kind: "set", secret: "whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u" }),
 		),
 		http.get(api("/projects/:projectId/automations/:automationId/runs"), () =>
+			HttpResponse.json({ items: [], nextCursor: null }),
+		),
+		http.get(api("/projects/:projectId/runs"), () =>
 			HttpResponse.json({ items: [], nextCursor: null }),
 		),
 	];

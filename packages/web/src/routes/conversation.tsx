@@ -79,7 +79,7 @@ export function RoutedConversation({
 					<Link
 						{...ownerLinkOptions(owner, { page: "thread", conversationId })}
 						className={cn(
-							buttonStyles({ variant: "outline", size: "sm" }),
+							buttonStyles({ variant: "secondary", size: "sm" }),
 							"shrink-0 max-md:hidden",
 						)}
 					>

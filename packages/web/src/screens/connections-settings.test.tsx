@@ -45,9 +45,13 @@ const wiki: TestConnection = {
 			access: "off",
 		},
 	],
-	lastTestedAt: "2026-09-14T00:00:01.000Z",
 	lastTestError: null,
-	connectedBy: "Sam",
+	connectedBy: {
+		id: "0199a3a0-0000-7000-8000-0000000000c1",
+		name: "Sam",
+		email: "sam@example.com",
+		image: null,
+	},
 	createdAt: "2026-09-14T00:00:00.000Z",
 };
 
@@ -64,13 +68,14 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-/** The bot's Connections, a page of its own beside the bot's General. */
-const connectionsPage = `/suga/settings/bots/${linear.handle}/connections`;
+/** The bot's Connections, a page of its own beside its threads. */
+const connectionsPage = `/suga/bots/${linear.handle}/connections`;
 const wikiPage = `${connectionsPage}/${wiki.id}`;
 
 /** The connection's own page, once it and its tools have loaded. */
 async function openedWiki() {
-	await screen.findByRole("heading", { name: "Wiki", level: 2 });
+	await screen.findByRole("heading", { name: "Wiki", level: 1 });
+	await screen.findByRole("region", { name: "Tools that read" });
 	await waitFor(() => expect(screen.queryByRole("status", { name: "Loading tools" })).toBeNull());
 }
 
@@ -91,7 +96,7 @@ async function openAdd() {
 	return screen.findByRole("dialog", { name: `Add to ${linear.name}` });
 }
 
-describe("the Connections settings", () => {
+describe("a bot's Connections page", () => {
 	it("connects a catalog app by signing in, leaving its tools to start at their defaults", async () => {
 		const go = vi.spyOn(browser, "go").mockImplementation(() => undefined);
 		serveConnections();
@@ -306,8 +311,13 @@ describe("the Connections settings", () => {
 		expect(screen.queryByText("search_pages")).toBeNull();
 		// A server added by its address is told apart by it.
 		expect(screen.getByText(wiki.url)).toBeDefined();
-		const backBar = document.querySelector<HTMLElement>("[data-page-back]");
-		expect(backBar && within(backBar).getByRole("link", { name: "Connections" })).toBeDefined();
+		// The page's header leads back to the list; the page adds no Back of its own.
+		expect(document.querySelector("[data-page-back]")).toBeNull();
+		expect(
+			screen
+				.getAllByRole("link", { name: "Connections" })
+				.some((link) => link.getAttribute("href") === connectionsPage),
+		).toBe(true);
 	});
 
 	it("opens a connection from its row, which offers nothing to change on the list", async () => {
@@ -452,7 +462,8 @@ describe("the Connections settings", () => {
 		await openIndividualTools();
 		const backBar = document.querySelector<HTMLElement>("[data-page-back]");
 		if (backBar) fireEvent.click(within(backBar).getByRole("button", { name: "Wiki" }));
-		expect(await screen.findByRole("heading", { name: "Wiki", level: 2 })).toBeDefined();
+		expect(await screen.findByRole("region", { name: "Tools that read" })).toBeDefined();
+		expect(screen.queryByRole("heading", { name: "Individual tools" })).toBeNull();
 	});
 
 	it("sums up on the bot's list what a connection's tools are set to", async () => {
@@ -582,7 +593,7 @@ describe("coming back from a connection sign-in", () => {
 	it("opens the Connections of the bot the sign-in was for", async () => {
 		serveConnections(wiki);
 		const router = mount(
-			`/connections/oauth/return?workspace=${project.workspaceId}&bot=${linear.id}`,
+			`/connections/oauth/return?workspace=${project.workspaceId}&project=${linear.defaultProjectId}`,
 		);
 
 		expect(await screen.findByRole("article", { name: "Wiki" })).toBeDefined();
@@ -592,7 +603,7 @@ describe("coming back from a connection sign-in", () => {
 	it("says once why a sign-in for a bot did not finish", async () => {
 		serveConnections(wiki);
 		const router = mount(
-			`/connections/oauth/return?workspace=${project.workspaceId}&bot=${linear.id}&oauth_error=refused`,
+			`/connections/oauth/return?workspace=${project.workspaceId}&project=${linear.defaultProjectId}&oauth_error=refused`,
 		);
 
 		expect(
@@ -603,8 +614,8 @@ describe("coming back from a connection sign-in", () => {
 		await waitFor(() => expect(router.state.location.href).toBe(connectionsPage));
 
 		await router.navigate({
-			to: "/$workspace/settings/bots/$bot/$page",
-			params: { workspace: "suga", bot: triager.handle, page: "connections" },
+			to: "/$workspace/bots/$bot/connections",
+			params: { workspace: "suga", bot: triager.handle },
 		});
 		expect(
 			await screen.findByText(`The services ${triager.name} uses, as whoever connected each one.`),

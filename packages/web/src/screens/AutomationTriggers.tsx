@@ -53,18 +53,18 @@ import { RoutineGroups } from "./RoutineSchedule.tsx";
 export type TriggerSection = "routines" | "triggers";
 
 /** The section that lists a trigger of `kind`. */
-export function sectionOf(kind: TriggerKind): TriggerSection {
+function sectionOf(kind: TriggerKind): TriggerSection {
 	return kind === "routine" ? "routines" : "triggers";
 }
 
 /** Each section's heading, its row while it has none, and its row that adds one. */
-export const SECTION_WORDS: Record<TriggerSection, { label: string; none: string; add: string }> = {
+const SECTION_WORDS: Record<TriggerSection, { label: string; none: string; add: string }> = {
 	routines: { label: "Routines", none: "No routines", add: "Add routine" },
 	triggers: { label: "Triggers", none: "No triggers", add: "Add trigger" },
 };
 
 /** The note under the empty sections of an automation that nothing starts. */
-export const RUNS_ONLY_BY_HAND = "It runs only when someone runs it.";
+const RUNS_ONLY_BY_HAND = "It runs only when someone runs it.";
 
 /** A trigger as written in a dialog, before it is saved. */
 export type TriggerDraft =
@@ -210,6 +210,7 @@ export function TriggersGroup({
 	editable,
 	onOpen,
 	onAdd,
+	headingLevel,
 }: {
 	section: TriggerSection;
 	/** Every trigger of the automation; the group lists those of its section. */
@@ -217,11 +218,13 @@ export function TriggersGroup({
 	editable: boolean;
 	onOpen: (key: string) => void;
 	onAdd: () => void;
+	/** 2 straight under the screen's heading, as on an automation's own page; 3 under a page's title. */
+	headingLevel?: 2 | 3;
 }) {
 	const words = SECTION_WORDS[section];
 	const listed = triggers.filter(({ trigger }) => sectionOf(trigger.kind) === section);
 	return (
-		<SettingsGroup label={words.label}>
+		<SettingsGroup label={words.label} headingLevel={headingLevel}>
 			{listed.length === 0 && (
 				<SettingsRow
 					label={words.none}

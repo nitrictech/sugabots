@@ -5,14 +5,13 @@ import {
 	MAX_EVERY_MONTHS,
 	MAX_EVERY_WEEKS,
 } from "@sugabots/contracts";
+import { formatEvery, formatTime } from "@sugabots/contracts/routine-schedule-label";
 import { cn } from "cn";
 import { Check, Minus, Plus, X } from "lucide-react";
 import {
 	canAddTime,
 	DAY_OPTIONS,
 	formatDayOfMonth,
-	formatEvery,
-	formatTime,
 	nextTime,
 	REPEAT_OPTIONS,
 	type RoutineReading,

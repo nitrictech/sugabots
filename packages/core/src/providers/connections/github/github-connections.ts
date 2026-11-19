@@ -155,7 +155,6 @@ export const make = Effect.gen(function* () {
 					.map((one) => ({
 						repository: one.path,
 						addedByName: (one.addedById && names.get(one.addedById)) ?? null,
-						addedAt: one.addedAt,
 					})),
 			} satisfies ConnectionRepositories;
 		});

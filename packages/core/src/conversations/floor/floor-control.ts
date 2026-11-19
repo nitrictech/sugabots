@@ -1,8 +1,10 @@
 export * as FloorControl from "./floor-control.ts";
 
-import { Context, Effect, Layer } from "effect";
+import { userText } from "@sugabots/errors";
+import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import type { DomainEvents } from "../../database/events/domain-events.ts";
+import type { UserFacing } from "../../user-message.ts";
 import type { ConversationEvent } from "../events.ts";
 import { ConversationRepository } from "../repository/repository.ts";
 import { Turns } from "../turns/turns.ts";
@@ -14,9 +16,11 @@ export interface Interface {
 	 * Decides who speaks after the committed message `committed` (see
 	 * `decideFloor`) and asks for them: brings each addressed bot into the
 	 * conversation and asks for its turn. Runs in the caller's transaction, so it
-	 * commits with the message.
+	 * commits with the message. Refused, before any turn is asked for, when a
+	 * bot given the floor has no model, so the caller's transaction rolls the
+	 * message back rather than keep it with a turn that could only fail.
 	 */
-	readonly giveFloor: (committed: FloorMessage) => Effect.Effect<void>;
+	readonly giveFloor: (committed: FloorMessage) => Effect.Effect<void, BotHasNoModel>;
 	/**
 	 * Asks for the collaborator's turn when a collaboration opens, for the
 	 * asking bot's when a collaboration ends after it stopped waiting, and
@@ -40,6 +44,13 @@ export const make = Effect.gen(function* () {
 					const scope = yield* query((db) => loadFloorScope(db, committed));
 					const decision = decideFloor({ ...scope, content: committed.content });
 					if (decision.kind !== "turns") return;
+					const modelled = new Set(
+						scope.mentionableBots.flatMap((member) => (member.hasModel ? [member.id] : [])),
+					);
+					if (scope.lead?.hasModel) modelled.add(scope.lead.id);
+					if (decision.bots.some(({ botId }) => !modelled.has(botId))) {
+						return yield* new BotHasNoModel();
+					}
 					yield* conversations.addBots(
 						committed.conversationId,
 						decision.bots.map(({ botId }) => botId),
@@ -100,3 +111,13 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide(ConversationRepository.layer));
+
+/**
+ * A bot given the floor has no model, so nothing could answer. The message is
+ * not kept, rather than kept with a turn that will never run.
+ */
+export class BotHasNoModel extends Data.TaggedError("BotHasNoModel") implements UserFacing {
+	get userMessage() {
+		return userText`This bot has no model chosen, so it can't answer yet`;
+	}
+}

@@ -72,12 +72,12 @@ away and which wait for someone to say yes.
 
 ### Automations
 
-Give a bot a job to do on a schedule, or whenever a webhook or a GitHub event
-calls it. It posts what it did in its chat, where the team can pick it up. Try telling a bot "check in with me every morning at 9".
+Give a bot a job to do on a routine, or whenever a webhook or a GitHub event
+calls it. It posts what it did in its automation's feed, where the team can pick it up. Try telling a bot "check in with me every morning at 9".
 
 ### Computers
 
-Bots can runs code, use software or browse the web in their own isolated environment.
+Bots run code, use software and browse the web on a computer of their own, or their project's.
 
 ### And more
 

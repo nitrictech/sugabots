@@ -3,7 +3,8 @@ import { useState } from "react";
 import { expect, fn, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
-import { appHandlers } from "@/story-app.tsx";
+import { SessionContext } from "@/lib/session.ts";
+import { appHandlers, storyUser } from "@/story-app.tsx";
 import { DirectMessagesSection } from "./DirectMessages.tsx";
 import { IconRail } from "./IconRail.tsx";
 import { OwnerSidebar } from "./OwnerSidebar.tsx";
@@ -86,7 +87,7 @@ const meta = preview.meta({
 export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("link", { name: chief.name })).toBeVisible();
-		await expect(canvas.getByRole("region", { name: "Projects" })).toBeVisible();
+		await expect(canvas.getByRole("group", { name: "Projects" })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: growthDesk.name })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Settings" })).toBeVisible();
 	},
@@ -101,14 +102,20 @@ export const OwnerOpen = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...appHandlers());
 	},
+	// Revenue's threads mark the ones that need you, so they ask who you are.
+	decorators: [
+		(Story) => (
+			<SessionContext value={{ user: storyUser, error: undefined, refresh: async () => {} }}>
+				<Story />
+			</SessionContext>
+		),
+	],
 	args: {
 		rail: (
 			<IconRail
+				assistant={{ bot: chief, ...nothing }}
 				projects={projectStandings}
-				bots={[
-					{ bot: chief, ...nothing },
-					{ bot: growthDesk, ...nothing },
-				]}
+				bots={[{ bot: growthDesk, ...nothing }]}
 				currentProjectSlug={revenue.slug}
 				currentBotHandle={undefined}
 			/>
@@ -128,6 +135,6 @@ export const OwnerOpen = meta.story({
 			"page",
 		);
 		await expect(canvas.getByRole("navigation", { name: `${revenue.name}'s pages` })).toBeVisible();
-		await expect(canvas.queryByRole("region", { name: "Projects" })).toBeNull();
+		await expect(canvas.queryByRole("group", { name: "Projects" })).toBeNull();
 	},
 });

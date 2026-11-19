@@ -5,12 +5,12 @@ import { cn } from "cn";
 /*
  * The button. The variant and size names are shadcn's, so a component installed
  * from a shadcn registry, such as AI Elements, uses this button rather than
- * bringing a look of its own.
+ * bringing a look of its own; map any variant it uses that this lacks when it
+ * is installed.
  *
  * The design draws buttons as pills: the accent primary, a neutral chip for
  * everything secondary (`muted` where it sits on a card's fill), and bare
- * text for links, quiet actions and destructive ones. `outline` is mapped onto
- * `secondary`, so it can't drift into a palette of its own.
+ * text for links, quiet actions and destructive ones.
  *
  * An icon-only control is an `IconButton`, which requires a label. A link
  * styled as a button gets `buttonStyles(...)` on its `<a>`, so it stays a link.
@@ -26,7 +26,6 @@ export const buttonStyles = cva(
 				secondary: "bg-chip text-foreground hover:bg-hover disabled:text-disabled-foreground",
 				/** A secondary answer beside a primary one on a card, a step stronger than `secondary` so it reads on the card's fill. */
 				muted: "bg-hover text-foreground hover:bg-hover-strong disabled:text-disabled-foreground",
-				outline: "bg-chip text-foreground hover:bg-hover disabled:text-disabled-foreground",
 				ghost:
 					"font-medium text-muted-foreground hover:bg-hover hover:text-foreground disabled:opacity-50",
 				link: "rounded-md font-medium text-link hover:opacity-80 disabled:text-disabled-foreground",

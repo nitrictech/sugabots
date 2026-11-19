@@ -10,12 +10,9 @@ import { Effect } from "effect";
 import { client } from "@/api.ts";
 
 /*
- * Files: a project's, or a bot's own, each opened by version. They refetch on every visit, and whenever a conversation the
+ * Files: a project's, a bot's being its default project's, each opened by version. They refetch on every visit, and whenever a conversation the
  * app is following reports a write (see `refreshFilesAfter`).
  */
-
-/** Whose files a list shows: a project's, from its threads, or a bot's, from its own threads. */
-type FileScope = { kind: "project"; projectId: string } | { kind: "bot"; botId: string };
 
 /**
  * Refetches the files on screen once `toolCall` has written one. Every
@@ -27,9 +24,8 @@ export function refreshFilesAfter(queries: QueryClient, toolCall: ToolCallPart):
 	void queries.invalidateQueries({ queryKey: ["files"] });
 }
 
-/** The cache key of `scope`'s list of files. */
-export const filesKey = (scope: FileScope) =>
-	scope.kind === "project" ? ["files", "project", scope.projectId] : ["files", "bot", scope.botId];
+/** The cache key of the project `projectId`'s list of files. */
+export const filesKey = (projectId: string) => ["files", "project", projectId];
 
 /** The cache key of one file at `version`, or at its current version when none is given. */
 export const fileKey = (fileId: string, version?: number) => [
@@ -39,16 +35,12 @@ export const fileKey = (fileId: string, version?: number) => [
 	version ?? "current",
 ];
 
-export function useFiles(scope: FileScope) {
+/** The files from the threads of the project `projectId`, which for a bot is its default project. */
+export function useFiles(projectId: string) {
 	return useQuery({
-		queryKey: filesKey(scope),
+		queryKey: filesKey(projectId),
 		queryFn: ({ signal }) =>
-			Effect.runPromise(
-				scope.kind === "project"
-					? client.api.files.listInProject({ params: { projectId: scope.projectId } })
-					: client.api.files.listForBot({ params: { botId: scope.botId } }),
-				{ signal },
-			),
+			Effect.runPromise(client.api.files.listInProject({ params: { projectId } }), { signal }),
 		refetchOnMount: "always",
 	});
 }

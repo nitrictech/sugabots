@@ -2,6 +2,7 @@ import {
 	type ApprovalRequest,
 	type ModelProvider,
 	type ProviderModel,
+	type Run,
 	type SessionUser,
 	streamEvent,
 } from "@sugabots/contracts";
@@ -488,7 +489,7 @@ describe("the workspace while the API is not answering", () => {
 });
 
 describe("the sidebar", () => {
-	it("lists the projects you are in, then your Personal Assistant first among the bots you pinned", async () => {
+	it("lists your Personal Assistant first, then the projects you are in, then the bots you pinned", async () => {
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed([
 				{ ...linear, pinned: true },
@@ -499,25 +500,31 @@ describe("the sidebar", () => {
 		mount("/suga/projects");
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-		const projects = within(sidebar).getByRole("region", { name: "Projects" });
+		const projects = within(sidebar).getByRole("group", { name: "Projects" });
 		// One row each, as a bot has: their threads are in the project's own sidebar.
 		const sales = await within(projects).findByRole("link", { name: "Sales" });
 		const team = within(projects).getByRole("link", { name: "Suga-Team" });
 		expect(team.compareDocumentPosition(sales) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 		expect(within(projects).queryByRole("group")).toBeNull();
-		const bots = within(sidebar).getByRole("region", { name: "Bots" });
-		await within(bots).findByRole("link", { name: personalAssistant.name });
+		const assistant = await within(sidebar).findByRole("link", { name: personalAssistant.name });
+		expect(
+			assistant.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		const bots = within(sidebar).getByRole("group", { name: "Bots" });
 		const listed = within(within(bots).getByRole("list")).getAllByRole("link");
-		expect(listed.map((link) => link.textContent)).toEqual([personalAssistant.name, linear.name]);
+		expect(listed.map((link) => link.textContent)).toEqual([linear.name]);
 	});
 
 	it("says what waits in the Personal Assistant's row, as a bot's row does", async () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([linear, personalAssistant]));
 		client.api.chats.projectMarkers.mockReturnValue(
 			Effect.succeed({
-				projects: {},
-				bots: {
-					[personalAssistant.id]: { unreadMessages: 2, needsApproval: true, failedAutomations: 0 },
+				projects: {
+					[personalAssistant.defaultProjectId]: {
+						unreadMessages: 2,
+						needsApproval: true,
+						failedAutomations: 0,
+					},
 				},
 			}),
 		);
@@ -540,11 +547,11 @@ describe("the sidebar", () => {
 		expect(
 			await within(sidebar).findByRole("navigation", { name: `${linear.name}'s pages` }),
 		).toBeDefined();
-		const work = await within(sidebar).findByRole("list", { name: `${linear.name}'s work` });
+		const work = await within(sidebar).findByRole("region", { name: "Threads" });
 		expect(
 			await within(work).findByRole("link", { name: new RegExp(threadWith(linear).title) }),
 		).toBeDefined();
-		expect(within(sidebar).queryByRole("region", { name: "Projects" })).toBeNull();
+		expect(within(sidebar).queryByRole("group", { name: "Projects" })).toBeNull();
 	});
 
 	it("goes back to the projects and bots from a bot's sidebar", async () => {
@@ -554,7 +561,7 @@ describe("the sidebar", () => {
 		fireEvent.click(await screen.findByRole("link", { name: "All projects and bots" }));
 
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga"));
-		expect(await screen.findByRole("region", { name: "Bots" })).toBeDefined();
+		expect(await screen.findByRole("group", { name: "Bots" })).toBeDefined();
 	});
 
 	it("makes your Personal Assistant when you have none", async () => {
@@ -603,8 +610,12 @@ describe("someone else's private bot an administrator sees listed", () => {
 	const theirs = {
 		...triager,
 		visibility: "private" as const,
-		createdById: juno.id,
-		permissions: { ...triager.permissions, talk: false },
+		createdBy: { id: juno.id, name: juno.name, email: juno.email, image: null },
+		permissions: {
+			...triager.permissions,
+			talk: false,
+			resources: { ...triager.permissions.resources, readHistory: false },
+		},
 	};
 
 	it("shows that it exists, with its settings, but none of its threads", async () => {
@@ -615,8 +626,8 @@ describe("someone else's private bot an administrator sees listed", () => {
 		expect(screen.getByRole("link", { name: "Open its settings" }).getAttribute("href")).toBe(
 			`/suga/settings/bots/${theirs.handle}`,
 		);
-		expect(client.api.chats.botThreads).not.toHaveBeenCalledWith({
-			params: { botId: theirs.id },
+		expect(client.api.chats.threads).not.toHaveBeenCalledWith({
+			params: { projectId: theirs.defaultProjectId },
 		});
 	});
 
@@ -661,9 +672,9 @@ describe("a public project you're not in", () => {
 				params: { projectId: projects[1]?.id },
 			}),
 		);
-		expect(client.api.chats.list).not.toHaveBeenCalledWith(
-			expect.objectContaining({ query: { project: "sales" } }),
-		);
+		expect(client.api.chats.threads).not.toHaveBeenCalledWith({
+			params: { projectId: projects[1]?.id },
+		});
 	});
 
 	it("joins it from the directory by its name, and says why when joining fails", async () => {
@@ -706,9 +717,10 @@ describe("a project's threads", () => {
 	it("opens the project at its newest thread", async () => {
 		onWideScreen();
 		const newest = threadIn("0199a3a0-0000-7000-8000-0000000000f1", "Launch");
-		client.api.chats.list.mockReturnValue(
+		client.api.chats.threads.mockReturnValue(
 			Effect.succeed({
-				chats: [newest, threadIn("0199a3a0-0000-7000-8000-0000000000f2", "Pricing")],
+				threads: [newest, threadIn("0199a3a0-0000-7000-8000-0000000000f2", "Pricing")],
+				automations: [],
 			}),
 		);
 		const router = mount(`/suga/projects/${sales.slug}`);
@@ -718,6 +730,50 @@ describe("a project's threads", () => {
 				`/suga/projects/${sales.slug}/${newest.conversation.id}`,
 			),
 		);
+	});
+
+	it("lists a scheduled run that started and finished while the project was open", async () => {
+		onWideScreen();
+		const updates = controlledEventStream();
+		client.events.workspace.mockReturnValue(updates.stream);
+		client.api.chats.threads.mockReturnValue(
+			Effect.succeed({
+				threads: [threadIn("0199a3a0-0000-7000-8000-0000000000f1", "Launch")],
+				automations: [],
+			}),
+		);
+		mount(`/suga/projects/${sales.slug}`);
+		await screen.findByText("Launch");
+
+		const at = "2026-09-18T09:00:00.000Z";
+		const run: Run = {
+			id: "0199a3a0-0000-7000-8000-0000000003e5",
+			automationId: "0199a3a0-0000-7000-8000-0000000003e1",
+			workspaceId: workspace.id,
+			botId: "0199a3a0-0000-7000-8000-0000000000b1",
+			conversationId: "0199a3a0-0000-7000-8000-0000000003e6",
+			rootConversationId: "0199a3a0-0000-7000-8000-0000000003e7",
+			automationName: "Morning pipeline review",
+			instructions: "Review the pipeline.",
+			trigger: { kind: "routine", scheduledAt: at, acceptedAt: at },
+			state: "completed",
+			error: null,
+			posted: true,
+			acceptedAt: at,
+			startedAt: at,
+			finishedAt: at,
+		};
+		client.api.automations.projectRuns.mockReturnValue(
+			Effect.succeed({ items: [run], nextCursor: null }),
+		);
+		updates.emit(
+			streamEvent("conversation.item_changed", {
+				rootConversationId: run.rootConversationId,
+				conversationId: run.conversationId,
+			}),
+		);
+
+		expect(await screen.findByText(run.automationName)).toBeDefined();
 	});
 
 	it("asks whoever may change a project with no lead bot yet to choose one", async () => {
@@ -780,13 +836,12 @@ describe("the settings navigation", () => {
 	 * their list simply ends rather than showing gaps.
 	 */
 
-	it("lists a project's General, People, Bots, Connections and Computer, as a bot has its own", async () => {
+	it("lists a project's General, People, Bots and Computer, as a bot has its own", async () => {
 		client.api.computerProviders.access.mockReturnValue(Effect.succeed({ enabled: true }));
 		mount("/suga/settings/projects/suga-team");
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
 		const projects = await within(rail).findByRole("group", { name: "Projects" });
 		expect(await within(projects).findByRole("link", { name: /^Bots/ })).toBeDefined();
-		expect(within(projects).getByRole("link", { name: "Connections" })).toBeDefined();
 		expect(within(projects).getByRole("link", { name: "Computer" })).toBeDefined();
 	});
 
@@ -934,11 +989,11 @@ describe("the settings navigation", () => {
 		await screen.findByRole("heading", { name: linear.name });
 	}
 
-	it("goes back to the project's Bots a bot was opened from", async () => {
+	it("goes back, under the project's name, to the project's bots a bot was opened from", async () => {
 		const router = mount("/suga/settings/projects/suga-team/bots");
 		await openLinearFromItsProject();
 
-		fireEvent.click(await pageBack("Bots"));
+		fireEvent.click(await pageBack("Suga-Team"));
 
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/suga/settings/projects/suga-team/bots"),
@@ -1012,7 +1067,6 @@ function firstBotMade(name: string) {
 		id: "0199a3a0-0000-7000-8000-0000000000c8",
 		name,
 		handle: name.toLowerCase(),
-		createdById: sam.id,
 	};
 	client.api.bots.create.mockImplementation(() => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([personalAssistant, made]));
@@ -1324,7 +1378,12 @@ describe("routes", () => {
 
 	it("does not retry an accepted invitation when continuing initially fails", async () => {
 		client.api.workspaces.invitation.mockReturnValue(
-			Effect.succeed({ status: "pending", workspaceName: "Nitric", inviterName: "Sam" }),
+			Effect.succeed({
+				status: "pending",
+				workspaceName: "Nitric",
+				inviterName: "Sam",
+				role: "member",
+			}),
 		);
 		const refresh = vi
 			.fn<() => Promise<void>>()
@@ -1355,7 +1414,12 @@ describe("routes", () => {
 			setupCompletedAt: "2026-09-01T00:00:00.000Z",
 		};
 		client.api.workspaces.invitation.mockReturnValue(
-			Effect.succeed({ status: "pending", workspaceName: "Nitric", inviterName: "Sam" }),
+			Effect.succeed({
+				status: "pending",
+				workspaceName: "Nitric",
+				inviterName: "Sam",
+				role: "member",
+			}),
 		);
 		client.api.workspaces.acceptInvitation.mockImplementation(() => {
 			client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, joined]));
@@ -1748,7 +1812,6 @@ describe("workspace settings", () => {
 		status: "untested" as const,
 		models: [],
 		modelCount: 0,
-		enabledModelCount: 0,
 	};
 
 	function mountOllama(provider: typeof ollama = ollama) {
@@ -1823,7 +1886,6 @@ describe("workspace settings", () => {
 			status: "missing_key" as const,
 			models: [],
 			modelCount: 0,
-			enabledModelCount: 0,
 		};
 		client.api.modelProviders.create.mockReturnValue(Effect.succeed(provider));
 		const router = mount("/suga/settings/providers");
@@ -1863,7 +1925,6 @@ describe("workspace settings", () => {
 			baseUrl: "https://api.groq.com/openai/v1",
 			models: [],
 			modelCount: 0,
-			enabledModelCount: 0,
 		};
 		client.api.modelProviders.create.mockReturnValue(Effect.succeed(groq));
 		mount("/suga/settings/providers");
@@ -1990,7 +2051,6 @@ describe("workspace settings", () => {
 			baseUrl: "http://localhost:11434/v1",
 			models: [],
 			modelCount: 0,
-			enabledModelCount: 0,
 		};
 		client.api.modelProviders.list.mockReturnValue(Effect.succeed([custom]));
 		client.api.modelProviders.addModel.mockReturnValue(
@@ -2434,7 +2494,6 @@ describe("project settings", () => {
 		name: sam.name,
 		email: sam.email,
 		image: null,
-		addedAt: "2026-09-09T00:00:00.000Z",
 		// Sam administers the workspace, so is in every project for good.
 		removable: false,
 	};
@@ -2673,12 +2732,21 @@ describe("the app's badge", () => {
 		});
 	}
 
+	/** `count` approvals wait on the person, as the API counts them. */
+	function approvalsWaiting(count: number) {
+		client.api.chats.attention.mockReturnValue(
+			Effect.succeed({
+				unreadInInbox: 0,
+				waitingApprovals: count,
+				unreadForYou: 0,
+			}),
+		);
+	}
+
 	it("counts approvals waiting on you on the app's icon and in the title", async () => {
 		const { setAppBadge } = badging();
 		pageTitle();
-		client.api.chats.approvals.mockReturnValue(
-			Effect.succeed({ waiting: [waitingApproval], answered: [] }),
-		);
+		approvalsWaiting(1);
 		mount(linearPage);
 
 		await waitFor(() => expect(document.title).toBe("(1) Sugabots | Suga Workspace"));
@@ -2688,9 +2756,7 @@ describe("the app's badge", () => {
 	it("puts the count after the app's name in an installed window, which would otherwise repeat the name", async () => {
 		installedApp();
 		pageTitle();
-		client.api.chats.approvals.mockReturnValue(
-			Effect.succeed({ waiting: [waitingApproval], answered: [] }),
-		);
+		approvalsWaiting(1);
 		mount(linearPage);
 
 		await waitFor(() => expect(document.title).toBe("Sugabots | Suga Workspace (1)"));
@@ -2702,15 +2768,14 @@ describe("the app's badge", () => {
 		client.api.chats.projectMarkers.mockReturnValue(
 			Effect.succeed({
 				projects: {
-					[project.id]: { unreadMessages: 2, needsApproval: false },
+					[project.id]: { unreadMessages: 2, needsApproval: false, failedAutomations: 0 },
 				},
-				bots: {},
 			}),
 		);
 		mount("/suga/projects");
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-		const projects = within(sidebar).getByRole("region", { name: "Projects" });
+		const projects = within(sidebar).getByRole("group", { name: "Projects" });
 		await within(projects).findByText(/2 unread messages/);
 		expect(document.title).toBe("Sugabots | Suga Workspace");
 		expect(setAppBadge).not.toHaveBeenCalled();
@@ -2721,14 +2786,12 @@ describe("the app's badge", () => {
 		pageTitle();
 		const updates = controlledEventStream();
 		client.events.workspace.mockReturnValue(updates.stream);
-		client.api.chats.approvals.mockReturnValue(
-			Effect.succeed({ waiting: [waitingApproval], answered: [] }),
-		);
+		approvalsWaiting(1);
 		mount(linearPage);
 		await waitFor(() => expect(document.title).toBe("(1) Sugabots | Suga Workspace"));
 		clearAppBadge.mockClear();
 
-		client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
+		approvalsWaiting(0);
 		updates.emit(
 			streamEvent("conversation.changed", { conversationId: waitingApproval.conversationId }),
 		);
@@ -2741,13 +2804,11 @@ describe("the app's badge", () => {
 		pageTitle();
 		const updates = controlledEventStream();
 		client.events.workspace.mockReturnValue(updates.stream);
-		client.api.chats.approvals.mockReturnValue(
-			Effect.succeed({ waiting: [waitingApproval], answered: [] }),
-		);
+		approvalsWaiting(1);
 		mount(linearPage);
 		await waitFor(() => expect(document.title).toBe("(1) Sugabots | Suga Workspace"));
 
-		client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
+		approvalsWaiting(0);
 		updates.emit(streamEvent("reset"));
 
 		await waitFor(() => expect(document.title).toBe("Sugabots | Suga Workspace"));

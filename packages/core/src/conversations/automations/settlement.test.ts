@@ -406,7 +406,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 					conversationId: fixture.accepted.conversationId,
 					botId,
 					triggerMessageId: crypto.randomUUID(),
-					reason: "routine",
+					reason: "automation",
 				}),
 			);
 

@@ -1,3 +1,4 @@
+import { PROJECT_DESCRIPTION_MAX_LENGTH, PROJECT_NAME_MAX_LENGTH } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
 import type { RunEffect } from "../../../database/database.ts";
@@ -36,8 +37,13 @@ export function workspaceGuideTool({
 	});
 }
 
-const nameSchema = (description: string) =>
-	Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({ description });
+/** The longest handle or project address the assistant is asked to give. */
+const NAME_MAX_LENGTH = 200;
+
+const nameSchema = (description: string, maxLength = NAME_MAX_LENGTH) =>
+	Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(maxLength)).annotate({
+		description,
+	});
 
 /**
  * The things a Personal Assistant does in the workspace for its person, each
@@ -67,10 +73,10 @@ export function assistantRequests({
 				description:
 					"Make a project for your person, with them in it, led by a public bot of their choosing, which answers its threads unless another bot is mentioned. Public projects are listed for anyone in the workspace to join; private ones only for the people added.",
 				inputSchema: Schema.Struct({
-					name: nameSchema("What the project is called, like Launch."),
+					name: nameSchema("What the project is called, like Launch.", PROJECT_NAME_MAX_LENGTH),
 					lead: nameSchema("The handle of the public bot to lead it, like @support."),
 					description: Schema.optional(
-						Schema.Trim.check(Schema.isMaxLength(500)).annotate({
+						Schema.Trim.check(Schema.isMaxLength(PROJECT_DESCRIPTION_MAX_LENGTH)).annotate({
 							description: "What the project is for, in a sentence.",
 						}),
 					),

@@ -1,4 +1,5 @@
 import { Schema, Struct } from "effect";
+import { namedPersonSchema } from "./api.ts";
 import { handleSchema } from "./bots.ts";
 import {
 	headerNameSchema,
@@ -156,10 +157,9 @@ export const connectionSchema = Schema.Struct({
 	 * since a server can list hundreds.
 	 */
 	toolCounts: toolAccessCountsSchema,
-	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
-	/** The name of whoever added it, while they still have an account. */
-	connectedBy: Schema.NullOr(Schema.String),
+	/** Whoever added it, while they are still in the workspace. */
+	connectedBy: Schema.NullOr(namedPersonSchema),
 	createdAt: isoTimestampSchema,
 });
 

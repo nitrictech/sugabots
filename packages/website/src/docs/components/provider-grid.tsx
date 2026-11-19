@@ -1,49 +1,37 @@
 import { type ProviderPreset, providerCatalog } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
-import { cn } from "cn";
 import { useState } from "react";
 import { Reveal, RevealItem } from "@/components/reveal";
+import { ChoiceChips } from "@/components/ui/choice-chips";
 
-const filters = {
-	all: { label: "All", matches: () => true },
-	remote: {
-		label: "Hosted services",
-		matches: (preset: ProviderPreset) => preset.hosting === "remote",
-	},
-	local: {
-		label: "On your own machine",
-		matches: (preset: ProviderPreset) => preset.hosting === "local",
-	},
+const filterLabels = {
+	all: "All",
+	remote: "Hosted services",
+	local: "On your own machine",
 } as const;
 
-type Filter = keyof typeof filters;
+type Filter = keyof typeof filterLabels;
+
+const filterMatches: Record<Filter, (preset: ProviderPreset) => boolean> = {
+	all: () => true,
+	remote: (preset) => preset.hosting === "remote",
+	local: (preset) => preset.hosting === "local",
+};
 
 /** Every model provider Sugabots has a preset for, straight from its catalog, filterable by where it runs. */
 export function ProviderGrid() {
 	const [filter, setFilter] = useState<Filter>("all");
-	const shown = providerCatalog.filter(filters[filter].matches);
+	const shown = providerCatalog.filter(filterMatches[filter]);
 
 	return (
 		<div className="my-8 flex flex-col gap-4">
-			<fieldset className="flex flex-wrap gap-2">
-				<legend className="sr-only">Where it runs</legend>
-				{(Object.keys(filters) as Filter[]).map((key) => (
-					<button
-						key={key}
-						type="button"
-						aria-pressed={key === filter}
-						onClick={() => setFilter(key)}
-						className={cn(
-							"rounded-full border-2 px-3.5 py-1 text-sm font-semibold transition-colors",
-							key === filter
-								? "border-foreground bg-foreground text-background"
-								: "border-input text-muted-foreground hover:border-muted-foreground hover:text-foreground",
-						)}
-					>
-						{filters[key].label}
-					</button>
-				))}
-			</fieldset>
+			<ChoiceChips
+				label="Where it runs"
+				labelClassName="sr-only"
+				options={filterLabels}
+				value={filter}
+				onChange={setFilter}
+			/>
 			<Reveal
 				key={filter}
 				stagger={0.03}

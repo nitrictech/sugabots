@@ -9,13 +9,12 @@ import type {
 	AutomationUpdate,
 	AutomationWebhookChallenge,
 	GitHubTrigger,
+	ListedAutomationDefinition,
 	NewAutomation,
-	RoutineSchedule,
 	RunPage,
 	RunPageQuery,
 	WebhookAuth,
 	WebhookCondition,
-	WorkspaceAutomation,
 } from "@sugabots/contracts";
 import { MAX_AUTOMATION_TRIGGERS, webhookSecretLongEnough } from "@sugabots/contracts";
 import { and, eq } from "drizzle-orm";
@@ -43,9 +42,11 @@ import {
 	automationWithTriggers,
 	type InProject,
 	inScope,
+	type RoutineInput,
 	type Scope,
 	scopeOf,
 	TooManyAutomationTriggers,
+	TriggerSetInSettings,
 	toAutomation,
 	triggersOf,
 	WebhookDeliveryIdHeaderRejected,
@@ -55,7 +56,7 @@ import { type InvalidRunCursor, makeView } from "./automation-view.ts";
 import { makeWebhooks } from "./automation-webhooks.ts";
 import { makeConnectionEvents } from "./connection-events.ts";
 import { AutomationRepository } from "./repository.ts";
-import { type InvalidRoutineSchedule, nextOccurrence, upcomingOccurrences } from "./schedule.ts";
+import { type InvalidRoutineSchedule, nextOccurrence } from "./schedule.ts";
 import { type Delivery, generateSecret } from "./webhook-auth.ts";
 
 /**
@@ -100,6 +101,25 @@ export interface Interface {
 		| AutomationNotFound
 		| AutomationRepository.AutomationNameTaken
 		| InvalidRoutineSchedule,
+		CurrentActor.Service
+	>;
+	/**
+	 * Changes an automation's own settings, as `update` does, and makes the
+	 * routine all that starts it, in one transaction: rewrites its one routine,
+	 * or adds it when nothing starts the automation yet. Refused, changing
+	 * nothing, when it has another routine or a trigger.
+	 */
+	readonly updateWithSoleRoutine: (
+		automation: InProject,
+		input: AutomationUpdate,
+		routine: RoutineInput,
+	) => Effect.Effect<
+		Defined,
+		| AuthorizationDenied
+		| AutomationNotFound
+		| AutomationRepository.AutomationNameTaken
+		| InvalidRoutineSchedule
+		| TriggerSetInSettings,
 		CurrentActor.Service
 	>;
 	/** Adds a trigger to an automation, returning a secret made for a webhook. */
@@ -174,15 +194,6 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * When a routine's schedule would run next, for somebody choosing one for
-	 * the project's automations.
-	 */
-	readonly previewSchedule: (input: {
-		projectId: string;
-		schedule: RoutineSchedule;
-		timezone: string;
-	}) => Effect.Effect<Date[], AuthorizationDenied | InvalidRoutineSchedule, CurrentActor.Service>;
-	/**
 	 * Runs the automation now, for the actor: opens its conversation, posts the
 	 * trigger, and queues the run. Asking again with the same `requestId`
 	 * returns that run again, as a duplicate.
@@ -200,15 +211,18 @@ export interface Interface {
 	>;
 	/**
 	 * Every automation of a project the actor reaches, in a workspace
-	 * named by its id or its slug, by name, with its project's lead bot.
+	 * named by its id or its slug, by name.
 	 */
 	readonly listInWorkspace: (
 		workspace: string,
-	) => Effect.Effect<WorkspaceAutomation[], AuthorizationDenied, CurrentActor.Service>;
-	/** The project's automations, by name. */
+	) => Effect.Effect<Automation[], AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * The project's automations, by name, each with how it stands for
+	 * whoever may read its runs.
+	 */
 	readonly list: (owner: {
 		projectId: string;
-	}) => Effect.Effect<Automation[], AuthorizationDenied, CurrentActor.Service>;
+	}) => Effect.Effect<ListedAutomationDefinition[], AuthorizationDenied, CurrentActor.Service>;
 	readonly get: (
 		automation: InProject,
 	) => Effect.Effect<Automation, AuthorizationDenied | AutomationNotFound, CurrentActor.Service>;
@@ -224,6 +238,14 @@ export interface Interface {
 		AuthorizationDenied | AutomationNotFound | InvalidRunCursor,
 		CurrentActor.Service
 	>;
+	/**
+	 * A page of the runs of every automation of the project, newest first,
+	 * removed automations' included.
+	 */
+	readonly listProjectRuns: (
+		owner: { projectId: string },
+		page?: RunPageQuery,
+	) => Effect.Effect<RunPage, AuthorizationDenied | InvalidRunCursor, CurrentActor.Service>;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Automations") {}
@@ -295,6 +317,31 @@ export const make = Effect.gen(function* () {
 	const view = yield* makeView;
 
 	/**
+	 * What a routine is written as: when it runs next while the automation
+	 * runs. Worked out while it is paused too, so a schedule that cannot run is
+	 * refused now rather than when the automation is enabled again.
+	 */
+	const routineValues = (input: RoutineInput, state: AutomationState) =>
+		Effect.gen(function* () {
+			const settings = {
+				kind: "routine" as const,
+				schedule: input.schedule,
+				timezone: input.timezone,
+			};
+			const next = yield* nextOccurrence(
+				settings.schedule,
+				settings.timezone,
+				yield* DateTime.nowAsDate,
+			);
+			const values: AutomationRepository.TriggerValues = {
+				...NO_SECRET,
+				settings,
+				nextScheduledAt: state === "enabled" ? next : null,
+			};
+			return { values, secret: null } satisfies Written;
+		});
+
+	/**
 	 * What `input` writes for a trigger of the project `owner`'s automation, given
 	 * the trigger it rewrites, if any, and whether the automation runs: a
 	 * routine's next time while it does, and a webhook's secret.
@@ -314,22 +361,8 @@ export const make = Effect.gen(function* () {
 	> =>
 		Effect.gen(function* () {
 			switch (input.kind) {
-				case "routine": {
-					const settings = {
-						kind: "routine" as const,
-						schedule: input.schedule,
-						timezone: input.timezone,
-					};
-					const next =
-						state === "enabled"
-							? yield* nextOccurrence(
-									settings.schedule,
-									settings.timezone,
-									yield* DateTime.nowAsDate,
-								)
-							: null;
-					return { values: { ...NO_SECRET, settings, nextScheduledAt: next }, secret: null };
-				}
+				case "routine":
+					return yield* routineValues(input, state);
 				case "webhook": {
 					const checked = yield* webhookCheck(
 						credentials,
@@ -378,6 +411,35 @@ export const make = Effect.gen(function* () {
 					),
 			);
 			yield* repository.scheduleNext(next);
+		});
+
+	/**
+	 * Writes `input` over the automation `current`'s own settings, leaving
+	 * when its routines next run as it was.
+	 */
+	const writeSettings = (scope: Scope, current: schema.AutomationRow, input: AutomationUpdate) =>
+		Effect.gen(function* () {
+			const row = yield* repository.update(scope, {
+				name: input.name ?? current.name,
+				instructions: input.instructions ?? current.instructions,
+				state: input.state ?? current.state,
+				// Turned on or off by hand, it is no longer one that paused itself.
+				...(input.state && { pausedAfterFailuresAt: null }),
+			});
+			if (!row) return yield* new AutomationNotFound();
+			return row;
+		});
+
+	/**
+	 * Writes `input` over the automation `current`'s own settings, which the
+	 * caller holds the trigger lock of, and reschedules its routines when it
+	 * is paused or enabled.
+	 */
+	const changeSettings = (scope: Scope, current: schema.AutomationRow, input: AutomationUpdate) =>
+		Effect.gen(function* () {
+			const row = yield* writeSettings(scope, current, input);
+			if (row.state !== current.state) yield* reschedule(scope.automationId, row.state);
+			return row;
 		});
 
 	return Service.of({
@@ -429,16 +491,33 @@ export const make = Effect.gen(function* () {
 						const scope = yield* scopeOf(authorization, addressed, "automation.manage");
 						yield* lockTriggers(scope.automationId);
 						const current = yield* automationIn(scope);
-						const state = input.state ?? current.state;
-						const row = yield* repository.update(scope, {
-							name: input.name ?? current.name,
-							instructions: input.instructions ?? current.instructions,
-							state,
-							// Turned on or off by hand, it is no longer one that paused itself.
-							...(input.state && { pausedAfterFailuresAt: null }),
-						});
-						if (!row) return yield* new AutomationNotFound();
-						if (state !== current.state) yield* reschedule(scope.automationId, state);
+						const row = yield* changeSettings(scope, current, input);
+						return { automation: yield* automationWithTriggers(row), secrets: [] };
+					}),
+				),
+			),
+
+		updateWithSoleRoutine: (addressed, input, routine) =>
+			operation(
+				"updateWithSoleRoutine",
+				transaction(
+					Effect.gen(function* () {
+						const scope = yield* scopeOf(authorization, addressed, "automation.manage");
+						// Held across the check and both writes, so a trigger added meanwhile
+						// waits, and a refused routine leaves the settings as they were.
+						yield* lockTriggers(scope.automationId);
+						const current = yield* automationIn(scope);
+						const [only, ...others] =
+							(yield* triggersOf([scope.automationId])).get(scope.automationId) ?? [];
+						if (others.length > 0 || (only && only.settings.kind !== "routine")) {
+							return yield* new TriggerSetInSettings();
+						}
+						// Written as the settings leave it, running or paused.
+						const written = yield* routineValues(routine, input.state ?? current.state);
+						if (only) yield* repository.updateTrigger(scope, only.id, written.values);
+						else yield* repository.addTriggers(scope, [written.values]);
+						// The sole routine was just written for the state the settings leave.
+						const row = yield* writeSettings(scope, current, input);
 						return { automation: yield* automationWithTriggers(row), secrets: [] };
 					}),
 				),
@@ -570,15 +649,6 @@ export const make = Effect.gen(function* () {
 						}
 						return secret;
 					}),
-				),
-			),
-
-		previewSchedule: ({ projectId, schedule, timezone }) =>
-			operation(
-				"previewSchedule",
-				Effect.andThen(
-					authorization.project(projectId, "automation.manage"),
-					Effect.flatMap(DateTime.nowAsDate, (now) => upcomingOccurrences(schedule, timezone, now)),
 				),
 			),
 

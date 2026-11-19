@@ -466,6 +466,20 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(people.outsider.id)).toEqual([]);
 	});
 
+	it("tells the people taking part in a project's thread of a bot's reply there, as in a bot's thread", async () => {
+		const chat = await projectThread();
+		await onDatabase((db) =>
+			db.insert(conversationParticipant).values({ conversationId: chat, userId: people.ada.id }),
+		);
+
+		await emit(await botReplied(chat, "The checklist is done."));
+
+		expect(await deliveredTo(people.ada.id)).toEqual([
+			expect.objectContaining({ title: "Scout in Launch", body: "The checklist is done." }),
+		]);
+		expect(sentTo(people.bob.id)).toEqual([]);
+	});
+
 	it("leaves out somebody who muted the bot or paused", async () => {
 		const conversation = await conversationWithBot([people.ada.id, people.bob.id, people.cy.id]);
 		await as(

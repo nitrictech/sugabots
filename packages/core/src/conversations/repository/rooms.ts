@@ -2,13 +2,12 @@ import type { ConversationKind } from "@sugabots/contracts";
 import type { Brand } from "effect";
 
 /**
- * A bot's conversations and the rest, told apart. A thread of a project
- * people made lasts and goes by the name people gave it, while a bot's
- * conversations, such as its threads, in its default project, are each one
- * piece of work.
- * A direct message between people is neither: it lasts and goes by its
- * people's names, as a project's thread does, but nothing is started
- * from it. Work that only makes sense on a bot's conversation takes its id,
+ * A bot's conversations and the rest, told apart. A bot's conversations are
+ * every kind but two: the threads of its default project, automation feeds,
+ * runs, collaborations and system conversations. These are summarised and
+ * retitled from their summary. A thread of a project people made keeps the
+ * name people gave it, and a direct message between people goes by its
+ * people's names; neither is summarised. Work that only makes sense on a bot's conversation takes its id,
  * which only `isBotConversation` makes: an id read from a request or an event
  * is a plain `string` until its row's kind has been checked.
  */

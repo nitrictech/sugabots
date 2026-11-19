@@ -14,12 +14,7 @@ import { failureMessage } from "@/lib/failure.ts";
 import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
-import {
-	usePlaceProjectMember,
-	useProjectBots,
-	useProjectMembers,
-	useProjects,
-} from "@/lib/projects.ts";
+import { usePlaceProjectMember, useProjectMembers, useProjects } from "@/lib/projects.ts";
 import { useBackTarget, useBackToHere } from "@/lib/settings-back.tsx";
 import {
 	useCancelWorkspaceInvitation,
@@ -90,7 +85,7 @@ export function WorkspaceMembersSettings({
 		const member = members.data?.find((one) => one.id === selectedMemberId);
 		if (!member) {
 			return (
-				<EmptyState page title="No such person here">
+				<EmptyState page="min" title="No such person here">
 					They may have left the workspace, or been removed from it.
 				</EmptyState>
 			);
@@ -487,15 +482,16 @@ function ProjectMembershipRow({
 	name: string;
 	canManage: boolean;
 }) {
-	const members = useProjectMembers(project.id);
+	// The list of projects counts people only where the viewer may list them, and the roster is
+	// asked for only there, since anywhere else the API refuses it.
+	const members = useProjectMembers(project.memberCount === undefined ? undefined : project.id);
 	const place = usePlaceProjectMember(project.id);
-	const bots = useProjectBots(project.id).data ?? [];
 	const inProject = members.data?.some((member) => member.userId === userId) ?? false;
-	const headcount = projectHeadcount({ people: members.data?.length, bots: bots.length });
+	const headcount = projectHeadcount({ people: project.memberCount, bots: project.botCount });
 
 	return (
 		<SettingsRow
-			icon={<ProjectInitial project={project} className="size-7 rounded-sm text-xs" />}
+			icon={<ProjectInitial project={project} size="row" />}
 			label={project.name}
 			sub={place.error ? failureMessage(place.error) : headcount}
 			trailing={

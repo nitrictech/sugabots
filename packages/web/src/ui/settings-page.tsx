@@ -1,10 +1,17 @@
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "cn";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE, usePhoneBack } from "@/ui/back-button.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "@/ui/dropdown-menu.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 
@@ -448,6 +455,66 @@ export function SettingsChoiceRow<Value extends string>({
 				className="sm:ml-auto max-sm:w-full max-sm:[&>label]:flex-1 max-sm:[&>label]:text-center"
 			/>
 		</div>
+	);
+}
+
+/**
+ * A field row whose value is picked from a menu that opens under its arrow,
+ * which turns while the menu is open. `mark` draws an icon beside the value
+ * and each option.
+ */
+export function SettingsMenuRow<Value extends string>({
+	label,
+	options,
+	value,
+	mark,
+	onChange,
+}: {
+	label: string;
+	options: readonly { value: Value; label: string }[];
+	value: Value;
+	mark?: (value: Value) => ReactNode;
+	onChange: (value: Value) => void;
+}) {
+	const current = options.find((option) => option.value === value);
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				aria-label={`${label}: ${current?.label ?? value}`}
+				className={cn(
+					SETTINGS_ROW,
+					"group focus-ring w-full cursor-pointer py-2.5 text-left text-sm text-foreground transition-colors hover:bg-settings-row-hover",
+				)}
+			>
+				<SettingsFieldLabel>{label}</SettingsFieldLabel>
+				<span className="flex min-w-0 flex-1 items-center gap-2.5">
+					{mark?.(value)}
+					<span className="min-w-0 flex-1 truncate">{current?.label ?? value}</span>
+				</span>
+				<ChevronDown
+					aria-hidden
+					size={15}
+					strokeWidth={2.4}
+					className="shrink-0 text-subtle-foreground transition-transform group-data-popup-open:rotate-180"
+				/>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="min-w-56">
+				<DropdownMenuRadioGroup
+					value={value}
+					onValueChange={(chosen) => {
+						const option = options.find((candidate) => candidate.value === chosen);
+						if (option) onChange(option.value);
+					}}
+				>
+					{options.map((option) => (
+						<DropdownMenuRadioItem key={option.value} value={option.value} closeOnClick>
+							{mark?.(option.value)}
+							{option.label}
+						</DropdownMenuRadioItem>
+					))}
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }
 

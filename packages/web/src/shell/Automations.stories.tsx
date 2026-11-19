@@ -1,15 +1,16 @@
-import type { Automation, BotThreadList, Run } from "@sugabots/contracts";
+import type { Automation, AutomationUpdate, ProjectThreadList, Run } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { accountManager, growthDesk, leadResearcher, revenue } from "@/shell/story-fixtures.ts";
+import { growthDesk, leadResearcher } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	chatPath,
 	StoryApp,
+	storyBots,
 	storyChatDetails,
-	storyProjects,
+	storyThreadFor,
 	storyUser,
 	storyWorkspace,
 } from "@/story-app.tsx";
@@ -87,13 +88,11 @@ function automation(
 			},
 		],
 		state,
-		results: "post_to_chat",
-		chatId: null,
 		createdById: null,
-		createdByBotId: null,
+		pausedAfterFailures: false,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		updatedAt: "2026-09-18T06:01:00.000Z",
-	} as Automation;
+	};
 }
 
 const outboundAutomation = automation(
@@ -105,7 +104,7 @@ const outboundAutomation = automation(
 );
 const renewalsAutomation = automation(
 	renewals.id,
-	accountManager.defaultProjectId,
+	growthDesk.defaultProjectId,
 	"Renewal reminders",
 	"Remind the account owners of renewals due in the next 30 days.",
 	"paused",
@@ -133,9 +132,7 @@ const outboundFailure: Run = {
 	posted: false,
 };
 
-const chatList: BotThreadList = {
-	bot: growthDesk,
-	summary: null,
+const chatList: ProjectThreadList = {
 	threads: [],
 	automations: [
 		{
@@ -143,7 +140,6 @@ const chatList: BotThreadList = {
 				id: outbound.id,
 				name: "Overnight outbound",
 				state: "enabled",
-				failed: true,
 				pausedAfterFailures: false,
 			},
 			conversation: {
@@ -158,17 +154,27 @@ const chatList: BotThreadList = {
 				automationId: outbound.id,
 			},
 			mentionsYou: false,
+			status: {
+				failing: true,
+				latestRun: {
+					id: outboundFailure.id,
+					state: outboundFailure.state,
+					posted: outboundFailure.posted,
+					acceptedAt: outboundFailure.acceptedAt,
+					error: outboundFailure.error,
+				},
+			},
 		},
 		{
 			automation: {
 				id: renewals.id,
 				name: "Renewal reminders",
 				state: "paused",
-				failed: false,
 				pausedAfterFailures: false,
 			},
 			conversation: null,
 			mentionsYou: false,
+			status: { failing: false, latestRun: null },
 		},
 	],
 };
@@ -192,22 +198,13 @@ function automationHandlers() {
 		},
 	};
 	return [
-		http.get(`${API}/bots/:botId/threads`, () => HttpResponse.json(chatList)),
-		http.get(`${API}/workspaces/:workspace/automations`, () =>
-			HttpResponse.json({
-				items: [
-					{
-						automation: outboundAutomation,
-						bot: growthDesk,
-						project: { id: revenue.id, slug: revenue.slug },
-					},
-					{
-						automation: renewalsAutomation,
-						bot: accountManager,
-						project: { id: revenue.id, slug: revenue.slug },
-					},
-				],
-			}),
+		// Both automations are Growth Desk's, so its default project lists them and every other none.
+		http.get(`${API}/projects/:projectId/threads`, ({ params }) =>
+			HttpResponse.json(
+				params.projectId === growthDesk.defaultProjectId
+					? chatList
+					: { threads: [], automations: [] },
+			),
 		),
 		http.get(`${API}/projects/:projectId/automations`, ({ params }) =>
 			HttpResponse.json(
@@ -309,13 +306,39 @@ export const Default = meta.story({
 	},
 });
 
+const editedInstructions = `${outboundAutomation.instructions} Skip weekends.`;
+
 /** The automation's instructions, written straight into on its page and saved once the box is left. */
 export const EditingInstructions = meta.story({
+	beforeEach({ msw }) {
+		// The API as it keeps the automation: what is saved is what the automation is read as after.
+		let saved = outboundAutomation;
+		msw.use(
+			http.patch(`${API}/projects/:projectId/automations/${outbound.id}`, async ({ request }) => {
+				const update = (await request.json()) as AutomationUpdate;
+				saved = { ...saved, ...update };
+				return HttpResponse.json({ automation: saved, secrets: [] });
+			}),
+			http.get(`${API}/projects/:projectId/automations`, ({ params }) =>
+				HttpResponse.json(
+					params.projectId === growthDesk.defaultProjectId ? [saved, renewalsAutomation] : [],
+				),
+			),
+		);
+	},
 	play: async ({ canvas, userEvent }) => {
 		const field = await canvas.findByRole("textbox", { name: "Instructions" });
 		await expect(field).toHaveValue(outboundAutomation.instructions);
 		await userEvent.type(field, " Skip weekends.");
-		await expect(field).toHaveValue(`${outboundAutomation.instructions} Skip weekends.`);
+		await userEvent.tab();
+
+		// Back to the list, and the automation opened again, reads what was saved.
+		const page = canvas.getByRole("region", { name: "Automation" });
+		await userEvent.click(within(page).getByRole("link", { name: "Automations" }));
+		await userEvent.click(await canvas.findByRole("link", { name: /^Overnight outbound/ }));
+		await waitFor(() =>
+			expect(canvas.getByRole("textbox", { name: "Instructions" })).toHaveValue(editedInstructions),
+		);
 	},
 });
 
@@ -323,7 +346,7 @@ export const EditingInstructions = meta.story({
 export const AddingTrigger = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		const routines = await canvas.findByRole("region", { name: "Routines" });
-		await expect(within(routines).getByRole("button", { name: /^Routine/ })).toBeVisible();
+		await expect(within(routines).getByRole("button", { name: /^Daily at 6:00/ })).toBeVisible();
 		const triggers = canvas.getByRole("region", { name: "Triggers" });
 		await userEvent.click(within(triggers).getByRole("button", { name: "Add trigger" }));
 		const dialog = await within(document.body).findByRole("dialog", { name: "Add a trigger" });
@@ -342,11 +365,19 @@ export const Phone = meta.story({
 
 const botWithNonePath = `/${storyWorkspace.slug}/bots/${leadResearcher.handle}/automations`;
 
-/** A bot that runs no automations yet goes straight to making one, for someone who may. */
+/** A bot that runs no automations yet says what one is, and New automation opens the form, for someone who may. */
 export const BotWithNone = meta.story({
 	render: () => <StoryApp path={botWithNonePath} />,
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "New automation" })).toBeVisible();
+	play: async ({ canvas, userEvent }) => {
+		await expect(
+			await canvas.findByText(`No automations for ${leadResearcher.name} yet`),
+		).toBeVisible();
+		// The header's New automation, then the empty state's under its sentence.
+		const [, fromEmptyState] = canvas.getAllByRole("link", { name: "New automation" });
+		await userEvent.click(fromEmptyState as HTMLElement);
+		await expect(
+			await canvas.findByRole("heading", { level: 1, name: "New automation" }),
+		).toBeVisible();
 		await expect(canvas.getByRole("button", { name: "Create automation" })).toBeVisible();
 	},
 });
@@ -354,11 +385,15 @@ export const BotWithNone = meta.story({
 /** Somebody who may not manage the bot's automations is sent to someone who may, as a bot makes them only for them. */
 export const BotWithNoneAsAMember = meta.story({
 	beforeEach({ msw }) {
-		const asMember = storyProjects.map((project) => ({
-			...project,
-			permissions: { ...project.permissions, manageAutomations: false },
+		// A bot's automations are its default project's, so whether they may be managed is the bot's.
+		const asMember = storyBots.map((bot) => ({
+			...bot,
+			permissions: {
+				...bot.permissions,
+				resources: { ...bot.permissions.resources, manageAutomations: false },
+			},
 		}));
-		msw.use(...appHandlers({ role: "member", projects: asMember }));
+		msw.use(...appHandlers({ role: "member", bots: asMember }));
 	},
 	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {
@@ -370,11 +405,11 @@ export const BotWithNoneAsAMember = meta.story({
 });
 
 /**
- * Beside the bot's chat, as its computer opens: its automations, then one of
- * them in their place, its runs and all, and the Back before its name to the list,
- * with the bot's chat in view throughout.
+ * Beside a thread with the bot, as its computer opens: its automations, then one
+ * of them in their place, its runs and all, and the Back before its name to the
+ * list, with that thread in view throughout.
  */
-export const BesideTheBotsChat = meta.story({
+export const BesideTheBotThread = meta.story({
 	render: () => <StoryApp path={`${chatPath(growthDesk)}?automations=all`} />,
 	play: async ({ canvas, userEvent }) => {
 		const automations = await canvas.findByRole("region", {
@@ -383,7 +418,7 @@ export const BesideTheBotsChat = meta.story({
 		await userEvent.click(
 			await within(automations).findByRole("button", { name: /^Overnight outbound/ }),
 		);
-		// Its runs, in its own chat beside the bot's.
+		// Its runs, in its automation feed beside the bot's thread.
 		await waitFor(() =>
 			expect(
 				canvas
@@ -397,6 +432,8 @@ export const BesideTheBotsChat = meta.story({
 		await expect(
 			await canvas.findByRole("region", { name: `${growthDesk.name}'s automations` }),
 		).toBeVisible();
-		await expect(canvas.getByRole("heading", { name: growthDesk.name, level: 1 })).toBeVisible();
+		await expect(
+			canvas.getByRole("heading", { name: storyThreadFor(growthDesk).title, level: 1 }),
+		).toBeVisible();
 	},
 });

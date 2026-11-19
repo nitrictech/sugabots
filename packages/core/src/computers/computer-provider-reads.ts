@@ -17,7 +17,6 @@ export function toComputerProvider(row: ComputerProviderRow): ComputerProvider {
 			lastTestError: row.lastTestError,
 		}),
 		hasApiKey: row.apiKeyEncrypted !== null,
-		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
 		createdAt: row.createdAt.toISOString(),
 	};

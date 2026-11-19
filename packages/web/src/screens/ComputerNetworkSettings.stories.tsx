@@ -22,12 +22,10 @@ const settings: ComputerNetworkSettings = {
 		{
 			host: "api.stripe.com",
 			addedByName: "Sam Rivera",
-			addedAt: "2026-10-01T09:30:00.000Z",
 		},
 		{
 			host: "*.internal.example.com",
 			addedByName: "Kim Park",
-			addedAt: "2026-10-02T02:10:00.000Z",
 		},
 	],
 	blockedHosts: [{ host: "*.pastebin.com", blockedByName: "Kim Park" }],

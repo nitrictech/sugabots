@@ -21,6 +21,17 @@ export const sessionUserSchema = Schema.Struct({
 
 export type SessionUser = typeof sessionUserSchema.Type;
 
+/** A person named beside something they did, such as connecting a provider, while they are still in the workspace. */
+export const namedPersonSchema = Schema.Struct({
+	id: uuidSchema,
+	name: Schema.String,
+	/** As the workspace's members list shows it, for a picture of them where they have none of their own. */
+	email: emailSchema,
+	image: Schema.NullOr(Schema.String),
+});
+
+export type NamedPerson = typeof namedPersonSchema.Type;
+
 export const USER_NAME_MAX_LENGTH = 100;
 
 export const userNameSchema = Schema.Trim.check(

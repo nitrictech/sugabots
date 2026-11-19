@@ -1,11 +1,11 @@
-import type { Bot, SystemBot } from "@sugabots/contracts";
+import type { Bot, NamedPerson, SystemBot } from "@sugabots/contracts";
 import { and, asc, eq, isNotNull, isNull, or } from "drizzle-orm";
 import { Effect } from "effect";
 import { reachesBotFor } from "../../authorization/access.ts";
 import { type Actor, managesEveryBot } from "../../authorization/permissions.ts";
 import { query } from "../../database/database.ts";
-import { bot, pinnedBot } from "../../database/schema.ts";
-import { defaultProjectIdOf, personFacingBotRow, pinnedBy, toBot } from "./bot.ts";
+import { bot } from "../../database/schema.ts";
+import { creatorOf, defaultProjectIdOf, personFacingBotRow, pinnedBy, toBot } from "./bot.ts";
 import { SYSTEM_BOTS } from "./system-bots.ts";
 
 /**
@@ -16,11 +16,7 @@ import { SYSTEM_BOTS } from "./system-bots.ts";
 export const visiblePersonFacingBots = (workspaceId: string, actor: Actor) =>
 	query((db) =>
 		db
-			.select({
-				bot,
-				pinned: pinnedBy(bot.id, actor.userId),
-				defaultProjectId: defaultProjectIdOf(bot.id),
-			})
+			.select(shownColumns(actor))
 			.from(bot)
 			.where(
 				and(
@@ -32,31 +28,44 @@ export const visiblePersonFacingBots = (workspaceId: string, actor: Actor) =>
 				),
 			)
 			.orderBy(asc(bot.name)),
-	).pipe(
-		Effect.map((rows): Bot[] =>
-			rows.flatMap((row) => {
-				const bot = personFacingBotRow(row.bot);
-				return bot
-					? [
-							toBot(
-								{ ...bot, defaultProjectId: row.defaultProjectId },
-								{ actor, pinned: row.pinned },
-							),
-						]
-					: [];
-			}),
-		),
+	).pipe(Effect.map((rows): Bot[] => rows.flatMap((row) => shownTo(row, actor) ?? [])));
+
+/**
+ * The bot `botId` as `actor` is shown it, with whether they pinned it, or
+ * nothing for a system bot or one that is gone. Whether `actor` may see it is
+ * the caller's to decide.
+ */
+export const personFacingBot = (botId: string, actor: Actor) =>
+	query((db) => db.select(shownColumns(actor)).from(bot).where(eq(bot.id, botId)).limit(1)).pipe(
+		Effect.map(([row]) => (row ? shownTo(row, actor) : undefined)),
 	);
 
-/** Whether the person `userId` pinned the bot `botId`. */
-export const isPinnedBy = (botId: string, userId: string) =>
-	query((db) =>
-		db
-			.select({ botId: pinnedBot.botId })
-			.from(pinnedBot)
-			.where(and(eq(pinnedBot.botId, botId), eq(pinnedBot.userId, userId)))
-			.limit(1),
-	).pipe(Effect.map((rows) => rows.length > 0));
+/** What a bot is shown with: its row, whether `actor` pinned it, its default project and who added it. */
+const shownColumns = (actor: Actor) => ({
+	bot,
+	pinned: pinnedBy(bot.id, actor.userId),
+	defaultProjectId: defaultProjectIdOf(bot.id),
+	createdBy: creatorOf(bot),
+});
+
+function shownTo(
+	row: {
+		bot: typeof bot.$inferSelect;
+		pinned: boolean;
+		defaultProjectId: string;
+		createdBy: NamedPerson | null;
+	},
+	actor: Actor,
+): Bot | undefined {
+	const shown = personFacingBotRow(row.bot);
+	return (
+		shown &&
+		toBot(
+			{ ...shown, defaultProjectId: row.defaultProjectId, createdBy: row.createdBy },
+			{ actor, pinned: row.pinned },
+		)
+	);
+}
 
 /**
  * Every system bot the product defines, with the model the workspace chose

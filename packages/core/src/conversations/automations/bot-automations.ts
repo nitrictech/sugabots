@@ -10,17 +10,16 @@ import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
-import { AuthenticatedUserId, CurrentActor } from "../../authorization/current-actor.ts";
+import { asAsker, type CurrentActor, type NobodyAsked } from "../../authorization/current-actor.ts";
 import { query, serviceOperations } from "../../database/database.ts";
 import { bot, project, workspace } from "../../database/schema.ts";
 import { Installation } from "../../installation/installation.ts";
-import { botAutomationsPath, projectPath } from "../../installation/web-app-paths.ts";
+import { automationsPagePath } from "../../installation/web-app-paths.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type {
 	AutomationNotFound,
 	AutomationRepositoryNotConnected,
-	AutomationTriggerKindChanged,
-	AutomationTriggerNotFound,
+	TriggerSetInSettings,
 	WebhookDeliveryIdHeaderRejected,
 	WebhookSecretTooShort,
 } from "./automation.ts";
@@ -37,13 +36,18 @@ import type { InvalidRoutineSchedule } from "./schedule.ts";
  *
  * A bot sets up automations with one routine, in its workspace's timezone,
  * and records itself as their maker; the project's lead bot runs them. It
- * changes that routine while the routine is all that starts the automation. Triggers are set up in settings: a webhook's secret is shown
- * once, so one made here would leave it in the conversation.
+ * changes that routine while the routine is all that starts the automation,
+ * and gives one to an automation nothing starts yet. Triggers are set up in
+ * settings: a webhook's secret is shown once, so one made here would leave it
+ * in the conversation.
  */
 export interface Interface {
 	readonly list: (bot: Bot) => Effect.Effect<BotAutomation[], Refused>;
 	readonly create: (bot: Bot, input: NewBotAutomation) => Effect.Effect<BotAutomation, Refused>;
-	/** Changes one of the project's automations. Its routine changes only while one routine is all that starts it. */
+	/**
+	 * Changes one of the project's automations. Its routine changes only while
+	 * one routine is all that starts it, or is added when nothing starts it.
+	 */
 	readonly update: (
 		bot: Bot,
 		automationId: string,
@@ -62,8 +66,7 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Where the project is: its workspace's timezone, and the page an automation
-	 * of it is set up on. A bot's own automations have their own pages; a
-	 * project people made shows its automations on its own page.
+	 * of it is set up on, the bot's for a bot's own.
 	 */
 	const placeOf = (projectId: string) =>
 		Effect.flatMap(
@@ -83,31 +86,32 @@ export const make = Effect.gen(function* () {
 			),
 			([row]) => {
 				if (!row) return Effect.die(new Error("A project with automations is not in a workspace"));
-				const { botHandle } = row;
+				const { workspaceSlug, projectSlug, botHandle } = row;
 				const pageOf = (automationId: string) =>
-					botHandle === null
-						? `${installation.webAppUrl}${projectPath(row.workspaceSlug, row.projectSlug)}`
-						: `${installation.webAppUrl}${botAutomationsPath(row.workspaceSlug, botHandle)}/${automationId}`;
+					`${installation.webAppUrl}${automationsPagePath(
+						botHandle === null ? { workspaceSlug, projectSlug } : { workspaceSlug, botHandle },
+						automationId,
+					)}`;
 				return Effect.succeed({ timeZone: row.timeZone, pageOf });
 			},
 		);
 
 	/**
-	 * Runs `work` as the person the bot is answering. They signed in to post
-	 * the message the turn answers, which is the claim `vouchedFor` makes.
+	 * Runs `work` as the person the bot is answering, who may not manage the
+	 * project's automations unless it lets them.
 	 */
 	const forAsker = <A, E>(
 		bot: Bot,
 		work: Effect.Effect<A, E | AuthorizationDenied, CurrentActor.Service>,
 	) =>
-		bot.askedBy
-			? work.pipe(
-					CurrentActor.provide(AuthenticatedUserId.vouchedFor(bot.askedBy)),
-					Effect.catchTag(["ActionForbidden", "ResourceHidden"], () =>
-						Effect.fail(new MayNotManageAutomations()),
-					),
-				)
-			: Effect.fail(new NobodyAsked());
+		asAsker(
+			bot.askedBy,
+			work.pipe(
+				Effect.catchTag(["ActionForbidden", "ResourceHidden"], () =>
+					Effect.fail(new MayNotManageAutomations()),
+				),
+			),
+		);
 
 	return Service.of({
 		list: (bot) =>
@@ -152,38 +156,22 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const place = yield* placeOf(bot.projectId);
 					const addressed = { projectId: bot.projectId, automationId };
-					const current = yield* forAsker(bot, automations.get(addressed));
-					const [only, ...others] = current.triggers;
-					if (
-						changes.routineExpression !== undefined &&
-						(only?.kind !== "routine" || others.length > 0)
-					) {
-						return yield* new TriggerSetInSettings();
-					}
+					const settings = {
+						name: changes.name,
+						instructions: changes.instructions,
+						state: changes.paused === undefined ? undefined : changes.paused ? "paused" : "enabled",
+					} as const;
 					const updated = yield* forAsker(
 						bot,
-						automations.update(addressed, {
-							name: changes.name,
-							instructions: changes.instructions,
-							state:
-								changes.paused === undefined ? undefined : changes.paused ? "paused" : "enabled",
-						}),
+						changes.routineExpression === undefined
+							? automations.update(addressed, settings)
+							: automations.updateWithSoleRoutine(addressed, settings, {
+									kind: "routine",
+									schedule: { repeat: "cron", expression: changes.routineExpression },
+									timezone: place.timeZone,
+								}),
 					);
-					if (changes.routineExpression === undefined || !only) {
-						return toBotAutomation(updated.automation, place.pageOf);
-					}
-					const rescheduled = yield* forAsker(
-						bot,
-						automations.updateTrigger(
-							{ ...addressed, triggerId: only.id },
-							{
-								kind: "routine",
-								schedule: { repeat: "cron", expression: changes.routineExpression },
-								timezone: place.timeZone,
-							},
-						),
-					);
-					return toBotAutomation(rescheduled.automation, place.pageOf);
+					return toBotAutomation(updated.automation, place.pageOf);
 				}),
 			),
 	});
@@ -284,15 +272,7 @@ export type Refused =
 	| InvalidRoutineSchedule
 	| WebhookSecretTooShort
 	| WebhookDeliveryIdHeaderRejected
-	| AutomationRepositoryNotConnected
-	| AutomationTriggerNotFound
-	| AutomationTriggerKindChanged;
-
-export class NobodyAsked extends Data.TaggedError("NobodyAsked") implements UserFacing {
-	get userMessage() {
-		return userText`Only a person can ask a bot to read or change automations, and this turn answers no one.`;
-	}
-}
+	| AutomationRepositoryNotConnected;
 
 export class MayNotManageAutomations
 	extends Data.TaggedError("MayNotManageAutomations")
@@ -300,14 +280,5 @@ export class MayNotManageAutomations
 {
 	get userMessage() {
 		return userText`The person asking may not do that: only those who manage this project's automations (for a bot's own, its creator or an admin) can have them set up or changed.`;
-	}
-}
-
-export class TriggerSetInSettings
-	extends Data.TaggedError("TriggerSetInSettings")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`That automation has more than one routine, or a trigger, which only its settings can change. Its name, instructions and whether it is paused can still be changed here.`;
 	}
 }

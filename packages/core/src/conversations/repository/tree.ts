@@ -9,19 +9,19 @@ import { collaboration, conversation, placedConversation } from "../../database/
 
 /**
  * The conversation `conversationId` and every conversation above it, as a
- * relation of `(id, bot_id, depth)`: depth 0 is the conversation itself, 1
+ * relation of `(id, depth)`: depth 0 is the conversation itself, 1
  * its parent, and so on.
  */
 export const lineageOf = (conversationId: SQLWrapper) => sql`(
 	with recursive lineage as (
-		select id, parent_conversation_id, bot_id, 0 as depth
+		select id, parent_conversation_id, 0 as depth
 		from ${placedConversation} where id = ${conversationId}
 		union all
-		select parent.id, parent.parent_conversation_id, parent.bot_id, child.depth + 1
+		select parent.id, parent.parent_conversation_id, child.depth + 1
 		from ${placedConversation} parent
 		join lineage child on child.parent_conversation_id = parent.id
 	)
-	select id, bot_id, depth from lineage
+	select id, depth from lineage
 )`;
 
 /**

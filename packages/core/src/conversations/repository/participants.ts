@@ -132,6 +132,18 @@ export const personColumns = {
 	columns: { id: true, name: true, email: true, image: true },
 } as const;
 
+/**
+ * A person's id, name, email and image, for a select that names who did
+ * something. Which person the query joins, and whether one who has left the
+ * workspace is shown, is the query's to decide.
+ */
+export const namedPersonColumns = {
+	id: user.id,
+	name: user.name,
+	email: user.email,
+	image: user.image,
+};
+
 /** A person read with {@link personColumns}, as the API shows them. */
 export function toPerson(row: PersonIdentity): PersonParticipant {
 	return {

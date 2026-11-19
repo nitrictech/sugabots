@@ -8,6 +8,7 @@ import { createRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { botsQuery } from "@/lib/bots.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
+import { ownerOfProject } from "@/lib/owner-of-project.ts";
 import { projectsQuery } from "@/lib/projects.ts";
 import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useWorkspaces } from "@/lib/workspace.ts";
@@ -17,9 +18,8 @@ import { optionalString } from "./search.ts";
 
 interface SignInReturnSearch {
 	workspace?: string;
-	/** The project the connection is of; with `bot`, that bot's default project. */
+	/** The project the connection is of, which may be a bot's default project. */
 	project?: string;
-	bot?: string;
 	/** A code saying why the sign-in did not finish, shown only through `signInFailureReason`. */
 	oauth_error?: string;
 }
@@ -31,7 +31,6 @@ export const signInReturnRoute = createRoute({
 	validateSearch: (search: Record<string, unknown>): SignInReturnSearch => ({
 		workspace: optionalString(search.workspace),
 		project: optionalString(search.project),
-		bot: optionalString(search.bot),
 		oauth_error: optionalString(search.oauth_error),
 	}),
 	beforeLoad: requireUser,
@@ -39,15 +38,10 @@ export const signInReturnRoute = createRoute({
 });
 
 function SignInReturnRoute() {
-	const {
-		workspace,
-		project: projectId,
-		bot: botId,
-		oauth_error: oauthError,
-	} = signInReturnRoute.useSearch();
+	const { workspace, project: projectId, oauth_error: oauthError } = signInReturnRoute.useSearch();
 	const workspaces = useWorkspaces();
 	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
-	const { owner, resolving: ownerResolving } = useOwnerOf(workspace, botId, projectId);
+	const { owner, resolving: ownerResolving } = useOwnerOf(workspace, projectId);
 	const navigate = useNavigate();
 
 	useEffect(() => {
@@ -56,14 +50,14 @@ function SignInReturnRoute() {
 		void navigate(
 			"bot" in owner
 				? {
-						to: "/$workspace/settings/bots/$bot/$page",
-						params: { workspace: slug, bot: owner.bot.handle, page: "connections" },
+						to: "/$workspace/bots/$bot/connections",
+						params: { workspace: slug, bot: owner.bot.handle },
 						search: { oauth_error: oauthError },
 						replace: true,
 					}
 				: {
-						to: "/$workspace/settings/projects/$project/$page",
-						params: { workspace: slug, project: owner.project.slug, page: "connections" },
+						to: "/$workspace/projects/$project/connections",
+						params: { workspace: slug, project: owner.project.slug },
 						search: { oauth_error: oauthError },
 						replace: true,
 					},
@@ -91,9 +85,8 @@ function SignInReturnRoute() {
 }
 
 /**
- * Where a GitHub setup returns: the API names the project, and the bot when it
- * is a bot's default project, its GitHub app once GitHub made it, and why
- * setup stopped when it did.
+ * Where a GitHub setup returns: the API names the project, its GitHub app
+ * once GitHub made it, and why setup stopped when it did.
  */
 export const gitHubSetupReturnRoute = createRoute({
 	getParentRoute: () => rootRoute,
@@ -101,7 +94,6 @@ export const gitHubSetupReturnRoute = createRoute({
 	validateSearch: (search: Record<string, unknown>) => ({
 		workspace: optionalString(search.workspace),
 		project: optionalString(search.project),
-		bot: optionalString(search.bot),
 		connection: optionalString(search.connection),
 		github_error: optionalString(search.github_error),
 	}),
@@ -113,13 +105,12 @@ function GitHubSetupReturnRoute() {
 	const {
 		workspace,
 		project: projectId,
-		bot: botId,
 		connection,
 		github_error: failure,
 	} = gitHubSetupReturnRoute.useSearch();
 	const workspaces = useWorkspaces();
 	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
-	const { owner, resolving: ownerResolving } = useOwnerOf(workspace, botId, projectId);
+	const { owner, resolving: ownerResolving } = useOwnerOf(workspace, projectId);
 	const navigate = useNavigate();
 
 	useEffect(() => {
@@ -128,12 +119,12 @@ function GitHubSetupReturnRoute() {
 		void navigate(
 			"bot" in owner
 				? {
-						to: "/$workspace/settings/bots/$bot/connections/$connection",
+						to: "/$workspace/bots/$bot/connections/$connection",
 						params: { workspace: slug, bot: owner.bot.handle, connection },
 						replace: true,
 					}
 				: {
-						to: "/$workspace/settings/projects/$project/connections/$connection",
+						to: "/$workspace/projects/$project/connections/$connection",
 						params: { workspace: slug, project: owner.project.slug, connection },
 						replace: true,
 					},
@@ -150,16 +141,17 @@ function GitHubSetupReturnRoute() {
 				<p>{gitHubSetupFailureReason(failure)}</p>
 				{slug && owner && "bot" in owner ? (
 					<Link
-						to="/$workspace/settings/bots/$bot"
+						to="/$workspace/bots/$bot/connections"
 						params={{ workspace: slug, bot: owner.bot.handle }}
+						search={{}}
 						className="text-link underline"
 					>
 						Back to {owner.bot.name}
 					</Link>
 				) : slug && owner && "project" in owner ? (
 					<Link
-						to="/$workspace/settings/projects/$project/$page"
-						params={{ workspace: slug, project: owner.project.slug, page: "connections" }}
+						to="/$workspace/projects/$project/connections"
+						params={{ workspace: slug, project: owner.project.slug }}
 						search={{}}
 						className="text-link underline"
 					>
@@ -177,28 +169,18 @@ function GitHubSetupReturnRoute() {
 
 /**
  * Whose connections a page outside any workspace returns to, from the ids
- * the API sent back: the bot `botId` of `workspace` when it names one, whose
- * default project the connection is of, else the project `projectId`.
+ * the API sent back: `ownerOfProject` over `workspace`'s bots and projects.
  */
 function useOwnerOf(
 	workspace: string | undefined,
-	botId: string | undefined,
 	projectId: string | undefined,
 ): { owner: ResourceOwner | undefined; resolving: boolean } {
-	const bots = useQuery({ ...botsQuery(workspace), enabled: botId !== undefined });
-	const projects = useQuery({
-		...projectsQuery(workspace),
-		enabled: botId === undefined && projectId !== undefined,
-	});
-	if (botId !== undefined) {
-		const bot = bots.data?.find((one) => one.id === botId);
-		return { owner: bot && { bot }, resolving: bots.isPending };
-	}
-	const project = projects.data?.find((one) => one.id === projectId && one.isMember);
-	return {
-		owner: project && { project },
-		resolving: projectId !== undefined && projects.isPending,
-	};
+	const enabled = projectId !== undefined;
+	const bots = useQuery({ ...botsQuery(workspace), enabled });
+	const projects = useQuery({ ...projectsQuery(workspace), enabled });
+	const owner = enabled ? ownerOfProject(projectId, bots.data, projects.data) : undefined;
+	if (owner) return { owner, resolving: false };
+	return { owner: undefined, resolving: enabled && (bots.isPending || projects.isPending) };
 }
 
 const GITHUB_SETUP_FAILURES: Record<GitHubSetupFailure, string> = {

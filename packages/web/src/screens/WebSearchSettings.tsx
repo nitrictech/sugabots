@@ -13,6 +13,7 @@ import { useSearchProvider, useSearchProviderActions } from "@/lib/search-provid
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
 import {
 	SETTINGS_CARD,
 	SETTINGS_RADIO_ROW,
@@ -22,7 +23,6 @@ import {
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
-import { LetterTile } from "./letter-tile.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
 /*

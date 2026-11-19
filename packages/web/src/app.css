@@ -62,10 +62,11 @@
 	--soft-foreground: light-dark(var(--color-zinc-700), var(--color-zinc-300));
 	--muted-foreground: light-dark(var(--color-zinc-600), var(--color-zinc-400));
 	/*
-	 * Times, section labels, hints. A shade lighter in dark than the design's
-	 * #6b6b73, and darker in light than its #71717a, so both pass AA on a chip.
+	 * Times, section labels, hints. Lighter in dark than the design's #6b6b73 so
+	 * it passes AA on the lightest surface it sits on there, a selected row or
+	 * the composer (zinc-800); zinc-500 in light passes on a chip.
 	 */
-	--subtle-foreground: light-dark(var(--color-zinc-500), var(--color-zinc-500));
+	--subtle-foreground: light-dark(var(--color-zinc-500), #8e8e97);
 	--disabled-foreground: light-dark(#a1a1aa, #52525b);
 	/* A text action, such as Cancel or Create in a dialog header. */
 	--link: light-dark(#111113, #ededed);
@@ -83,9 +84,8 @@
 	--glass-edge: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.08));
 	/* The send button with nothing to send. */
 	--chip-strong: light-dark(#e4e4e7, #1f1f23);
-	/* A project tile, and a slot in one with no bot in it. */
+	/* The fill of a tile with no colour of its own: a project's, a workspace's, an icon's or a file's. */
 	--tile: light-dark(#e4e4e7, #26262a);
-	--tile-empty: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.06));
 
 	/*
 	 * There is no hue: the accent is the strongest ink, near-black in light and
@@ -192,7 +192,6 @@
 	--color-border-dashed: var(--border-dashed);
 	--color-chip-strong: var(--chip-strong);
 	--color-tile: var(--tile);
-	--color-tile-empty: var(--tile-empty);
 	--color-switch-on: var(--switch-on);
 	--color-destructive-text: var(--destructive-text);
 	--color-destructive-hover: var(--destructive-hover);
@@ -322,6 +321,58 @@
 	}
 	html:active-view-transition-type(back)::view-transition-new(root) {
 		animation: 320ms cubic-bezier(0.32, 0.72, 0, 1) both slide-in-behind;
+	}
+}
+
+/*
+ * From a tablet up, opening a bot or a project folds the sidebar to the icon
+ * rail, and All projects and bots unfolds it: each bot's face and project's
+ * tile moves between its row and its place on the rail, while the rest
+ * changes at once.
+ */
+@media (width >= 48rem) and (prefers-reduced-motion: no-preference) {
+	html:active-view-transition-type(rail)::view-transition-old(root),
+	html:active-view-transition-type(rail)::view-transition-new(root) {
+		animation: none;
+	}
+	html:active-view-transition-type(rail)::view-transition-group(*) {
+		animation-duration: 280ms;
+		animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+	}
+	/*
+	 * A mark is drawn a little differently in a row and on the rail, so rather
+	 * than fade one into the other, which flickers where a mark barely moves, it
+	 * is the mark it is going to be all the way.
+	 */
+	html:active-view-transition-type(rail)::view-transition-old(*):not(:only-child) {
+		animation: none;
+		opacity: 0;
+	}
+	html:active-view-transition-type(rail)::view-transition-new(*):not(:only-child) {
+		animation: none;
+	}
+	/* The sidebar coming in slides out from behind the rail; the one going slides back under it. */
+	html:active-view-transition-type(rail)::view-transition-new(owner-sidebar):only-child,
+	html:active-view-transition-type(rail)::view-transition-new(workspace-sidebar):only-child {
+		animation: 280ms cubic-bezier(0.32, 0.72, 0, 1) both sidebar-slide-in;
+	}
+	html:active-view-transition-type(rail)::view-transition-old(owner-sidebar):only-child,
+	html:active-view-transition-type(rail)::view-transition-old(workspace-sidebar):only-child {
+		animation: 200ms cubic-bezier(0.32, 0.72, 0, 1) both sidebar-slide-out;
+	}
+}
+
+@keyframes sidebar-slide-in {
+	from {
+		transform: translateX(-2rem);
+		opacity: 0;
+	}
+}
+
+@keyframes sidebar-slide-out {
+	to {
+		transform: translateX(-2rem);
+		opacity: 0;
 	}
 }
 
@@ -903,4 +954,10 @@
 }
 @utility view-transition-tabs {
 	view-transition-name: tabs;
+}
+@utility view-transition-owner-sidebar {
+	view-transition-name: owner-sidebar;
+}
+@utility view-transition-workspace-sidebar {
+	view-transition-name: workspace-sidebar;
 }

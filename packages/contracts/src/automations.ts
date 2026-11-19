@@ -1,6 +1,5 @@
 import { Effect, Schema } from "effect";
 import isISO8601 from "validator/lib/isISO8601.js";
-import { botSchema } from "./bots.ts";
 import { repositoryEventSchema, repositoryPathSchema } from "./github.ts";
 import { MAX_TIMEZONE_CHARACTERS } from "./time-zones.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
@@ -174,7 +173,7 @@ const minutesPastMidnightSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 0, maximum: MINUTES_PER_DAY - 1 }),
 );
 
-/** The times of day a schedule runs at, as minutes past midnight, each once. */
+/** The times of day a routine runs at, by its timetable, as minutes past midnight, each once. */
 const scheduleTimesSchema = Schema.Array(minutesPastMidnightSchema).check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_ROUTINE_TIMES),
@@ -200,9 +199,9 @@ const everySchema = (maximum: number) =>
 /**
  * When a routine runs, in its time zone: every `every` days, weeks
  * or months counted from `startsOn`, at each of `times`; on `days` of those
- * weeks, or on `dayOfMonth` of those months. A `cron` schedule is a cron
- * expression kept as it was written, for automations made before schedules were
- * picked this way.
+ * weeks, or on `dayOfMonth` of those months. A `cron` timetable is a cron
+ * expression kept as it was written, for automations made before a routine's
+ * timetable was picked this way.
  */
 const routineScheduleSchema = Schema.Union([
 	Schema.Struct({
@@ -238,7 +237,7 @@ const routineScheduleSchema = Schema.Union([
 ]);
 export type RoutineSchedule = typeof routineScheduleSchema.Type;
 
-/** A schedule picked by its parts rather than written as cron. */
+/** A routine's timetable picked by its parts rather than written as cron. */
 export type CalendarSchedule = Exclude<RoutineSchedule, { repeat: "cron" }>;
 
 /**
@@ -287,9 +286,9 @@ export const automationSchema = Schema.Struct({
 	/** What starts it, in the order they were added; with none, it runs only when someone runs it. */
 	triggers: Schema.Array(automationTriggerSchema),
 	state: automationStateSchema,
+	/** It paused itself after its runs kept failing, and nobody has turned it on or off since. */
+	pausedAfterFailures: Schema.Boolean,
 	createdById: Schema.NullOr(uuidSchema),
-	/** The bot that made the automation, working in its project, at `createdById`'s request. */
-	createdByBotId: Schema.NullOr(uuidSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
 });
@@ -297,19 +296,11 @@ export const automationSchema = Schema.Struct({
 export type Automation = typeof automationSchema.Type;
 
 /**
- * An automation in the workspace list, with the bot whose default project it
- * is in: a bot's own automation. Null for one in a project people made.
+ * Every automation of a project the person can reach, by name. A bot's own
+ * are those whose `projectId` is the bot's `defaultProjectId`.
  */
-const workspaceAutomationSchema = Schema.Struct({
-	automation: automationSchema,
-	bot: Schema.NullOr(botSchema),
-});
-
-export type WorkspaceAutomation = typeof workspaceAutomationSchema.Type;
-
-/** Every automation of a project the person can reach, by name. */
 export const workspaceAutomationListSchema = Schema.Struct({
-	items: Schema.mutable(Schema.Array(workspaceAutomationSchema)),
+	items: Schema.mutable(Schema.Array(automationSchema)),
 });
 
 /**
@@ -478,12 +469,44 @@ export const runSchema = Schema.Struct({
 
 export type Run = typeof runSchema.Type;
 
+/**
+ * How a listed automation stands, for whoever may read its runs
+ * (`automation.history.read`): left out for anyone else.
+ */
+export const automationListStatusSchema = Schema.Struct({
+	/**
+	 * It paused itself after its runs kept failing, or it is enabled and its
+	 * latest run failed. One paused by hand is not failing.
+	 */
+	failing: Schema.Boolean,
+	/** Its latest run, by when it was accepted; null until it first runs. */
+	latestRun: Schema.NullOr(
+		Schema.Struct({
+			id: uuidSchema,
+			state: runStateSchema,
+			/** Whether it posted a result (see `Run.posted`). */
+			posted: Schema.Boolean,
+			acceptedAt: isoTimestampSchema,
+			error: Schema.NullOr(Schema.String),
+		}),
+	),
+});
+
+export type AutomationListStatus = typeof automationListStatusSchema.Type;
+
+/** One of a project's automations as its list shows it: how it is set up, and how it stands. */
+export const listedAutomationDefinitionSchema = Schema.Struct({
+	...automationSchema.fields,
+	status: Schema.optionalKey(automationListStatusSchema),
+});
+
+export type ListedAutomationDefinition = typeof listedAutomationDefinitionSchema.Type;
+
 export const runSummarySchema = Schema.Struct({
 	runId: uuidSchema,
 	automationId: uuidSchema,
 	automationName: automationNameSchema,
 	triggerKind: runTriggerKindSchema,
-	triggeredAt: isoTimestampSchema,
 });
 
 export const runPageQuerySchema = Schema.Struct({
@@ -576,10 +599,3 @@ export const automationWriteResultSchema = Schema.Struct({
 	secrets: Schema.Array(Schema.Struct({ triggerId: uuidSchema, secret: Schema.String })),
 }).annotate({ identifier: "AutomationWriteResult" });
 export type AutomationWriteResult = typeof automationWriteResultSchema.Type;
-
-export const routineSchedulePreviewSchema = Schema.Struct({
-	schedule: routineScheduleSchema,
-	timezone: timezoneSchema,
-});
-
-export const routineScheduleOccurrencesSchema = Schema.Array(isoTimestampSchema);

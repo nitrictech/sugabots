@@ -12,7 +12,12 @@ import { Activities } from "@sugabots/workflow/activities";
 import { Context, Duration, Effect, Schema } from "effect";
 import { DurableClock, DurableDeferred, Workflow } from "effect/unstable/workflow";
 import { Lanes } from "../../workflows/lanes.ts";
-import type { TurnReason } from "../sql.ts";
+import {
+	type StoredTurnReason,
+	storedTurnReason,
+	type TurnReason,
+	turnReasonOfStored,
+} from "../sql.ts";
 import { ApprovalDecision, DecidedApproval } from "./tool-calls/lifecycle.ts";
 
 /**
@@ -30,12 +35,12 @@ export const StoredTurn = Schema.Struct({
 		"default",
 		"optional",
 		"collaboration",
-		// Stored in the payloads of running turns: see `TurnReason`.
+		// An automation's run: see `StoredTurnReason`.
 		"routine",
 		"resume",
 		"interview",
 		"brief",
-	]) satisfies Schema.Codec<TurnReason>,
+	]) satisfies Schema.Codec<StoredTurnReason>,
 });
 export type StoredTurn = typeof StoredTurn.Type;
 
@@ -47,15 +52,26 @@ export interface TurnRequest {
 	readonly reason: TurnReason;
 }
 
-export const storedTurn = ({ conversationId, botId, ...request }: TurnRequest): StoredTurn => ({
+export const storedTurn = ({
+	conversationId,
+	botId,
+	reason,
+	...request
+}: TurnRequest): StoredTurn => ({
 	...request,
 	threadId: conversationId,
 	agentId: botId,
+	reason: storedTurnReason(reason),
 });
 
 export const turnOfStored = (stored: StoredTurn): TurnRequest => {
-	const { agentId, threadId, ...request } = stored;
-	return { ...request, conversationId: threadId, botId: agentId };
+	const { agentId, threadId, reason, ...request } = stored;
+	return {
+		...request,
+		conversationId: threadId,
+		botId: agentId,
+		reason: turnReasonOfStored(reason),
+	};
 };
 
 /** A turn is one bot answering one message, so that is what identifies its execution. */

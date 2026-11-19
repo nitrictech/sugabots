@@ -116,10 +116,11 @@ export function callToolTool({
 }
 
 /**
- * toolCatalogNote tells the model how to reach the tools in `catalog`, or
- * nothing when there are none. It goes in the turn's note rather than the
- * tools sent, so a bot gaining or losing tools leaves the provider's cached
- * prompt intact.
+ * toolCatalogNote tells the model how to reach the tools in `catalog`, and
+ * which connections are left out or could be added, with where people fix or
+ * add them; with no tools, only that. It goes in the turn's note rather than
+ * the tools sent, so a bot gaining or losing tools leaves the provider's
+ * cached prompt intact.
  */
 export function toolCatalogNote({
 	catalog,
@@ -132,17 +133,17 @@ export function toolCatalogNote({
 }: {
 	catalog: readonly CatalogEntry[];
 	addable: readonly ConnectionPreset[];
+	/** The bot's own Connections page, where a missing server is added. */
 	connectionsPageUrl: string;
-} & Pick<
-	ConnectionToolSet,
-	"unavailable" | "signInExpired" | "instructions" | "fromProjectAndBot"
->): string {
+	/** Connections left out until someone signs in again, each with the Connections page of the bot or project that holds it. */
+	signInExpired: readonly { handle: string; connectionsPageUrl: string }[];
+} & Pick<ConnectionToolSet, "unavailable" | "instructions" | "fromProjectAndBot">): string {
 	const leftOut = [
 		unavailable.length > 0
 			? `These connections aren't answering right now, so their tools can't be found or run: ${unavailable.join(", ")}. If the person asks for one, say so rather than that it can't be done.`
 			: undefined,
 		signInExpired.length > 0
-			? `These connections' sign-ins have expired, so their tools can't be found or run until someone who manages you signs in again from your connections page: ${signInExpired.join(", ")}. If the person asks for something one of them would do, or it would have helped, tell them which connection needs signing in again, with the link [Connections](${connectionsPageUrl}).`
+			? `These connections' sign-ins have expired, so their tools can't be found or run until someone who manages the bot or project that holds each one signs in again from its Connections page: ${signInExpired.map(({ handle, connectionsPageUrl }) => `${handle} ([Connections](${connectionsPageUrl}))`).join(", ")}. If the person asks for something one of them would do, or it would have helped, tell them which connection needs signing in again, with its link.`
 			: undefined,
 	]
 		.filter(Boolean)

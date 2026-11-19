@@ -13,8 +13,8 @@ export function useListedProjectThread(
 	conversationId: string,
 	title: string | undefined,
 ): { name: string; toChange: ProjectThreadToChange | undefined } {
-	const chats = useProjectThreads(project?.slug).data?.chats;
-	const listed = chats?.find((chat) => chat.conversation.id === conversationId)?.conversation;
+	const threads = useProjectThreads(project?.id).data?.threads;
+	const listed = threads?.find((thread) => thread.conversation.id === conversationId)?.conversation;
 	const name = listed?.title ?? title ?? "";
 	const toChange =
 		listed && project?.permissions.rename ? { project, conversationId, name } : undefined;

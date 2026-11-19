@@ -123,7 +123,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 
 		expect(await storedTurn()).toMatchObject({ status: "failed" });
 		expect(deliveredEvents()).toContainEqual(
-			expect.objectContaining({ type: "message.failed", willRetry: false, error: told }),
+			expect.objectContaining({ type: "message.failed", error: told }),
 		);
 		// A file shared by a call still running when the turn ended isn't shared.
 		await expect(
@@ -234,7 +234,6 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			expect.objectContaining({
 				type: "message.failed",
 				messageId: prepared.responseMessage.id,
-				willRetry: false,
 				error: "The reply stopped unexpectedly.",
 			}),
 			expect.objectContaining({ type: "conversation.changed", conversationId }),
@@ -272,7 +271,7 @@ describe.skipIf(!process.env.DATABASE_URL)("turns, against Postgres", async () =
 			expect(await execution.prepare(prepared.run)).toMatchObject({ _tag: "NotRunnable" });
 			expect(await storedTurn()).toMatchObject({ status: "failed", error: told });
 			expect(deliveredEvents()).toContainEqual(
-				expect.objectContaining({ type: "message.failed", willRetry: false, error: told }),
+				expect.objectContaining({ type: "message.failed", error: told }),
 			);
 		});
 

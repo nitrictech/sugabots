@@ -1,4 +1,4 @@
-import type { ConversationDetails, Message } from "@sugabots/contracts";
+import type { ConversationDetails, ListedAutomationDefinition, Message } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, fn, within } from "storybook/test";
@@ -158,10 +158,32 @@ function Preview({ children, run }: { children: React.ReactNode; run?: Conversat
 		if (run?.automationRun) {
 			client.setQueryData(["conversation", RUN], run);
 			// The run is its automation's latest, so a failure may be retried.
-			client.setQueryData(["automations", "runs", run.automationRun.automationId], {
-				items: [run.automationRun],
-				nextCursor: null,
-			});
+			const latest = run.automationRun;
+			client.setQueryData(["automations", "project", revenue.id], [
+				{
+					id: latest.automationId,
+					workspaceId: revenue.workspaceId,
+					projectId: revenue.id,
+					name: latest.automationName,
+					instructions: latest.instructions,
+					triggers: [],
+					state: "enabled",
+					pausedAfterFailures: false,
+					createdById: null,
+					createdAt: latest.acceptedAt,
+					updatedAt: latest.acceptedAt,
+					status: {
+						failing: latest.state === "failed",
+						latestRun: {
+							id: latest.id,
+							state: latest.state,
+							posted: latest.posted,
+							acceptedAt: latest.acceptedAt,
+							error: latest.error,
+						},
+					},
+				},
+			] satisfies ListedAutomationDefinition[]);
 		}
 		client.setQueryData(["connections", revenue.id], []);
 		// The run's link to its automation is found through the bot.

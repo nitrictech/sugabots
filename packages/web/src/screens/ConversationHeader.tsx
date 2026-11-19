@@ -1,6 +1,6 @@
 import type { ConversationDetails, PersonParticipant, SessionUser } from "@sugabots/contracts";
 import { directPeopleTitle, isOneToOne } from "@/lib/chats.ts";
-import { AutomationsCrumb, ProjectCrumb } from "@/shell/BotCrumb.tsx";
+import { OwnerPageCrumb, ProjectCrumb } from "@/shell/BotCrumb.tsx";
 import { DirectPeopleAvatar } from "@/shell/DirectMessages.tsx";
 import {
 	AutomationFace,
@@ -97,7 +97,7 @@ export function ConversationHeader({
 				{...headerPlace}
 				title={details.conversation.title}
 				face={<AutomationFace />}
-				crumbs={<AutomationsCrumb owner={{ bot: conversation.bot }} />}
+				crumbs={<OwnerPageCrumb owner={{ bot: conversation.bot }} page="automations" />}
 			/>
 		);
 	}

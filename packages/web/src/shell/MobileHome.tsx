@@ -4,7 +4,7 @@ import { cn } from "cn";
 import { Bot, Hash, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAssistant, useBots } from "@/lib/bots.ts";
-import { useDirectMessages, useProjectThreadMarkers } from "@/lib/chats.ts";
+import { useDirectMessages, useProjectMarkers } from "@/lib/chats.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { botLink, botsLink, newDirectMessageLink, projectLink, projectsLink } from "@/lib/links.ts";
 import { ownerPages } from "@/lib/owner-pages.ts";
@@ -12,9 +12,9 @@ import { useProjects } from "@/lib/projects.ts";
 import { OwnerLink, ownerLink } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { DirectMessageCards } from "@/shell/DirectMessages.tsx";
-import { OwnerWork } from "@/shell/OwnerWork.tsx";
+import { OwnerWork, useOwnerWork } from "@/shell/OwnerWork.tsx";
 import { sidebarBots } from "@/shell/Sidebar.tsx";
-import { NOTHING_NEW, SidebarBot } from "@/shell/SidebarBot.tsx";
+import { SidebarBot } from "@/shell/SidebarBot.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { sidebarRow } from "@/ui/sidebar-row.ts";
@@ -87,7 +87,7 @@ export function MobileHome({ className }: { className?: string }) {
 	const { data: projects } = useProjects();
 	const { bots } = useBots();
 	const assistant = useAssistant();
-	const { data: markers } = useProjectThreadMarkers();
+	const { markerOf } = useProjectMarkers();
 	const pinned = sidebarBots(bots ?? []);
 	return (
 		<MobilePage title="Home" className={className}>
@@ -121,7 +121,7 @@ export function MobileHome({ className }: { className?: string }) {
 					{pinned.map((bot) => (
 						<SidebarBot
 							key={bot.id}
-							standing={{ bot, ...(markers?.bots[bot.id] ?? NOTHING_NEW) }}
+							standing={{ bot, ...markerOf(bot.defaultProjectId) }}
 							selected={false}
 						/>
 					))}
@@ -142,6 +142,7 @@ export function MobileHome({ className }: { className?: string }) {
  */
 export function MobileProject({ project }: { project: Project }) {
 	const owner = { project };
+	const work = useOwnerWork(owner);
 	const computersOn = useComputerAccess().data?.enabled === true;
 	return (
 		<MobilePage
@@ -155,7 +156,7 @@ export function MobileProject({ project }: { project: Project }) {
 				</IconButton>
 			}
 		>
-			<OwnerWork owner={owner} selectedConversationId={undefined} />
+			<OwnerWork owner={owner} work={work} selectedConversationId={undefined} />
 			<HomeSection label="Pages">
 				{ownerPages(owner, { computersOn }).map(({ to, label, icon: Icon }) => (
 					<OwnerLink

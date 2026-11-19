@@ -27,7 +27,6 @@ const opensandbox: ComputerProvider = {
 	enabled: false,
 	status: "missing_key",
 	hasApiKey: false,
-	lastTestedAt: null,
 	lastTestError: null,
 	createdAt: "2026-10-01T00:00:00.000Z",
 };
@@ -106,10 +105,7 @@ export const BotsUsingAComputer = meta.story({
 		const using = await canvas.findByRole("region", { name: "Bots using a computer" });
 		const [first] = storyBots;
 		const row = await within(using).findByRole("link", { name: new RegExp(`^${first?.name}`) });
-		await expect(row).toHaveAttribute(
-			"href",
-			expect.stringMatching(/\/settings\/projects\/.+\/bots\//),
-		);
+		await expect(row).toHaveAttribute("href", expect.stringMatching(/\/settings\/bots\/[^/]+$/));
 		await expect(within(using).getAllByRole("link")).toHaveLength(2);
 	},
 });
@@ -124,7 +120,6 @@ export const InUse = meta.story({
 					enabled: true,
 					hasApiKey: true,
 					status: "connected",
-					lastTestedAt: "2026-10-02T00:00:00.000Z",
 				},
 			]),
 		);
@@ -358,7 +353,9 @@ export const DiskUse = meta.story({
 		);
 		await expect(rows[1]).toHaveAttribute(
 			"href",
-			expect.stringMatching(/\/settings\/projects\/.+\/computer$/),
+			expect.stringMatching(
+				new RegExp(`/settings/projects/${storyProjects[0]?.slug ?? ""}/computer$`),
+			),
 		);
 	},
 });

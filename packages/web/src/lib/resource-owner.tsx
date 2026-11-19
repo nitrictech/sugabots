@@ -1,12 +1,13 @@
 import { useRender } from "@base-ui/react/use-render";
-import type { Bot, Project } from "@sugabots/contracts";
+import type { Bot, Project, ResourcePermissions } from "@sugabots/contracts";
 import { type HistoryState, Link, useNavigate } from "@tanstack/react-router";
 import { type ComponentProps, type ReactElement, useCallback } from "react";
 import { useBot } from "@/lib/bots.ts";
 import {
 	botAutomationFeedLink,
 	botAutomationsLink,
-	botConnectionSettingsLink,
+	botConnectionLink,
+	botConnectionsLink,
 	botFileLink,
 	botFilesLink,
 	botLink,
@@ -16,7 +17,8 @@ import {
 	conversationLink,
 	projectAutomationFeedLink,
 	projectAutomationsLink,
-	projectConnectionSettingsLink,
+	projectConnectionLink,
+	projectConnectionsLink,
 	projectFileLink,
 	projectFilesLink,
 	projectLink,
@@ -47,45 +49,8 @@ export function ownerName(owner: ResourceOwner): string {
 }
 
 /** What the person may do with the owner's computer, connections and automations, as the API resolved it. */
-interface ResourcePermissions {
-	manageConnections: boolean;
-	manageComputer: boolean;
-	useDesktop: boolean;
-	manageAutomations: boolean;
-	runAutomations: boolean;
-	/** Read its threads and what its automations' runs said, which managing them alone does not give. */
-	readHistory: boolean;
-	/** Open its settings: a bot's for whoever may change it, a project's for anyone in it. */
-	openSettings: boolean;
-	/** Delete the files written in its threads. */
-	deleteFiles: boolean;
-}
-
 export function resourcePermissions(owner: ResourceOwner): ResourcePermissions {
-	if ("bot" in owner) {
-		const may = owner.bot.permissions;
-		return {
-			manageConnections: may.manageConnections,
-			manageComputer: may.manageComputer,
-			useDesktop: may.useDesktop,
-			manageAutomations: may.manageAutomations,
-			runAutomations: may.runAutomations,
-			readHistory: may.talk,
-			openSettings: may.update,
-			deleteFiles: may.update,
-		};
-	}
-	const may = owner.project.permissions;
-	return {
-		manageConnections: may.manageConnections,
-		manageComputer: may.manageComputer,
-		useDesktop: may.useDesktop,
-		manageAutomations: may.manageAutomations,
-		runAutomations: may.runAutomations,
-		readHistory: owner.project.isMember,
-		openSettings: owner.project.isMember,
-		deleteFiles: may.deleteFiles,
-	};
+	return "bot" in owner ? owner.bot.permissions.resources : owner.project.permissions.resources;
 }
 
 /**
@@ -153,9 +118,9 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 			case "automation":
 				return botAutomationFeedLink(bot, to.automationId, itemPageSearch(to.itemPage));
 			case "connections":
-				return botSettingsPageLink(bot, "connections");
+				return botConnectionsLink(bot);
 			case "connection":
-				return botConnectionSettingsLink(bot, { id: to.connectionId });
+				return botConnectionLink(bot, { id: to.connectionId });
 			case "computer":
 				return botSettingsPageLink(bot, "computer");
 			case "settings":
@@ -181,9 +146,9 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 		case "automation":
 			return projectAutomationFeedLink(project, to.automationId, itemPageSearch(to.itemPage));
 		case "connections":
-			return projectSettingsPageLink(project, "connections");
+			return projectConnectionsLink(project);
 		case "connection":
-			return projectConnectionSettingsLink(project, { id: to.connectionId });
+			return projectConnectionLink(project, { id: to.connectionId });
 		case "computer":
 			return projectSettingsPageLink(project, "computer");
 		case "settings":

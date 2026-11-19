@@ -77,7 +77,7 @@ export class Connected {
 	}
 
 	/**
-	 * What the bot's computer reads the repositories with: git's sign-in to the
+	 * What the computer of the project the turn works in reads the repositories with: git's sign-in to the
 	 * account's paths, added outside the computer by its provider. Nothing for
 	 * GitHub's API, whose paths don't all name the account: bots read through
 	 * the connection's tools instead.
@@ -390,7 +390,7 @@ export class Connected {
 	}
 }
 
-/** What a bot's computer is signed in to GitHub with, and when it must be replaced. */
+/** What the computer of the project the turn works in is signed in to GitHub with, and when it must be replaced. */
 interface ComputerSignIn {
 	readonly credentials: readonly Computers.Credential[];
 	readonly expiresAt: GitHub.AccessToken["expiresAt"];

@@ -12,10 +12,9 @@ import {
 	automationWebhookChallengeSchema,
 	automationWriteResultSchema,
 	ignoredAutomationWebhookSchema,
+	listedAutomationDefinitionSchema,
 	manualAutomationRunSchema,
 	newAutomationSchema,
-	routineScheduleOccurrencesSchema,
-	routineSchedulePreviewSchema,
 	runPageQuerySchema,
 	runPageSchema,
 	workspaceAutomationListSchema,
@@ -50,7 +49,7 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 	}).middleware(Session),
 	HttpApiEndpoint.get("list", "/projects/:projectId/automations", {
 		params: inProject,
-		success: Schema.Array(automationSchema),
+		success: Schema.Array(listedAutomationDefinitionSchema),
 		error: refused,
 	}).middleware(Session),
 	HttpApiEndpoint.post("create", "/projects/:projectId/automations", {
@@ -58,12 +57,6 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 		payload: newAutomationSchema,
 		success: automationWriteResultSchema.pipe(HttpApiSchema.status(201)),
 		error: [Conflict, ...refused],
-	}).middleware(Session),
-	HttpApiEndpoint.post("previewSchedule", "/projects/:projectId/automations/schedule-preview", {
-		params: inProject,
-		payload: routineSchedulePreviewSchema,
-		success: routineScheduleOccurrencesSchema,
-		error: refused,
 	}).middleware(Session),
 	HttpApiEndpoint.get("get", "/projects/:projectId/automations/:automationId", {
 		params: automation,
@@ -122,6 +115,13 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 			error: refused,
 		},
 	).middleware(Session),
+	/** The runs of every automation of the project, removed ones' included, newest first. */
+	HttpApiEndpoint.get("projectRuns", "/projects/:projectId/runs", {
+		params: inProject,
+		query: runPageQuerySchema,
+		success: runPageSchema,
+		error: refused,
+	}).middleware(Session),
 	HttpApiEndpoint.get("runs", "/projects/:projectId/automations/:automationId/runs", {
 		params: automation,
 		query: runPageQuerySchema,

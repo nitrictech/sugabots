@@ -5,8 +5,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { type CastName, cast } from "@/cast";
 import { BotAvatar } from "@/components/bot-avatar";
+import { DemoCard } from "@/components/demo-card";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Say } from "@/docs/components/chat-demo";
 
 /** How the system bot that compacts a bot's history looks, as packages/core/src/workspaces/bots/system-bots.ts defines it. */
@@ -195,7 +195,7 @@ export function CompactionDemo() {
 	}
 
 	return (
-		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
+		<DemoCard>
 			<div className="flex flex-wrap items-center gap-2 border-b px-5 py-3">
 				<span className="flex-1 text-sm font-semibold">
 					{index + 1}. {step.title}
@@ -232,7 +232,7 @@ export function CompactionDemo() {
 			<p aria-live="polite" className="m-4 mt-0 rounded-2xl bg-muted px-4 py-3 text-sm text-pretty">
 				{step.caption}
 			</p>
-		</Card>
+		</DemoCard>
 	);
 }
 

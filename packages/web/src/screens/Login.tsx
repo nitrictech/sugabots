@@ -105,7 +105,7 @@ export function Login({
 				subtitle={`Open the link sent to ${unverified} to finish signing in.`}
 			>
 				<Button
-					variant="outline"
+					variant="secondary"
 					size="lg"
 					onClick={() => setUnverified(undefined)}
 					className="w-full"

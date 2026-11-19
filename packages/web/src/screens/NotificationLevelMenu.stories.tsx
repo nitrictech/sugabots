@@ -2,7 +2,7 @@ import type { NotificationLevel, NotificationSettings } from "@sugabots/contract
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, chatPath, StoryApp, storyBots, storyProjects } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyBots, storyProjects, storyWorkspace } from "@/story-app.tsx";
 
 const API = import.meta.env.VITE_API_URL as string;
 
@@ -29,6 +29,12 @@ async function chooseAndClose(item: HTMLElement) {
 	await userEvent.click(item);
 	await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 }
+
+/*
+ * Inbox, as a page with the whole sidebar: on a bot's or project's own pages
+ * the sidebar narrows to their icons, which have no menu.
+ */
+const inboxPath = `/${storyWorkspace.slug}/inbox`;
 
 const meta = preview.meta({
 	title: "Views/NotificationLevelMenu",
@@ -88,7 +94,7 @@ const meta = preview.meta({
  * Nothing marks it muted, until it goes back to following its project.
  */
 export const MutingABot = meta.story({
-	render: () => <StoryApp path={chatPath(bot)} />,
+	render: () => <StoryApp path={inboxPath} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);
@@ -110,7 +116,7 @@ export const MutingABot = meta.story({
  * and the same menu then offers to unmute it.
  */
 export const MutingABotForAWhile = meta.story({
-	render: () => <StoryApp path={chatPath(bot)} />,
+	render: () => <StoryApp path={inboxPath} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);
@@ -128,7 +134,7 @@ export const MutingABotForAWhile = meta.story({
 
 /** More options ends with the way to every notification setting. */
 export const OpeningNotificationSettings = meta.story({
-	render: () => <StoryApp path={chatPath(bot)} />,
+	render: () => <StoryApp path={inboxPath} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);

@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { namedPersonSchema } from "./api.ts";
 import { modelIdSchema } from "./bots.ts";
 import {
 	presetRequiresApiKey,
@@ -203,11 +204,9 @@ export const modelProviderSchema = Schema.Struct({
 	signedIn: Schema.Boolean,
 	customHeaders: Schema.mutable(Schema.Array(Schema.Struct({ name: Schema.String }))),
 	modelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	enabledModelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
-	/** The name of whoever connected it, while it is connected and they still have an account. */
-	connectedBy: Schema.NullOr(Schema.String),
+	/** Whoever connected it, while it is connected and they are still in the workspace. */
+	connectedBy: Schema.NullOr(namedPersonSchema),
 	/** When somebody added it, or, for a preset every workspace starts with, when it was seeded. */
 	createdAt: isoTimestampSchema,
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
@@ -405,7 +404,6 @@ const workspaceModelSchema = Schema.Struct({
 	providerId: uuidSchema,
 	providerName: Schema.String,
 	providerPreset: Schema.NullOr(providerPresetIdSchema),
-	providerActive: Schema.Boolean,
 	modelId: modelIdSchema,
 	displayName: Schema.NullOr(Schema.String),
 	/** What bots may use it for: what it can do, less what an admin switched off. */

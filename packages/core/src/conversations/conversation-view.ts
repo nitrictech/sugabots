@@ -35,7 +35,7 @@ import {
 } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
-import { latestRunFailed, resultPosted, runIdOf, toRun } from "./automations/execution.ts";
+import { automationFailing, resultPosted, runIdOf, toRun } from "./automations/execution.ts";
 import { compactionLineTokens } from "./compaction/window.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "./cursor.ts";
 import {
@@ -138,7 +138,7 @@ export const make = Effect.gen(function* () {
 								id: automation.id,
 								projectId: automation.projectId,
 								state: automation.state,
-								failed: latestRunFailed(automation.id),
+								failed: automationFailing(),
 								pausedAfterFailuresAt: automation.pausedAfterFailuresAt,
 							})
 							.from(automation)
@@ -406,7 +406,6 @@ function toConversationContext(
 function toConversationSummary(row: schema.SummaryRow): ConversationSummary {
 	return {
 		content: row.content,
-		sourceMessageId: row.sourceMessageId,
 		updatedAt: row.updatedAt.toISOString(),
 	};
 }

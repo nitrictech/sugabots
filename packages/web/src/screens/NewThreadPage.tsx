@@ -5,7 +5,6 @@ import { useState } from "react";
 import { useModelName } from "@/lib/bots.ts";
 import {
 	THREAD_NOT_STARTED,
-	useBotThreads,
 	useProjectThreads,
 	useRecentThreads,
 	useThreadStarter,
@@ -18,6 +17,7 @@ import { useProjectBots } from "@/lib/projects.ts";
 import {
 	ownerName,
 	type ResourceOwner,
+	resourceProjectId,
 	useLeadBot,
 	useNavigateToOwnerPage,
 } from "@/lib/resource-owner.tsx";
@@ -44,9 +44,7 @@ const RECENT_THREADS_SHOWN = 5;
 export function NewThreadPage({ owner, userId }: { owner: ResourceOwner; userId: string }) {
 	// A thread has nowhere to upload to until it starts.
 	const attachments = useComposerAttachments(undefined);
-	const threads = useThreadStarter(
-		"bot" in owner ? { botId: owner.bot.id } : { projectId: owner.project.id },
-	);
+	const threads = useThreadStarter({ projectId: resourceProjectId(owner) });
 	const navigateToOwnerPage = useNavigateToOwnerPage();
 	const [draft, setDraft] = useState("");
 	const [failed, setFailed] = useState(false);
@@ -123,7 +121,7 @@ export function NewThreadPage({ owner, userId }: { owner: ResourceOwner; userId:
 							attachments={attachments}
 						/>
 					)}
-					{"bot" in owner && owner.bot.assistant && <RecentThreads userId={userId} />}
+					{"bot" in owner && owner.bot.assistant && <RecentThreads />}
 				</div>
 			</div>
 		</div>
@@ -132,10 +130,8 @@ export function NewThreadPage({ owner, userId }: { owner: ResourceOwner; userId:
 
 /** How many of the bot's or project's open threads wait on the viewer, which its page greets them with. */
 function useWaitingOnViewer(owner: ResourceOwner): number {
-	const botThreads = useBotThreads("bot" in owner ? owner.bot.id : undefined).data?.threads;
-	const projectThreads = useProjectThreads("project" in owner ? owner.project.slug : undefined).data
-		?.chats;
-	return (("bot" in owner ? botThreads : projectThreads) ?? []).filter(
+	const threads = useProjectThreads(resourceProjectId(owner)).data?.threads;
+	return (threads ?? []).filter(
 		(row) => row.conversation.doneAt === null && (row.needsApproval || row.mentionsYou),
 	).length;
 }
@@ -183,8 +179,8 @@ function greetingFor(waiting: number): string {
  * the viewer has been working on lately, each with its bot, how it stands and
  * when it last moved.
  */
-function RecentThreads({ userId }: { userId: string }) {
-	const recent = useRecentThreads(userId, RECENT_THREADS_SHOWN);
+function RecentThreads() {
+	const recent = useRecentThreads(RECENT_THREADS_SHOWN);
 	if (recent.length === 0) return null;
 	return (
 		<section aria-label="Recent threads" className="flex w-full flex-col gap-1 pt-4">

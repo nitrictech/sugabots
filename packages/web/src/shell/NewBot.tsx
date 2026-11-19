@@ -15,19 +15,7 @@ import {
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import {
-	ArrowLeft,
-	AudioLines,
-	Brain,
-	Eye,
-	Image,
-	Pencil,
-	Search,
-	SmilePlus,
-	Star,
-	Wrench,
-	X,
-} from "lucide-react";
+import { AudioLines, Brain, Eye, Image, Pencil, SmilePlus, Star, Wrench, X } from "lucide-react";
 import {
 	type CSSProperties,
 	type FormEvent,
@@ -46,12 +34,15 @@ import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { EyesGlyph, ShapeGlyph } from "@/shell/LookPicker.tsx";
+import { BotColourPicker, EyesGlyph, ShapeGlyph } from "@/shell/LookPicker.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { BACK_BUTTON, BackChevron } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
+import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /** How a bot looks: its colour, head and eyes. */
@@ -440,17 +431,16 @@ function ModelPicker({
 	loading: boolean;
 	onChoose: (modelId: string) => void;
 }) {
-	const [search, setSearch] = useState("");
+	const {
+		query: search,
+		setQuery: setSearch,
+		searching,
+		matches: found,
+	} = useSearchFilter(models, (model) => [model.displayName, model.modelId, model.providerName]);
 	const { bots } = useBots();
 	const list = useRef<HTMLDivElement>(null);
-	const words = search.trim().toLowerCase();
 	const usersOf = (modelId: string) => bots?.filter((bot) => bot.model === modelId).length ?? 0;
-	const found = models.filter((model) =>
-		[model.displayName ?? "", model.modelId, model.providerName].some((text) =>
-			text.toLowerCase().includes(words),
-		),
-	);
-	const suggested = words
+	const suggested = searching
 		? []
 		: [...models]
 				.sort(
@@ -491,30 +481,22 @@ function ModelPicker({
 					<h2 className="m-0 flex-1 font-semibold text-sm text-foreground">Model</h2>
 					<Close />
 				</div>
-				<div className="flex h-10 items-center gap-2 rounded-lg border border-border-strong px-3 focus-within:shadow-(--ring-shadow)">
-					<Search
-						aria-hidden
-						size={15}
-						strokeWidth={1.75}
-						className="shrink-0 text-subtle-foreground"
-					/>
-					<input
-						aria-label="Search models"
-						value={search}
-						onChange={(event) => setSearch(event.target.value)}
-						onKeyDown={(event) => {
-							if (event.key === "Enter" && found[0]) {
-								event.preventDefault();
-								onChoose(found[0].modelId);
-								return;
-							}
-							moveFocus(event, null);
-						}}
-						placeholder={`Search ${countOf(models.length, "model", "models")}`}
-						autoComplete="off"
-						className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-subtle-foreground"
-					/>
-				</div>
+				<SearchField
+					label="Search models"
+					value={search}
+					onChange={setSearch}
+					onKeyDown={(event) => {
+						if (event.key === "Enter" && found[0]) {
+							event.preventDefault();
+							onChoose(found[0].modelId);
+							return;
+						}
+						moveFocus(event, null);
+					}}
+					placeholder={`Search ${countOf(models.length, "model", "models")}`}
+					autoComplete="off"
+					className="h-10 gap-2 rounded-lg border border-border-strong bg-transparent"
+				/>
 			</div>
 			<div ref={list} className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 max-md:max-h-96">
 				{found.length === 0 && (
@@ -743,14 +725,9 @@ function StepHeader({ onBack, children }: { onBack?: () => void; children: React
 		<div className="shrink-0 px-5 pt-5 pb-4">
 			<div className={cn(HEADER_ROW, "gap-2")}>
 				{onBack && (
-					<button
-						type="button"
-						onClick={onBack}
-						aria-label="Back"
-						className="focus-ring -ml-1 grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
-					>
-						<ArrowLeft aria-hidden size={16} strokeWidth={1.75} />
-					</button>
+					<IconButton label="Back" onClick={onBack} className="-ml-1">
+						<BackChevron />
+					</IconButton>
 				)}
 				{children}
 				<span className="flex-1" />
@@ -841,44 +818,10 @@ export function LookStep({
 			</div>
 			<div className="shrink-0 px-5 pb-5">
 				<div className="rounded-2xl border border-border-strong px-4 py-3.5">
-					<ColourRow value={look.color} onChange={(color) => onChange({ color })} />
+					<BotColourPicker value={look.color} onChange={(color) => onChange({ color })} />
 				</div>
 			</div>
 		</div>
-	);
-}
-
-/** The bot colours as round swatches, two rows of eight, the chosen one ringed. Each is a native radio. */
-function ColourRow({ value, onChange }: { value: BotColor; onChange: (color: BotColor) => void }) {
-	const group = useId();
-	return (
-		// `min-w-0`: a fieldset is otherwise as wide as its swatches, and would push the preview aside.
-		<fieldset className="m-0 grid min-w-0 grid-cols-8 justify-items-center gap-x-2 gap-y-3 border-0 p-0">
-			<legend className="sr-only">Colour</legend>
-			{botColors.map((color) => (
-				<label
-					key={color}
-					className="size-7 shrink-0 cursor-pointer rounded-full has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4"
-					// Ringed by an outline set out from it, so the gap shows whatever is behind.
-					style={{
-						background: botPalettes[color].face,
-						...(value === color && {
-							outline: `2px solid ${botPalettes[color].face}`,
-							outlineOffset: 2,
-						}),
-					}}
-				>
-					<input
-						type="radio"
-						name={group}
-						aria-label={color}
-						checked={value === color}
-						onChange={() => onChange(color)}
-						className="sr-only"
-					/>
-				</label>
-			))}
-		</fieldset>
 	);
 }
 
@@ -887,12 +830,10 @@ function ProviderMark({ model }: { model: OfferedModel }) {
 	return model.providerPreset ? (
 		<ProviderLogo preset={model.providerPreset} className="size-3.5 shrink-0" />
 	) : (
-		<span
-			aria-hidden
-			className="grid size-3.5 shrink-0 place-items-center rounded bg-chip-strong text-3xs"
-		>
-			{model.providerName.trim().charAt(0).toUpperCase()}
-		</span>
+		<LetterTile
+			name={model.providerName}
+			className="size-3.5 rounded border-0 bg-chip-strong font-normal text-3xs text-current"
+		/>
 	);
 }
 

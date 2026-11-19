@@ -857,7 +857,9 @@ function ReplyQuote({
 				className="shrink-0 text-subtle-foreground"
 			/>
 			<span className={cn("shrink-0 font-medium", tone.text)}>{name}</span>
-			<span className="min-w-0 truncate text-subtle-foreground">{replyTo.preview}</span>
+			<span className="min-w-0 truncate text-subtle-foreground transition-colors group-hover/quote:text-muted-foreground">
+				{replyTo.preview}
+			</span>
 		</>
 	);
 	const className =
@@ -875,7 +877,8 @@ function ReplyQuote({
 			aria-label={`Replying to ${name}: ${replyTo.preview}`}
 			onClick={() => onJump(replyTo.id)}
 			className={cn(
-				"focus-ring rounded-r-sm opacity-80 transition-opacity hover:opacity-100",
+				// The preview is already in the faintest ink AA allows, so the quote lifts on hover rather than dimming at rest.
+				"group/quote focus-ring rounded-r-sm",
 				className,
 			)}
 			style={tone.style}

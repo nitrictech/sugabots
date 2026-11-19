@@ -25,13 +25,11 @@ const network: ProjectComputerNetwork = {
 		{
 			host: "api.stripe.com",
 			addedByName: "Sam Rivera",
-			addedAt: "2026-10-01T09:30:00.000Z",
 			blockedBy: null,
 		},
 		{
 			host: "*.pastebin.com",
 			addedByName: "Kim Park",
-			addedAt: "2026-10-02T02:10:00.000Z",
 			blockedBy: "*.pastebin.com",
 		},
 	],

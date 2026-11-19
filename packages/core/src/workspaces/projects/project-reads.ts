@@ -1,8 +1,15 @@
 import { ADMINISTERING_WORKSPACE_ROLES, type ProjectMember } from "@sugabots/contracts";
-import { and, asc, eq, inArray, not, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
-import { project, projectMember, user, workspaceMember } from "../../database/schema.ts";
+import {
+	bot,
+	project,
+	projectBot,
+	projectMember,
+	user,
+	workspaceMember,
+} from "../../database/schema.ts";
 
 /** The people in the project, by name. Administrators, who are in every one, can't be taken out. */
 export const projectMembers = (projectId: string) =>
@@ -13,7 +20,6 @@ export const projectMembers = (projectId: string) =>
 				name: user.name,
 				email: user.email,
 				image: user.image,
-				addedAt: projectMember.createdAt,
 				removable: sql<boolean>`${not(inArray(workspaceMember.role, [...ADMINISTERING_WORKSPACE_ROLES]))}`,
 			})
 			.from(projectMember)
@@ -27,11 +33,43 @@ export const projectMembers = (projectId: string) =>
 			)
 			.where(eq(projectMember.projectId, projectId))
 			.orderBy(asc(user.name)),
-	).pipe(
-		Effect.map((rows): ProjectMember[] =>
-			rows.map((row) => ({ ...row, addedAt: row.addedAt.toISOString() })),
-		),
-	);
+	).pipe(Effect.map((rows): ProjectMember[] => rows));
+
+/**
+ * How many people and bots are in each of the projects `projectIds`, counted
+ * as the project's members list and bots list would list them.
+ */
+export const projectHeadcounts = (projectIds: readonly string[]) =>
+	Effect.gen(function* () {
+		const people = yield* query((db) =>
+			db
+				.select({ projectId: projectMember.projectId, count: count() })
+				.from(projectMember)
+				.innerJoin(
+					workspaceMember,
+					and(
+						eq(workspaceMember.workspaceId, projectMember.workspaceId),
+						eq(workspaceMember.userId, projectMember.userId),
+					),
+				)
+				.where(inArray(projectMember.projectId, [...projectIds]))
+				.groupBy(projectMember.projectId),
+		);
+		const bots = yield* query((db) =>
+			db
+				.select({ projectId: projectBot.projectId, count: count() })
+				.from(projectBot)
+				.innerJoin(bot, eq(bot.id, projectBot.botId))
+				.where(and(inArray(projectBot.projectId, [...projectIds]), isNull(bot.systemBotKey)))
+				.groupBy(projectBot.projectId),
+		);
+		const memberCounts = new Map(people.map((row) => [row.projectId, row.count]));
+		const botCounts = new Map(bots.map((row) => [row.projectId, row.count]));
+		return (projectId: string) => ({
+			memberCount: memberCounts.get(projectId) ?? 0,
+			botCount: botCounts.get(projectId) ?? 0,
+		});
+	});
 
 /**
  * The id of the bot's default project, where its own threads are. Every bot

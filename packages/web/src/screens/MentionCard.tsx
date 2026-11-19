@@ -10,6 +10,7 @@ import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { PopoverContent } from "@/ui/popover.tsx";
+import { TitleTag } from "@/ui/title-tag.tsx";
 import type { GroupMention, MentionTarget } from "./mentions.tsx";
 
 /**
@@ -87,15 +88,6 @@ function CardHeading({
 				<span className="truncate text-muted-foreground text-xs">{subtitle}</span>
 			</div>
 		</div>
-	);
-}
-
-/** A word beside a card's title saying what it names: a bot, or a person's role. */
-function TitleTag({ children }: { children: string }) {
-	return (
-		<span className="shrink-0 rounded bg-chip px-1.25 py-px font-semibold text-2xs text-muted-foreground leading-snug">
-			{children}
-		</span>
 	);
 }
 

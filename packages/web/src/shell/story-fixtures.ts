@@ -25,27 +25,38 @@ const PERMISSIONS: ProjectPermissions = {
 	leave: false,
 	join: false,
 	delete: true,
-	deleteFiles: true,
-	manageConnections: true,
-	manageComputer: true,
-	useDesktop: true,
-	manageAutomations: true,
-	runAutomations: true,
+	resources: {
+		readHistory: true,
+		openSettings: true,
+		deleteFiles: true,
+		manageConnections: true,
+		manageComputer: true,
+		useDesktop: true,
+		manageAutomations: true,
+		runAutomations: true,
+	},
 };
 
 /** What the viewer may do with a bot in the stories: everything. */
 export const BOT_PERMISSIONS: BotPermissions = {
 	update: true,
 	delete: true,
-	manageConnections: true,
-	manageComputer: true,
-	useDesktop: true,
-	manageAutomations: true,
-	runAutomations: true,
 	talk: true,
+	resources: PERMISSIONS.resources,
 };
 
-function project(id: string, name: string, color: Project["color"], lead: Bot | null): Project {
+/**
+ * A project the viewer is in, so the workspace's list counts its people and
+ * bots: the viewer alone, as the stories' members list answers, and
+ * `botCount`, as many as `projectsWithBots` adds to it.
+ */
+function project(
+	id: string,
+	name: string,
+	color: Project["color"],
+	lead: Bot | null,
+	botCount: number,
+): Project {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000000${id}`,
 		workspaceId: WORKSPACE,
@@ -57,6 +68,8 @@ function project(id: string, name: string, color: Project["color"], lead: Bot | 
 		visibility: "public",
 		isMember: true,
 		permissions: PERMISSIONS,
+		memberCount: 1,
+		botCount,
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }
@@ -84,7 +97,7 @@ function bot(
 		disabledTools: [],
 		usesComputer: false,
 		naturalBrowsing: false,
-		createdById: null,
+		createdBy: null,
 		visibility: "public",
 		assistant: false,
 		pinned: true,
@@ -106,10 +119,10 @@ export const chief = bot("Chief", "purple", "wink", "blob", {
 	visibility: "private",
 });
 
-export const revenue = project("a1", "Revenue", "green", growthDesk);
-export const engineering = project("a2", "Engineering", "blue", linearHandler);
+export const revenue = project("a1", "Revenue", "green", growthDesk, 3);
+export const engineering = project("a2", "Engineering", "blue", linearHandler, 2);
 /** A project from before projects had leads, which had no bots then. */
-export const design = project("a3", "Design", "plum", null);
+export const design = project("a3", "Design", "plum", null, 0);
 
 /** The projects, each with the bots added to it. */
 export const projectsWithBots = [

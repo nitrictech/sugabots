@@ -94,7 +94,6 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 					conversationId,
 					messageId,
 					turnId,
-					willRetry,
 					error: userMessage,
 				}),
 			),

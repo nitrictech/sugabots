@@ -104,7 +104,6 @@ describe("envelope", () => {
 			"message.failed": {
 				...ids,
 				messageId: "m1",
-				willRetry: false,
 				error: "Provider returned 403",
 			},
 			"tool_call.started": { ...ids, messageId: "m1", toolCall: toolCall("running") },

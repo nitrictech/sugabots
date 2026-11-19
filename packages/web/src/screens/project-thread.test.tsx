@@ -129,7 +129,9 @@ const automationPage = `/suga/projects/${project.slug}/automations/${automationI
 
 beforeEach(() => {
 	apiAnswers();
-	client.api.chats.list.mockReturnValue(Effect.succeed({ chats: [listedThread(thread)] }));
+	client.api.chats.threads.mockReturnValue(
+		Effect.succeed({ threads: [listedThread(thread)], automations: [] }),
+	);
 	client.api.conversations.get.mockImplementation(
 		({ params }: { params: { conversationId: string } }) =>
 			Effect.succeed(conversations[params.conversationId]),
@@ -189,5 +191,57 @@ describe("a project's automation from Inbox", () => {
 
 		const settings = await screen.findByRole("link", { name: "Automation settings" });
 		expect(settings.getAttribute("href")).toBe(automationPage);
+	});
+
+	it("sends a failed run's page to the project's connections, not its lead bot's", async () => {
+		const failed: Run = {
+			...run,
+			state: "failed",
+			error: "The connection refused the request.",
+			posted: false,
+		};
+		client.api.automations.runs.mockReturnValue(
+			Effect.succeed({ items: [failed], nextCursor: null }),
+		);
+		// Fix connection is offered on the automation's latest run only.
+		client.api.automations.list.mockReturnValue(
+			Effect.succeed([
+				{
+					id: automationId,
+					workspaceId: project.workspaceId,
+					projectId: project.id,
+					name: run.automationName,
+					instructions: run.instructions,
+					triggers: [],
+					state: "enabled",
+					pausedAfterFailures: false,
+					createdById: sam.id,
+					createdAt: at,
+					updatedAt: at,
+					status: {
+						failing: true,
+						latestRun: {
+							id: failed.id,
+							state: failed.state,
+							posted: failed.posted,
+							acceptedAt: failed.acceptedAt,
+							error: failed.error,
+						},
+					},
+				},
+			]),
+		);
+		client.api.conversations.get.mockImplementation(
+			({ params }: { params: { conversationId: string } }) =>
+				Effect.succeed(
+					params.conversationId === runConversationId
+						? details(runConversationId, "run", { automationRun: failed })
+						: conversations[params.conversationId],
+				),
+		);
+		mount(`/suga/inbox/${feedId}?itemPage=${runConversationId}`);
+
+		const fix = await screen.findByRole("link", { name: "Fix connection" });
+		expect(fix.getAttribute("href")).toBe(`/suga/projects/${project.slug}/connections`);
 	});
 });

@@ -26,7 +26,7 @@ import {
 } from "@/lib/resource-owner.tsx";
 import { OwnerCrumb } from "@/shell/BotCrumb.tsx";
 import { Page } from "@/shell/Page.tsx";
-import { type CloseStage, Stage, StageMark } from "@/shell/Stage.tsx";
+import { type CloseStage, Stage } from "@/shell/Stage.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
@@ -36,6 +36,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { IconTile } from "@/ui/icon-tile.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { useCopy } from "@/ui/use-copy.ts";
@@ -75,9 +76,7 @@ export function FilesPage({
 	version?: number;
 }) {
 	const { data, isError } = useFiles(
-		"project" in owner
-			? { kind: "project", projectId: owner.project.id }
-			: { kind: "bot", botId: owner.bot.id },
+		"project" in owner ? owner.project.id : owner.bot.defaultProjectId,
 	);
 	const navigate = useNavigate();
 	const hrefOf = useFileHref();
@@ -128,16 +127,14 @@ export function FileListView({
 		<div className="flex min-h-0 min-w-0 flex-1">
 			<Page title="Files" parent={<OwnerCrumb owner={owner} />} place={{ kind: "owner", owner }}>
 				{files !== "loading" && files !== "failed" && files.length === 0 ? (
-					// As tall as the page leaves above the tabs, so there is nothing to scroll.
-					<div className="flex h-above-tab-bar pb-20">
-						<EmptyState
-							title={`No files from ${ownerName(owner)} yet`}
-							icon={<FileText strokeWidth={1.75} />}
-						>
-							When a bot writes you a doc, report or page, or someone sends a file, it's kept here
-							so everyone can find it later.
-						</EmptyState>
-					</div>
+					<EmptyState
+						title={`No files from ${ownerName(owner)} yet`}
+						page="fill"
+						icon={<FileText strokeWidth={1.75} />}
+					>
+						When a bot writes you a doc, report or page, or someone sends a file, it's kept here so
+						everyone can find it later.
+					</EmptyState>
 				) : (
 					<div className="flex flex-col gap-5 px-4 pt-4 pb-12">
 						{files === "failed" ? (
@@ -389,9 +386,9 @@ export function FileStageView({
 		<Stage
 			label={file.title}
 			icon={
-				<StageMark>
+				<IconTile size="sm">
 					<kind.Icon strokeWidth={2} />
-				</StageMark>
+				</IconTile>
 			}
 			title={file.title}
 			byline={

@@ -2,10 +2,8 @@
  * Finds the words GLOSSARY.md retires in tracked files: in identifiers,
  * comments, strings and docs alike.
  *
- * `node lint/check-glossary.ts` fails if any word marked `failing` is found,
- * listing where. `--report` also counts every retired word by package, so a
- * cleanup round can see what is left. A word becomes failing once the round
- * that removes it is done, so it can't come back.
+ * `node lint/check-glossary.ts` fails if any retired word is found, listing
+ * where, so none can come back. `--report` also counts each by package.
  *
  * Words whose meaning changed rather than ended, such as "thread", aren't
  * checked: whether one is right depends on what it means there, which only a
@@ -21,7 +19,6 @@ interface RetiredWord {
 	readonly plural: string;
 	/** What GLOSSARY.md says to use instead. */
 	readonly replacement: string;
-	readonly failing: boolean;
 	/** Uses of the word that mean something else, removed before matching. */
 	readonly otherMeanings?: RegExp;
 	/** Files where the word is only ever someone else's, so it isn't checked there. */
@@ -33,22 +30,21 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 		word: "pod",
 		plural: "pods",
 		replacement: "project, or the bot",
-		failing: true,
-		// Names run from outside, which keep their old words: the script that
-		// destroys the computers bots used to share, and migrations by their
-		// names. And Apple's iPod.
+		// Names run from outside, which keep their old words: the
+		// `destroy-pod-computers` script, and migrations by their names. And
+		// Apple's iPod.
 		otherMeanings: /destroy-pod-computers|\b\d{14}_[a-z0-9_]+|iPod/g,
 		keptIn: [
-			// Run against a database from before channels had their name.
+			// Reads a database whose tables and columns still have their
+			// pre-migration names, `pod_id` among them.
 			/^packages\/core\/src\/computers\/destroy-pod-computers\.ts$/,
 		],
 	},
-	{ word: "crew", plural: "crews", replacement: "the project's bots", failing: true },
+	{ word: "crew", plural: "crews", replacement: "the project's bots" },
 	{
 		word: "artifact",
 		plural: "artifacts",
 		replacement: "file",
-		failing: true,
 		// The blob store's folder for the files bots write, `artifacts/<fileId>`,
 		// which keeps the name their content was first stored under.
 		otherMeanings: /`artifacts\/(?:<fileId>|\$\{)[^`]*`|BlobStore\.key\("artifacts"/g,
@@ -57,7 +53,6 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 		word: "sandbox",
 		plural: "sandboxes",
 		replacement: "computer",
-		failing: true,
 		// Others' names: the OpenSandbox provider, its server's setting, SDK and
 		// container names; E2B's `sandboxUrl`; Chromium's and an iframe's
 		// sandbox. And names kept because something outside the code holds
@@ -69,7 +64,8 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 		keptIn: [
 			// Talking to each provider in its own words.
 			/^packages\/core\/src\/computers\/implementations\//,
-			// Run against a database from before computers had their name.
+			// Reads a database whose tables still have their pre-migration
+			// names, `sandbox` and `sandbox_provider`.
 			/^packages\/core\/src\/computers\/destroy-pod-computers\.ts$/,
 			// Nix's build sandbox.
 			/^docker\/computer\/nix\/nix\.conf$/,
@@ -79,12 +75,11 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 			/^packages\/server\/src\/routes\/chats\/(file-response|files\.test)\.ts$/,
 		],
 	},
-	{ word: "scribe", plural: "scribes", replacement: "summariser", failing: true },
+	{ word: "scribe", plural: "scribes", replacement: "summariser" },
 	{
 		word: "agent",
 		plural: "agents",
 		replacement: "bot",
-		failing: true,
 		// Others' agents: the HTTP user agent, coding agents and their
 		// AGENTS.md, crawlers and AI agents generally, and SSH's and GPG's. And
 		// names stored or run from outside, which keep
@@ -101,7 +96,6 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 		word: "channel",
 		plural: "channels",
 		replacement: "project",
-		failing: true,
 		// Others' channels: Slack's, and its `@channel`, which a person writes to
 		// mention everyone in a conversation; the browser's MessageChannel; the
 		// Postgres notification channel, and the event table's `channel`, the stream
@@ -122,13 +116,11 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 		word: "main chat",
 		plural: "main chats",
 		replacement: "a project's threads",
-		failing: true,
 	},
 	{
 		word: "main thread",
 		plural: "main threads",
 		replacement: "a project's threads",
-		failing: true,
 	},
 ];
 
@@ -225,8 +217,7 @@ function printReport(retired: RetiredWord, findings: readonly Finding[]): void {
 		const area = areaOf(path);
 		byArea.set(area, (byArea.get(area) ?? 0) + 1);
 	}
-	const status = retired.failing ? "failing" : "reported";
-	console.log(`${retired.word} → ${retired.replacement}: ${findings.length} (${status})`);
+	console.log(`${retired.word} → ${retired.replacement}: ${findings.length}`);
 	for (const [area, count] of [...byArea].sort(([, a], [, b]) => b - a)) {
 		console.log(`  ${String(count).padStart(6)}  ${area}`);
 	}
@@ -238,7 +229,7 @@ let failed = false;
 for (const retired of RETIRED_WORDS) {
 	const findings = findingsOf(retired, files);
 	if (report) printReport(retired, findings);
-	if (!retired.failing || findings.length === 0) continue;
+	if (findings.length === 0) continue;
 	failed = true;
 	console.error(`"${retired.word}" is retired; GLOSSARY.md says to use ${retired.replacement}:`);
 	for (const { path, line, text } of findings) console.error(`  ${path}:${line}  ${text}`);

@@ -3,7 +3,7 @@ import { Folder, type LucideIcon, Monitor, Settings2, Wrench, Zap } from "lucide
 import { type OwnerPage, type ResourceOwner, resourcePermissions } from "@/lib/resource-owner.tsx";
 
 /** One of a bot's or a project's own pages, as its sidebar and a phone's page of it list them. */
-export interface OwnerPageEntry {
+interface OwnerPageEntry {
 	to: Extract<OwnerPage, { page: OwnerPageName }>;
 	label: string;
 	icon: LucideIcon;
@@ -42,7 +42,10 @@ export function ownerPages(
  * settings for no lead bot, no model or one since switched off, and its
  * automations for one whose latest run failed.
  */
-export type OwnerProblems = Partial<Record<OwnerPageName, string>>;
+type OwnerProblems = Partial<Record<OwnerPageName, string>>;
+
+/** The problem an owner's automations page sets right: one of them is failing. */
+export const AUTOMATION_FAILED = "An automation's last run failed";
 
 /**
  * What stops the owner working that its own pages set right. `lead` is the
@@ -63,7 +66,7 @@ export function ownerProblems(
 ): OwnerProblems {
 	return {
 		settings: settingsProblem(owner, lead, enabledModels),
-		automations: automationFailed ? "An automation's last run failed" : undefined,
+		automations: automationFailed ? AUTOMATION_FAILED : undefined,
 	};
 }
 

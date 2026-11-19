@@ -5,12 +5,19 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { automationRun, bot as botTable, connection } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
+import {
+	closeDatabase,
+	onDatabase,
+	onPostgres,
+	type Promised,
+	runOnPostgres,
+} from "../../database/testing.ts";
 import type { RepositoryActivity } from "../../providers/connections/github/github-events.ts";
+import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
 import { Automations } from "./automations.ts";
-import { anAutomationOwner, defaultProjectOf } from "./testing.ts";
+import { anAutomationOwner } from "./testing.ts";
 
 const opened: RepositoryActivity = {
 	event: "pull_request_opened",
@@ -180,5 +187,5 @@ async function anotherBotOf(owner: { workspaceId: string; userId: string }) {
 			.returning(),
 	);
 	if (!bot) throw new Error("fixture");
-	return { botId: bot.id, projectId: await defaultProjectOf(bot.id) };
+	return { botId: bot.id, projectId: await runOnPostgres(defaultProjectOf(bot.id)) };
 }

@@ -18,7 +18,6 @@ const brave: SearchProvider = {
 	enabled: false,
 	status: "missing_key",
 	hasApiKey: false,
-	lastTestedAt: null,
 	lastTestError: null,
 	createdAt: "2026-09-14T00:00:00.000Z",
 };

@@ -1,6 +1,6 @@
 import { motion, type Variants } from "motion/react";
 import type { ComponentProps } from "react";
-import { Card } from "@/components/ui/card";
+import { DemoCard } from "@/components/demo-card";
 
 /** A short rise and fade: how text, cards and messages arrive. */
 export const riseIn: Variants = {
@@ -52,5 +52,5 @@ export function RevealItem({ variant = "rise", ...props }: RevealItemProps) {
 	return <motion.div variants={revealItemVariants[variant]} {...props} />;
 }
 
-/** A shadcn `Card` that can take part in a `Reveal`, e.g. with `variants={riseIn}`. */
-export const MotionCard = motion.create(Card);
+/** A `DemoCard` that can take part in a `Reveal`, e.g. with `variants={riseIn}`. */
+export const MotionDemoCard = motion.create(DemoCard);

@@ -5,7 +5,7 @@ import { AnimatePresence } from "motion/react";
 import type { ComponentProps, ReactNode } from "react";
 import { BotAvatar } from "@/components/bot-avatar";
 import { RevealItem } from "@/components/reveal";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
 /*
@@ -31,7 +31,7 @@ export interface ChatPerson {
 /** Who wrote a message: a bot with its face, or a person. */
 export type ChatAuthor = ChatBot | ChatPerson;
 
-/** A bot's face, or a person's initials. */
+/** A bot's face, or a person's photo or initials. */
 export function ChatAvatar({
 	author,
 	size,
@@ -42,6 +42,7 @@ export function ChatAvatar({
 	if (author.kind === "bot") return <BotAvatar size={size} {...author.look} />;
 	return (
 		<Avatar size={size}>
+			{author.photo && <AvatarImage src={author.photo} alt="" />}
 			<AvatarFallback className="bg-secondary text-xs font-bold text-secondary-foreground">
 				{author.initials}
 			</AvatarFallback>
@@ -51,6 +52,7 @@ export function ChatAvatar({
 
 interface ChatMessageProps {
 	author: ChatAuthor;
+	avatarSize?: ComponentProps<typeof Avatar>["size"];
 	/** When it was sent, beside the name, e.g. "7:12 PM". */
 	time?: string;
 	className?: string;
@@ -59,11 +61,11 @@ interface ChatMessageProps {
 }
 
 /** One message as a row: the author's face, their name, a Bot tag for a bot, the time, and the message. */
-export function ChatMessage({ author, time, className, children }: ChatMessageProps) {
+export function ChatMessage({ author, avatarSize, time, className, children }: ChatMessageProps) {
 	return (
 		<article className={cn("flex gap-3", className)}>
 			<span aria-hidden className="mt-0.5 flex shrink-0">
-				<ChatAvatar author={author} />
+				<ChatAvatar author={author} size={avatarSize} />
 			</span>
 			<div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
 				<div className="flex items-center gap-2">

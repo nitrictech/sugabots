@@ -10,16 +10,7 @@ const meta = preview.meta({
 	argTypes: {
 		variant: {
 			control: "select",
-			options: [
-				"default",
-				"secondary",
-				"muted",
-				"outline",
-				"ghost",
-				"link",
-				"destructive",
-				"quiet",
-			],
+			options: ["default", "secondary", "muted", "ghost", "link", "destructive", "quiet"],
 		},
 		size: { control: "select", options: ["sm", "default", "lg", "bare", "text"] },
 	},

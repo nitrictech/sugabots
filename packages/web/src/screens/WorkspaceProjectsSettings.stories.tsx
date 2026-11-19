@@ -1,21 +1,18 @@
-import type { ConnectionAccess } from "@sugabots/contracts";
-import { listedConnection, type TestConnection } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, StoryApp, storyProjects, storyUser, storyWorkspace } from "../story-app.tsx";
 
 /*
  * A project in settings, listed in the navigation with its pages: General,
- * its connections, its people, and its bots. On a phone a project's page
+ * its people, its bots and its computer. On a phone a project's page
  * opens full screen, with the way back to the list of settings.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
 const projects = `/${storyWorkspace.slug}/settings/projects`;
 const revenuePage = (page: "people" | "bots") => `${projects}/${revenue.slug}/${page}`;
-const growthDeskConnections = `${projects}/${revenue.slug}/bots/${growthDesk.handle}/connections`;
 const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 
 const people = [
@@ -34,46 +31,11 @@ const people = [
 	},
 ].map((person, index) => ({
 	...person,
-	addedAt: "2026-09-02T00:00:00.000Z",
 	// The first two are administrators, as the workspace roster below says.
 	removable: index > 1,
 }));
 
-function connection(
-	n: number,
-	name: string,
-	url: string,
-	access: ConnectionAccess,
-): TestConnection {
-	return {
-		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
-		workspaceId: revenue.workspaceId,
-		projectId: "0199a3a0-0000-7000-8000-00000000b071",
-		name,
-		handle: name.toLowerCase(),
-		url,
-		kind: "mcp",
-		auth: "oauth",
-		signedIn: true,
-		signInExpired: false,
-		secretHeader: null,
-		hasSecret: false,
-		appSettingsUrl: null,
-		status: "connected",
-		tools: [{ name: "search", description: "Search", readOnly: true, destructive: false, access }],
-		lastTestedAt: "2026-09-18T06:00:00.000Z",
-		lastTestError: null,
-		connectedBy: null,
-		createdAt: "2026-09-10T00:00:00.000Z",
-	};
-}
-
-const connections = [
-	connection(1, "HubSpot", "https://mcp.hubspot.com/mcp", "allow"),
-	connection(2, "Gmail", "https://mcp.gmail.example/mcp", "ask"),
-];
-
-/** The Revenue project's people, and a bot's connections, which the example workspace has none of by default. */
+/** The Revenue project's people, which the example workspace has none of by default. */
 const revenueHandlers = [
 	// The project's people are the workspace's too, with the roles the project's rows show.
 	http.get(`${API}/workspaces/:workspace/members`, () =>
@@ -82,26 +44,26 @@ const revenueHandlers = [
 				id: `0199a3a0-0000-7000-8000-0000000007${index}0`,
 				role: index === 0 ? "admin" : index === 1 ? "admin" : "member",
 				user: { id: person.userId, name: person.name, email: person.email, image: null },
-				joinedAt: person.addedAt,
+				joinedAt: "2026-09-02T00:00:00.000Z",
 			})),
 		),
 	),
 	http.get(`${API}/projects/:projectId/members`, ({ params }) =>
 		HttpResponse.json(params.projectId === revenue.id ? people : people.slice(0, 1)),
 	),
-	http.get(`${API}/projects/:projectId/connections`, ({ params }) =>
-		HttpResponse.json(
-			params.projectId === growthDesk.defaultProjectId ? connections.map(listedConnection) : [],
-		),
-	),
 ];
+
+/** The projects, with Revenue counting the people its members list answers with. */
+const projectsWithPeople = storyProjects.map((project) =>
+	project.id === revenue.id ? { ...project, memberCount: people.length } : project,
+);
 
 const meta = preview.meta({
 	title: "Views/Projects",
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
-		msw.use(...revenueHandlers, ...appHandlers());
+		msw.use(...revenueHandlers, ...appHandlers({ projects: projectsWithPeople }));
 	},
 });
 
@@ -125,17 +87,6 @@ export const General = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Delete project" })).toBeInTheDocument();
-	},
-});
-
-/** A bot's connections, each with what its tools may do. */
-export const Connections = meta.story({
-	render: () => <StoryApp path={growthDeskConnections} />,
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "Connections" })).toBeInTheDocument();
-		await expect(await canvas.findByRole("article", { name: "HubSpot" })).toBeInTheDocument();
-		await expect(canvas.getByRole("article", { name: "Gmail" })).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "Add connection" })).toBeInTheDocument();
 	},
 });
 
@@ -175,7 +126,7 @@ export const Bots = meta.story({
 export const AsAMember = meta.story({
 	beforeEach({ msw }) {
 		// A project carries what its viewer may do there; a member may not rename, delete or manage it.
-		const asMember = storyProjects.map((project) => ({
+		const asMember = projectsWithPeople.map((project) => ({
 			...project,
 			permissions: {
 				...project.permissions,
@@ -208,14 +159,14 @@ export const GeneralAsAMember = meta.story({
 	},
 });
 
-/** On a phone a project's page opens full screen, with the way back to the project's page in You. */
+/** On a phone a project's page opens full screen, with the way back to Settings in You. */
 export const Phone = meta.story({
 	globals: PHONE,
 	render: () => <StoryApp path={`${projects}/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: revenue.name })).toHaveAttribute(
+		await expect(await canvas.findByRole("link", { name: "Settings" })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/you/projects/${revenue.slug}`,
+			`/${storyWorkspace.slug}/you`,
 		);
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
 	},

@@ -16,7 +16,7 @@ export function InstructionsField({
 		<textarea
 			aria-label={ariaLabel}
 			className={cn(
-				"block min-h-60 w-full resize-y rounded-xl bg-transparent p-3.5 text-xs text-foreground leading-relaxed outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)",
+				"focus-ring block min-h-60 w-full resize-y rounded-xl bg-transparent p-3.5 text-xs text-foreground leading-relaxed placeholder:text-subtle-foreground",
 				className,
 			)}
 			{...props}

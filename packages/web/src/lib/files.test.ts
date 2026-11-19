@@ -20,7 +20,7 @@ const call = (tool: string, status: ToolCallPart["status"]): ToolCallPart => ({
 /** A cache holding a project's list and one version of a file, both fresh. */
 function cacheWithFiles() {
 	const queries = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-	queries.setQueryData(filesKey({ kind: "project", projectId: "a-project" }), []);
+	queries.setQueryData(filesKey("a-project"), []);
 	queries.setQueryData(fileKey("a-file", 2), {});
 	const stale = () =>
 		queries

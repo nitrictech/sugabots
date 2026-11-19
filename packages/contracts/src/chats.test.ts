@@ -4,7 +4,6 @@ import {
 	chatHistoryPageSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
-	itemConversationKindSchema,
 	MAX_CHAT_PAGE_LIMIT,
 } from "./chats.ts";
 
@@ -39,10 +38,6 @@ describe("chat contracts", () => {
 
 	it.each(["project_thread", "system"])("keeps %s conversations out of the history", (kind) => {
 		expect(decodeHistory({ ...historyEntry, kind })).toBe("Failure");
-	});
-
-	it.each(["collaboration", "run"])("accepts item conversation kind %s", (type) => {
-		expect(Schema.decodeUnknownSync(itemConversationKindSchema)(type)).toBe(type);
 	});
 
 	it("accepts an automation run in the Chat timeline", () => {

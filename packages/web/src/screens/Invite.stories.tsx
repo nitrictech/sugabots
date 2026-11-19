@@ -39,7 +39,12 @@ export const Invited = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			http.get(`${API}/invitations/:invitationId`, () =>
-				HttpResponse.json({ status: "pending", workspaceName: "Nitric", inviterName: "Jay Young" }),
+				HttpResponse.json({
+					status: "pending",
+					workspaceName: "Nitric",
+					inviterName: "Jay Young",
+					role: "member",
+				}),
 			),
 		);
 	},

@@ -168,7 +168,9 @@ function RunLine({
 		<RunRow
 			automationName={item.automationName}
 			triggerKind={item.triggerKind}
-			state={workStateOf(entries.find((entry) => entry.conversationId === item.conversationId))}
+			state={workStateOf(
+				entries.find((entry) => entry.conversationId === item.conversationId)?.status,
+			)}
 			at={item.createdAt}
 			onOpen={() => onOpenItem(item.conversationId)}
 		/>

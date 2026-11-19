@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { CurrentActor } from "../../authorization/current-actor.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
@@ -15,6 +16,7 @@ import {
 import { closeDatabase, onDatabase, onPostgres, type Promised } from "../../database/testing.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
+import { TriggerSetInSettings } from "./automation.ts";
 import { Automations } from "./automations.ts";
 import { BotAutomations } from "./bot-automations.ts";
 import { anAutomationOwner } from "./testing.ts";
@@ -132,6 +134,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			]);
 		});
 
+		it("changes nothing when the new routine is refused", async () => {
+			const bot = { botId, projectId: ownProjectId, askedBy: userId };
+			const made = await bots.create(bot, standup);
+
+			await expect(
+				bots.update(bot, made.id, {
+					name: "Evening standup",
+					paused: true,
+					routineExpression: "not a cron expression",
+				}),
+			).rejects.toMatchObject({ _tag: "InvalidRoutineSchedule" });
+			expect(await bots.list(bot)).toEqual([made]);
+		});
+
 		it("changes a webhook automation's other settings but leaves its trigger to settings", async () => {
 			const automations = onPostgresAs(userId)(Context.get(conversations, Automations.Service));
 			const hook = await automations.create(
@@ -142,10 +158,32 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
 			await expect(
 				bots.update(bot, hook.automation.id, { routineExpression: "0 9 * * *" }),
-			).rejects.toThrow(BotAutomations.TriggerSetInSettings);
+			).rejects.toThrow(TriggerSetInSettings);
 			expect(await bots.update(bot, hook.automation.id, { name: "Sentry triage" })).toMatchObject({
 				name: "Sentry triage",
 				when: [{ kind: "webhook" }],
+			});
+		});
+
+		it("gives a routine to an automation nothing starts yet", async () => {
+			const automations = onPostgresAs(userId)(Context.get(conversations, Automations.Service));
+			const manual = await automations.create(
+				{ projectId: ownProjectId },
+				{ name: "Weekly summary", instructions: "Sum up the week.", triggers: [] },
+			);
+			const bot = { botId, projectId: ownProjectId, askedBy: userId };
+
+			expect(
+				await bots.update(bot, manual.automation.id, { routineExpression: "0 17 * * 5" }),
+			).toMatchObject({
+				when: [
+					{
+						kind: "routine",
+						schedule: { repeat: "cron", expression: "0 17 * * 5" },
+						timezone: "Australia/Sydney",
+						nextRunAt: expect.any(String),
+					},
+				],
 			});
 		});
 
@@ -161,7 +199,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				bots.update({ botId, projectId: ownProjectId, askedBy: userId }, made.id, {
 					routineExpression: "0 10 * * 1-5",
 				}),
-			).rejects.toThrow(BotAutomations.TriggerSetInSettings);
+			).rejects.toThrow(TriggerSetInSettings);
 			expect(await bots.list({ botId, projectId: ownProjectId, askedBy: userId })).toEqual([
 				expect.objectContaining({
 					when: [
@@ -175,9 +213,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		it("refuses when no person asked, as in an automation's run", async () => {
 			await expect(
 				bots.create({ botId, projectId: ownProjectId, askedBy: null }, standup),
-			).rejects.toThrow(BotAutomations.NobodyAsked);
+			).rejects.toThrow(CurrentActor.NobodyAsked);
 			await expect(bots.list({ botId, projectId: ownProjectId, askedBy: null })).rejects.toThrow(
-				BotAutomations.NobodyAsked,
+				CurrentActor.NobodyAsked,
 			);
 		});
 
@@ -206,7 +244,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				db.select().from(automation).where(eq(automation.id, made.id)),
 			);
 			expect(stored).toMatchObject({ projectId, createdByBotId: botId });
-			expect(made.settingsUrl).toMatch(/\/projects\/automation-[^/]+$/);
+			expect(made.settingsUrl).toMatch(
+				new RegExp(`/projects/automation-[^/]+/automations/${made.id}$`),
+			);
 			expect(await bots.list(inProject)).toEqual([made]);
 			expect(await bots.list({ botId, projectId: ownProjectId, askedBy: userId })).toEqual([]);
 		});

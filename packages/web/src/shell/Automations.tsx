@@ -3,8 +3,8 @@ import type { Automation, Bot, ListedAutomation } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Plus, RefreshCcw } from "lucide-react";
 import type { ReactNode } from "react";
-import { useAutomations, useRecentRuns, useWorkspaceAutomationsById } from "@/lib/automations.ts";
-import { useBotThreads } from "@/lib/chats.ts";
+import { useAutomations } from "@/lib/automations.ts";
+import { useProjectThreads } from "@/lib/chats.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import {
 	ownerLink,
@@ -42,7 +42,6 @@ export function AutomationsPage({
 	children: ReactNode;
 }) {
 	const list = useListedAutomations(owner);
-	const automationById = useWorkspaceAutomationsById();
 	const automations = list.automations ?? [];
 	const name = ownerName(owner);
 	// "Growth Desk / Automations" from a tablet up; a phone, with no room for the breadcrumb, names the owner.
@@ -73,10 +72,16 @@ export function AutomationsPage({
 					actions={newAutomation}
 				/>
 				{none ? (
-					// Someone who may make one is taken to the form instead; anyone else is told who can.
-					<div className="flex min-h-0 flex-1 flex-col pb-20">
-						<NoAutomations title={`No automations for ${name} yet`} owner={name} />
-					</div>
+					<NoAutomations
+						title={`No automations for ${name} yet`}
+						ownerName={name}
+						page="fill"
+						create={
+							resourcePermissions(owner).manageAutomations
+								? { newAutomation: ownerLink(owner, { page: "newAutomation" }) }
+								: undefined
+						}
+					/>
 				) : (
 					<ul className="tab-bar-clearance m-0 flex min-h-0 w-full flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2 md:mx-auto md:max-w-180 md:pt-4">
 						{list.isError && (
@@ -86,12 +91,7 @@ export function AutomationsPage({
 						)}
 						{automations.map((row) => (
 							<li key={row.automation.id}>
-								<AutomationRow
-									row={row}
-									owner={owner}
-									automation={automationById.get(row.automation.id)}
-									selected={row.automation.id === selectedAutomationId}
-								/>
+								<AutomationRow row={row} owner={owner} />
 							</li>
 						))}
 					</ul>
@@ -102,28 +102,43 @@ export function AutomationsPage({
 	);
 }
 
-/** One of the automations a list shows, with the bot that runs it. */
-export type ShownAutomation = ListedAutomation & { bot: Bot };
+/**
+ * One of the automations a list shows, with the bot that runs it, and how it
+ * is set up, which says when it runs, once that is loaded.
+ */
+type ShownAutomation = Omit<ListedAutomation, "status"> & {
+	/** Missing for an automation whose runs the person may not read. */
+	status?: ListedAutomation["status"];
+	bot: Bot;
+	definition: Automation | undefined;
+};
 
 /**
  * A bot's or a project's automations as its Automations list shows them, or
- * undefined until they are loaded. A bot's list says how each ran; somebody
- * who manages the automations of a bot they do not reach, as an administrator
- * does another person's private bot, reads only how each is set up. A
- * project's are listed as they are set up, each run by its lead bot.
+ * undefined until they are loaded, each with how it stands for whoever may
+ * read its runs. A bot's come with its threads; somebody who manages the
+ * automations of a bot they do not reach, as an administrator does another
+ * person's private bot, reads them as they are set up, as a project's are,
+ * each run by its lead bot.
  */
 export function useListedAutomations(owner: ResourceOwner): {
 	automations: ShownAutomation[] | undefined;
 	isError: boolean;
 } {
-	const fromThreads = "bot" in owner && owner.bot.permissions.talk;
-	const threads = useBotThreads(fromThreads ? owner.bot.id : undefined);
-	const definitions = useAutomations(fromThreads ? undefined : resourceProjectId(owner));
+	const fromThreads = "bot" in owner && owner.bot.permissions.talk ? owner.bot : undefined;
+	const threads = useProjectThreads(fromThreads?.defaultProjectId);
+	const definitions = useAutomations(resourceProjectId(owner));
 	const runner = useLeadBot(owner);
 	if (fromThreads) {
-		const list = threads.data;
+		const definitionById = new Map(
+			definitions.data?.map((automation) => [automation.id, automation]),
+		);
 		return {
-			automations: list?.automations.map((row) => ({ ...row, bot: list.bot })),
+			automations: threads.data?.automations.map((row) => ({
+				...row,
+				bot: fromThreads,
+				definition: definitionById.get(row.automation.id),
+			})),
 			isError: threads.isError,
 		};
 	}
@@ -135,36 +150,41 @@ export function useListedAutomations(owner: ResourceOwner): {
 					id: automation.id,
 					name: automation.name,
 					state: automation.state,
-					failed: false,
-					pausedAfterFailures: false,
+					pausedAfterFailures: automation.pausedAfterFailures,
 				},
 				bot: runner,
+				definition: automation,
 				conversation: null,
 				mentionsYou: false,
+				...(automation.status && { status: automation.status }),
 			})),
 		isError: definitions.isError,
 	};
 }
 
 /**
- * No automations yet, and how one is made: for someone who may make one, New
- * automation, with asking the bot instead under it. Anyone else is sent to
- * whoever manages the bot, as a bot makes them only for someone who may.
+ * No automations yet, what one does, and how one is made: for someone who may
+ * make one, New automation, with asking the bot instead under it when
+ * `whoToAsk` is given. Anyone else is sent to whoever manages the bot or
+ * project.
  */
 export function NoAutomations({
 	title,
-	owner,
+	ownerName,
+	page,
 	create,
 }: {
 	title: string;
-	/** The bot's name, whose managers make its automations. */
-	owner: string;
+	/** The bot's or project's name, whose managers make its automations. */
+	ownerName: string;
+	/** As `EmptyState`'s: standing in for a whole page. */
+	page?: "min" | "fill";
 	/** For a viewer who may manage the bot's automations; omitted for anyone else. */
 	create?: {
 		/** The element New automation is, such as a link to the form or a button that opens it. */
 		newAutomation: useRender.RenderProp;
 		/** Who could set one up instead, such as the bot, linked to it. */
-		whoToAsk: ReactNode;
+		whoToAsk?: ReactNode;
 	};
 }) {
 	const newAutomation = useRender({
@@ -173,14 +193,16 @@ export function NoAutomations({
 		props: { className: buttonStyles({ size: "sm" }), children: "New automation" },
 	});
 	return (
-		<EmptyState title={title} icon={<RefreshCcw strokeWidth={1.75} />}>
+		<EmptyState title={title} page={page} icon={<RefreshCcw strokeWidth={1.75} />}>
+			An automation runs on a timetable, or when a webhook or a GitHub event arrives, and posts what
+			it did to its own feed.{" "}
 			{create ? (
-				<span className="mt-3 flex flex-col items-center gap-3">
+				<span className="mt-4 flex flex-col items-center gap-3">
 					{newAutomation}
-					<span>Or ask {create.whoToAsk} to set one up.</span>
+					{create.whoToAsk && <span>Or ask {create.whoToAsk} to set one up.</span>}
 				</span>
 			) : (
-				<>Ask someone who manages {owner} to set one up.</>
+				<>Ask someone who manages {ownerName} to set one up.</>
 			)}
 		</EmptyState>
 	);
@@ -195,32 +217,27 @@ export function NoAutomations({
 export function AutomationRow({
 	row,
 	owner,
-	automation,
-	selected,
 	render,
 }: {
 	row: ShownAutomation;
 	/** The bot or project whose automation it is. */
 	owner: ResourceOwner;
-	/** The automation in full, for when it runs, once the workspace's automations are loaded. */
-	automation: Automation | undefined;
-	selected: boolean;
 	/** The element the row is, such as a button that opens the automation where the list is. */
 	render?: useRender.RenderProp;
 }) {
-	// How it last ran is history, which somebody who manages the bot without reaching it does not read.
-	const lastRun = useRecentRuns({
-		projectId: resourceProjectId(owner),
-		automationId: row.automation.id,
-		enabled: resourcePermissions(owner).readHistory,
-	}).data?.items[0];
+	// How it last ran is history, left out for somebody who may not read it.
+	const lastRun = row.status?.latestRun ?? undefined;
 	const paused = row.automation.state === "paused";
 	const status: RunOutcome | undefined = paused
 		? row.automation.pausedAfterFailures
 			? "pausedAfterFailures"
 			: "paused"
 		: lastRun && outcomeOf(lastRun.state, lastRun.posted);
-	const schedule = automation && automationStartsLabel(automation);
+	// Said only of one whose runs the viewer may read, which has none.
+	const neverRan = !status && row.status?.latestRun === null;
+	const when =
+		(row.definition && automationStartsLabel(row.definition)) ??
+		(neverRan ? "Not run yet" : undefined);
 	// Gone wrong: its last run failed, or it paused itself after failing again.
 	const problem =
 		status === "failed"
@@ -232,11 +249,8 @@ export function AutomationRow({
 	return useRender({
 		render: render ?? ownerLink(owner, { page: "automation", automationId: row.automation.id }),
 		props: {
-			"aria-current": selected ? "page" : undefined,
-			className: cn(
-				"focus-ring flex w-full gap-2.5 rounded-lg p-2.5 text-left transition-colors",
-				selected ? "bg-row-selected" : "hover:bg-row-hover",
-			),
+			className:
+				"focus-ring flex w-full gap-2.5 rounded-lg p-2.5 text-left transition-colors hover:bg-row-hover",
 			children: (
 				<>
 					<BotAvatar
@@ -251,7 +265,7 @@ export function AutomationRow({
 							<span
 								className={cn(
 									"min-w-0 flex-1 truncate-fade text-xs",
-									selected || row.mentionsYou
+									row.mentionsYou
 										? "text-foreground"
 										: paused
 											? "text-subtle-foreground"
@@ -271,11 +285,7 @@ export function AutomationRow({
 						</span>
 						<span className="flex min-w-0 items-center gap-3 text-xs">
 							{status && <RunStatus outcome={status} />}
-							{(schedule || !status) && (
-								<span className="min-w-0 truncate text-subtle-foreground">
-									{schedule ?? "Not run yet"}
-								</span>
-							)}
+							{when && <span className="min-w-0 truncate text-subtle-foreground">{when}</span>}
 						</span>
 						{/* Why, in its own words, so what to do about it is on the list. */}
 						{why && <span className="line-clamp-2 text-destructive-text text-xs">{why}</span>}

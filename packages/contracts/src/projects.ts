@@ -85,6 +85,33 @@ export function leastUsedProjectColor(taken: readonly (ProjectColor | null)[]): 
  * membership as well as their role, so a client never has to pair one of these
  * with `visibility` or `isMember` to know whether to draw something.
  */
+/**
+ * What the person may do with what a project holds besides its people and
+ * bots, the same on a project and on a bot, whose are its default
+ * project's: its threads' history, settings, files, connections, computer
+ * and automations.
+ */
+export const resourcePermissionsSchema = Schema.Struct({
+	/** Read its threads and what its automations' runs said, which managing them alone does not give. */
+	readHistory: Schema.Boolean,
+	/** Open its settings: a bot's for whoever may change it, a project's for anyone in it. */
+	openSettings: Schema.Boolean,
+	/** Delete the files made in its threads. */
+	deleteFiles: Schema.Boolean,
+	/** Add, change, sign in and remove its connections, its GitHub app among them. */
+	manageConnections: Schema.Boolean,
+	/** Decide what its computer may reach, and reset and upgrade it. */
+	manageComputer: Schema.Boolean,
+	/** Click and type on its computer's desktop, rather than only watch it. */
+	useDesktop: Schema.Boolean,
+	/** Make, change and delete its automations, and rotate their webhook secrets. */
+	manageAutomations: Schema.Boolean,
+	/** Run its automations by hand. */
+	runAutomations: Schema.Boolean,
+});
+
+export type ResourcePermissions = typeof resourcePermissionsSchema.Type;
+
 export const projectPermissionsSchema = Schema.Struct({
 	/** Change the project's name, address, colour, description, visibility and lead bot. */
 	rename: Schema.Boolean,
@@ -97,18 +124,7 @@ export const projectPermissionsSchema = Schema.Struct({
 	/** Join it from the directory: a public project the person isn't in. */
 	join: Schema.Boolean,
 	delete: Schema.Boolean,
-	/** Delete the files its bots made in it. */
-	deleteFiles: Schema.Boolean,
-	/** Add, change, sign in and remove its connections, its GitHub app among them. */
-	manageConnections: Schema.Boolean,
-	/** Decide what its computer may reach, and reset and upgrade it. */
-	manageComputer: Schema.Boolean,
-	/** Click and type on its computer's desktop, rather than only watch it. */
-	useDesktop: Schema.Boolean,
-	/** Make, change and delete its automations. */
-	manageAutomations: Schema.Boolean,
-	/** Run its automations by hand. */
-	runAutomations: Schema.Boolean,
+	resources: resourcePermissionsSchema,
 });
 
 export type ProjectPermissions = typeof projectPermissionsSchema.Type;
@@ -134,6 +150,16 @@ export const projectSchema = Schema.Struct({
 	leadBotId: Schema.NullOr(uuidSchema),
 	/** Whether the person asking is in it, rather than seeing it in the directory. */
 	isMember: Schema.Boolean,
+	/**
+	 * How many people are in it, as its members list counts them. Given in the
+	 * workspace's list of projects, for a project whose members the person may list.
+	 */
+	memberCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+	/**
+	 * How many bots are in it, as its bots list counts them. Given in the
+	 * workspace's list of projects, for a project whose bots the person may list.
+	 */
+	botCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 	permissions: projectPermissionsSchema,
 	createdAt: isoTimestampSchema,
 });
@@ -172,7 +198,6 @@ export const projectMemberSchema = Schema.Struct({
 	name: Schema.String,
 	email: emailSchema,
 	image: Schema.NullOr(Schema.String),
-	addedAt: isoTimestampSchema,
 	/** Whether they can be taken out of this project. Never an administrator, who is in every one. */
 	removable: Schema.Boolean,
 });

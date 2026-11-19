@@ -1,6 +1,7 @@
 import {
 	type BotPermissions as BotPermissionsView,
 	type ProjectPermissions as ProjectPermissionsView,
+	type ResourcePermissions as ResourcePermissionsView,
 	WORKSPACE_ROLES,
 	type WorkspacePermissions as WorkspacePermissionsView,
 	type WorkspaceRole,
@@ -186,11 +187,14 @@ const WORKSPACE_GRANTS: Record<WorkspaceRole, ReadonlySet<WorkspacePermission>> 
 };
 
 /**
- * The project permissions each role holds in the projects it is a member of.
+ * The project permissions each role holds in the projects people made that it
+ * is a member of.
  *
- * Nobody reaches a project without a `project_member` row. Administrators are no
- * exception: database triggers make them members of every project, as
- * `projectMember` in `packages/core/src/workspaces/sql.ts` describes.
+ * Nobody reaches a project people made without a `project_member` row.
+ * Administrators are no exception: database triggers make them members of
+ * every project people made, as `projectMember` in
+ * `packages/core/src/workspaces/sql.ts` describes. A bot's default project
+ * has no members; what may be done there is `DEFAULT_PROJECT_GRANTS`.
  */
 const ADMINISTRATOR_PROJECT_GRANTS = new Set<ProjectPermission>([
 	"project.read",
@@ -451,6 +455,22 @@ export function projectPermissions(
 			project.isPublic &&
 			mayInWorkspace(actor, "workspace.read"),
 		delete: may("project.delete"),
+		resources: resourcePermissions(actor, project),
+	};
+}
+
+/**
+ * What the caller may do with what the project holds, as the API returns it
+ * on a project and, from its default project, on a bot, so the two agree.
+ */
+export function resourcePermissions(actor: Actor, project: ProjectFacts): ResourcePermissionsView {
+	const may = (permission: ProjectPermission) => mayInProject(actor, permission, project);
+	return {
+		readHistory: may("project.read"),
+		// A bot's settings are for whoever may change it; a project's for anyone in it.
+		openSettings: project.defaultOf
+			? mayOnBot(actor, "bot.update", project.defaultOf)
+			: may("project.read"),
 		deleteFiles: may("project.threads.manage"),
 		manageConnections: may("connection.manage"),
 		manageComputer: may("computer.manage"),
@@ -466,12 +486,9 @@ export function botPermissions(actor: Actor, bot: BotFacts): BotPermissionsView 
 	return {
 		update: may("bot.update"),
 		delete: may("bot.delete"),
-		manageConnections: may("connection.manage"),
-		manageComputer: may("computer.manage"),
-		useDesktop: may("computer.desktop.use"),
-		manageAutomations: may("automation.manage"),
-		runAutomations: may("automation.run"),
 		talk: reachesBot(actor, bot) && actor.workspaceRole !== undefined,
+		// Its default project is nobody's to be in; it follows the bot.
+		resources: resourcePermissions(actor, { isMember: false, defaultOf: bot }),
 	};
 }
 

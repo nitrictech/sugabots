@@ -18,7 +18,7 @@ export function PageFailure() {
 			<EmptyState title="This page could not load">
 				<div className="flex flex-col items-center gap-3">
 					<p>Reload the page to try again.</p>
-					<Button variant="outline" onClick={() => window.location.reload()}>
+					<Button variant="secondary" onClick={() => window.location.reload()}>
 						Reload
 					</Button>
 				</div>

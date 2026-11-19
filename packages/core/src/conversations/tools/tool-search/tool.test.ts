@@ -24,7 +24,7 @@ const sentry: ConnectionPreset = {
 	url: "https://mcp.sentry.dev/mcp",
 };
 
-const connectionsPageUrl = "https://app.example.com/acme/settings/bots/support/connections";
+const connectionsPageUrl = "https://app.example.com/acme/bots/support/connections";
 
 describe("the turn's note on connection tools", () => {
 	it("quotes what a server says about its tools as the server's own text, without hidden characters", () => {
@@ -72,11 +72,15 @@ describe("the turn's note on connection tools", () => {
 		expect(note).toContain("- Sentry (Errors and performance issues)");
 	});
 
-	it("tells the model which connections need signing in again, apart from ones not answering", () => {
+	it("tells the model which connections need signing in again, each with its owner's page, apart from ones not answering", () => {
+		const projectConnectionsPageUrl = "https://app.example.com/acme/projects/launch/connections";
 		const note = toolCatalogNote({
 			catalog: [],
 			unavailable: ["wiki"],
-			signInExpired: ["linear"],
+			signInExpired: [
+				{ handle: "linear", connectionsPageUrl: projectConnectionsPageUrl },
+				{ handle: "notion", connectionsPageUrl },
+			],
 			instructions: {},
 			addable: [],
 			fromProjectAndBot: false,
@@ -87,7 +91,8 @@ describe("the turn's note on connection tools", () => {
 			"aren't answering right now, so their tools can't be found or run: wiki.",
 		);
 		expect(note).toContain("sign-ins have expired");
-		expect(note).toMatch(/signs in again[^\n]*: linear\./);
-		expect(note).toMatch(/linear\.[^\n]*\[Connections\]\(/);
+		expect(note).toContain(
+			`linear ([Connections](${projectConnectionsPageUrl})), notion ([Connections](${connectionsPageUrl})).`,
+		);
 	});
 });

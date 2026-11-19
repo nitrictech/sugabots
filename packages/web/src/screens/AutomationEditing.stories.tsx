@@ -1,9 +1,4 @@
-import type {
-	Automation,
-	AutomationTriggerInput,
-	Bot,
-	WorkspaceAutomation,
-} from "@sugabots/contracts";
+import type { Automation, AutomationTriggerInput, Bot } from "@sugabots/contracts";
 import { automationTriggers, type TestAutomationTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 // A menu is portalled to the body, so reaching it means `screen` rather than the story's canvas.
@@ -20,8 +15,8 @@ import {
 import {
 	appHandlers,
 	StoryApp,
+	storyBots,
 	storyChatDetails,
-	storyProjects,
 	storyWorkspace,
 } from "../story-app.tsx";
 
@@ -37,7 +32,7 @@ const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 const newInRevenue = `/${storyWorkspace.slug}/bots/${growthDesk.handle}/automations/new`;
 
 /** An automation in the workspace list that is a bot's own, as these stories show. */
-type BotsAutomation = WorkspaceAutomation & { bot: Bot };
+type BotsAutomation = { automation: Automation; bot: Bot };
 
 function placed(
 	n: number,
@@ -57,7 +52,7 @@ function placed(
 			triggers: automationTriggers(id, ...[trigger].flat()),
 			state: "enabled",
 			createdById: null,
-			createdByBotId: null,
+			pausedAfterFailures: false,
 			createdAt: "2026-09-01T00:00:00.000Z",
 			updatedAt: "2026-09-01T00:00:00.000Z",
 			...fields,
@@ -148,9 +143,13 @@ const projectRepositories = [
 					"https://github.com/organizations/acme/settings/apps/sugabots-engineering-4b6a",
 				status: "connected",
 				toolCounts: { allow: 5, ask: 2, off: 0 },
-				lastTestedAt: "2026-10-05T09:30:00.000Z",
 				lastTestError: null,
-				connectedBy: "Sam Rivera",
+				connectedBy: {
+					id: "0199a3a0-0000-7000-8000-0000000000c3",
+					name: "Sam Rivera",
+					email: "sam.rivera@example.com",
+					image: null,
+				},
 				createdAt: "2026-10-05T09:30:00.000Z",
 			},
 		]),
@@ -161,7 +160,6 @@ const projectRepositories = [
 			repositories: ["acme/web", "acme/infra"].map((repository) => ({
 				repository,
 				addedByName: "Sam Rivera",
-				addedAt: "2026-10-05T09:30:00.000Z",
 			})),
 		}),
 	),
@@ -183,12 +181,11 @@ const feedOf = (one: BotsAutomation) =>
 	`${one.automation.id.slice(0, -4)}f${one.automation.id.slice(-3)}`;
 
 /**
- * `items` as the workspace's automations, each with its feed beside its
- * bot's automations: the list, each bot's automations, and each feed, empty.
+ * `items` as their bots' automations, each with its feed: each bot's
+ * automations, and each feed, empty.
  */
 function automationsAnswer(items: BotsAutomation[]) {
 	return [
-		http.get(`${API}/workspaces/:workspace/automations`, () => HttpResponse.json({ items })),
 		http.get(`${API}/projects/:projectId/automations`, ({ params }) =>
 			HttpResponse.json(
 				items
@@ -196,17 +193,16 @@ function automationsAnswer(items: BotsAutomation[]) {
 					.filter((automation) => automation.projectId === params.projectId),
 			),
 		),
-		http.get(`${API}/bots/:botId/threads`, ({ params }) =>
+		http.get(`${API}/projects/:projectId/threads`, ({ params }) =>
 			HttpResponse.json({
 				threads: [],
 				automations: items
-					.filter((item) => item.bot.id === params.botId)
+					.filter((item) => item.bot.defaultProjectId === params.projectId)
 					.map(({ automation, bot }) => ({
 						automation: {
 							id: automation.id,
 							name: automation.name,
 							state: automation.state,
-							failed: false,
 							pausedAfterFailures: false,
 						},
 						bot,
@@ -221,6 +217,7 @@ function automationsAnswer(items: BotsAutomation[]) {
 							automationId: automation.id,
 						},
 						mentionsYou: false,
+						status: { failing: false, latestRun: null },
 					})),
 			}),
 		),
@@ -258,14 +255,9 @@ const pageOf = (one: BotsAutomation) =>
 
 type Canvas = ReturnType<typeof within>;
 
-/** The automation's panel, opened with Details if the page didn't open it already. */
+/** The automation's own page, once it has loaded. */
 async function openPanel(canvas: Canvas) {
-	return waitFor(async () => {
-		const existing = canvas.queryByRole("complementary", { name: "Automation" });
-		if (existing) return within(existing);
-		await userEvent.click(canvas.getByRole("button", { name: "Details" }));
-		throw new Error("The automation panel has not opened yet");
-	});
+	return within(await canvas.findByRole("region", { name: "Automation" }));
 }
 
 /** The rows of the panel's Routines or Triggers, its add row last, once the automation has loaded. */
@@ -347,8 +339,8 @@ export const SeveralTriggers = meta.story({
 	play: async ({ canvas }) => {
 		const routines = await sectionRows(canvas, "Routines");
 		await expect(routines.map((row) => row.textContent)).toEqual([
-			"RoutineWeekdays at 9:00",
-			"RoutineFri at 17:00",
+			"Weekdays at 9:00Routine",
+			"Fri at 17:00Routine",
 			"Add routine",
 		]);
 		const triggers = await sectionRows(canvas, "Triggers");
@@ -534,16 +526,7 @@ export const DeliveryIdHeader = meta.story({
 export const DeliveryIdHeaderOnAPhone = meta.story({
 	...DeliveryIdHeader.input,
 	globals: { ...PHONE, theme: "light" },
-	play: async (context) => {
-		await waitFor(async () => {
-			if (context.canvas.queryByRole("complementary", { name: "Automation" })) return;
-			await userEvent.click(
-				context.canvas.getByText("Incident intake", { selector: "button > span > span" }),
-			);
-			throw new Error("The automation panel has not opened yet");
-		});
-		await DeliveryIdHeader.input.play?.(context);
-	},
+	play: (context) => DeliveryIdHeader.input.play?.(context),
 });
 
 /** From Slack, only its signing secret is asked for; Escape puts the saved one back over one pasted in. */
@@ -568,9 +551,9 @@ export const SourceMenu = meta.story({
 		await userEvent.click(await dialog.findByRole("button", { name: "Source: Generic" }));
 		const menu = await screen.findByRole("menu");
 		for (const source of ["Generic", "GitHub", "Stripe", "Slack", "Linear"]) {
-			await expect(within(menu).getByRole("menuitem", { name: source })).toBeInTheDocument();
+			await expect(within(menu).getByRole("menuitemradio", { name: source })).toBeInTheDocument();
 		}
-		await userEvent.click(within(menu).getByRole("menuitem", { name: "Stripe" }));
+		await userEvent.click(within(menu).getByRole("menuitemradio", { name: "Stripe" }));
 		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 	},
 });
@@ -644,7 +627,7 @@ export const NewAutomation = meta.story({
 	render: () => <StoryApp path={newInRevenue} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "New automation" }),
+			await canvas.findByRole("heading", { level: 1, name: "New automation" }),
 		).toBeInTheDocument();
 		await expect(canvas.getByText("No routines")).toBeInTheDocument();
 		await expect(canvas.getByText("No triggers")).toBeInTheDocument();
@@ -672,13 +655,21 @@ export const ChoosingDays = meta.story({
 /** Somebody who may not manage a bot's automations reads them without the controls to change them. */
 export const AsAMember = meta.story({
 	beforeEach({ msw }) {
-		const asMember = storyProjects.map((project) => ({
-			...project,
-			permissions: { ...project.permissions, manageAutomations: false, runAutomations: false },
+		// A bot's automations are its default project's, so what may be done with them is the bot's.
+		const asMember = storyBots.map((bot) => ({
+			...bot,
+			permissions: {
+				...bot.permissions,
+				resources: {
+					...bot.permissions.resources,
+					manageAutomations: false,
+					runAutomations: false,
+				},
+			},
 		}));
 		msw.use(
 			...automationsAnswer(everyAutomation),
-			...appHandlers({ role: "member", projects: asMember }),
+			...appHandlers({ role: "member", bots: asMember }),
 		);
 	},
 	render: () => <StoryApp path={pageOf(overnight)} />,

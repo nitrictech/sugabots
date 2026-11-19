@@ -3,11 +3,9 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/ht
 import { uploadAttachmentQuerySchema, uploadedAttachmentSchema } from "../../attachments.ts";
 import {
 	approvalInboxSchema,
+	attentionCountsSchema,
 	automationFeedSchema,
-	botThreadListSchema,
 	chatHistoryPageSchema,
-	chatListQuerySchema,
-	chatListSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
 	directMessageListItemSchema,
@@ -15,8 +13,11 @@ import {
 	firstThreadMessageSchema,
 	inboxFeedSchema,
 	newDirectMessageSchema,
+	projectThreadListSchema,
 	projectThreadMarkersSchema,
 	projectThreadSchema,
+	recentThreadsQuerySchema,
+	recentThreadsSchema,
 	sentDirectMessageSchema,
 	startedThreadSchema,
 	threadNameSchema,
@@ -28,10 +29,21 @@ import { Session } from "../middleware.ts";
 
 export class ChatsApi extends HttpApiGroup.make("chats")
 	.add(
-		HttpApiEndpoint.get("list", "/workspaces/:workspace/chats", {
+		/** A project's threads and automations: a bot's are its default project's. */
+		HttpApiEndpoint.get("threads", "/projects/:projectId/threads", {
+			params: { projectId: Schema.String },
+			success: projectThreadListSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.get("recentThreads", "/workspaces/:workspace/chats/recent-threads", {
 			params: { workspace: workspaceIdOrSlugSchema },
-			query: chatListQuerySchema,
-			success: chatListSchema,
+			query: recentThreadsQuerySchema,
+			success: recentThreadsSchema,
+			error: refused,
+		}),
+		HttpApiEndpoint.get("attention", "/workspaces/:workspace/chats/attention", {
+			params: { workspace: workspaceIdOrSlugSchema },
+			success: attentionCountsSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.get("projectMarkers", "/workspaces/:workspace/chats/project-markers", {
@@ -48,19 +60,6 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			params: { workspace: workspaceIdOrSlugSchema },
 			success: approvalInboxSchema,
 			error: refused,
-		}),
-		/** A bot's threads, which are its default project's, and its automations. */
-		HttpApiEndpoint.get("botThreads", "/bots/:botId/threads", {
-			params: { botId: Schema.String },
-			success: botThreadListSchema,
-			error: refused,
-		}),
-		/** Starts a thread with a bot, with its first message. */
-		HttpApiEndpoint.post("startThread", "/bots/:botId/threads", {
-			params: { botId: Schema.String },
-			payload: firstThreadMessageSchema,
-			success: startedThreadSchema.pipe(HttpApiSchema.status(201)),
-			error: [BadRequest, Conflict, ...refused],
 		}),
 		/**
 		 * Starts the thread in which a bot the caller just made interviews them to
@@ -103,19 +102,15 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 				error: refused,
 			},
 		),
-		/** Starts a thread in the project, for everyone in it, with its first message. */
+		/**
+		 * Starts a thread in the project, for everyone in it, with its first
+		 * message. A bot's thread is started in its default project.
+		 */
 		HttpApiEndpoint.post("startProjectThread", "/projects/:projectId/threads", {
 			params: { projectId: Schema.String },
 			payload: firstThreadMessageSchema,
 			success: startedThreadSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
-		}),
-		/** Starts a thread in the project, for everyone in it, called what it is given. */
-		HttpApiEndpoint.post("startNamedThread", "/projects/:projectId/chats", {
-			params: { projectId: Schema.String },
-			payload: threadNameSchema,
-			success: projectThreadSchema.pipe(HttpApiSchema.status(201)),
-			error: [BadRequest, ...refused],
 		}),
 		/** Renames one of the project's threads that is not archived. */
 		HttpApiEndpoint.put("renameThread", "/conversations/:conversationId/name", {
@@ -156,6 +151,16 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		}),
 		HttpApiEndpoint.post("markRead", "/conversations/:conversationId/read", {
 			params: { conversationId: Schema.String },
+			success: HttpApiSchema.Empty(204),
+			error: refused,
+		}),
+		/**
+		 * Reads, for the caller, every conversation they reach in the workspace
+		 * that holds something they have not read, as `markRead` reads one: the
+		 * automation runs and collaborations listed in each go with it.
+		 */
+		HttpApiEndpoint.post("markAllRead", "/workspaces/:workspace/chats/read", {
+			params: { workspace: workspaceIdOrSlugSchema },
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),

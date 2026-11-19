@@ -10,6 +10,7 @@ import type {
 import { UserText, userText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
+import { computerProjectIdOf } from "../../authorization/access.ts";
 import {
 	type Database,
 	type Executor,
@@ -123,7 +124,9 @@ export const make = Effect.gen(function* () {
 						Database | Transaction
 					> {
 						const request = run.request;
-						const loaded = yield* query((db) => loadTurnContext(db, request.conversationId));
+						const loaded = yield* query((db) =>
+							loadTurnContext(db, request.conversationId, request.botId),
+						);
 						if (!loaded) return yield* refuseRun(run, "The conversation is gone", CANCELLED);
 						// In a project the bot has to be one of the project's, whoever a
 						// mention picks; in a bot's own conversation, it has to be that bot. A
@@ -227,17 +230,12 @@ export const make = Effect.gen(function* () {
 									color: speaker.color,
 									defaultProjectId: speaker.defaultProject?.id ?? null,
 								},
-								// The rule `computerProjectIdOf` writes in SQL: a collaborator works
-								// in a conversation of its own, with what is its own.
-								projectId:
-									loaded.kind === "collaboration"
-										? (speaker.defaultProject?.id ?? null)
-										: loaded.projectId,
+								projectId: loaded.computerProjectId,
 								reason: request.reason,
 								// A bot's default project is where its own threads are, not a project people made.
 								project:
 									loaded.project && loaded.project.defaultOfBotId === null
-										? { name: loaded.project.name }
+										? { name: loaded.project.name, slug: loaded.project.slug }
 										: null,
 								workspaceName: loaded.workspace.name,
 								workspaceSlug: loaded.workspace.slug,
@@ -358,10 +356,11 @@ export interface TurnContext {
 	/** Why this bot has the turn, when the trigger recorded it. */
 	reason: TurnReason | undefined;
 	/**
-	 * The project people made that the conversation is in, by name; none in a
-	 * bot's own conversation, its threads in its default project included.
+	 * The project people made that the conversation is in, by name and slug;
+	 * none in a bot's own conversation, its threads in its default project
+	 * included.
 	 */
-	project: { name: string } | null;
+	project: { name: string; slug: string } | null;
 	workspaceName: string;
 	workspaceSlug: string;
 	/** The workspace's timezone, which the routines the bot sets up run in. */
@@ -503,15 +502,20 @@ const SPEAKER_RELATIONS = { defaultProject: { columns: { id: true } } } as const
 /**
  * Everything the model is told about the conversation, in one statement: the
  * conversation with its workspace, its project and the bots in it or the bot it is
- * with, the people and bots in it, its compaction, and its newest completed
- * messages since the compaction kept them, with the parts placed in them.
+ * with, the project whose computer and connections the turn of `botId` uses, the
+ * people and bots in it, its compaction, and its newest completed messages since
+ * the compaction kept them, with the parts placed in them.
  */
 const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 	db: Executor,
 	conversationId: string,
+	botId: string,
 ) {
 	return yield* db.query.placedConversation.findFirst({
 		where: { id: conversationId },
+		extras: {
+			computerProjectId: (row) => computerProjectIdOf(row, sql`${botId}::uuid`),
+		},
 		columns: {
 			id: true,
 			workspaceId: true,
@@ -525,7 +529,7 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 		with: {
 			workspace: { columns: { name: true, slug: true, timeZone: true } },
 			project: {
-				columns: { id: true, name: true, defaultOfBotId: true },
+				columns: { id: true, name: true, slug: true, defaultOfBotId: true },
 				with: { bots: { columns: SPEAKER_COLUMNS, with: SPEAKER_RELATIONS } },
 			},
 			bot: { columns: SPEAKER_COLUMNS, with: SPEAKER_RELATIONS },

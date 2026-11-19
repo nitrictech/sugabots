@@ -1,9 +1,15 @@
 import type { Bot, Project } from "@sugabots/contracts";
 import { createRoute, Navigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { useBotWithHandle } from "@/lib/bots.ts";
-import { signInFailureReason } from "@/lib/connections.ts";
-import { botSettingsLink, projectSettingsLink } from "@/lib/links.ts";
+import {
+	botConnectionLink,
+	botConnectionsLink,
+	botSettingsLink,
+	projectConnectionLink,
+	projectConnectionsLink,
+	projectSettingsLink,
+} from "@/lib/links.ts";
 import { findProject, useProjects } from "@/lib/projects.ts";
 import {
 	botSettingsPage,
@@ -14,7 +20,6 @@ import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
 import { Panes } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
-import { optionalString } from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
 /*
@@ -69,25 +74,26 @@ export const settingsProjectRoute = createRoute({
 	component: SettingsProjectRoute,
 });
 
-/** One of a project's pages besides General: People, Bots, Connections or Computer. */
+/**
+ * One of a project's pages besides General: People, Bots or Computer.
+ * `connections` here redirects to the project's own Connections page, for
+ * links already sent out.
+ */
 export const settingsProjectPageRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/projects/$project/$page",
-	validateSearch: (search: Record<string, unknown>): { oauth_error?: string } => ({
-		oauth_error: optionalString(search.oauth_error),
-	}),
-	// A sign-in error shown for one project must not follow you to the next.
-	remountDeps: ({ params }) => [params.workspace, params.project],
 	loader: () => WorkspaceSettings.preload(),
 	component: SettingsProjectPageRoute,
 });
 
-/** One of a project's connections, by its id. */
+/** Redirects a project's connection's settings address to its own page, for links already sent out. */
 export const settingsProjectConnectionRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/projects/$project/connections/$connection",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsProjectConnectionRoute,
+	component: () => {
+		const { project, connection } = settingsProjectConnectionRoute.useParams();
+		return <Navigate {...projectConnectionLink({ slug: project }, { id: connection })} replace />;
+	},
 });
 
 export const settingsBotRoute = createRoute({
@@ -97,26 +103,29 @@ export const settingsBotRoute = createRoute({
 	component: SettingsBotRoute,
 });
 
-/** One of a bot's pages besides its own: Connections or Computer. */
+/**
+ * One of a bot's pages besides its own: Computer. `connections` here
+ * redirects to the bot's own Connections page, for links already sent out.
+ */
 export const settingsBotPageRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/bots/$bot/$page",
-	validateSearch: (search: Record<string, unknown>): { oauth_error?: string } => ({
-		oauth_error: optionalString(search.oauth_error),
-	}),
-	// A sign-in error shown for one bot must not follow you to the next.
-	remountDeps: ({ params }) => [params.workspace, params.bot],
 	loader: () => WorkspaceSettings.preload(),
 	component: SettingsBotPageRoute,
 });
 
-/** One of a bot's connections, by its id. */
+/** Redirects a bot's connection's settings address to its own page, for links already sent out. */
 export const settingsBotConnectionRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/bots/$bot/connections/$connection",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsBotConnectionRoute,
+	component: () => {
+		const { bot, connection } = settingsBotConnectionRoute.useParams();
+		return <Navigate {...botConnectionLink({ handle: bot }, { id: connection })} replace />;
+	},
 });
+
+/** The settings page segment that redirects to the owner's Connections page. */
+const MOVED_CONNECTIONS_PAGE = "connections";
 
 /** One model provider, by its id. */
 export const settingsProviderRoute = createRoute({
@@ -175,10 +184,12 @@ function SettingsProjectRoute() {
 
 function SettingsProjectPageRoute() {
 	const { project: slug, page: pageSegment } = settingsProjectPageRoute.useParams();
-	const signInError = useSignInErrorOnce(settingsProjectPageRoute);
 	const { data: projects, isPending, error } = useProjects();
 	const project = memberProject(projects, slug);
 	const page = projectSettingsPage(pageSegment);
+	if (pageSegment === MOVED_CONNECTIONS_PAGE) {
+		return <Navigate {...projectConnectionsLink({ slug })} replace />;
+	}
 	if (!page) {
 		return <Navigate {...projectSettingsLink({ slug })} replace />;
 	}
@@ -186,54 +197,9 @@ function SettingsProjectPageRoute() {
 	if (!project) return <ProjectSettingsMissing projects={projects} slug={slug} error={error} />;
 	return (
 		<SettingsLayout>
-			<WorkspaceSettings
-				section="projects"
-				selectedProjectId={project.id}
-				projectPage={page}
-				connectionSignInError={signInError && signInFailureReason(signInError)}
-			/>
+			<WorkspaceSettings section="projects" selectedProjectId={project.id} projectPage={page} />
 		</SettingsLayout>
 	);
-}
-
-function SettingsProjectConnectionRoute() {
-	const { project: slug, connection } = settingsProjectConnectionRoute.useParams();
-	const { data: projects, isPending, error } = useProjects();
-	const project = memberProject(projects, slug);
-	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!project) return <ProjectSettingsMissing projects={projects} slug={slug} error={error} />;
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings
-				section="projects"
-				selectedProjectId={project.id}
-				projectPage="connections"
-				selectedConnectionId={connection}
-			/>
-		</SettingsLayout>
-	);
-}
-
-/**
- * Why the sign-in that returned to `route`'s page did not finish, as its
- * `?oauth_error=` said, taken out of the address once read and kept, so a
- * reload does not show it twice.
- */
-function useSignInErrorOnce(
-	route: typeof settingsProjectPageRoute | typeof settingsBotPageRoute,
-): string | undefined {
-	const { oauth_error: oauthError } = route.useSearch();
-	const navigate = route.useNavigate();
-	const [signInError, setSignInError] = useState(oauthError);
-	useEffect(() => {
-		if (oauthError === undefined) return;
-		setSignInError(oauthError);
-		void navigate({
-			search: (previous) => ({ ...previous, oauth_error: undefined }),
-			replace: true,
-		});
-	}, [oauthError, navigate]);
-	return signInError;
 }
 
 /**
@@ -297,8 +263,10 @@ function SettingsBotRoute() {
 
 function SettingsBotPageRoute() {
 	const { bot, page: pageSegment } = settingsBotPageRoute.useParams();
-	const signInError = useSignInErrorOnce(settingsBotPageRoute);
 	const page = botSettingsPage(pageSegment);
+	if (pageSegment === MOVED_CONNECTIONS_PAGE) {
+		return <Navigate {...botConnectionsLink({ handle: bot })} replace />;
+	}
 	if (!page) {
 		return <Navigate {...botSettingsLink({ handle: bot })} replace />;
 	}
@@ -309,30 +277,9 @@ function SettingsBotPageRoute() {
 				bot.assistant && page === "computer" ? (
 					<Navigate {...botSettingsLink(bot)} replace />
 				) : (
-					<WorkspaceSettings
-						section="bots"
-						selectedBot={bot}
-						botPage={page}
-						connectionSignInError={signInError && signInFailureReason(signInError)}
-					/>
+					<WorkspaceSettings section="bots" selectedBot={bot} botPage={page} />
 				)
 			}
-		</SettingsBot>
-	);
-}
-
-function SettingsBotConnectionRoute() {
-	const { bot, connection } = settingsBotConnectionRoute.useParams();
-	return (
-		<SettingsBot handle={bot}>
-			{(bot) => (
-				<WorkspaceSettings
-					section="bots"
-					selectedBot={bot}
-					botPage="connections"
-					selectedConnectionId={connection}
-				/>
-			)}
 		</SettingsBot>
 	);
 }

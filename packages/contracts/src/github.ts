@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-import { isoTimestampSchema } from "./timestamps.ts";
 
 /**
  * Where GitHub sends the browser, under the API, once a project's GitHub App is
@@ -102,7 +101,6 @@ export const connectionRepositoriesSchema = Schema.Struct({
 			repository: repositoryPathSchema,
 			/** Who added it; null once they've left. */
 			addedByName: Schema.NullOr(Schema.String),
-			addedAt: isoTimestampSchema,
 		}),
 	),
 });

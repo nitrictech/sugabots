@@ -41,7 +41,6 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 				if (outcome.at) {
 					back.searchParams.set("workspace", outcome.at.workspaceId);
 					back.searchParams.set("project", outcome.at.projectId);
-					if (outcome.at.botId) back.searchParams.set("bot", outcome.at.botId);
 				}
 				if (outcome.kind === "done") back.searchParams.set("connection", outcome.connectionId);
 				if (outcome.kind === "failed") back.searchParams.set("github_error", outcome.failure);

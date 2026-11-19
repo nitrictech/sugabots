@@ -29,11 +29,6 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 	};
 }
 
-/** A message in one of `lead`'s own threads, in its default project, where it is the only bot. */
-function botsOwnThread(overrides: Partial<FloorInput> = {}): FloorInput {
-	return input({ mentionableBots: [{ id: lead, handle: "lead-bot" }], ...overrides });
-}
-
 const turns = (...bots: Array<{ botId: string; reason: string }>) => ({ kind: "turns", bots });
 
 describe("a person's message in a project's thread", () => {
@@ -99,23 +94,6 @@ describe("a person's message in a project's thread", () => {
 		expect(
 			decideFloor(input({ lead: { id: lead, hasModel: false }, content: "@sam can you look?" })),
 		).toEqual({ kind: "nobody" });
-	});
-});
-
-describe("a person's message in a bot's own thread", () => {
-	it("always goes to the bot, whichever other bots it mentions", () => {
-		expect(decideFloor(botsOwnThread({ content: "@reviewer, thoughts?" }))).toEqual(
-			turns({ botId: lead, reason: "default" }),
-		);
-		expect(decideFloor(botsOwnThread({ content: "Hello" }))).toEqual(
-			turns({ botId: lead, reason: "default" }),
-		);
-	});
-
-	it("gives the bot an optional turn when it mentions only people", () => {
-		expect(decideFloor(botsOwnThread({ content: "@sam can you look?" }))).toEqual(
-			turns({ botId: lead, reason: "optional" }),
-		);
 	});
 });
 

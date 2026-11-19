@@ -30,10 +30,10 @@ import { useWorkspace } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SETTINGS_CARD, SettingsGroup, SettingsPage } from "@/ui/settings-page.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
-import { LetterTile } from "./letter-tile.tsx";
 import { ProviderTile } from "./ProviderSettings.tsx";
 
 /**

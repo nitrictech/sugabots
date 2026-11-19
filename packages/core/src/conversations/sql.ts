@@ -476,11 +476,24 @@ export type TurnReason =
 	| "default"
 	| "optional"
 	| "collaboration"
-	// An automation ran, whatever started it. Turns and the turn workflow's payload store the value, so it stays as it is.
-	| "routine"
+	// An automation ran, whatever started it: a routine, a trigger or somebody by hand.
+	| "automation"
 	| "resume"
 	| "interview"
 	| "brief";
+
+/**
+ * A turn's reason as turns and the turn workflow's payloads store it: an
+ * automation's run is stored as `routine`, which turns already stored and
+ * workflows already running hold.
+ */
+export type StoredTurnReason = Exclude<TurnReason, "automation"> | "routine";
+
+export const storedTurnReason = (reason: TurnReason): StoredTurnReason =>
+	reason === "automation" ? "routine" : reason;
+
+export const turnReasonOfStored = (stored: StoredTurnReason): TurnReason =>
+	stored === "routine" ? "automation" : stored;
 
 export type TurnStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
 
@@ -521,7 +534,7 @@ export const turn = pgTable(
 		/** Server-owned AI SDK messages needed to continue after tool approval. */
 		checkpoint: jsonb("checkpoint").$type<unknown>(),
 		// Why this bot got the turn, for reading a routing decision back later.
-		reason: text("reason").$type<TurnReason>(),
+		reason: text("reason").$type<StoredTurnReason>(),
 		error: text("error").$type<UserText>(),
 		startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
 		finishedAt: timestamp("finished_at", { withTimezone: true }),

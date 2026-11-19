@@ -7,13 +7,6 @@ import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SettingsNameRow } from "@/ui/settings-page.tsx";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
 
-/**
- * The shared components, tested for the invariants that are the reason they are
- * shared — an icon button always has a name, a dialog is dismissable — rather
- * than for the utilities they happen to carry. Classes are the design's to
- * change; these are not.
- */
-
 afterEach(cleanup);
 
 describe("IconButton", () => {
@@ -80,7 +73,7 @@ describe("PersonAvatar", () => {
 			const [small, large] = screen
 				.getAllByTitle("Rowan Ellis")
 				.map((avatar) => avatar.querySelector("img")?.getAttribute("src"));
-			expect(small).toBeDefined();
+			expect(small).toEqual(expect.stringContaining("gravatar.com/avatar/"));
 			expect(small).toBe(large);
 		});
 	});

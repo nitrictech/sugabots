@@ -5,8 +5,8 @@ import { type ReactNode, useState } from "react";
 import { cast } from "@/cast";
 import { BotAvatar } from "@/components/bot-avatar";
 import { ChatAvatar } from "@/components/chat";
+import { DemoCard } from "@/components/demo-card";
 import { riseIn } from "@/components/reveal";
-import { Card } from "@/components/ui/card";
 import { ChoiceChips } from "@/components/ui/choice-chips";
 
 const parts = {
@@ -63,7 +63,7 @@ export function ProjectMap() {
 	const bots = [cast.tripPlanner, cast.budgetKeeper];
 
 	return (
-		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
+		<DemoCard>
 			<div className="flex items-center gap-3 border-b px-5 py-4">
 				<span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
 					<HashIcon className="size-5" />
@@ -139,6 +139,6 @@ export function ProjectMap() {
 					</AnimatePresence>
 				</div>
 			</div>
-		</Card>
+		</DemoCard>
 	);
 }

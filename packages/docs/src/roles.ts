@@ -32,7 +32,7 @@ export const roleAbilities: readonly RoleAbility[] = [
 		note: "The owner and admins are in every project",
 	},
 	{
-		label: "Change their Personal Assistant's look and connections",
+		label: "Change their Personal Assistant's name, look and connections",
 		roles: EVERYONE,
 	},
 	{ label: "Create bots", roles: ALL_BUT_VIEWERS },
@@ -44,12 +44,12 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Answer approvals from automation runs",
 		roles: ALL_BUT_VIEWERS,
-		note: BOTS_THEY_MADE,
+		note: "Members, for bots they made; the owner and admins, for every bot and project",
 	},
 	{
-		label: "Run a bot's automations now",
+		label: "Run automations now",
 		roles: ALL_BUT_VIEWERS,
-		note: "Bots they can talk to",
+		note: "Projects they're in, and bots they can talk to",
 	},
 	{
 		label: "Answer a bot's approval in a conversation",
@@ -57,9 +57,9 @@ export const roleAbilities: readonly RoleAbility[] = [
 		note: "Threads of bots they can talk to, and projects they're in",
 	},
 	{
-		label: "Use a bot's desktop",
+		label: "Use a project's desktop",
 		roles: ALL_BUT_VIEWERS,
-		note: "Bots they can talk to; viewers can watch",
+		note: "Projects they're in, and bots they can talk to; viewers can watch",
 	},
 	{ label: "Create projects", roles: ALL_BUT_VIEWERS },
 	{
@@ -72,7 +72,11 @@ export const roleAbilities: readonly RoleAbility[] = [
 		roles: ["member", "viewer"],
 		note: "The owner and admins stay in every project",
 	},
-	{ label: "Rename and delete projects, and delete their files", roles: ADMINISTRATORS },
+	{
+		label:
+			"Rename and delete projects, manage their connections, computers and automations, and delete their files",
+		roles: ADMINISTRATORS,
+	},
 	{ label: "See that private bots exist, but not their threads", roles: ADMINISTRATORS },
 	{ label: "Connect models and web search", roles: ADMINISTRATORS },
 	{ label: "See what the workspace's models cost", roles: ADMINISTRATORS },

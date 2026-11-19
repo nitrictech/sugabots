@@ -143,7 +143,6 @@ export const make = Effect.gen(function* () {
 				addedHosts: added.map((row) => ({
 					host: row.host,
 					addedByName: nameOf(names, row.addedById),
-					addedAt: row.createdAt.toISOString(),
 				})),
 				blockedHosts: blocked.map((row) => ({
 					host: row.host,
@@ -170,7 +169,6 @@ export const make = Effect.gen(function* () {
 				addedHosts: projectAdded.map((row) => ({
 					host: row.host,
 					addedByName: nameOf(names, row.addedById),
-					addedAt: row.createdAt.toISOString(),
 					blockedBy: blockOn(row.host, blocks) ?? null,
 				})),
 			} satisfies ProjectComputerNetwork;

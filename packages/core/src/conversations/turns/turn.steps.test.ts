@@ -7,6 +7,7 @@ import {
 import { tool } from "ai";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { CurrentActor } from "../../authorization/current-actor.ts";
 import { effectRunner, type RunEffect } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
@@ -613,7 +614,7 @@ describe("runSegment", () => {
 		async ({ disabledTools, called }) => {
 			const { execution, turns } = fakes();
 			const askedBy = "0199a3a0-0000-7000-8000-0000000000f1";
-			const create = vi.fn(() => Effect.fail(new BotAutomations.NobodyAsked()));
+			const create = vi.fn(() => Effect.fail(new CurrentActor.NobodyAsked()));
 			let outcome: unknown;
 			const model = Models.fromStream((input) =>
 				Effect.sync(() =>

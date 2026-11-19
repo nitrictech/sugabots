@@ -1,6 +1,7 @@
 import {
 	type Automation,
 	type AutomationTrigger,
+	type AutomationTriggerInput,
 	MAX_AUTOMATION_TRIGGERS,
 	MIN_WEBHOOK_SECRET_CHARACTERS,
 } from "@sugabots/contracts";
@@ -19,6 +20,9 @@ export interface InProject {
 	projectId: string;
 	automationId: string;
 }
+
+/** A routine as it is written: when it repeats, and in which timezone. */
+export type RoutineInput = Extract<AutomationTriggerInput, { kind: "routine" }>;
 
 /** An automation of a project in a workspace. */
 export interface Scope {
@@ -66,8 +70,8 @@ export function toAutomation(
 		instructions: row.instructions,
 		triggers: triggers.map(toTrigger),
 		state: row.state,
+		pausedAfterFailures: row.pausedAfterFailuresAt !== null,
 		createdById: row.createdById,
-		createdByBotId: row.createdByBotId,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 	};
@@ -190,6 +194,20 @@ export class AutomationTriggerKindChanged
 {
 	get userMessage() {
 		return userText`A trigger keeps its kind. Add a trigger of the other kind instead, and remove this one.`;
+	}
+}
+
+/**
+ * A routine changed only while it is all that starts its automation, as a bot
+ * changes one: one with another routine or a trigger has those set up in
+ * settings.
+ */
+export class TriggerSetInSettings
+	extends Data.TaggedError("TriggerSetInSettings")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`That automation has more than one routine, or a trigger, which only its Automations page can change. Its name, instructions and whether it is paused can still be changed here.`;
 	}
 }
 

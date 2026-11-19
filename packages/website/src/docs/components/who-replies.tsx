@@ -2,8 +2,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { cast } from "@/cast";
 import { type ChatBot, ChatMessage, ChatText } from "@/components/chat";
+import { DemoCard } from "@/components/demo-card";
 import { riseIn } from "@/components/reveal";
-import { Card } from "@/components/ui/card";
 import { ChoiceChips } from "@/components/ui/choice-chips";
 
 interface Scenario {
@@ -46,7 +46,7 @@ export function WhoReplies() {
 	const scenario: Scenario = scenarios[picked];
 
 	return (
-		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
+		<DemoCard>
 			<ChoiceChips
 				label="In a thread with Trip Planner:"
 				labelClassName="float-left pr-1 text-sm font-semibold"
@@ -88,6 +88,6 @@ export function WhoReplies() {
 					</motion.p>
 				</motion.div>
 			</AnimatePresence>
-		</Card>
+		</DemoCard>
 	);
 }

@@ -75,9 +75,9 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 		});
 	});
 
-	it("makes a bot's own app in its default project, named for the bot, and returns to the bot", async () => {
+	it("makes a bot's own app in its default project, named for the bot, and returns to that project", async () => {
 		const fixture = await workspaceWithProject("Own");
-		const { workspaceId, botId, botProjectId, adminId } = fixture;
+		const { workspaceId, botProjectId, adminId } = fixture;
 		const form = await as(adminId).start({ projectId: botProjectId, organization: undefined });
 		expect(JSON.parse(form.manifest).name).toMatch(/^Sugabots Builder [0-9a-f]{4}$/);
 
@@ -90,7 +90,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 
 		expect(installed).toMatchObject({
 			kind: "done",
-			at: { workspaceId, projectId: botProjectId, botId },
+			at: { workspaceId, projectId: botProjectId },
 		});
 		expect(
 			await runOnPostgres(connections.forProject({ workspaceId, projectId: botProjectId })),
@@ -131,12 +131,12 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 
 		expect(notOurs).toEqual({
 			kind: "failed",
-			at: { workspaceId, projectId, botId: null },
+			at: { workspaceId, projectId },
 			failure: "github",
 		});
 		expect(installed).toEqual({
 			kind: "done",
-			at: { workspaceId, projectId, botId: null },
+			at: { workspaceId, projectId },
 			connectionId: pending?.id,
 		});
 		expect(await listedIn(fixture)).toMatchObject([
@@ -164,7 +164,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 		expect(url).toMatch(/^https:\/\/github\.com\/apps\/acme-sugabots\/installations\/new\?/);
 		expect(again).toEqual({
 			kind: "done",
-			at: { workspaceId, projectId, botId: null },
+			at: { workspaceId, projectId },
 			connectionId,
 		});
 		expect(await listedIn(fixture)).toMatchObject([{ url: "https://github.com/acme-labs" }]);
@@ -183,7 +183,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 
 		expect(meanwhile).toEqual({
 			kind: "failed",
-			at: { workspaceId, projectId, botId: null },
+			at: { workspaceId, projectId },
 			failure: "github",
 		});
 		await expect(as(adminId).start({ projectId, organization: undefined })).rejects.toMatchObject({
@@ -231,7 +231,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub Apps, against Postgres", () =
 
 		expect(outcome).toEqual({
 			kind: "failed",
-			at: { workspaceId, projectId, botId: null },
+			at: { workspaceId, projectId },
 			failure: "cancelled",
 		});
 	});

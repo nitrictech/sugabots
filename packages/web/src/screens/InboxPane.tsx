@@ -51,7 +51,7 @@ export function InboxPane({
 	const automationId = useConversation(conversationId).data?.automation?.id;
 	const owner = conversationOwner(conversationPlace);
 	const openClassName = cn(
-		buttonStyles({ variant: "outline", size: "sm" }),
+		buttonStyles({ variant: "secondary", size: "sm" }),
 		"shrink-0 max-md:hidden",
 	);
 	// A phone shows the conversation itself, whole, with Back to Inbox; it needs no way to another copy of it.

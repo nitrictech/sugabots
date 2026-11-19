@@ -4,14 +4,15 @@ import type {
 	AnsweredApproval,
 	ApprovalInbox,
 	ApprovalRequest,
-	BotMarker,
-	BotThreadList,
+	AttentionCounts,
+	BotThread,
 	ChatHistoryEntry,
 	ChatHistoryPage,
-	ChatList,
 	ChatMessageItem,
 	ChatMessagesPage,
 	ChatPageQuery,
+	ConversationKind,
+	ConversationPlace,
 	DirectMessageList,
 	DirectMessageListItem,
 	InboxFeed,
@@ -19,7 +20,9 @@ import type {
 	ListedThread,
 	PersonParticipant,
 	ProjectMarker,
+	ProjectThreadList,
 	ProjectThreadMarkers,
+	RecentThreads,
 	ToolApprovalDeciders,
 } from "@sugabots/contracts";
 import {
@@ -39,6 +42,7 @@ import {
 	type DBQueryConfig,
 	desc,
 	eq,
+	exists,
 	getColumns,
 	gt,
 	inArray,
@@ -57,6 +61,7 @@ import {
 	computerProjectIdOf,
 	mayDecideToolCall,
 	projectStandingsFor,
+	projectStandingsOf,
 	ResourceHidden,
 } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
@@ -70,15 +75,14 @@ import {
 	automationFeed,
 	automationRun,
 	bot,
-	botSummary,
 	collaboration,
+	conversationParticipant,
 	conversationRead,
 	directMessageMember,
 	message,
 	OPENABLE_CONVERSATION_KINDS,
 	type PlacedConversationRow,
 	placedConversation,
-	project,
 	toolCall,
 	turn,
 	user,
@@ -86,16 +90,22 @@ import {
 } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { personFacingBotRow, toBot } from "../../workspaces/bots/bot.ts";
-import { isPinnedBy } from "../../workspaces/bots/bot-reads.ts";
-import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
-import { latestRunFailedUnseen, resultPosted, runIdOf } from "../automations/execution.ts";
+import { pinnedBy } from "../../workspaces/bots/bot.ts";
+import {
+	latestRunOf,
+	listStatusColumns,
+	resultPosted,
+	runIdOf,
+	toListStatus,
+	unseenAutomationFailure,
+} from "../automations/execution.ts";
 import { type CursorPoint, decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
 import {
 	authorRow,
 	botColumns,
 	messageFromRelations,
 	messageRelations,
+	namedPersonColumns,
 	personColumns,
 	recentParticipantsOf,
 	toParticipant,
@@ -109,23 +119,31 @@ import { toAutomationFeed, toDirectMessage, toProjectThread } from "./conversati
 
 /**
  * What the chat screens show, of the conversations the current actor can see:
- * a project's threads, a bot's threads, and a conversation's two
- * timelines.
+ * a project's threads (a bot's are its default project's), and a
+ * conversation's two timelines.
  */
 export interface Interface {
-	/** The threads of one project, `project` by its id or slug, of a workspace by its id or its slug. */
-	readonly list: (input: {
-		workspace: string;
-		project: string;
-	}) => Effect.Effect<ChatList, AuthorizationDenied, CurrentActor.Service>;
-	/** The threads and automations of the bot `botId`. Hidden unless the actor reaches it. */
-	readonly botThreads: (
-		botId: string,
-	) => Effect.Effect<BotThreadList, AuthorizationDenied, CurrentActor.Service>;
 	/**
-	 * How each project and bot of the workspace the actor reaches stands for
-	 * them: its conversations' unread messages, whether any waits on their
-	 * decision, and how many of a bot's automations failed.
+	 * The threads and automations of the project `projectId`, a bot's default
+	 * project included. Hidden unless the actor reaches it.
+	 */
+	readonly threads: (
+		projectId: string,
+	) => Effect.Effect<ProjectThreadList, AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * The actor's `limit` most recent threads in the workspace, newest message
+	 * first: those not done that they take part in, in the default projects of
+	 * the bots they pinned and still reach, and of their Personal Assistant.
+	 */
+	readonly recentThreads: (input: {
+		workspace: string;
+		limit: number;
+	}) => Effect.Effect<RecentThreads, AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * How each project of the workspace the actor reaches, bots' default
+	 * projects included, stands for them: its threads' and automation feeds'
+	 * unread messages, whether any waits on their decision, and how many of its
+	 * automations are failing unseen.
 	 */
 	readonly projectMarkers: (
 		workspace: string,
@@ -157,6 +175,13 @@ export interface Interface {
 	readonly inbox: (
 		workspace: string,
 	) => Effect.Effect<InboxFeed, AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * How much in the workspace waits for the actor, over the inbox's window,
+	 * counted in full rather than over the inbox's latest items.
+	 */
+	readonly attention: (
+		workspace: string,
+	) => Effect.Effect<AttentionCounts, AuthorizationDenied, CurrentActor.Service>;
 	/** The newest `limit` messages in the inbox that mention the actor and they have not read. */
 	readonly unreadMentions: (
 		workspace: string,
@@ -197,31 +222,22 @@ export const make = Effect.gen(function* () {
 		});
 	});
 
-	/** What the inbox looks through for the actor in `workspace`; none when they have no account. */
+	/** What the inbox looks through for the actor in `workspace`. */
 	const inboxScopeOf = (workspace: string) =>
 		Effect.gen(function* () {
 			const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
 			const { userId } = yield* CurrentActor.Service;
-			const [person] = yield* query((db) =>
-				db.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1),
-			);
-			if (!person) return undefined;
-			const since = DateTime.toDate(
-				DateTime.subtract(yield* DateTime.now, { days: INBOX_WINDOW_DAYS }),
-			);
-			return {
+			return yield* inboxScopeIn({
 				workspaceId,
-				reachesConversation: yield* visibility.reachesConversation,
 				userId,
-				handle: handleFromName(person.name),
-				since,
-			} satisfies InboxScope;
+				reachesConversation: yield* visibility.reachesConversation,
+			});
 		});
 
 	/**
 	 * The threads `rows` as a project's list shows them to `userId`: each with
 	 * its latest message, how many it holds, who has written in it lately,
-	 * what it waits on, and how it stands for them.
+	 * and how it stands for them, newest message first.
 	 */
 	const listedThreads = Effect.fn("ChatView.listedThreads")(function* (
 		workspaceId: string,
@@ -231,10 +247,9 @@ export const make = Effect.gen(function* () {
 		const conversationIds = rows.map((row) => row.conversation.id);
 		const latest = yield* query((db) => latestMessages(db, conversationIds));
 		const counts = yield* query((db) => messageCounts(db, conversationIds));
-		const waitingOn = yield* query((db) => toolsAwaitingApproval(db, conversationIds));
 		const marksOf = yield* conversationMarks(workspaceId, conversationIds);
 		const mentioning = yield* query((db) => unreadMentionsIn(db, userId, conversationIds));
-		return rows.map((row): ListedThread => {
+		const listed = rows.map((row): ListedThread => {
 			const last = latest.get(row.conversation.id);
 			return {
 				conversation: toProjectThread(row.conversation),
@@ -247,44 +262,25 @@ export const make = Effect.gen(function* () {
 					: null,
 				participants: row.participants.map(toParticipant),
 				messageCount: counts.get(row.conversation.id) ?? 0,
-				waitingOn: waitingOn.get(row.conversation.id) || null,
 				...marksOf(row.conversation.id),
 				mentionsYou: mentioning.has(row.conversation.id),
 			};
 		});
+		return listed.sort(byLatestMessage);
 	});
 
 	return Service.of({
-		list: (input) =>
+		threads: (projectId) =>
 			operation(
-				"list",
+				"threads",
 				Effect.gen(function* () {
-					yield* Effect.annotateCurrentSpan("conversation.list.project", input.project);
-					const { workspaceId } = yield* authorization.workspace(input.workspace, "workspace.read");
-					const reachesProject = yield* visibility.reachesProject;
-					const { userId } = yield* CurrentActor.Service;
-					const projectId = yield* query((db) =>
-						reachableProject(db, input.project, { workspaceId, reachesProject }),
-					);
-					if (!projectId) return yield* new ResourceHidden({ resource: "project" });
-					const rows = yield* query((db) => projectThreads(db, projectId));
-					return { chats: yield* listedThreads(workspaceId, userId, rows) };
-				}),
-			),
-
-		botThreads: (botId) =>
-			operation(
-				"botThreads",
-				Effect.gen(function* () {
-					const { bot: host, actor } = yield* authorization.bot(botId, "bot.read");
+					yield* Effect.annotateCurrentSpan("conversation.list.project", projectId);
+					const standing = yield* authorization.project(projectId, "project.read");
+					const { project: listed, actor } = standing;
 					const { userId } = actor;
-					const personFacingHost = personFacingBotRow(host);
-					if (!personFacingHost) return yield* new ResourceHidden({ resource: "bot" });
-					const defaultProjectId = yield* defaultProjectOf(host.id);
-					const listed = yield* query((db) => projectThreads(db, defaultProjectId));
-					const pinned = yield* isPinnedBy(host.id, userId);
-					const threads = yield* listedThreads(host.workspaceId, userId, listed);
-					const owned = yield* query((db) => listedAutomations(db, defaultProjectId, userId));
+					const rows = yield* query((db) => projectThreads(db, listed.id));
+					const threads = yield* listedThreads(listed.workspaceId, userId, rows);
+					const owned = yield* query((db) => listedAutomations(db, listed.id));
 					const feedMentions = yield* query((db) =>
 						unreadMentionsIn(
 							db,
@@ -297,27 +293,37 @@ export const make = Effect.gen(function* () {
 							id: row.automation.id,
 							name: row.automation.name,
 							state: row.automation.state,
-							failed: row.failed,
 							pausedAfterFailures: row.automation.pausedAfterFailuresAt !== null,
 						},
 						conversation: row.feed && toAutomationFeed(row.feed),
 						mentionsYou: row.feed !== null && feedMentions.has(row.feed.id),
+						status: toListStatus(row),
 					}));
-					const [summary] = yield* query((db) =>
-						db
-							.select({ content: botSummary.content, updatedAt: botSummary.updatedAt })
-							.from(botSummary)
-							.where(eq(botSummary.botId, host.id))
-							.limit(1),
+					return { threads, automations };
+				}),
+			),
+
+		recentThreads: (input) =>
+			operation(
+				"recentThreads",
+				Effect.gen(function* () {
+					const { workspaceId } = yield* authorization.workspace(input.workspace, "workspace.read");
+					const { userId } = yield* CurrentActor.Service;
+					const reachesBot = yield* visibility.reachesBot;
+					const rows = yield* query((db) =>
+						recentThreadsOf(db, { workspaceId, userId, reachesBot, limit: input.limit }),
 					);
-					return {
-						bot: toBot({ ...personFacingHost, defaultProjectId }, { actor, pinned }),
-						threads: threads.sort(byLatestMessage),
-						automations,
-						summary: summary
-							? { content: summary.content, updatedAt: summary.updatedAt.toISOString() }
-							: null,
-					};
+					const listed = yield* listedThreads(workspaceId, userId, rows);
+					const threads = yield* Effect.forEach(listed, (thread) => {
+						const { botId } = thread.conversation;
+						// The query joins each thread's bot, so every one has its bot.
+						if (botId === null) return Effect.die(new Error("A recent thread has no bot"));
+						return Effect.succeed({
+							...thread,
+							conversation: { ...thread.conversation, botId },
+						} satisfies BotThread);
+					});
+					return { threads };
 				}),
 			),
 
@@ -328,45 +334,31 @@ export const make = Effect.gen(function* () {
 					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
 					const { userId } = yield* CurrentActor.Service;
 					const reachesProject = yield* visibility.reachesProject;
-					const reachesBot = yield* visibility.reachesBot;
-					const chats = yield* query((db) =>
-						projectThreadsReached(db, workspaceId, reachesProject),
+					const conversations = yield* query((db) =>
+						projectConversationsReached(db, workspaceId, reachesProject),
 					);
-					const botThreads = yield* query((db) =>
-						botConversationsReached(db, workspaceId, reachesBot),
+					const marksOf = yield* conversationMarks(
+						workspaceId,
+						conversations.map(({ id }) => id),
 					);
-					const marksOf = yield* conversationMarks(workspaceId, [
-						...chats.map(({ id }) => id),
-						...botThreads.map(({ id }) => id),
-					]);
 					const failed = yield* query((db) =>
-						failedAutomationsByBot(db, workspaceId, reachesBot, userId),
+						failingAutomationsByProject(db, workspaceId, reachesProject, userId),
 					);
-					const tally = <Marker extends ProjectMarker>(
-						into: Record<string, Marker>,
-						key: string,
-						conversationId: string,
-						nothing: Marker,
-					) => {
-						const { unreadMessages, needsApproval } = marksOf(conversationId);
-						if (unreadMessages === 0 && !needsApproval) return;
-						const marked = into[key] ?? nothing;
-						into[key] = {
+					const projects: Record<string, ProjectMarker> = {};
+					for (const { id, projectId } of conversations) {
+						const { unreadMessages, needsApproval } = marksOf(id);
+						if (unreadMessages === 0 && !needsApproval) continue;
+						const marked = projects[projectId] ?? NOTHING_NEW;
+						projects[projectId] = {
 							...marked,
 							unreadMessages: marked.unreadMessages + unreadMessages,
 							needsApproval: marked.needsApproval || needsApproval,
 						};
-					};
-					const projects: Record<string, ProjectMarker> = {};
-					for (const chat of chats) tally(projects, chat.projectId, chat.id, NOTHING_NEW);
-					const bots: Record<string, BotMarker> = {};
-					for (const conversation of botThreads) {
-						tally(bots, conversation.botId, conversation.id, NOTHING_NEW_FOR_BOT);
 					}
-					for (const [botId, failedAutomations] of failed) {
-						bots[botId] = { ...(bots[botId] ?? NOTHING_NEW_FOR_BOT), failedAutomations };
+					for (const [projectId, failedAutomations] of failed) {
+						projects[projectId] = { ...(projects[projectId] ?? NOTHING_NEW), failedAutomations };
 					}
-					return { projects, bots };
+					return { projects };
 				}),
 			),
 
@@ -430,7 +422,6 @@ export const make = Effect.gen(function* () {
 				"inbox",
 				Effect.gen(function* () {
 					const scope = yield* inboxScopeOf(workspace);
-					if (!scope) return { items: [] };
 					const messages = yield* query((db) =>
 						inboxMessageRows(db, scope, { onlyUnreadMentions: false, limit: INBOX_ITEMS }),
 					);
@@ -449,6 +440,7 @@ export const make = Effect.gen(function* () {
 								preview: row.lastReply && runReportPreview(row.lastReply),
 								mentionsYou: row.mentionsYou,
 								rootConversationId: row.rootConversationId,
+								place: placeOf(row.place),
 								at: row.at.toISOString(),
 								unread: row.unread,
 							}),
@@ -462,6 +454,7 @@ export const make = Effect.gen(function* () {
 								status: row.status,
 								brief: row.brief,
 								rootConversationId: row.rootConversationId,
+								place: placeOf(row.place),
 								at: row.at.toISOString(),
 								unread: row.unread,
 							}),
@@ -475,12 +468,42 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
+		attention: (workspace) =>
+			operation(
+				"attention",
+				Effect.gen(function* () {
+					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
+					const { userId } = yield* CurrentActor.Service;
+					const deciders = yield* query((db) => approvalDecidersIn(db, workspaceId, userId));
+					const reachesConversation = yield* visibility.reachesConversation;
+					const waitingApprovals = yield* query((db) =>
+						waitingApprovalCount(db, deciders.decidable, reachesConversation),
+					);
+					const directIds = (yield* query((db) => directMessagesOf(db, workspaceId, userId))).map(
+						(conversation) => conversation.id,
+					);
+					const unreadInDirect = yield* query((db) => unreadMessageCounts(db, userId, directIds));
+					const unreadInDirectMessages = [...unreadInDirect.values()].reduce(
+						(sum, unread) => sum + unread,
+						0,
+					);
+					const scope = yield* inboxScopeIn({ workspaceId, userId, reachesConversation });
+					const messages = yield* query((db) => inboxMessageCounts(db, scope));
+					const runs = yield* query((db) => inboxRunCounts(db, scope));
+					const collaborations = yield* query((db) => inboxCollaborationsUnread(db, scope));
+					return {
+						unreadInInbox: messages.unread + runs.unread + collaborations,
+						waitingApprovals,
+						unreadForYou: messages.unreadMentions + runs.unreadMentions + unreadInDirectMessages,
+					};
+				}),
+			),
+
 		unreadMentions: (workspace, limit) =>
 			operation(
 				"unreadMentions",
 				Effect.gen(function* () {
 					const scope = yield* inboxScopeOf(workspace);
-					if (!scope) return [];
 					const messages = yield* query((db) =>
 						inboxMessageRows(db, scope, { onlyUnreadMentions: true, limit }),
 					);
@@ -539,10 +562,12 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
 
-/** A project's marker before any of its conversations is counted. */
-const NOTHING_NEW: ProjectMarker = { unreadMessages: 0, needsApproval: false };
-/** A bot's marker before any of its conversations or automations is counted. */
-const NOTHING_NEW_FOR_BOT: BotMarker = { ...NOTHING_NEW, failedAutomations: 0 };
+/** A project's marker before any of its conversations or automations is counted. */
+const NOTHING_NEW: ProjectMarker = {
+	unreadMessages: 0,
+	needsApproval: false,
+	failedAutomations: 0,
+};
 
 export class InvalidPageCursor extends Data.TaggedError("InvalidPageCursor") implements UserFacing {
 	get userMessage() {
@@ -551,57 +576,25 @@ export class InvalidPageCursor extends Data.TaggedError("InvalidPageCursor") imp
 }
 
 /**
- * The id of the project `projectRef` names, by its id or its slug, when the
- * actor reaches it. A bot's default project is found by its id only: its slug
- * is a placeholder that a project people named may share.
- */
-const reachableProject = Effect.fn("ChatView.reachableProject")(function* (
-	db: Executor,
-	projectRef: string,
-	input: { workspaceId: string; reachesProject: Visibility.ReachesProject },
-) {
-	const [row] = yield* db
-		.select({ id: project.id })
-		.from(project)
-		.where(
-			and(
-				isUuid(projectRef)
-					? eq(project.id, projectRef)
-					: and(eq(project.slug, projectRef), isNull(project.defaultOfBotId)),
-				eq(project.workspaceId, input.workspaceId),
-				input.reachesProject(project.id),
-			),
-		)
-		.limit(1);
-	return row?.id;
-});
-
-/** A bot's thread not archived: a thread of its default project, whose bot the view names. */
-const isBotThread = and(
-	eq(placedConversation.kind, "project_thread"),
-	isNotNull(placedConversation.botId),
-	isNull(placedConversation.archivedAt),
-) as SQL;
-
-/**
  * The project `projectId`'s automations that are still there, by name, each
- * with its conversation when it has one, and whether it failed since `userId`
- * last looked.
+ * with its conversation when it has one, its latest run and whether it is
+ * failing.
  */
 const listedAutomations = Effect.fn("ChatView.listedAutomations")(function* (
 	db: Executor,
 	projectId: string,
-	userId: string,
 ) {
 	const feed = alias(placedConversation, "feed");
+	const latest = latestRunOf(db);
 	return yield* db
 		.select({
 			automation,
 			feed: getColumns(feed),
-			failed: latestRunFailedUnseen(automation.id, userId),
+			...listStatusColumns(latest),
 		})
 		.from(automation)
 		.leftJoin(feed, eq(feed.automationId, automation.id))
+		.leftJoinLateral(latest, sql`true`)
 		.where(and(eq(automation.projectId, projectId), isNull(automation.deletedAt)))
 		.orderBy(asc(automation.name), asc(automation.id));
 });
@@ -634,10 +627,10 @@ const projectThreads = Effect.fn("ChatView.projectThreads")(function* (
 });
 
 /**
- * The threads not archived of every project people made in the workspace that
- * `reachesProject` reaches. A bot's threads are counted for the bot instead.
+ * The threads not archived and the automation feeds of every project in the
+ * workspace that `reachesProject` reaches, bots' default projects included.
  */
-const projectThreadsReached = Effect.fn("ChatView.projectThreadsReached")(function* (
+const projectConversationsReached = Effect.fn("ChatView.projectConversationsReached")(function* (
 	db: Executor,
 	workspaceId: string,
 	reachesProject: Visibility.ReachesProject,
@@ -647,9 +640,10 @@ const projectThreadsReached = Effect.fn("ChatView.projectThreadsReached")(functi
 		.from(placedConversation)
 		.where(
 			and(
-				eq(placedConversation.kind, "project_thread"),
-				isNull(placedConversation.botId),
-				isNull(placedConversation.archivedAt),
+				or(
+					and(eq(placedConversation.kind, "project_thread"), isNull(placedConversation.archivedAt)),
+					eq(placedConversation.kind, "automation_feed"),
+				),
 				eq(placedConversation.workspaceId, workspaceId),
 				reachesProject(placedConversation.projectId),
 			),
@@ -657,23 +651,57 @@ const projectThreadsReached = Effect.fn("ChatView.projectThreadsReached")(functi
 	return rows.flatMap(({ id, projectId }) => (projectId ? [{ id, projectId }] : []));
 });
 
-/** The threads and automation feeds of every bot in the workspace that `reachesBot` reaches. */
-const botConversationsReached = Effect.fn("ChatView.botConversationsReached")(function* (
+/**
+ * The threads not done of the bots `userId` pinned that `reachesBot` reaches,
+ * and of their Personal Assistant, in which they take part, the `limit` with
+ * the newest messages, each with who has written in it lately.
+ */
+const recentThreadsOf = Effect.fn("ChatView.recentThreadsOf")(function* (
 	db: Executor,
-	workspaceId: string,
-	reachesBot: Visibility.ReachesBot,
+	input: {
+		workspaceId: string;
+		userId: string;
+		reachesBot: Visibility.ReachesBot;
+		limit: number;
+	},
 ) {
-	const rows = yield* db
-		.select({ id: placedConversation.id, botId: placedConversation.botId })
+	const latest = alias(message, "latest_message");
+	const lastMovedAt = sql`coalesce((${db
+		.select({ at: sql`max(${latest.createdAt})` })
+		.from(latest)
+		.where(
+			and(eq(latest.conversationId, placedConversation.id), ne(latest.content, "")),
+		)}), ${placedConversation.createdAt})`;
+	return yield* db
+		.select({
+			conversation: getColumns(placedConversation),
+			participants: recentParticipantsOf(placedConversation.id),
+		})
 		.from(placedConversation)
+		.innerJoin(bot, eq(bot.id, placedConversation.botId))
 		.where(
 			and(
-				or(isBotThread, eq(placedConversation.kind, "automation_feed")),
-				eq(placedConversation.workspaceId, workspaceId),
-				reachesBot(placedConversation.botId),
+				eq(placedConversation.kind, "project_thread"),
+				eq(placedConversation.workspaceId, input.workspaceId),
+				isNull(placedConversation.archivedAt),
+				isNull(placedConversation.doneAt),
+				or(eq(bot.assistantOf, input.userId), pinnedBy(bot.id, input.userId)),
+				input.reachesBot(bot.id),
+				exists(
+					db
+						.select({ id: conversationParticipant.id })
+						.from(conversationParticipant)
+						.where(
+							and(
+								eq(conversationParticipant.conversationId, placedConversation.id),
+								eq(conversationParticipant.userId, input.userId),
+							),
+						),
+				),
 			),
-		);
-	return rows.flatMap(({ id, botId }) => (botId ? [{ id, botId }] : []));
+		)
+		.orderBy(desc(lastMovedAt), desc(placedConversation.id))
+		.limit(input.limit);
 });
 
 /** How many messages each of the conversations holds, by its id; one with none is left out. */
@@ -718,37 +746,6 @@ const latestMessages = Effect.fn("ChatView.latestMessages")(function* (
 		.where(and(inArray(message.conversationId, [...conversationIds]), ne(message.content, "")))
 		.orderBy(message.conversationId, desc(message.createdAt));
 	return new Map(rows.map((row) => [row.conversationId, row]));
-});
-
-/**
- * For each of the conversations with calls waiting for approval, the tool the first
- * would run in the newest reply that asked, whether or not it wrote anything.
- */
-const toolsAwaitingApproval = Effect.fn("ChatView.toolsAwaitingApproval")(function* (
-	db: Executor,
-	conversationIds: readonly string[],
-) {
-	if (conversationIds.length === 0) return new Map<string, string>();
-	const rows = yield* db
-		.selectDistinctOn([toolCall.conversationId], {
-			conversationId: toolCall.conversationId,
-			tool: toolCall.tool,
-		})
-		.from(toolCall)
-		.innerJoin(message, eq(message.id, toolCall.messageId))
-		.where(
-			and(
-				inArray(toolCall.conversationId, [...conversationIds]),
-				eq(toolCall.approvalStatus, "pending"),
-			),
-		)
-		.orderBy(
-			toolCall.conversationId,
-			desc(message.createdAt),
-			asc(toolCall.atOffset),
-			asc(toolCall.id),
-		);
-	return new Map(rows.map((row) => [row.conversationId, row.tool]));
 });
 
 /**
@@ -895,12 +892,7 @@ const inboxMessageRows = Effect.fn("ChatView.inboxMessageRows")(function* (
 	input: InboxScope,
 	{ onlyUnreadMentions, limit }: { onlyUnreadMentions: boolean; limit: number },
 ) {
-	// `@here` and `@channel` are text in a direct message, where everybody is told of every message.
-	const mentionsYou = mentions(input.handle, sql`${placedConversation.kind} <> 'direct_message'`);
-	const unread = unreadBy(db, input.userId, {
-		conversationId: message.conversationId,
-		at: message.createdAt,
-	});
+	const { mentionsYou, unread, inConversation, listed } = inboxMessageTerms(db, input);
 	const author = alias(bot, "author_bot");
 	return yield* db
 		.select({
@@ -908,9 +900,13 @@ const inboxMessageRows = Effect.fn("ChatView.inboxMessageRows")(function* (
 			parts: message.parts,
 			content: message.content,
 			createdAt: message.createdAt,
-			projectId: listedProjectIdOf(placedConversation),
 			conversationId: placedConversation.id,
-			authorUser: { id: user.id, name: user.name, email: user.email, image: user.image },
+			place: {
+				kind: placedConversation.kind,
+				projectId: placedConversation.projectId,
+				botId: placedConversation.botId,
+			},
+			authorUser: namedPersonColumns,
 			authorBot: {
 				id: author.id,
 				name: author.name,
@@ -923,27 +919,60 @@ const inboxMessageRows = Effect.fn("ChatView.inboxMessageRows")(function* (
 			unread: sql<boolean>`${unread}`,
 		})
 		.from(message)
-		.innerJoin(
-			placedConversation,
-			and(
-				eq(placedConversation.id, message.conversationId),
-				// The conversations whose messages notify people are the ones Inbox shows.
-				inArray(placedConversation.kind, [...NOTIFYING_CONVERSATION_KINDS]),
-			),
-		)
+		.innerJoin(placedConversation, inConversation)
 		.leftJoin(user, eq(user.id, message.authorUserId))
 		.leftJoin(author, eq(author.id, message.authorBotId))
-		.where(
-			and(
-				eq(placedConversation.workspaceId, input.workspaceId),
-				input.reachesConversation(placedConversation),
-				gt(message.createdAt, input.since),
-				finishedWordsFromOthers(input.userId),
-				onlyUnreadMentions ? and(mentionsYou, unread) : or(mentionsYou, unread),
-			),
-		)
+		.where(and(listed, onlyUnreadMentions ? and(mentionsYou, unread) : or(mentionsYou, unread)))
 		.orderBy(desc(message.createdAt))
 		.limit(limit);
+});
+
+/**
+ * How `inboxMessageRows` picks a message, over `message` joined to its
+ * `placedConversation` by `inConversation`: `listed` holds for one in a
+ * conversation Inbox shows, since `since`, written by somebody else;
+ * `mentionsYou` and `unread` say how it stands for the person.
+ */
+function inboxMessageTerms(db: Executor, input: InboxScope) {
+	return {
+		// `@here` and `@channel` are text in a direct message, where everybody is told of every message.
+		mentionsYou: mentions(input.handle, sql`${placedConversation.kind} <> 'direct_message'`),
+		unread: unreadBy(db, input.userId, {
+			conversationId: message.conversationId,
+			at: message.createdAt,
+		}),
+		inConversation: and(
+			eq(placedConversation.id, message.conversationId),
+			// The conversations whose messages notify people are the ones Inbox shows.
+			inArray(placedConversation.kind, [...NOTIFYING_CONVERSATION_KINDS]),
+		),
+		listed: and(
+			eq(placedConversation.workspaceId, input.workspaceId),
+			input.reachesConversation(placedConversation),
+			gt(message.createdAt, input.since),
+			finishedWordsFromOthers(input.userId),
+		),
+	};
+}
+
+/**
+ * How many of the messages Inbox would list are unread, and how many of
+ * those mention the person outside a direct message.
+ */
+const inboxMessageCounts = Effect.fn("ChatView.inboxMessageCounts")(function* (
+	db: Executor,
+	input: InboxScope,
+) {
+	const { mentionsYou, unread, inConversation, listed } = inboxMessageTerms(db, input);
+	const [counts] = yield* db
+		.select({
+			unread: sql<number>`count(*)::int`,
+			unreadMentions: sql<number>`(count(*) filter (where ${mentionsYou} and ${placedConversation.kind} <> 'direct_message'))::int`,
+		})
+		.from(message)
+		.innerJoin(placedConversation, inConversation)
+		.where(and(listed, unread));
+	return counts ?? { unread: 0, unreadMentions: 0 };
 });
 
 /** A message row as the inbox lists it. */
@@ -955,8 +984,8 @@ function inboxMessageItem(
 		messageId: row.id,
 		author: toParticipant(authorRow(row.authorUser, row.authorBot)),
 		preview: replyPreview(row),
-		projectId: row.projectId,
 		rootConversationId: row.conversationId,
+		place: placeOf(row.place),
 		at: row.createdAt.toISOString(),
 		unread: row.unread,
 	};
@@ -971,6 +1000,74 @@ export interface UnreadMention {
 	/** The conversation people open to read it. */
 	rootConversationId: string;
 }
+
+/**
+ * What the inbox looks through for `userId` in the workspace `workspaceId`,
+ * which they are in and where `reachesConversation` is what they reach. Being
+ * in the workspace means they have an account, as its members are removed
+ * with their accounts.
+ */
+const inboxScopeIn = Effect.fn("ChatView.inboxScopeIn")(function* (
+	reached: Pick<InboxScope, "workspaceId" | "userId" | "reachesConversation">,
+) {
+	const [person] = yield* query((db) =>
+		db.select({ name: user.name }).from(user).where(eq(user.id, reached.userId)).limit(1),
+	);
+	if (!person) return yield* Effect.die(new Error("A workspace member has no account"));
+	const since = DateTime.toDate(
+		DateTime.subtract(yield* DateTime.now, { days: INBOX_WINDOW_DAYS }),
+	);
+	return { ...reached, handle: handleFromName(person.name), since } satisfies InboxScope;
+});
+
+/**
+ * The conversations people open in the workspace `reached.workspaceId`, of
+ * those `reached.reachesConversation` reaches, where `reached.userId` has
+ * something unread: a message somebody else finished, or an automation run or
+ * collaboration Inbox counts unread, by the conversation it is listed in.
+ */
+export const conversationsWithUnread = Effect.fn("ChatView.conversationsWithUnread")(function* (
+	reached: Pick<InboxScope, "workspaceId" | "userId" | "reachesConversation">,
+) {
+	const withMessages = yield* query((db) =>
+		db
+			.selectDistinct({ id: placedConversation.id })
+			.from(message)
+			.innerJoin(placedConversation, eq(placedConversation.id, message.conversationId))
+			.where(
+				and(
+					eq(placedConversation.workspaceId, reached.workspaceId),
+					inArray(placedConversation.kind, [...OPENABLE_CONVERSATION_KINDS]),
+					reached.reachesConversation(placedConversation),
+					finishedWordsFromOthers(reached.userId),
+					unreadBy(db, reached.userId, {
+						conversationId: message.conversationId,
+						at: message.createdAt,
+					}),
+				),
+			),
+	);
+	const scope = yield* inboxScopeIn(reached);
+	const withRuns = yield* query((db) => {
+		const { conversation, unread, listed } = inboxRunTerms(db, scope);
+		return db
+			.selectDistinct({ id: conversation.id })
+			.from(automationRun)
+			.innerJoin(placedConversation, eq(placedConversation.id, automationRun.conversationId))
+			.innerJoin(conversation, eq(conversation.id, placedConversation.rootConversationId))
+			.where(and(listed, unread));
+	});
+	const withCollaborations = yield* query((db) => {
+		const { asked, conversation, unread, listed } = inboxCollaborationTerms(db, scope);
+		return db
+			.selectDistinct({ id: conversation.id })
+			.from(collaboration)
+			.innerJoin(asked, eq(asked.id, collaboration.conversationId))
+			.innerJoin(conversation, eq(conversation.id, asked.rootConversationId))
+			.where(and(listed, unread));
+	});
+	return [...new Set([...withMessages, ...withRuns, ...withCollaborations].map(({ id }) => id))];
+});
 
 interface InboxScope {
 	workspaceId: string;
@@ -1025,31 +1122,29 @@ function spokenText(reply: Reply): string {
 }
 
 /**
- * The bots `reachesBot` reaches with automations of their own, their default
- * projects', whose latest run failed since `userId` last looked, and how many
+ * The projects `reachesProject` reaches, bots' default projects included,
+ * with automations failing that `userId` has not opened since, and how many
  * each has.
  */
-const failedAutomationsByBot = Effect.fn("ChatView.failedAutomationsByBot")(function* (
+const failingAutomationsByProject = Effect.fn("ChatView.failingAutomationsByProject")(function* (
 	db: Executor,
 	workspaceId: string,
-	reachesBot: Visibility.ReachesBot,
+	reachesProject: Visibility.ReachesProject,
 	userId: string,
 ) {
 	const rows = yield* db
-		.select({ botId: project.defaultOfBotId, count: sql<number>`count(*)::int` })
+		.select({ projectId: automation.projectId, count: sql<number>`count(*)::int` })
 		.from(automation)
-		.innerJoin(project, eq(project.id, automation.projectId))
 		.where(
 			and(
 				eq(automation.workspaceId, workspaceId),
 				isNull(automation.deletedAt),
-				isNotNull(project.defaultOfBotId),
-				reachesBot(project.defaultOfBotId),
-				latestRunFailedUnseen(automation.id, userId),
+				reachesProject(automation.projectId),
+				unseenAutomationFailure(userId),
 			),
 		)
-		.groupBy(project.defaultOfBotId);
-	return new Map(rows.flatMap((row) => (row.botId ? [[row.botId, row.count] as const] : [])));
+		.groupBy(automation.projectId);
+	return new Map(rows.map((row) => [row.projectId, row.count] as const));
 });
 
 /**
@@ -1063,6 +1158,66 @@ const automationRunRows = Effect.fn("ChatView.automationRunRows")(function* (
 	db: Executor,
 	input: InboxScope,
 ) {
+	const { conversation, unread, mentionsYou, listed } = inboxRunTerms(db, input);
+	return yield* db
+		.select({
+			conversationId: automationRun.conversationId,
+			automationName: automationRun.automationName,
+			state: automationRun.state,
+			triggerKind: automationRun.triggerKind,
+			at: automationRun.acceptedAt,
+			bot: {
+				id: bot.id,
+				name: bot.name,
+				handle: bot.handle,
+				color: bot.color,
+				face: bot.face,
+				shape: bot.shape,
+			},
+			rootConversationId: conversation.id,
+			place: {
+				kind: conversation.kind,
+				projectId: conversation.projectId,
+				botId: conversation.botId,
+			},
+			unread,
+			mentionsYou,
+			lastReply: lastReplyIn(db, automationRun.conversationId),
+		})
+		.from(automationRun)
+		.innerJoin(placedConversation, eq(placedConversation.id, automationRun.conversationId))
+		.innerJoin(conversation, eq(conversation.id, placedConversation.rootConversationId))
+		.innerJoin(bot, eq(bot.id, automationRun.botId))
+		.where(listed)
+		.orderBy(desc(automationRun.acceptedAt))
+		.limit(INBOX_ITEMS);
+});
+
+/** How many of the runs Inbox would list are unread, and how many of those mention the person. */
+const inboxRunCounts = Effect.fn("ChatView.inboxRunCounts")(function* (
+	db: Executor,
+	input: InboxScope,
+) {
+	const { conversation, unread, mentionsYou, listed } = inboxRunTerms(db, input);
+	const [counts] = yield* db
+		.select({
+			unread: sql<number>`count(*)::int`,
+			unreadMentions: sql<number>`(count(*) filter (where ${mentionsYou}))::int`,
+		})
+		.from(automationRun)
+		.innerJoin(placedConversation, eq(placedConversation.id, automationRun.conversationId))
+		.innerJoin(conversation, eq(conversation.id, placedConversation.rootConversationId))
+		.where(and(listed, unread));
+	return counts ?? { unread: 0, unreadMentions: 0 };
+});
+
+/**
+ * How `automationRunRows` picks a run, over `automationRun` joined to its own
+ * `placedConversation` and that to `conversation`, the feed it is listed in:
+ * `listed` holds for a run Inbox shows, and `unread` and `mentionsYou` say
+ * how it stands for the person.
+ */
+function inboxRunTerms(db: Executor, input: InboxScope) {
 	const conversation = alias(placedConversation, "conversation");
 	const posted = resultPosted(automationRun.id);
 	const elsewhere = alias(message, "result_elsewhere");
@@ -1086,45 +1241,22 @@ const automationRunRows = Effect.fn("ChatView.automationRunRows")(function* (
 			),
 		);
 	const isNews = or(eq(automationRun.state, "failed"), posted);
-	return yield* db
-		.select({
-			conversationId: automationRun.conversationId,
-			automationName: automationRun.automationName,
-			state: automationRun.state,
-			triggerKind: automationRun.triggerKind,
-			at: automationRun.acceptedAt,
-			bot: {
-				id: bot.id,
-				name: bot.name,
-				handle: bot.handle,
-				color: bot.color,
-				face: bot.face,
-				shape: bot.shape,
-			},
-			rootConversationId: conversation.id,
-			unread: sql<boolean>`(${isNews} and ${itemUnreadBy(db, input.userId, {
-				conversationId: conversation.id,
-				itemConversationId: automationRun.conversationId,
-				at: sql`coalesce(${automationRun.finishedAt}, ${automationRun.acceptedAt})`,
-			})})`,
-			mentionsYou: sql<boolean>`exists (${resultMentioningYou})`,
-			lastReply: lastReplyIn(db, automationRun.conversationId),
-		})
-		.from(automationRun)
-		.innerJoin(placedConversation, eq(placedConversation.id, automationRun.conversationId))
-		.innerJoin(conversation, eq(conversation.id, placedConversation.rootConversationId))
-		.innerJoin(bot, eq(bot.id, automationRun.botId))
-		.where(
-			and(
-				eq(conversation.workspaceId, input.workspaceId),
-				input.reachesConversation(conversation),
-				gt(automationRun.acceptedAt, input.since),
-				or(ne(automationRun.state, "completed"), posted),
-			),
-		)
-		.orderBy(desc(automationRun.acceptedAt))
-		.limit(INBOX_ITEMS);
-});
+	return {
+		conversation,
+		unread: sql<boolean>`(${isNews} and ${itemUnreadBy(db, input.userId, {
+			conversationId: conversation.id,
+			itemConversationId: automationRun.conversationId,
+			at: sql`coalesce(${automationRun.finishedAt}, ${automationRun.acceptedAt})`,
+		})})`,
+		mentionsYou: sql<boolean>`exists (${resultMentioningYou})`,
+		listed: and(
+			eq(conversation.workspaceId, input.workspaceId),
+			input.reachesConversation(conversation),
+			gt(automationRun.acceptedAt, input.since),
+			or(ne(automationRun.state, "completed"), posted),
+		),
+	};
+}
 
 /**
  * The collaborations one bot opened with another in the conversations
@@ -1134,11 +1266,10 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 	db: Executor,
 	input: InboxScope,
 ) {
-	const asked = alias(placedConversation, "asked_conversation");
+	const { asked, conversation, unread, listed } = inboxCollaborationTerms(db, input);
 	const askingMessage = alias(message, "asking_message");
 	const initiator = alias(bot, "initiator");
 	const recipient = alias(bot, "recipient");
-	const conversation = alias(placedConversation, "conversation");
 	return yield* db
 		.select({
 			conversationId: collaboration.conversationId,
@@ -1162,11 +1293,12 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 				shape: recipient.shape,
 			},
 			rootConversationId: conversation.id,
-			unread: itemUnreadBy(db, input.userId, {
-				conversationId: conversation.id,
-				itemConversationId: collaboration.conversationId,
-				at: collaboration.createdAt,
-			}),
+			place: {
+				kind: conversation.kind,
+				projectId: conversation.projectId,
+				botId: conversation.botId,
+			},
+			unread,
 		})
 		.from(collaboration)
 		.innerJoin(asked, eq(asked.id, collaboration.conversationId))
@@ -1174,16 +1306,50 @@ const collaborationRows = Effect.fn("ChatView.collaborationRows")(function* (
 		.innerJoin(askingMessage, eq(askingMessage.id, collaboration.parentMessageId))
 		.innerJoin(initiator, eq(initiator.id, askingMessage.authorBotId))
 		.innerJoin(recipient, eq(recipient.id, collaboration.collaboratorBotId))
-		.where(
-			and(
-				eq(conversation.workspaceId, input.workspaceId),
-				input.reachesConversation(conversation),
-				gt(collaboration.createdAt, input.since),
-			),
-		)
+		.where(listed)
 		.orderBy(desc(collaboration.createdAt))
 		.limit(INBOX_ITEMS);
 });
+
+/** How many of the collaborations Inbox would list are unread. */
+const inboxCollaborationsUnread = Effect.fn("ChatView.inboxCollaborationsUnread")(function* (
+	db: Executor,
+	input: InboxScope,
+) {
+	const { asked, conversation, unread, listed } = inboxCollaborationTerms(db, input);
+	const [counted] = yield* db
+		.select({ unread: sql<number>`count(*)::int` })
+		.from(collaboration)
+		.innerJoin(asked, eq(asked.id, collaboration.conversationId))
+		.innerJoin(conversation, eq(conversation.id, asked.rootConversationId))
+		.where(and(listed, unread));
+	return counted?.unread ?? 0;
+});
+
+/**
+ * How `collaborationRows` picks a collaboration, over `collaboration` joined
+ * to its own conversation, `asked`, and that to `conversation`, the one it
+ * hangs under: `listed` holds for one Inbox shows, and `unread` says whether
+ * the person has caught up with it.
+ */
+function inboxCollaborationTerms(db: Executor, input: InboxScope) {
+	const asked = alias(placedConversation, "asked_conversation");
+	const conversation = alias(placedConversation, "conversation");
+	return {
+		asked,
+		conversation,
+		unread: itemUnreadBy(db, input.userId, {
+			conversationId: conversation.id,
+			itemConversationId: collaboration.conversationId,
+			at: collaboration.createdAt,
+		}),
+		listed: and(
+			eq(conversation.workspaceId, input.workspaceId),
+			input.reachesConversation(conversation),
+			gt(collaboration.createdAt, input.since),
+		),
+	};
+}
 
 /** How many answered approvals the inbox lists, newest first. */
 const ANSWERED_APPROVALS = 50;
@@ -1195,6 +1361,9 @@ const WAITING_APPROVALS = 100;
  * `mayDecideToolCall`, the rule deciding an approval checks: by their
  * standing in the project of the conversation a call's conversation belongs
  * to, and, for a request to change a computer, in the computer's project.
+ * That project need not be one they reach: an administrator decides a private
+ * bot's computer requests, raised in a collaboration they can see, without
+ * reaching the bot's threads.
  */
 const approvalDecidersIn = Effect.fn("ChatView.approvalDecidersIn")(function* (
 	db: Executor,
@@ -1207,8 +1376,14 @@ const approvalDecidersIn = Effect.fn("ChatView.approvalDecidersIn")(function* (
 			standing,
 		]),
 	);
-	const standingIn = (projectId: string | null) =>
-		projectId === null ? undefined : projects.get(projectId);
+	const unreachedComputerProjectIds = (yield* waitingComputerRequestProjectIds(
+		db,
+		workspaceId,
+	)).filter((id) => !projects.has(id));
+	const computerProjects = new Map(projects);
+	for (const standing of yield* projectStandingsOf(db, unreachedComputerProjectIds, userId)) {
+		computerProjects.set(standing.project.id, standing);
+	}
 	/**
 	 * `projectId` is the project of the conversation the call's conversation
 	 * belongs to; `computerProjectId` the project whose computer the asking
@@ -1220,10 +1395,10 @@ const approvalDecidersIn = Effect.fn("ChatView.approvalDecidersIn")(function* (
 		inAutomation: boolean,
 		deciders: ToolApprovalDeciders,
 	) => {
-		const standing = standingIn(projectId);
+		const standing = projectId === null ? undefined : projects.get(projectId);
 		return mayDecideToolCall(
 			standing && { kind: "project", standing },
-			standingIn(computerProjectId),
+			computerProjectId === null ? undefined : computerProjects.get(computerProjectId),
 			inAutomation,
 			deciders,
 		);
@@ -1232,10 +1407,32 @@ const approvalDecidersIn = Effect.fn("ChatView.approvalDecidersIn")(function* (
 	const decidable: Decidable = {
 		outsideAutomations: projectIds.filter((id) => mayDecide(id, null, false, "conversation")),
 		inAutomations: projectIds.filter((id) => mayDecide(id, null, true, "conversation")),
-		computerRequests: projectIds.filter((id) => mayDecide(null, id, false, "computer-managers")),
+		computerRequests: [...computerProjects.keys()].filter((id) =>
+			mayDecide(null, id, false, "computer-managers"),
+		),
 	};
 	return { mayDecide, decidable };
 });
+
+/** The projects whose computers a waiting request to change a computer in the workspace is for. */
+const waitingComputerRequestProjectIds = Effect.fn("ChatView.waitingComputerRequestProjectIds")(
+	function* (db: Executor, workspaceId: string) {
+		const asking = alias(placedConversation, "asking_conversation");
+		const rows = yield* db
+			.selectDistinct({ projectId: computerProjectIdOf(asking, turn.botId) })
+			.from(toolCall)
+			.innerJoin(asking, eq(asking.id, toolCall.conversationId))
+			.innerJoin(turn, eq(turn.id, toolCall.turnId))
+			.where(
+				and(
+					eq(asking.workspaceId, workspaceId),
+					eq(toolCall.approvalStatus, "pending"),
+					inArray(toolCall.tool, [...COMPUTER_REQUEST_TOOLS]),
+				),
+			);
+		return rows.flatMap(({ projectId }) => (projectId ? [projectId] : []));
+	},
+);
 
 /**
  * Where a person may decide approvals, by project: the projects whose
@@ -1261,6 +1458,46 @@ const waitingApprovalRows = Effect.fn("ChatView.waitingApprovalRows")(function* 
 ) {
 	const asking = alias(placedConversation, "asking_conversation");
 	const conversation = alias(placedConversation, "approval_conversation");
+	const waiting = waitingOnDecision(decidable, asking, conversation, reachesConversation);
+	if (!waiting) return [];
+	return yield* selectApprovals(db, asking, conversation)
+		.where(waiting)
+		.orderBy(asc(toolCall.startedAt))
+		.limit(WAITING_APPROVALS);
+});
+
+/** How many approvals wait on a decision `decidable` allows, every one of them rather than a page. */
+const waitingApprovalCount = Effect.fn("ChatView.waitingApprovalCount")(function* (
+	db: Executor,
+	decidable: Decidable,
+	reachesConversation: Visibility.ReachesConversation,
+) {
+	const asking = alias(placedConversation, "asking_conversation");
+	const conversation = alias(placedConversation, "approval_conversation");
+	const waiting = waitingOnDecision(decidable, asking, conversation, reachesConversation);
+	if (!waiting) return 0;
+	const [counted] = yield* db
+		.select({ waiting: sql<number>`count(*)::int` })
+		.from(toolCall)
+		.innerJoin(asking, eq(asking.id, toolCall.conversationId))
+		.innerJoin(conversation, eq(conversation.id, asking.rootConversationId))
+		.innerJoin(turn, eq(turn.id, toolCall.turnId))
+		.where(waiting);
+	return counted?.waiting ?? 0;
+});
+
+/**
+ * Whether a tool call, joined to the conversation it asks in, `asking`, the
+ * conversation that belongs to, `conversation`, and its turn, waits on a
+ * decision `decidable` allows in a conversation `reachesConversation`
+ * reaches. Undefined when `decidable` allows none.
+ */
+function waitingOnDecision(
+	decidable: Decidable,
+	asking: AskingConversation,
+	conversation: ApprovalConversation,
+	reachesConversation: Visibility.ReachesConversation,
+): SQL | undefined {
 	const computerRequest = inArray(toolCall.tool, [...COMPUTER_REQUEST_TOOLS]);
 	const inAutomation = isNotNull(runIdOf(asking.id));
 	const conditions: SQL[] = [];
@@ -1282,14 +1519,13 @@ const waitingApprovalRows = Effect.fn("ChatView.waitingApprovalRows")(function* 
 			)})`,
 		);
 	}
-	if (conditions.length === 0) return [];
-	return yield* selectApprovals(db, asking, conversation)
-		.where(
-			and(eq(toolCall.approvalStatus, "pending"), or(...conditions), reachesConversation(asking)),
-		)
-		.orderBy(asc(toolCall.startedAt))
-		.limit(WAITING_APPROVALS);
-});
+	if (conditions.length === 0) return undefined;
+	return and(
+		eq(toolCall.approvalStatus, "pending"),
+		or(...conditions),
+		reachesConversation(asking),
+	);
+}
 
 /**
  * The tool calls answered in conversations `reachesConversation` reaches, newest answer
@@ -1443,6 +1679,23 @@ function listedProjectIdOf(row: { projectId: SQLWrapper; botId: SQLWrapper }): S
 	return sql<string | null>`case when ${row.botId} is null then ${row.projectId} end`;
 }
 
+/**
+ * Where a conversation people open is, from its kind, project and bot: a
+ * direct message is in no project, and a bot's default project is listed
+ * under the bot.
+ */
+function placeOf(row: {
+	kind: ConversationKind;
+	projectId: string | null;
+	botId: string | null;
+}): ConversationPlace {
+	if (row.kind === "direct_message") return { kind: "direct_message" };
+	if (row.botId !== null) return { kind: "bot", botId: row.botId };
+	if (row.projectId !== null) return { kind: "project", projectId: row.projectId };
+	// Only a system bot's conversation is in neither, and it is never one people open.
+	throw new Error(`The ${row.kind} conversation people open is in no project`);
+}
+
 /** The direct messages `userId` is in, in the workspace. */
 const directMessagesOf = Effect.fn("ChatView.directMessagesOf")(function* (
 	db: Executor,
@@ -1520,7 +1773,7 @@ const workspaceMembersById = Effect.fn("ChatView.workspaceMembersById")(function
 ) {
 	if (userIds.length === 0) return new Map<string, PersonParticipant>();
 	const rows = yield* db
-		.select({ id: user.id, name: user.name, email: user.email, image: user.image })
+		.select(namedPersonColumns)
 		.from(workspaceMember)
 		.innerJoin(user, eq(user.id, workspaceMember.userId))
 		.where(
@@ -1762,15 +2015,8 @@ function toHistoryPage(row: HistoryRow, limit: number) {
 							automationId: execution.automationId,
 							automationName: execution.automationName,
 							triggerKind: execution.trigger.kind,
-							triggeredAt:
-								execution.trigger.kind === "routine"
-									? execution.trigger.scheduledAt
-									: execution.trigger.kind === "manual"
-										? execution.trigger.requestedAt
-										: execution.trigger.receivedAt,
 						}
 					: null,
-				latestActivityAt: side.updatedAt.toISOString(),
 			},
 		];
 	});

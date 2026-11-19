@@ -1,13 +1,13 @@
 import type { Bot, SessionUser } from "@sugabots/contracts";
 import { Plus, RefreshCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { useWorkspaceAutomationsById } from "@/lib/automations.ts";
-import { useBotThreads, useOpenAutomationFeed } from "@/lib/chats.ts";
+import { useOpenAutomationFeed } from "@/lib/chats.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
-import { AutomationRow, NoAutomations } from "@/shell/Automations.tsx";
-import { Stage, StageClose, StageMark, type StageParent } from "@/shell/Stage.tsx";
+import { AutomationRow, NoAutomations, useListedAutomations } from "@/shell/Automations.tsx";
+import { Stage, StageClose, type StageParent } from "@/shell/Stage.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { IconTile } from "@/ui/icon-tile.tsx";
 import { NewAutomationPage } from "./AutomationEditor.tsx";
 import { ConversationChat } from "./ConversationChat.tsx";
 import type { StagedChange } from "./staged.ts";
@@ -59,9 +59,9 @@ export function AutomationsStage({
 		);
 	}
 	const mark = (
-		<StageMark>
+		<IconTile size="sm">
 			<RefreshCcw strokeWidth={2} />
-		</StageMark>
+		</IconTile>
 	);
 	if (view.kind === "new") {
 		return (
@@ -93,7 +93,7 @@ export function AutomationsStage({
 			icon={mark}
 			title={title}
 			actions={
-				bot.permissions.manageAutomations && (
+				bot.permissions.resources.manageAutomations && (
 					<IconButton
 						label="New automation"
 						variant="bar"
@@ -124,9 +124,7 @@ function AutomationList({
 	onOpen: (automationId: string) => void;
 	onNew: () => void;
 }) {
-	const list = useBotThreads(bot.id);
-	const automationById = useWorkspaceAutomationsById();
-	const automations = list.data?.automations ?? [];
+	const list = useListedAutomations({ bot });
 	if (list.isError) {
 		return (
 			<EmptyState title="Could not load these automations">
@@ -134,13 +132,13 @@ function AutomationList({
 			</EmptyState>
 		);
 	}
-	if (list.isSuccess && automations.length === 0) {
+	if (list.automations?.length === 0) {
 		return (
 			<NoAutomations
 				title={`No automations for ${bot.name} yet`}
-				owner={bot.name}
+				ownerName={bot.name}
 				create={
-					bot.permissions.manageAutomations
+					bot.permissions.resources.manageAutomations
 						? {
 								newAutomation: <button type="button" onClick={onNew} />,
 								// Not linked: the bot's thread is already open beside this panel.
@@ -153,13 +151,11 @@ function AutomationList({
 	}
 	return (
 		<ul className="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-0">
-			{automations.map((row) => (
+			{list.automations?.map((row) => (
 				<li key={row.automation.id}>
 					<AutomationRow
-						row={{ ...row, bot }}
+						row={row}
 						owner={{ bot }}
-						automation={automationById.get(row.automation.id)}
-						selected={false}
 						render={<button type="button" onClick={() => onOpen(row.automation.id)} />}
 					/>
 				</li>
@@ -189,7 +185,7 @@ function AutomationFeed({
 	parent: StageParent;
 	trailing: ReactNode;
 }) {
-	const opened = useOpenAutomationFeed(bot.id, automationId);
+	const opened = useOpenAutomationFeed(bot.defaultProjectId, automationId);
 	const keys = usePanelKeys<HTMLElement>(parent.onBack);
 	const [itemConversationId, setItemConversationId] = useState<string>();
 	const [detailsOpen, setDetailsOpen] = useState(false);

@@ -35,6 +35,7 @@ import { FloorControl } from "../floor/floor-control.ts";
 import { madeByPeople, personColumns } from "../repository/participants.ts";
 import { ConversationRepository, lockMessageId } from "../repository/repository.ts";
 import { Turns } from "../turns/turns.ts";
+import { conversationsWithUnread } from "./chat-view.ts";
 import { toAutomationFeed, toDirectMessage, toProjectThread } from "./conversation.ts";
 import { threadTitleFrom } from "./thread-title.ts";
 
@@ -44,22 +45,6 @@ import { threadTitleFrom } from "./thread-title.ts";
  * after a message is asked to speak.
  */
 export interface Interface {
-	/**
-	 * Starts a thread for the actor with the bot `botId`, in its default
-	 * project, titled from its first message, which the bot answers. Hidden
-	 * unless the actor reaches the bot; refused when it has no model. Starting
-	 * it again with the same message returns the thread it started. Files are
-	 * added once it has started, since an upload belongs to a conversation.
-	 */
-	readonly startThread: (input: {
-		botId: string;
-		messageId: string;
-		content: string;
-	}) => Effect.Effect<
-		StartedThread,
-		AuthorizationDenied | HostHasNoModel | ConversationRepository.MessageIdConflict,
-		CurrentActor.Service
-	>;
 	/**
 	 * Starts the thread in which the bot `botId` interviews the actor, who made
 	 * it, to write its own instructions: once, while it still has the
@@ -91,8 +76,11 @@ export interface Interface {
 	/**
 	 * Starts a thread for the actor in the project `projectId`, for everyone in
 	 * it, titled from its first message, which whoever has the floor answers:
-	 * the lead bot, unless it mentions others. Anyone in the project may.
-	 * Starting it again with the same message returns the thread it started.
+	 * the lead bot, unless it mentions others. Anyone who reaches the project
+	 * may, so a bot's threads are started in its default project. Refused when
+	 * a bot given the floor has no model. Starting it again with the same
+	 * message returns the thread it started. Files are added once it has
+	 * started, since an upload belongs to a conversation.
 	 */
 	readonly startProjectThread: (input: {
 		projectId: string;
@@ -100,17 +88,9 @@ export interface Interface {
 		content: string;
 	}) => Effect.Effect<
 		StartedThread,
-		AuthorizationDenied | HostHasNoModel | ConversationRepository.MessageIdConflict,
+		AuthorizationDenied | FloorControl.BotHasNoModel | ConversationRepository.MessageIdConflict,
 		CurrentActor.Service
 	>;
-	/**
-	 * Starts a thread in the project `projectId`, called `name`, for everyone in
-	 * it. Anyone in the project may.
-	 */
-	readonly startNamedThread: (input: {
-		projectId: string;
-		name: string;
-	}) => Effect.Effect<ProjectThread, AuthorizationDenied | ResourceHidden, CurrentActor.Service>;
 	/**
 	 * Renames the project's thread `conversationId`, or archives it, for
 	 * whoever may manage the project's threads. An archived thread is changed no more.
@@ -151,7 +131,7 @@ export interface Interface {
 		| ConversationRepository.MessageIdConflict
 		| ConversationRepository.ReplyTargetNotFound
 		| ConversationFiles.UploadsNotFound
-		| HostHasNoModel,
+		| FloorControl.BotHasNoModel,
 		CurrentActor.Service
 	>;
 	/**
@@ -166,7 +146,11 @@ export interface Interface {
 		briefingBotId: string;
 		title: string;
 		brief: string;
-	}) => Effect.Effect<ProjectThread, HostUnavailable | HostHasNoModel, CurrentActor.Service>;
+	}) => Effect.Effect<
+		ProjectThread,
+		HostUnavailable | FloorControl.BotHasNoModel,
+		CurrentActor.Service
+	>;
 	/**
 	 * Marks the thread `conversationId` done, or reopens it. An automation's
 	 * feed is never done, so it is hidden from this.
@@ -179,6 +163,14 @@ export interface Interface {
 	readonly markRead: (
 		conversationId: string,
 	) => Effect.Effect<void, ResourceHidden, CurrentActor.Service>;
+	/**
+	 * Records that the actor has read every conversation they reach in
+	 * `workspace`, named by its id or its slug, that holds something they have
+	 * not read, each as `markRead` reads it.
+	 */
+	readonly markAllRead: (
+		workspace: string,
+	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
 	/**
 	 * Records that the actor has read one automation run or collaboration as an
 	 * Inbox item, by its own conversation `itemConversationId`, leaving the
@@ -261,11 +253,8 @@ export const make = Effect.gen(function* () {
 			if (conversation.kind === "direct_message") return posted.message;
 			// Something new in a done thread is not left where nobody looks.
 			yield* conversations.setDone(conversation, false);
-			// Checked once the message is known to be new, so sending it again
-			// still returns it; refusing here rolls the post back.
-			if (conversation.botId && (yield* hostModelOf(conversation.botId)) === null) {
-				return yield* new HostHasNoModel();
-			}
+			// Given once the message is known to be new, so sending it again
+			// still returns it; a refusal rolls the post back.
 			yield* floor.giveFloor({
 				id: posted.message.id,
 				conversationId: conversation.id,
@@ -278,13 +267,11 @@ export const make = Effect.gen(function* () {
 	 * Starts a thread for `userId` in the project `place.projectId`, titled
 	 * from its first message, and posts it, giving the floor. Sent again with the same message, it
 	 * returns the thread that message started instead, unless that is elsewhere.
-	 * `refusal`, when given, is failed with before anything is made.
 	 */
 	const startWithMessage = Effect.fnUntraced(function* (
 		place: { workspaceId: string; projectId: string },
 		userId: string,
 		input: { messageId: string; content: string },
-		refusal?: HostHasNoModel,
 	) {
 		// A retry waits for the first send, and then finds the thread it started.
 		yield* lockMessageId(input.messageId);
@@ -311,7 +298,6 @@ export const make = Effect.gen(function* () {
 			);
 			return { conversation: toProjectThread(sent.conversation), message: posted };
 		}
-		if (refusal) return yield* refusal;
 		const started = yield* conversations.startThread({
 			workspaceId: place.workspaceId,
 			projectId: place.projectId,
@@ -356,24 +342,6 @@ export const make = Effect.gen(function* () {
 	});
 
 	return Service.of({
-		startThread: (input) =>
-			operation(
-				"startThread",
-				transaction(
-					Effect.gen(function* () {
-						const { bot: host, actor } = yield* authorization.bot(input.botId, "bot.read");
-						const projectId = yield* defaultProjectOf(host.id);
-						return yield* startWithMessage(
-							{ workspaceId: host.workspaceId, projectId },
-							actor.userId,
-							input,
-							// Refused before the thread is made, rather than after its message.
-							host.model === null ? new HostHasNoModel() : undefined,
-						);
-					}),
-				),
-			),
-
 		startInterview: (botId) =>
 			operation(
 				"startInterview",
@@ -423,7 +391,7 @@ export const make = Effect.gen(function* () {
 							Effect.catchTags({
 								ReplyTargetNotFound: Effect.die,
 								UploadsNotFound: Effect.die,
-								HostHasNoModel: Effect.die,
+								BotHasNoModel: Effect.die,
 							}),
 						);
 						return { conversation: toDirectMessage(conversation), message };
@@ -447,22 +415,6 @@ export const make = Effect.gen(function* () {
 						);
 					}),
 				),
-			),
-
-		startNamedThread: (input) =>
-			operation(
-				"startNamedThread",
-				Effect.gen(function* () {
-					const { project, actor } = yield* authorization.project(input.projectId, "project.read");
-					return toProjectThread(
-						yield* conversations.startThread({
-							workspaceId: project.workspaceId,
-							projectId: project.id,
-							startedById: actor.userId,
-							title: input.name,
-						}),
-					);
-				}),
 			),
 
 		changeThread: (input) =>
@@ -532,17 +484,14 @@ export const make = Effect.gen(function* () {
 				"startBriefedThread",
 				transaction(
 					Effect.gen(function* () {
-						if (!(yield* hostReached(input, yield* visibility.reachesBot))) {
-							return yield* new HostUnavailable();
-						}
-						if ((yield* hostModelOf(input.botId)) === null) {
-							return yield* new HostHasNoModel();
-						}
+						const host = yield* reachedHost(input, yield* visibility.reachesBot);
+						if (!host) return yield* new HostUnavailable();
+						if (host.model === null) return yield* new FloorControl.BotHasNoModel();
 						const { userId } = yield* CurrentActor.Service;
 						return toProjectThread(
 							yield* conversations.startBriefedThread({
 								workspaceId: input.workspaceId,
-								projectId: yield* defaultProjectOf(input.botId),
+								projectId: host.defaultProjectId,
 								briefingBotId: input.briefingBotId,
 								startedById: userId,
 								title: input.title,
@@ -578,6 +527,29 @@ export const make = Effect.gen(function* () {
 						yield* conversations.markRead(userId, visible.id);
 					}),
 				),
+			),
+
+		markAllRead: (workspace) =>
+			operation(
+				"markAllRead",
+				Effect.gen(function* () {
+					const { workspaceId, actor } = yield* authorization.workspace(
+						workspace,
+						"workspace.read",
+					);
+					const unread = yield* conversationsWithUnread({
+						workspaceId,
+						userId: actor.userId,
+						reachesConversation: yield* visibility.reachesConversation,
+					});
+					// Each in its own transaction, as `markRead` is, so no lock is held
+					// across the workspace's conversations.
+					yield* Effect.forEach(
+						unread,
+						(conversationId) => conversations.markRead(actor.userId, conversationId),
+						{ discard: true },
+					);
+				}),
 			),
 
 		markItemRead: (itemConversationId) =>
@@ -632,32 +604,26 @@ export class HostUnavailable extends Data.TaggedError("HostUnavailable") impleme
 	}
 }
 
-/**
- * The conversation's bot has no model, so nothing could answer. The message is not
- * kept, rather than kept with a turn that will never run.
- */
-export class HostHasNoModel extends Data.TaggedError("HostHasNoModel") implements UserFacing {
-	get userMessage() {
-		return userText`This bot has no model chosen, so it can't answer yet`;
-	}
-}
-
 export class ChatArchived extends Data.TaggedError("ChatArchived") implements UserFacing {
 	get userMessage() {
 		return userText`This thread is archived, so it can't be changed`;
 	}
 }
 
-/** Whether `reachesBot` reaches the bot, which is in the workspace and one people make. */
-const hostReached = (
+/**
+ * The bot `input.botId`, with its model and default project, when
+ * `reachesBot` reaches it, it is in the workspace, and people make it.
+ */
+const reachedHost = (
 	input: { workspaceId: string; botId: string },
 	reachesBot: Visibility.ReachesBot,
 ) =>
 	Effect.map(
 		query((db) =>
 			db
-				.select({ id: bot.id })
+				.select({ model: bot.model, defaultProjectId: project.id })
 				.from(bot)
+				.innerJoin(project, eq(project.defaultOfBotId, bot.id))
 				.where(
 					and(
 						eq(bot.id, input.botId),
@@ -668,7 +634,7 @@ const hostReached = (
 				)
 				.limit(1),
 		),
-		([allowed]) => allowed !== undefined,
+		([host]) => host,
 	);
 
 /** The actor as their messages are signed. */
@@ -677,10 +643,4 @@ const senderOf = ({ userId }: CurrentActor.Interface) =>
 		query((db) => db.query.user.findFirst({ where: { id: userId }, ...personColumns })),
 		(sender) =>
 			sender ? Effect.succeed(sender) : Effect.die(new Error("The current actor has no account")),
-	);
-
-const hostModelOf = (botId: string) =>
-	Effect.map(
-		query((db) => db.select({ model: bot.model }).from(bot).where(eq(bot.id, botId)).limit(1)),
-		([row]) => row?.model ?? null,
 	);

@@ -9,7 +9,7 @@ import type {
 import { automationTriggers, testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { expect, fn, within } from "storybook/test";
+import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk } from "@/shell/story-fixtures.ts";
 import { storyModel } from "@/story-app.tsx";
@@ -38,7 +38,6 @@ const activity: ConversationActivity = {
 	summary: {
 		content:
 			"Overnight outbound queued 38 leads and six have replied, including both Northwind accounts asking about pricing. Jay wants short replies drafted. Checkout timeouts are back; Linear Handler found 41 events and is waiting on approval to open an issue. Nothing else is outstanding from this week.",
-		sourceMessageId: "0199a3a0-0000-7000-8000-000000000512",
 		updatedAt: "2026-09-25T06:12:00.000Z",
 	},
 	context: {
@@ -74,7 +73,7 @@ function automation(id: string, name: string, expression: string): Automation {
 		}),
 		state: "enabled",
 		createdById: null,
-		createdByBotId: null,
+		pausedAfterFailures: false,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		updatedAt: "2026-09-01T00:00:00.000Z",
 	};
@@ -90,7 +89,7 @@ function connection(id: string, name: string, url: string): Connection {
 	return {
 		id,
 		workspaceId: WORKSPACE,
-		projectId: growthDesk.id,
+		projectId: growthDesk.defaultProjectId,
 		name,
 		handle: name.toLowerCase(),
 		url,
@@ -103,7 +102,6 @@ function connection(id: string, name: string, url: string): Connection {
 		appSettingsUrl: null,
 		status: "connected",
 		toolCounts: { allow: 1, ask: 0, off: 0 },
-		lastTestedAt: null,
 		lastTestError: null,
 		connectedBy: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
@@ -146,9 +144,9 @@ const meta = preview.meta({
 			const summariserHasModel = context.parameters.summariserHasModel !== false;
 			const [queryClient] = useState(() => {
 				const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-				client.setQueryData(["automations", "bot", growthDesk.id], automations);
+				client.setQueryData(["automations", "project", growthDesk.defaultProjectId], automations);
 				client.setQueryData(
-					["connections", growthDesk.id],
+					["connections", growthDesk.defaultProjectId],
 					context.parameters.connections ?? connections,
 				);
 				client.setQueryData(["models", WORKSPACE], { models: [storyModel] });
@@ -192,7 +190,8 @@ const meta = preview.meta({
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("heading", { name: "Context" })).toBeVisible();
+		// The cards fade in under the button that opened them.
+		await waitFor(() => expect(canvas.getByRole("heading", { name: "Context" })).toBeVisible());
 		await expect(canvas.getByRole("meter", { name: "Short-term memory used" })).toBeInTheDocument();
 		await expect(canvas.getByRole("link", { name: "northwind-pricing.pdf" })).toBeVisible();
 		await expect(canvas.getByRole("heading", { name: "Computer" })).toBeVisible();
@@ -254,7 +253,7 @@ export const SignInExpired = meta.story({
 	play: async ({ canvas }) => {
 		const tools = canvas.getByRole("heading", { name: "Context" }).closest("section");
 		if (!tools) throw new Error("The details have no Context section");
-		await expect(within(tools).getByText("Sign-in expired")).toBeVisible();
+		await waitFor(() => expect(within(tools).getByText("Sign-in expired")).toBeVisible());
 		await expect(within(tools).getByRole("button", { name: "Sign in to Linear" })).toBeVisible();
 		await expect(within(tools).getAllByText("1 tool")).toHaveLength(2);
 	},

@@ -142,13 +142,16 @@ export const PhoneSection = meta.story({
 	},
 });
 
-/** On a tablet, settings drill down as on a phone: a project's page full screen, with the way back to the list. */
+/** On a tablet, settings drill down as on a phone: one of a project's pages full screen, with the way back to the project. */
 export const TabletSection = meta.story({
 	globals: TABLET,
 	render: () => <StoryApp path={`${settings}/projects/revenue/bots`} />,
 	play: async ({ canvas }) => {
 		const page = await canvas.findByRole("main");
-		await expect(await within(page).findByRole("link", { name: "Settings" })).toBeInTheDocument();
+		await expect(await within(page).findByRole("link", { name: "Project" })).toHaveAttribute(
+			"href",
+			`${settings}/projects/revenue`,
+		);
 		await expect(await within(page).findByRole("heading", { name: "Bots" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("navigation", { name: "Settings" })).toBeNull();
 		await expect(canvas.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();

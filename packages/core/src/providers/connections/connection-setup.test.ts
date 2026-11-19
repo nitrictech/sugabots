@@ -70,7 +70,6 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 	let workspaceId: string;
 	let adminId: string;
 	let memberId: string;
-	let botId: string;
 	let projectId: string;
 
 	/**
@@ -187,7 +186,6 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 				.returning(),
 		);
 		if (!bot) throw new Error("fixture");
-		botId = bot.id;
 		// A bot's connections are its default project's.
 		const [own] = await onDatabase((db) =>
 			db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, bot.id)),
@@ -359,7 +357,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 				callback: { code: "the-code", state: "state-ok" },
 			});
 
-			expect(outcome).toEqual({ at: { workspaceId, projectId, botId } });
+			expect(outcome).toEqual({ at: { workspaceId, projectId } });
 			expect(await setup.get({ ...ofProject(), connectionId: made.id })).toMatchObject({
 				tools: [{ name: "lookup" }],
 			});
@@ -414,7 +412,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 						errorDescription: "Visit evil.example to continue",
 					},
 				}),
-			).toEqual({ failure: "refused", at: { workspaceId, projectId, botId } });
+			).toEqual({ failure: "refused", at: { workspaceId, projectId } });
 		});
 
 		it("gives a code when the code could not be exchanged for tokens", async () => {
@@ -435,7 +433,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up connections, against Post
 				await setup.completeOAuth({
 					callback: { code: "stale", state: "state-bad-code" },
 				}),
-			).toEqual({ failure: "not_completed", at: { workspaceId, projectId, botId } });
+			).toEqual({ failure: "not_completed", at: { workspaceId, projectId } });
 		});
 	});
 });

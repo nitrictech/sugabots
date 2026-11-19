@@ -1,3 +1,4 @@
+import type { WorkspaceRole } from "@sugabots/contracts";
 import { isEmailUnverified } from "@sugabots/sdk";
 import { useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
@@ -35,7 +36,11 @@ function invitationFailureMessage(failure: unknown): string {
 
 export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void> }) {
 	const queries = useQueryClient();
-	const [pending, setPending] = useState<{ workspaceName: string; inviterName: string }>();
+	const [pending, setPending] = useState<{
+		workspaceName: string;
+		inviterName: string;
+		role: WorkspaceRole;
+	}>();
 	const [error, setError] = useState<string>();
 	const [busy, setBusy] = useState(false);
 	/** The workspace joined, once it has been, so continuing after a failure does not accept again. */
@@ -112,7 +117,7 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 			<AuthLayout title={joined ? "Invitation accepted" : "This invitation did not work"}>
 				<Alert>{error}</Alert>
 				<Button
-					variant="outline"
+					variant="secondary"
 					size="lg"
 					onClick={() => void leave()}
 					disabled={busy}
@@ -131,7 +136,7 @@ export function Invite({ id, onDone }: { id: string; onDone: () => Promise<void>
 			}
 			subtitle={
 				pending &&
-				`${pending.inviterName} invited you. A project's threads are seen by everyone in it.`
+				`${pending.inviterName} invited you as ${pending.role === "admin" ? "an admin" : `a ${pending.role}`}. A project's threads are seen by everyone in it.`
 			}
 		>
 			<Button size="lg" onClick={accept} disabled={busy || !pending} className="w-full">

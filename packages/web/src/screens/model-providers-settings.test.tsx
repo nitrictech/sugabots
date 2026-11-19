@@ -38,7 +38,12 @@ describe("when a provider was added", () => {
 			id: "0199a3a0-0000-7000-8000-0000000000cf",
 			preset: null,
 			name: "Company gateway",
-			connectedBy: "Sam",
+			connectedBy: {
+				id: "0199a3a0-0000-7000-8000-0000000000c1",
+				name: "Sam",
+				email: "sam@example.com",
+				image: null,
+			},
 		};
 		client.api.modelProviders.list.mockReturnValue(Effect.succeed([gateway]));
 		mount(`/suga/settings/providers/${gateway.id}`);
@@ -48,7 +53,17 @@ describe("when a provider was added", () => {
 
 	it("is not said for a preset every workspace starts with, which nobody added", async () => {
 		client.api.modelProviders.list.mockReturnValue(
-			Effect.succeed([{ ...openai, connectedBy: "Sam" }]),
+			Effect.succeed([
+				{
+					...openai,
+					connectedBy: {
+						id: "0199a3a0-0000-7000-8000-0000000000c1",
+						name: "Sam",
+						email: "sam@example.com",
+						image: null,
+					},
+				},
+			]),
 		);
 		mount(`/suga/settings/providers/${openai.id}`);
 
@@ -137,7 +152,6 @@ describe("switching off a model bots run on", () => {
 					providerId: anthropic.id,
 					providerName: anthropic.name,
 					providerPreset: "anthropic" as const,
-					providerActive: true,
 					modelId,
 					displayName: null,
 					capabilities: ["tools" as const],
@@ -188,7 +202,6 @@ describe("switching off a provider whose models bots run on", () => {
 			providerId,
 			providerName: providerId === anthropic.id ? anthropic.name : openai.name,
 			providerPreset: null,
-			providerActive: true,
 			modelId,
 			displayName: null,
 			capabilities: ["tools" as const],
@@ -236,7 +249,6 @@ describe("switching off the model summaries run on", () => {
 					providerId: anthropic.id,
 					providerName: anthropic.name,
 					providerPreset: "anthropic" as const,
-					providerActive: true,
 					modelId,
 					displayName: null,
 					capabilities: ["tools" as const],

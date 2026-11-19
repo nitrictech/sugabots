@@ -168,10 +168,30 @@ describe.skipIf(!process.env.DATABASE_URL)("direct messages, against Postgres", 
 			expect(items).toEqual([
 				expect.objectContaining({
 					rootConversationId: conversation.id,
-					projectId: null,
+					place: { kind: "direct_message" },
 					unread: true,
 				}),
 			]);
+			expect(await as(colleague.id).view.attention(workspaceId)).toMatchObject({
+				unreadForYou: 1,
+			});
+		});
+
+		it("is read with everything else the person has not read in the workspace, and only for them", async () => {
+			const { conversation } = await send(member.id, [colleague.id], "Ping");
+			await send(colleague.id, [member.id], "Pong");
+
+			await as(colleague.id).chats.markAllRead(workspaceId);
+
+			expect(await as(colleague.id).view.directMessage(conversation.id)).toMatchObject({
+				unreadMessages: 0,
+			});
+			expect(await as(colleague.id).view.attention(workspaceId)).toMatchObject({
+				unreadForYou: 0,
+			});
+			expect(await as(member.id).view.directMessage(conversation.id)).toMatchObject({
+				unreadMessages: 1,
+			});
 		});
 
 		it("does not take @here or @channel in it as mentioning anybody, as everybody in it is told anyway", async () => {

@@ -159,7 +159,7 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
  * the tool's input or output is mostly one piece of text (a command, a file),
  * and otherwise the value itself, for `ToolCallValue` to lay out.
  */
-export interface StepDetails {
+interface StepDetails {
 	input?: unknown;
 	/** The input's other arguments, when `input` is only its main text: a command's timeout. */
 	otherArguments?: unknown;

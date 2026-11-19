@@ -20,12 +20,6 @@ export class FilesApi extends HttpApiGroup.make("files")
 			success: Schema.Array(fileSummarySchema),
 			error: refused,
 		}),
-		/** The files uploaded or made in the bot's threads. */
-		HttpApiEndpoint.get("listForBot", "/bots/:botId/files", {
-			params: { botId: uuidSchema },
-			success: Schema.Array(fileSummarySchema),
-			error: refused,
-		}),
 		/** A file a bot wrote, at its current version. */
 		HttpApiEndpoint.get("get", `${root}/:fileId`, {
 			params: file,

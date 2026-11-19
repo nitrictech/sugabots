@@ -35,7 +35,7 @@ const webhookAutomation = {
 	}),
 	state: "enabled",
 	createdById: null,
-	createdByBotId: null,
+	pausedAfterFailures: false,
 	createdAt: "2026-09-18T00:00:00.000Z",
 	updatedAt: "2026-09-18T00:00:00.000Z",
 } satisfies Automation;
@@ -99,7 +99,6 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 				access: "allow",
 			},
 		],
-		lastTestedAt: "2026-09-19T00:00:00.000Z",
 		lastTestError: null,
 		connectedBy: null,
 		createdAt: "2026-09-19T00:00:00.000Z",
@@ -131,7 +130,7 @@ describe("what everybody sees", () => {
 	});
 
 	it("says a bot nobody added was made with the workspace", async () => {
-		rosterAnswers({ createdById: null });
+		rosterAnswers({ createdBy: null });
 		mount(page);
 
 		const profile = await screen.findByRole("region", { name: "Profile" });
@@ -159,7 +158,7 @@ describe("what everybody sees", () => {
 		expect(within(connections).queryByText("Wiki")).toBeNull();
 		expect(within(connections).queryByRole("switch")).toBeNull();
 		const manage = within(connections).getByRole("link", { name: "Manage" });
-		expect(manage.getAttribute("href")).toBe(`${page}/connections`);
+		expect(manage.getAttribute("href")).toBe(`/suga/bots/${linear.handle}/connections`);
 	});
 });
 

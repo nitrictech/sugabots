@@ -7,9 +7,9 @@ import { ComputerCredentials } from "./computer-credentials.ts";
 import { workVolume } from "./implementations/opensandbox.ts";
 
 /**
- * What a bot's computer is signed in with and reaches the internet through,
- * for a test that never makes one, such as one that deletes a bot that has
- * none: any use dies.
+ * What a project's computer is signed in with and reaches the internet
+ * through, for a test that never makes one, such as one that deletes a bot
+ * whose default project has none: any use dies.
  */
 export const noComputers = Layer.mergeAll(
 	unimplemented(ComputerCredentials.Service, {}),

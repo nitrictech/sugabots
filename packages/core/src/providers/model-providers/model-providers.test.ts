@@ -257,10 +257,13 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			setup.update({ workspace: workspaceId, providerId: openai.id, changes });
 
 		await change({ apiKey: "secret" });
-		expect(await view(openai.id)).toMatchObject({ active: true, connectedBy: "Ada" });
+		expect(await view(openai.id)).toMatchObject({
+			active: true,
+			connectedBy: { name: "Ada", email: expect.stringMatching(/^ada-.*@example\.com$/) },
+		});
 
 		await change({ active: false });
-		expect(await view(openai.id)).toMatchObject({ active: false, connectedBy: "Ada" });
+		expect(await view(openai.id)).toMatchObject({ active: false, connectedBy: { name: "Ada" } });
 
 		await change({ apiKey: null });
 		expect(await view(openai.id)).toMatchObject({ connectedBy: null });
@@ -275,7 +278,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			setup.update({ workspace: workspaceId, providerId: ollama.id, changes });
 
 		await change({ active: true });
-		expect(await view(ollama.id)).toMatchObject({ connectedBy: "Ada" });
+		expect(await view(ollama.id)).toMatchObject({ connectedBy: { name: "Ada" } });
 
 		await change({ active: false });
 		expect(await view(ollama.id)).toMatchObject({ connectedBy: null });
@@ -291,7 +294,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		await change({ apiKey: "local-key" });
 		await change({ active: false });
 
-		expect(await view(ollama.id)).toMatchObject({ active: false, connectedBy: "Ada" });
+		expect(await view(ollama.id)).toMatchObject({ active: false, connectedBy: { name: "Ada" } });
 	});
 
 	it("names who next switches on a local provider whose key was taken away, not who gave the key", async () => {
@@ -323,7 +326,48 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 		expect(await view(ollama.id)).toMatchObject({ active: false, connectedBy: null });
 
 		await change({ active: true });
-		expect(await view(ollama.id)).toMatchObject({ active: true, connectedBy: "Bob" });
+		expect(await view(ollama.id)).toMatchObject({ active: true, connectedBy: { name: "Bob" } });
+	});
+
+	it("names nobody as who connected a provider once they have left the workspace, though they are in another", async () => {
+		const [bob] = await onDatabase((db) =>
+			db
+				.insert(user)
+				.values({ name: "Bob", email: `bob-${workspaceId}@example.com` })
+				.returning(),
+		);
+		if (!bob) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId, userId: bob.id, role: "admin" }),
+		);
+		await (await setupWith(() => Response.json({ data: [] }), { as: bob.id })).update({
+			workspace: workspaceId,
+			providerId,
+			changes: { apiKey: "bobs-key" },
+		});
+		expect(await view(providerId)).toMatchObject({ connectedBy: { name: "Bob" } });
+		const [elsewhere] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: "Elsewhere", slug: `elsewhere-${crypto.randomUUID()}` })
+				.returning(),
+		);
+		if (!elsewhere) throw new Error("fixture");
+		await onDatabase((db) =>
+			db
+				.insert(workspaceMember)
+				.values({ workspaceId: elsewhere.id, userId: bob.id, role: "admin" }),
+		);
+
+		await onDatabase((db) =>
+			db
+				.delete(workspaceMember)
+				.where(
+					and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, bob.id)),
+				),
+		);
+
+		expect(await view(providerId)).toMatchObject({ connectedBy: null });
 	});
 
 	it("does not let an in-flight successful test undo a manual deactivation", async () => {
@@ -871,26 +915,6 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 				modelId: "first",
 				holders: { workspaceDefault: false, systemBots: ["Compaction", "Summariser"] },
 			});
-		});
-
-		it("refuses to delete the default, even while its provider is off", async () => {
-			const ids = await offerable("first");
-			const setup = await answering();
-			await setup.setModelsEnabled({
-				workspace: workspaceId,
-				providerId,
-				modelIds: [ids.first ?? ""],
-				enabled: true,
-			});
-			// A failed test switches a provider off without asking anybody.
-			await onDatabase((db) =>
-				db.update(modelProvider).set({ active: false }).where(eq(modelProvider.id, providerId)),
-			);
-
-			await expect(
-				setup.removeModel({ workspace: workspaceId, providerId, modelId: ids.first ?? "" }),
-			).rejects.toBeInstanceOf(ModelInUse);
-			expect((await view(providerId))?.models.map(({ modelId }) => modelId)).toEqual(["first"]);
 		});
 
 		describe("switching off a model bots run on", () => {

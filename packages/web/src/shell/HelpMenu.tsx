@@ -31,8 +31,8 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
 import { useCopy } from "@/ui/use-copy.ts";
 
 /**
@@ -52,14 +52,15 @@ export function HelpMenu() {
 	return (
 		<>
 			<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-				<Tooltip label="Help" side="top">
-					<DropdownMenuTrigger
-						aria-label="Help"
-						className="focus-ring grid size-7 shrink-0 place-items-center rounded-sm text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground data-popup-open:bg-row-selected data-popup-open:text-foreground"
-					>
-						<CircleHelp aria-hidden size={16} strokeWidth={1.75} />
-					</DropdownMenuTrigger>
-				</Tooltip>
+				<IconButton
+					label="Help"
+					side="top"
+					variant="row"
+					render={<DropdownMenuTrigger />}
+					className="size-7 rounded-sm [&_svg]:size-4"
+				>
+					<CircleHelp aria-hidden size={16} strokeWidth={1.75} />
+				</IconButton>
 				<DropdownMenuContent side="top" align="end" className="min-w-60">
 					<ExternalItem href={projectLinks.documentation} icon={BookOpen}>
 						Documentation

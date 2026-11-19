@@ -1,5 +1,5 @@
 import type { ConnectionTool, NewConnection } from "@sugabots/contracts";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Credentials } from "../../credentials/credentials.ts";
@@ -222,6 +222,31 @@ describe.skipIf(!process.env.DATABASE_URL)("connections, against Postgres", () =
 		await connections.update(workspaceId, projectId, made.id, { access: "ask" });
 
 		expect((await shown(made.id))?.tools.map((tool) => tool.access)).toEqual(["ask", "ask", "ask"]);
+	});
+
+	it("names who added a connection while they are in the workspace, and nobody once they leave it for another", async () => {
+		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
+		expect((await shown(made.id))?.connectedBy).toMatchObject({ id: userId, name: "Sam" });
+		const [elsewhere] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: "Elsewhere", slug: `elsewhere-${crypto.randomUUID()}` })
+				.returning(),
+		);
+		if (!elsewhere) throw new Error("could not create the other workspace");
+		await onDatabase((db) =>
+			db.insert(workspaceMember).values({ workspaceId: elsewhere.id, userId, role: "member" }),
+		);
+
+		await onDatabase((db) =>
+			db
+				.delete(workspaceMember)
+				.where(
+					and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, userId)),
+				),
+		);
+
+		expect((await shown(made.id))?.connectedBy).toBeNull();
 	});
 
 	it("lists a connection's tools as counts, and gives one connection's tools without their descriptions", async () => {

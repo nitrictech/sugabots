@@ -56,13 +56,6 @@ export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (
 				.handle("create", ({ params, payload }) =>
 					automations.create(params, payload).pipe(asSessionUser, asHttpError(automationErrors)),
 				)
-				.handle("previewSchedule", ({ params, payload }) =>
-					automations.previewSchedule({ projectId: params.projectId, ...payload }).pipe(
-						Effect.map((dates) => dates.map((date) => date.toISOString())),
-						asSessionUser,
-						asHttpError(automationErrors),
-					),
-				)
 				.handle("get", ({ params }) =>
 					automations.get(params).pipe(asSessionUser, asHttpError(automationErrors)),
 				)
@@ -99,6 +92,11 @@ export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (
 						asSessionUser,
 						asHttpError(automationErrors),
 					),
+				)
+				.handle("projectRuns", ({ params, query }) =>
+					automations
+						.listProjectRuns(params, query)
+						.pipe(asSessionUser, asHttpError(automationErrors)),
 				)
 				.handle("runs", ({ params, query }) =>
 					automations.listRuns(params, query).pipe(asSessionUser, asHttpError(automationErrors)),

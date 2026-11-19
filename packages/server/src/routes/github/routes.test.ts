@@ -12,12 +12,11 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const CONNECTION_ID = "0199a3a0-0000-7000-8000-000000000001";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000002";
-const BOT_ID = "0199a3a0-0000-7000-8000-000000000003";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000004";
 const GOOD_SIGNATURE = "sha256=good";
 /** The bot's default project, which holds its GitHub app. */
 const PROJECT_ID = "0199a3a0-0000-7000-8000-000000000005";
-const ofBot = { workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, botId: BOT_ID };
+const ofProject = { workspaceId: WORKSPACE_ID, projectId: PROJECT_ID };
 
 const opened: RepositoryActivity = {
 	event: "pull_request_opened",
@@ -138,9 +137,9 @@ describe("Setting up a bot's GitHub App", () => {
 		expect(response.headers.get("location")).toBe("https://github.com/apps/acme/installations/new");
 	});
 
-	it("sends the browser back to the bot's new connection, in its default project once the app is installed", async () => {
+	it("sends the browser back to the project's new connection once the app is installed", async () => {
 		const installed = vi.fn<GitHubApps.Interface["installed"]>(() =>
-			Effect.succeed({ kind: "done", at: ofBot, connectionId: CONNECTION_ID }),
+			Effect.succeed({ kind: "done", at: ofProject, connectionId: CONNECTION_ID }),
 		);
 
 		const response = await setupApp({ installed }).request(
@@ -151,7 +150,7 @@ describe("Setting up a bot's GitHub App", () => {
 		expect(installed).toHaveBeenCalledWith({ installationId: 7, state: "s-1" });
 		expect(response.status).toBe(302);
 		expect(response.headers.get("location")).toBe(
-			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}&bot=${BOT_ID}&connection=${CONNECTION_ID}`,
+			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}&connection=${CONNECTION_ID}`,
 		);
 	});
 
@@ -161,8 +160,8 @@ describe("Setting up a bot's GitHub App", () => {
 				.request("/connections/github/made?state=s-1", signedIn)
 				.then((response) => response.headers.get("location"));
 
-		expect(await back({ kind: "failed", at: ofBot, failure: "cancelled" })).toBe(
-			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}&bot=${BOT_ID}&github_error=cancelled`,
+		expect(await back({ kind: "failed", at: ofProject, failure: "cancelled" })).toBe(
+			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}&github_error=cancelled`,
 		);
 		expect(await back({ kind: "failed", at: undefined, failure: "expired" })).toBe(
 			"http://localhost:5173/connections/github/return?github_error=expired",

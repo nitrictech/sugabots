@@ -108,7 +108,7 @@ export function automationTools({
 				answer(Effect.map(automations.create(bot, input), (automation) => ({ automation }))),
 		}),
 		[UPDATE_AUTOMATION_TOOL]: tool({
-			description: `Change one of the project's automations, by the id list_automations gives: its name, instructions, routine, or whether it is paused. Give only what changes. Routines run in ${zone}. Its routine can be changed here only while one routine is all that starts it; other routines and triggers are changed in its settings.`,
+			description: `Change one of the project's automations, by the id list_automations gives: its name, instructions, routine, or whether it is paused. Give only what changes. Routines run in ${zone}. A routine given here becomes its first when nothing starts it yet, or replaces its routine when that one routine is all that starts it. One with several routines, or with a webhook or GitHub trigger, has its routines and triggers changed on its Automations page instead.`,
 			inputSchema: Schema.Struct({
 				automationId: Schema.String.check(Schema.isUUID()).annotate({
 					description: "The automation's id, from list_automations.",

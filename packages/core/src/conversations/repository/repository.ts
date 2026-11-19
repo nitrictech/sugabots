@@ -28,6 +28,7 @@ import {
 	message,
 	messageReaction,
 	placedConversation,
+	project,
 	projectThread,
 	systemConversation,
 } from "../../database/schema.ts";
@@ -444,8 +445,9 @@ export const make = Effect.gen(function* () {
 	});
 
 	/**
-	 * Starts a project's thread, with the person who started it in it, and in a
-	 * bot's default project the bot, whose thread it is.
+	 * Starts a project's thread, with the person who started it in it, and the
+	 * project's lead bot, which answers it by default: in a bot's default
+	 * project, the bot.
 	 */
 	const insertThread = (input: NewThread) =>
 		Effect.gen(function* () {
@@ -462,17 +464,23 @@ export const make = Effect.gen(function* () {
 					startedById: input.startedById,
 				}),
 			);
-			const placed = yield* placedById(created.id);
-			const { botId } = placed;
+			const [led] = yield* query((db) =>
+				db
+					.select({ leadBotId: project.leadBotId })
+					.from(project)
+					.where(eq(project.id, input.projectId))
+					.limit(1),
+			);
+			const leadBotId = led?.leadBotId ?? null;
 			yield* query((db) =>
 				db
 					.insert(conversationParticipant)
 					.values([
 						{ conversationId: created.id, userId: input.startedById },
-						...(botId ? [{ conversationId: created.id, botId }] : []),
+						...(leadBotId ? [{ conversationId: created.id, botId: leadBotId }] : []),
 					]),
 			);
-			return placed;
+			return yield* placedById(created.id);
 		});
 
 	/** The feed of the automation `automationId`, if it has been opened. */

@@ -1,7 +1,7 @@
 export * as AssistantGuide from "./assistant-guide.ts";
 
 import { userText } from "@sugabots/errors";
-import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { reachesProjectFor } from "../../authorization/access.ts";
@@ -11,7 +11,7 @@ import { automation, botSummary, project } from "../../database/schema.ts";
 import { Installation } from "../../installation/installation.ts";
 import {
 	approvalPath,
-	botAutomationsPath,
+	automationsPagePath,
 	botPath,
 	inboxPath,
 	projectPath,
@@ -20,7 +20,7 @@ import type { UserFacing } from "../../user-message.ts";
 import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
 import { ProjectAdministration } from "../../workspaces/projects/project-administration.ts";
 import type { ProjectRepository } from "../../workspaces/projects/project-repository.ts";
-import { latestRunFailed } from "../automations/execution.ts";
+import { automationFailing } from "../automations/execution.ts";
 import { ChatView } from "../chats/chat-view.ts";
 
 /**
@@ -129,10 +129,7 @@ export const make = Effect.gen(function* () {
 									and(
 										eq(automation.workspaceId, workspace),
 										isNull(automation.deletedAt),
-										or(
-											isNotNull(automation.pausedAfterFailuresAt),
-											and(eq(automation.state, "enabled"), latestRunFailed(automation.id)),
-										),
+										automationFailing(),
 										reachesProjectFor(project.id, person.userId),
 									),
 								)
@@ -185,7 +182,9 @@ export const make = Effect.gen(function* () {
 												{
 													bot: bot.name,
 													failing: count,
-													link: linkTo(botAutomationsPath(workspaceSlug, bot.handle)),
+													link: linkTo(
+														automationsPagePath({ workspaceSlug, botHandle: bot.handle }),
+													),
 												},
 											];
 										}
@@ -195,7 +194,9 @@ export const make = Effect.gen(function* () {
 													{
 														project: inProject.name,
 														failing: count,
-														link: linkTo(projectPath(workspaceSlug, inProject.slug)),
+														link: linkTo(
+															automationsPagePath({ workspaceSlug, projectSlug: inProject.slug }),
+														),
 													},
 												]
 											: [];
@@ -354,6 +355,7 @@ type FailingAutomations = ({ bot: string } | { project: string }) & {
 export type Refused =
 	| AuthorizationDenied
 	| NothingNamed
+	| ProjectAdministration.InvalidProjectDetails
 	| ProjectAdministration.UnusableProjectName
 	| ProjectRepository.ProjectSlugTaken
 	| ProjectRepository.BotNotPublic

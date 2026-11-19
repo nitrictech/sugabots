@@ -14,9 +14,6 @@ export const fileRoutes = HttpApiBuilder.group(ServerApi, "files", (handlers) =>
 			.handle("listInProject", ({ params }) =>
 				files.listInProject(params).pipe(asSessionUser, asHttpError(refusals)),
 			)
-			.handle("listForBot", ({ params }) =>
-				files.listForBot(params).pipe(asSessionUser, asHttpError(refusals)),
-			)
 			.handle("get", ({ params }) => files.get(params).pipe(asSessionUser, asHttpError(refusals)))
 			.handle("versions", ({ params }) =>
 				files.versions(params).pipe(asSessionUser, asHttpError(refusals)),

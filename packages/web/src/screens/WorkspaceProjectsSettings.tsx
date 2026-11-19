@@ -30,7 +30,6 @@ import type { ProjectSettingsPage } from "@/lib/workspace-settings.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
 import { ProjectColourPicker } from "@/shell/LookPicker.tsx";
-import { useNewBot } from "@/shell/NewBot.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -55,30 +54,21 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
-import {
-	ComputerSettingsPage,
-	ConnectionSettingsPage,
-	ConnectionsSettingsPage,
-} from "./ResourceSettings.tsx";
+import { ComputerSettingsPage } from "./ResourceSettings.tsx";
 
 /**
  * One project's settings, a page at a time as the navigation lists them:
- * General, its lead bot among them, its people, its bots, its connections, one
- * of them by `selectedConnectionId`, and its computer. Only public bots can be
+ * General, its lead bot among them, its people, its bots, and its computer.
+ * Its connections are a page of the project's own. Only public bots can be
  * added, and a bot made private leaves its projects, unless it leads one.
  */
 export function WorkspaceProjectsSettings({
 	selectedProjectId,
 	projectPage = "general",
-	selectedConnectionId,
-	connectionSignInError,
 	canCreateProjects,
 }: {
 	selectedProjectId?: string;
 	projectPage?: ProjectSettingsPage;
-	selectedConnectionId?: string;
-	/** Why the OAuth sign-in that just returned to its connections did not finish, in our own words. */
-	connectionSignInError?: string;
 	canCreateProjects: boolean;
 }) {
 	const { data: projects, isPending, error } = useProjects();
@@ -98,7 +88,7 @@ export function WorkspaceProjectsSettings({
 	}
 	if (!selected) {
 		return (
-			<EmptyState page title={selectedProjectId ? "No such project here" : "No projects yet"}>
+			<EmptyState page="min" title={selectedProjectId ? "No such project here" : "No projects yet"}>
 				{selectedProjectId
 					? "It may have been removed, or you may no longer have access to it."
 					: canCreateProjects
@@ -123,20 +113,6 @@ export function WorkspaceProjectsSettings({
 			);
 		case "bots":
 			return <ProjectBots key={selected.id} project={selected} />;
-		case "connections":
-			return selectedConnectionId ? (
-				<ConnectionSettingsPage
-					key={selectedConnectionId}
-					owner={{ project: selected }}
-					connectionId={selectedConnectionId}
-				/>
-			) : (
-				<ConnectionsSettingsPage
-					key={selected.id}
-					owner={{ project: selected }}
-					signInError={connectionSignInError}
-				/>
-			);
 		case "computer":
 			return <ComputerSettingsPage key={selected.id} owner={{ project: selected }} />;
 		case "general":
@@ -151,12 +127,10 @@ function ProjectDetails({ project }: { project: Project }) {
 	const rename = useUpdateProject(project.id);
 	const updateDetails = useUpdateProject(project.id);
 	const relead = useUpdateProject(project.id);
-	const members = useProjectMembers(project.id);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const remove = useDeleteProject();
 	const router = useRouter();
 	const { leaveForPage } = useLeave();
-	const bots = useProjectBots(project.id).data ?? [];
 
 	async function deleteProject() {
 		try {
@@ -176,7 +150,7 @@ function ProjectDetails({ project }: { project: Project }) {
 		);
 	}
 
-	const headcount = projectHeadcount({ people: members.data?.length, bots: bots.length });
+	const headcount = projectHeadcount({ people: project.memberCount, bots: project.botCount });
 
 	return (
 		<SettingsPage
@@ -288,7 +262,7 @@ function ProjectBots({ project }: { project: Project }) {
 	const bots = useProjectBots(project.id);
 	const { bots: workspaceBots } = useBots();
 	const place = usePlaceProjectBot(project.id);
-	const backToBots = useBackToHere("Bots");
+	const backToProject = useBackToHere(project.name);
 	const may = project.permissions.manageBots;
 	const inProject = new Set(bots.data?.map((bot) => bot.id));
 	const addable =
@@ -342,7 +316,7 @@ function ProjectBots({ project }: { project: Project }) {
 						label={
 							<Link
 								{...botSettingsLink(bot)}
-								state={backToBots}
+								state={backToProject}
 								className="focus-ring rounded-sm hover:underline"
 							>
 								{bot.name}
@@ -365,49 +339,6 @@ function ProjectBots({ project }: { project: Project }) {
 					/>
 				))}
 			</SettingsGroup>
-		</SettingsPage>
-	);
-}
-
-/**
- * Every bot the person reaches, as the Bots section lists them, with making
- * another. Each opens its own settings.
- */
-export function WorkspaceBotsSettings({ canCreate }: { canCreate: boolean }) {
-	const { bots: reachable, isPending, error } = useBots();
-	const newBot = useNewBot();
-	const backToBots = useBackToHere("Bots");
-	const bots = reachable ?? [];
-	if (isPending) return null;
-	return (
-		<SettingsPage
-			title="Bots"
-			description="Public bots everyone can talk to, your private ones, and your Personal Assistant."
-			headerAction={
-				canCreate &&
-				newBot.start && <SettingsAddButton onClick={newBot.start}>New bot</SettingsAddButton>
-			}
-		>
-			{error ? <Alert>{failureMessage(error)}</Alert> : null}
-			<SettingsGroup>
-				{bots.map((bot) => (
-					<SettingsRow
-						key={bot.id}
-						icon={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={24} />}
-						label={bot.name}
-						sub={
-							bot.assistant
-								? "Your Personal Assistant"
-								: bot.visibility === "private"
-									? "Private"
-									: bot.description || undefined
-						}
-						chevron
-						render={<Link {...botSettingsLink(bot)} state={backToBots} />}
-					/>
-				))}
-			</SettingsGroup>
-			{newBot.dialog}
 		</SettingsPage>
 	);
 }

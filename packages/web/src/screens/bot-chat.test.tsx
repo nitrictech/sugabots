@@ -198,7 +198,6 @@ const collaborationEntry: ChatHistoryEntry = {
 	participants: [host, collaborator],
 	status: "completed",
 	automationRun: null,
-	latestActivityAt: "2026-09-18T09:12:00.000Z",
 };
 const automationEntry: ChatHistoryEntry = {
 	conversationId: automationId,
@@ -212,23 +211,19 @@ const automationEntry: ChatHistoryEntry = {
 		automationId: automationRun.automationId,
 		automationName: automationRun.automationName,
 		triggerKind: automationRun.trigger.kind,
-		triggeredAt: "2026-09-18T08:00:00.000Z",
 	},
-	latestActivityAt: "2026-09-18T08:30:00.000Z",
 };
 const automationCollaborationEntry: ChatHistoryEntry = {
 	...collaborationEntry,
 	conversationId: automationCollaborationId,
 	parentConversationId: automationId,
 	title: "Verify the overnight alerts",
-	latestActivityAt: "2026-09-18T08:20:00.000Z",
 };
 
 /** What the thread's Details show: a summary, and who has written lately. */
 const chatActivity: ConversationActivity = {
 	summary: {
 		content: "Chat is complete.",
-		sourceMessageId: "0199a3a0-0000-7000-8000-0000000000a2",
 		updatedAt: "2026-09-18T09:22:00.000Z",
 	},
 	context: null,
@@ -270,10 +265,8 @@ function details(
 /** Linear Handler's threads, with this one in them when `listed`. */
 function chatList({ listed }: { listed: boolean }) {
 	return Effect.succeed({
-		bot: linear,
 		threads: listed ? [listedThread(chat)] : [],
 		automations: [],
-		summary: null,
 	});
 }
 
@@ -304,7 +297,7 @@ function answerMessagesWith(later: Message) {
 }
 
 function chatAnswers() {
-	client.api.chats.botThreads.mockReturnValue(chatList({ listed: true }));
+	client.api.chats.threads.mockReturnValue(chatList({ listed: true }));
 	client.api.chats.messages.mockReturnValue(
 		Effect.succeed({
 			items: [
@@ -474,14 +467,14 @@ describe("a bot's thread", () => {
 		expect(client.api.projects.list).toHaveBeenCalledOnce();
 		expect(client.api.bots.list).toHaveBeenCalledOnce();
 		expect(
-			client.api.chats.botThreads.mock.calls.filter(
-				([request]) => request.params.botId === linear.id,
+			client.api.chats.threads.mock.calls.filter(
+				([request]) => request.params.projectId === linear.defaultProjectId,
 			),
 		).toHaveLength(1);
 	});
 
 	it("opens a thread its bot's list does not have yet", async () => {
-		client.api.chats.botThreads.mockReturnValue(chatList({ listed: false }));
+		client.api.chats.threads.mockReturnValue(chatList({ listed: false }));
 		mount(conversationPage);
 
 		expect(await screen.findByText(mainMessage.content)).toBeDefined();
@@ -1277,9 +1270,9 @@ describe("a message opened from Inbox", () => {
 		);
 	});
 
-	it("shows a collaboration in a project's thread as the page, from Inbox and at the conversation's address, and beside its chat", async () => {
+	it("shows a collaboration in a project's thread as the page, from Inbox and at the conversation's address, and beside that thread", async () => {
 		const project = projects[1] as (typeof projects)[number];
-		const projectChat = {
+		const projectThread = {
 			kind: "project_thread" as const,
 			id: chat.id,
 			workspaceId: chat.workspaceId,
@@ -1291,7 +1284,9 @@ describe("a message opened from Inbox", () => {
 			archivedAt: null,
 			doneAt: null,
 		};
-		client.api.chats.list.mockReturnValue(Effect.succeed({ chats: [listedThread(projectChat)] }));
+		client.api.chats.threads.mockReturnValue(
+			Effect.succeed({ threads: [listedThread(projectThread)], automations: [] }),
+		);
 		const collaboration = details(collaborationId, collaborationEntry.title, "collaboration", [
 			collaborationRequest,
 			collaborationAnswer,
@@ -1300,13 +1295,16 @@ describe("a message opened from Inbox", () => {
 			...one,
 			conversation: { ...one.conversation, projectId: project.id },
 		});
-		const main = details(chat.id, project.name, "project_thread", [mainMessage]);
+		const threadDetails = details(chat.id, project.name, "project_thread", [mainMessage]);
 		client.api.conversations.get.mockImplementation(
 			({ params }: { params: { conversationId: string } }) =>
 				Effect.succeed(
 					params.conversationId === collaborationId
 						? inProject(collaboration)
-						: inProject({ ...main, conversation: { ...main.conversation, botId: null } }),
+						: inProject({
+								...threadDetails,
+								conversation: { ...threadDetails.conversation, botId: null },
+							}),
 				),
 		);
 		const projectPage = `/suga/projects/${project.slug}/${chat.id}`;
@@ -1327,7 +1325,7 @@ describe("a message opened from Inbox", () => {
 		);
 		cleanup();
 
-		// Asked to open beside the project's chat, as Approvals does, it opens there.
+		// Asked to open beside that thread, as Approvals does, it opens there.
 		mount(`${projectPage}?item=${collaborationId}`);
 		expect(await screen.findByRole("log", { name: "Chat messages" })).toBeDefined();
 		expect(

@@ -107,9 +107,6 @@ export const Default = meta.story({
 		await expect(within(card).getByRole("button", { name: /^Allow/ })).toBeVisible();
 		await expect(within(card).getByRole("button", { name: /^Deny/ })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: /Delete deal/ })).toHaveTextContent("Denied");
-		const approvals = canvas.getByRole("link", { name: /^Approvals/ });
-		await expect(approvals).toHaveAttribute("aria-current", "page");
-		await expect(approvals).toHaveTextContent("1 waiting on you");
 	},
 });
 

@@ -2,6 +2,7 @@ import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { cn } from "cn";
 import { Check, ChevronRight } from "lucide-react";
+import { POPOVER_SURFACE } from "@/ui/popover.tsx";
 
 /*
  * A menu that floats over the page, drawn as the design draws every popover: a
@@ -11,8 +12,10 @@ import { Check, ChevronRight } from "lucide-react";
  */
 
 /** The panel a menu is drawn as, for a select or listbox that has to be another element. */
-export const MENU_POPUP =
-	"z-50 max-h-(--available-height) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-border-strong bg-panel p-1 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
+export const MENU_POPUP = cn(
+	POPOVER_SURFACE,
+	"z-50 max-h-(--available-height) min-w-32 overflow-x-hidden overflow-y-auto p-1",
+);
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
 	return <MenuPrimitive.Root {...props} />;

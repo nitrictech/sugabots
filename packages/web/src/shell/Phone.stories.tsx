@@ -1,5 +1,4 @@
-import type { ApprovalRequest, InboxItem, WrittenFileSummary } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import type { WrittenFileSummary } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, screen, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -46,7 +45,7 @@ export const Home = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { level: 1, name: "Home" })).toBeVisible();
 		const projects = canvas.getByRole("region", { name: "Projects" });
-		await expect(within(projects).getByRole("link", { name: revenue.name })).toBeVisible();
+		await expect(await within(projects).findByRole("link", { name: revenue.name })).toBeVisible();
 		await expect(within(projects).getByRole("link", { name: engineering.name })).toBeVisible();
 		await expect(within(projects).getByRole("link", { name: "Browse projects" })).toBeVisible();
 		const bots = canvas.getByRole("region", { name: "Bots" });
@@ -99,13 +98,11 @@ export const Inbox = meta.story({
 export const TabCounts = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/inbox`, () =>
-				HttpResponse.json({ items: Array.from({ length: 7 }, (_, index) => unreadMention(index)) }),
-			),
-			http.get(`${API}/workspaces/:workspace/chats/approvals`, () =>
+			http.get(`${API}/workspaces/:workspace/chats/attention`, () =>
 				HttpResponse.json({
-					waiting: Array.from({ length: 12 }, (_, index) => waitingApproval(index)),
-					answered: [],
+					unreadInInbox: 7,
+					waitingApprovals: 12,
+					unreadForYou: 7,
 				}),
 			),
 		);
@@ -117,50 +114,6 @@ export const TabCounts = meta.story({
 		await expect(await within(tabs).findByText("12 waiting on you")).toBeInTheDocument();
 	},
 });
-
-function unreadMention(index: number): InboxItem {
-	return {
-		kind: "mention",
-		unread: true,
-		messageId: `0199a3a0-0000-7000-8000-0000000009${String(index).padStart(2, "0")}`,
-		author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
-		preview: "@rowan-ellis can you sign off the Acme quote before 5?",
-		at: new Date(Date.now() - (index + 1) * 60_000).toISOString(),
-		projectId: null,
-		rootConversationId: storyThreadFor(growthDesk).id,
-	};
-}
-
-function waitingApproval(index: number): ApprovalRequest {
-	return {
-		call: {
-			type: "tool_call",
-			id: `0199a3a0-0000-7000-8000-0000000010${String(index).padStart(2, "0")}`,
-			tool: "stripe__send_quote",
-			input: { customer: "Acme Retail" },
-			output: null,
-			status: "awaiting_approval",
-			error: null,
-			mutating: true,
-			atOffset: 0,
-			startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
-			finishedAt: null,
-			approval: { status: "pending", decidedByName: null, decidedAt: null },
-		},
-		bot: {
-			kind: "bot",
-			id: growthDesk.id,
-			name: growthDesk.name,
-			handle: growthDesk.handle,
-			color: growthDesk.color,
-			face: growthDesk.face,
-			shape: "circle",
-		},
-		projectId: null,
-		conversationId: storyThreadFor(growthDesk).id,
-		rootConversationId: storyThreadFor(growthDesk).id,
-	};
-}
 
 /** Approvals as a tab, with nothing waiting. */
 export const Approvals = meta.story({
@@ -251,8 +204,8 @@ export const OpenFile = meta.story({
 });
 
 /**
- * A bot's chat, opened from Home: the tabs stay, with Home marked, until the
- * composer is typed in.
+ * A bot's new-thread composer, opened from Home: the tabs stay, with Home
+ * marked, until the composer is typed in.
  */
 export const Opened = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/growth-desk`} />,
@@ -342,18 +295,29 @@ export const Project = meta.story({
 		await expect(
 			await canvas.findByRole("heading", { level: 1, name: revenue.name }),
 		).toBeInTheDocument();
-		const work = await canvas.findByRole("list", { name: `${revenue.name}'s work` });
+		const work = await canvas.findByRole("region", { name: "Threads" });
 		await expect(await within(work).findByRole("link", { name: /Planning/ })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Files" })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: `New thread in ${revenue.name}` })).toBeVisible();
 	},
 });
 
-/** A bot's computer, from its chat: a sheet from the foot of the screen, here saying why there is none. */
+/**
+ * A bot's computer, from a thread's More menu: a sheet from the foot of the
+ * screen, here saying why there is none.
+ */
 export const Computer = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/growth-desk`} />,
+	render: () => (
+		<StoryApp
+			path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/threads/${storyThreadFor(growthDesk).id}`}
+		/>
+	),
 	// Opened, for a look at the sheet; what it says waits on the workspace's computers, which vary.
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Computer" }));
+		await userEvent.click(await canvas.findByRole("button", { name: "More for this thread" }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: "Computer" }));
+		await expect(
+			await screen.findByRole("dialog", { name: `${growthDesk.name}'s computer` }),
+		).toBeVisible();
 	},
 });

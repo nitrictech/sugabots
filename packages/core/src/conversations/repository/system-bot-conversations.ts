@@ -57,10 +57,8 @@ export const loadSystemBotScope = Effect.fn("SystemBotConversations.loadSystemBo
 			botModel: bot.model,
 		})
 		.from(placedConversation)
-		// The bot in the payload is whoever's reply triggered this, not the
-		// system bot doing the work, and not necessarily the conversation's
-		// bot: requiring that bot meant a shared conversation stopped being
-		// worked on the moment anyone else replied.
+		// The bot whose reply triggered the work, whose model is read: in a
+		// conversation with several bots it need not be the conversation's.
 		.innerJoin(bot, eq(bot.id, request.botId))
 		.innerJoin(
 			message,

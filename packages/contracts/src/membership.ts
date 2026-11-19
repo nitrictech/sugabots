@@ -98,6 +98,8 @@ export const invitationPreviewSchema = Schema.Union([
 		status: Schema.Literal("pending"),
 		workspaceName: Schema.String,
 		inviterName: Schema.String,
+		/** The role the person will have in the workspace once they accept. */
+		role: workspaceRoleSchema,
 	}),
 	Schema.Struct({ status: Schema.Literal("accepted"), workspaceId: uuidSchema }),
 ]);

@@ -71,7 +71,7 @@ export function ComputerSheet({
 							offersReconnect={false}
 						/>
 					</button>
-					<Button variant="outline" className="h-11 text-sm" onClick={onOpenFull}>
+					<Button variant="secondary" className="h-11 text-sm" onClick={onOpenFull}>
 						Open full screen
 					</Button>
 				</div>

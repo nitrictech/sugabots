@@ -12,6 +12,7 @@ import {
 } from "../../database/schema.ts";
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { lane } from "../../workflows/sql.ts";
+import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { lanesForTests } from "../testing.ts";
 import { releaseTurn, runningTurns } from "../turns/testing.ts";
 import {
@@ -115,17 +116,8 @@ export async function anAutomationOwner() {
 		workspaceId,
 		projectId,
 		botId: owner.id,
-		ownProjectId: await defaultProjectOf(owner.id),
+		ownProjectId: await runOnPostgres(defaultProjectOf(owner.id)),
 	};
-}
-
-/** The default project of the bot `botId`, which holds its own automations. */
-export async function defaultProjectOf(botId: string) {
-	const [own] = await onDatabase((db) =>
-		db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, botId)),
-	);
-	if (!own) throw new Error("The bot has no default project");
-	return own.id;
 }
 
 /** Starts the automation's run holding its lane, as its workflow's first step does. */

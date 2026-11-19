@@ -1,7 +1,6 @@
 export * as Files from "./files.ts";
 
 import {
-	type ConversationKind,
 	type FileAuthor,
 	type FileSummary,
 	type FileVersionSummary,
@@ -55,14 +54,6 @@ export interface Interface {
 	 */
 	readonly listInProject: (input: {
 		projectId: string;
-	}) => Effect.Effect<FileSummary[], AuthorizationDenied, CurrentActor.Service>;
-	/**
-	 * The files uploaded or made in the bot's own threads and automation feeds,
-	 * and what was opened from them, newest change first: not those it made in
-	 * a project or when another bot asked it.
-	 */
-	readonly listForBot: (input: {
-		botId: string;
 	}) => Effect.Effect<FileSummary[], AuthorizationDenied, CurrentActor.Service>;
 	/** The written file at its current version. */
 	readonly get: (
@@ -161,14 +152,6 @@ export const make = Effect.gen(function* () {
 				"listInProject",
 				Effect.flatMap(authorization.project(projectId, "project.read"), () =>
 					listedWhere(eq(madeInConversation.projectId, projectId)),
-				),
-			),
-
-		listForBot: ({ botId }) =>
-			operation(
-				"listForBot",
-				Effect.flatMap(authorization.bot(botId, "bot.read"), () =>
-					listedWhere(madeInOwnConversationOf(botId)),
 				),
 			),
 
@@ -539,22 +522,6 @@ const conversationOfMadeIn = eq(
 	madeInConversation.id,
 	sql`coalesce(${placedConversation.rootConversationId}, ${placedConversation.id})`,
 );
-
-/**
- * A bot's own conversations: its threads, which are its default project's,
- * and its automations' feeds, which whoever reaches it sees.
- */
-const OWN_CONVERSATION_KINDS = [
-	"project_thread",
-	"automation_feed",
-] as const satisfies ConversationKind[];
-
-/** Files made in `botId`'s own threads and automation feeds, and what was opened from them. */
-const madeInOwnConversationOf = (botId: string) =>
-	and(
-		eq(madeInConversation.botId, botId),
-		inArray(madeInConversation.kind, [...OWN_CONVERSATION_KINDS]),
-	);
 
 /** The conversation a bot is working in, by the conversation its turn is in. */
 interface WorkingConversation {

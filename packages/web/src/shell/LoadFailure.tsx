@@ -26,7 +26,7 @@ export function LoadFailure({
 				<div className="flex flex-col items-center gap-3">
 					{error != null && <p>{failureMessage(error)}</p>}
 					<Button
-						variant="outline"
+						variant="secondary"
 						disabled={retrying}
 						onClick={() => {
 							setRetrying(true);

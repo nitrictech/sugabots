@@ -9,7 +9,7 @@ import {
 	type SystemBotKey,
 } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, eq, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne, type SQL, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import {
 	type QueryFailure,
@@ -19,10 +19,10 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { violatedUniqueConstraint } from "../../database/errors.ts";
-import { bot, pinnedBot, project, projectBot } from "../../database/schema.ts";
+import { bot, pinnedBot, projectBot } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { type LeadsProjects, refuseWhileLeading } from "../projects/project-leads.ts";
-import { type PersonFacingBotRow, personFacingBotRow } from "./bot.ts";
+import { defaultProjectIdOf, type PersonFacingBotRow, personFacingBotRow } from "./bot.ts";
 import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 import { SYSTEM_BOTS, type SystemBotDefinition } from "./system-bots.ts";
 
@@ -232,10 +232,7 @@ export const make = Effect.gen(function* () {
 									.where(
 										and(
 											eq(projectBot.botId, updated.id),
-											sql`${projectBot.projectId} not in (${db
-												.select({ id: project.id })
-												.from(project)
-												.where(eq(project.defaultOfBotId, updated.id))})`,
+											ne(projectBot.projectId, defaultProjectIdOf(projectBot.botId)),
 										),
 									),
 							);

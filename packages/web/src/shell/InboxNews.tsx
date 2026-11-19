@@ -1,5 +1,6 @@
 import { cn } from "cn";
 import { countOf } from "@/lib/name-list.ts";
+import { AttentionDot } from "@/ui/attention-dot.tsx";
 import { COUNT_BADGE_SIZES, CountBadge, type CountBadgeSize } from "@/ui/count-badge.tsx";
 
 /**
@@ -34,7 +35,7 @@ export function InboxNews({
 	if (unreadInInbox === 0) return null;
 	return (
 		<span className={cn("grid shrink-0 place-items-center", COUNT_BADGE_SIZES[size])}>
-			<span className="size-1.5 rounded-full bg-foreground" />
+			<AttentionDot attention="unread" />
 			<span className="sr-only">{countOf(unreadInInbox, "unread item", "unread items")}</span>
 		</span>
 	);

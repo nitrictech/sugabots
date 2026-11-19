@@ -9,10 +9,10 @@ import {
 	collaboration,
 	conversation,
 	directMessage,
-	project,
 	projectThread,
 	systemConversation,
 } from "../database/schema.ts";
+import { defaultProjectIdOf } from "../workspaces/bots/bot.ts";
 
 /**
  * A conversation as fixtures write it straight into the database, as the
@@ -81,9 +81,7 @@ function kindRowOf(db: Executor, conversationId: string, seed: ConversationSeed)
 				conversationId,
 				workspaceId,
 				projectId:
-					"projectId" in seed
-						? seed.projectId
-						: sql`(select ${project.id} from ${project} where ${project.defaultOfBotId} = ${seed.botId})`,
+					"projectId" in seed ? seed.projectId : defaultProjectIdOf(sql`${seed.botId}::uuid`),
 				archivedAt: seed.archivedAt,
 				doneAt: seed.doneAt,
 				startedById: seed.startedById,

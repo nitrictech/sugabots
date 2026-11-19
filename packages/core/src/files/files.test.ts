@@ -19,6 +19,7 @@ import {
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Installation } from "../installation/installation.ts";
+import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
 import { servedOnPostgresAs } from "../workspaces/testing.ts";
 import { ConversationFiles } from "./conversation-files.ts";
 import { Files } from "./files.ts";
@@ -482,7 +483,11 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 
 		expect(await as(memberId).get({ fileId: made.id })).toMatchObject({ title: "Diary" });
 		expect(
-			(await as(memberId).listForBot({ botId: botElsewhere.botId })).map(({ id }) => id),
+			(
+				await as(memberId).listInProject({
+					projectId: await runOnPostgres(defaultProjectOf(botElsewhere.botId)),
+				})
+			).map(({ id }) => id),
 		).toEqual([made.id]);
 		for (const somebodyElse of [outsiderId, adminId]) {
 			await expect(as(somebodyElse).get({ fileId: made.id })).rejects.toMatchObject({
@@ -618,9 +623,13 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		expect(ids(await as(memberId).listInProject({ projectId }))).toEqual(
 			[inProject.id, forTheProject.id].sort(),
 		);
-		expect(ids(await as(memberId).listForBot({ botId: by.botId }))).toEqual([]);
-		expect(ids(await as(memberId).listForBot({ botId: botElsewhere.botId }))).toEqual([
-			forTheThread.id,
-		]);
+		const botsOwn = async (botId: string) =>
+			ids(
+				await as(memberId).listInProject({
+					projectId: await runOnPostgres(defaultProjectOf(botId)),
+				}),
+			);
+		expect(await botsOwn(by.botId)).toEqual([]);
+		expect(await botsOwn(botElsewhere.botId)).toEqual([forTheThread.id]);
 	});
 });

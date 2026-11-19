@@ -27,6 +27,12 @@ import {
 } from "./routes/bots.tsx";
 import { gitHubSetupReturnRoute, signInReturnRoute } from "./routes/connection-returns.tsx";
 import {
+	botConnectionRoute,
+	botConnectionsRoute,
+	projectConnectionRoute,
+	projectConnectionsRoute,
+} from "./routes/connections.tsx";
+import {
 	directMessageRoute,
 	directMessagesIndexRoute,
 	directMessagesRoute,
@@ -99,18 +105,19 @@ import {
  *   /$workspace/projects/$project/new   starting a thread from its first message
  *   /$workspace/projects/$project/$conversation   one of its threads
  *   /$workspace/projects/$project/files[/$file]   the files made in it
+ *   /$workspace/projects/$project/connections[/$connection]   the services it is connected to
  *   /$workspace/projects/$project/automations[/new|/$automation]   its automations
  *   /$workspace/bots         every bot the person reaches
  *   /$workspace/bots/$bot    a bot, starting a thread with it from its first message
  *   /$workspace/bots/$bot/threads/$conversation   one of its threads, or an automation's feed
  *   /$workspace/bots/$bot/files[/$file]   the files it made
+ *   /$workspace/bots/$bot/connections[/$connection]   the services it is connected to
  *   /$workspace/bots/$bot/automations[/new|/$automation]   its automations
  *   /$workspace/threads/$conversation   a thread by its id alone, which goes on to its bot's address
  *   /$workspace/settings/members/$member   one person, by membership id
- *   /$workspace/settings/projects/$project[/$page]   a project's settings: General, People, Bots, Connections or Computer
- *   /$workspace/settings/projects/$project/connections/$connection   one connection, by id
- *   /$workspace/settings/bots/$bot[/$page]   a bot's settings: General, Connections or Computer
- *   /$workspace/settings/bots/$bot/connections/$connection   one connection, by id
+ *   /$workspace/settings/projects/$project[/$page]   a project's settings: General, People, Bots or Computer
+ *   /$workspace/settings/bots/$bot[/$page]   a bot's settings: General or Computer
+ *   /$workspace/settings/{projects/$project,bots/$bot}/connections[/$connection]   from before, on to the owner's own Connections
  *   /$workspace/settings/providers/$provider   one model provider
  *   /$workspace/settings/providers/default  the model new bots start on
  *   /$workspace/settings/providers/system   the model the system bots use
@@ -163,6 +170,8 @@ const routeTree = rootRoute.addChildren([
 			projectNewThreadRoute,
 			projectFilesRoute,
 			projectFileRoute,
+			projectConnectionsRoute,
+			projectConnectionRoute,
 			projectAutomationsRoute.addChildren([
 				projectAutomationsIndexRoute,
 				projectNewAutomationRoute,
@@ -175,6 +184,8 @@ const routeTree = rootRoute.addChildren([
 			threadRoute,
 			botFilesRoute,
 			botFileRoute,
+			botConnectionsRoute,
+			botConnectionRoute,
 			automationsRoute.addChildren([
 				automationsIndexRoute,
 				newAutomationRoute,
@@ -183,6 +194,27 @@ const routeTree = rootRoute.addChildren([
 		]),
 	]),
 ]);
+
+/** Whether `pathname` is one of a bot's or a project's own pages, which the icon rail stands beside. */
+function isOwnerPath(pathname: string): boolean {
+	return /^\/[^/]+\/(bots|projects)\/[^/]+/.test(pathname);
+}
+
+/**
+ * The view transition between two pages, by its types: a phone's slide, or,
+ * from a tablet up, `rail` between the sidebar and a bot's or a project's own
+ * pages, on which its marks move between the sidebar's rows and the icon rail.
+ */
+function pageTransition(locations: {
+	fromLocation?: ParsedLocation;
+	toLocation: ParsedLocation;
+	hrefChanged: boolean;
+}): string[] | false {
+	if (!matchesMedia(SIDE_BY_SIDE)) return phoneSlide(locations);
+	const { fromLocation, toLocation } = locations;
+	if (!fromLocation) return false;
+	return isOwnerPath(fromLocation.pathname) !== isOwnerPath(toLocation.pathname) ? ["rail"] : false;
+}
 
 /**
  * Which way a phone slides from one page to the next, as a view transition's
@@ -204,7 +236,7 @@ function phoneSlide({
 	const toIndex = historyIndex(toLocation);
 	const from = locationDepth(fromLocation);
 	const to = locationDepth(toLocation);
-	// In place: a page that sends on to its own address, as a bot's chat does, doesn't
+	// In place: a page that sends on to its own address, as a bot's thread does, doesn't
 	// slide, but Back from a page opened first, which goes up in its place, does.
 	if (toIndex === fromIndex) return to < from ? ["back"] : false;
 	if (to !== from) return [to > from ? "forward" : "back"];
@@ -277,7 +309,7 @@ export function createAppRouter(options?: {
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
 		// On a phone, a page further in slides over the one it was opened from, and back slides it away.
-		defaultViewTransition: { types: phoneSlide },
+		defaultViewTransition: { types: pageTransition },
 		// Back to a list of settings returns to where it was left, not its top. Only settings:
 		// a chat opens at its latest instead. What scrolls is named by `data-scroll-restoration-id`.
 		scrollRestoration: ({ location }) => isSettingsPath(location.pathname),

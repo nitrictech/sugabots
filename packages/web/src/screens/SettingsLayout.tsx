@@ -22,13 +22,7 @@ import {
 	useState,
 } from "react";
 import { findBot, useBots } from "@/lib/bots.ts";
-import { useConnections } from "@/lib/connections.ts";
-import {
-	botSettingsLink,
-	botSettingsPageLink,
-	projectSettingsLink,
-	projectSettingsPageLink,
-} from "@/lib/links.ts";
+import { botSettingsLink, projectSettingsLink, projectSettingsPageLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
@@ -194,7 +188,7 @@ const settingsList: BackTarget = {
 /** The page `pathname` sits under, for its Back when nothing says where you came from. */
 function parentPage(pathname: string): BackTarget {
 	const [, sectionId, item, page] = pathname.split("/").filter(Boolean);
-	// One of a bot's own pages, or one of its connections, goes back to the bot.
+	// One of a bot's own pages goes back to the bot.
 	if (sectionId === "bots" && item !== undefined && page !== undefined) {
 		return {
 			label: "Bot",
@@ -733,7 +727,7 @@ function useSettingsCrumbs(): Crumb[] {
 	const pathname = useSettingsPath();
 	const { data: projects } = useProjects();
 	const { bots } = useBots();
-	const [, sectionId, item, page, detail] = pathname.split("/").filter(Boolean);
+	const [, sectionId, item, page] = pathname.split("/").filter(Boolean);
 	if (sectionId === undefined || sectionId === "general") {
 		return [workspaceCrumb, { label: "General" }];
 	}
@@ -747,7 +741,7 @@ function useSettingsCrumbs(): Crumb[] {
 	}
 	if (sectionId === "bots" && item !== undefined) {
 		const bot = findBot(bots, item);
-		return bot ? botCrumbs(bot, page, detail) : [];
+		return bot ? botCrumbs(bot, page) : [];
 	}
 	if (item === undefined) {
 		return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
@@ -771,8 +765,8 @@ function projectCrumbs(project: Project, page: string | undefined): Crumb[] {
 	return [projectCrumb, { label: label ?? page }];
 }
 
-/** A bot's part of the trail: its settings, then the page, down to one of its connections. */
-function botCrumbs(bot: Bot, page: string | undefined, connection: string | undefined): Crumb[] {
+/** A bot's part of the trail: its settings, then the page. */
+function botCrumbs(bot: Bot, page: string | undefined): Crumb[] {
 	const trail: Crumb[] = [
 		workspaceCrumb,
 		sectionCrumb("bots"),
@@ -784,16 +778,7 @@ function botCrumbs(bot: Bot, page: string | undefined, connection: string | unde
 	const shown = botSettingsPage(page ?? "");
 	if (!shown || shown === "general") return trail;
 	const pageLabel = botSettingsPages.find((one) => one.id === shown)?.label ?? shown;
-	if (connection === undefined) return [...trail, { label: pageLabel }];
-	return [
-		...trail,
-		{ label: pageLabel, link: <Link {...botSettingsPageLink(bot, shown)} /> },
-		{ label: <ConnectionName projectId={bot.defaultProjectId} connectionId={connection} /> },
-	];
-}
-
-function ConnectionName({ projectId, connectionId }: { projectId: string; connectionId: string }) {
-	return useConnections(projectId).data?.find((one) => one.id === connectionId)?.name ?? null;
+	return [...trail, { label: pageLabel }];
 }
 
 function MemberName({ membershipId }: { membershipId: string }) {

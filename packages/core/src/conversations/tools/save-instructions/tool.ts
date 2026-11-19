@@ -1,7 +1,7 @@
 import { DESCRIPTION_MAX_LENGTH, PROMPT_MAX_LENGTH } from "@sugabots/contracts";
 import { tool } from "ai";
 import { Effect, Schema } from "effect";
-import { AuthenticatedUserId, CurrentActor } from "../../../authorization/current-actor.ts";
+import { asAsker } from "../../../authorization/current-actor.ts";
 import type { RunEffect } from "../../../database/database.ts";
 import type { BotAdministration } from "../../../workspaces/bots/bot-administration.ts";
 
@@ -63,14 +63,18 @@ export function saveInstructionsTool({
 			}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 		execute: async ({ instructions, description }): Promise<SaveInstructionsResult> => {
-			if (!askedBy) return { refused: NOBODY_ASKED };
 			return run(
-				bots.update({ botId, changes: { prompt: instructions, description } }).pipe(
+				asAsker(
+					askedBy,
+					bots.update({ botId, changes: { prompt: instructions, description } }),
+				).pipe(
 					Effect.as<SaveInstructionsResult>({ saved: true, settingsUrl }),
-					CurrentActor.provide(AuthenticatedUserId.vouchedFor(askedBy)),
-					Effect.catchTag(["ActionForbidden", "ResourceHidden"], () =>
-						Effect.succeed<SaveInstructionsResult>({ refused: MAY_NOT_EDIT }),
-					),
+					Effect.catchTags({
+						NobodyAsked: () => Effect.succeed<SaveInstructionsResult>({ refused: NOBODY_ASKED }),
+						ActionForbidden: () =>
+							Effect.succeed<SaveInstructionsResult>({ refused: MAY_NOT_EDIT }),
+						ResourceHidden: () => Effect.succeed<SaveInstructionsResult>({ refused: MAY_NOT_EDIT }),
+					}),
 					Effect.orDie,
 				),
 			);

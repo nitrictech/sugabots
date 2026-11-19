@@ -7,12 +7,11 @@ import { Context, Data, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../../database/database.ts";
 import type { DomainEvents } from "../../../database/events/domain-events.ts";
 import type * as schema from "../../../database/schema.ts";
-import { bot, collaboration, placedConversation } from "../../../database/schema.ts";
+import { bot, collaboration, placedConversation, turn } from "../../../database/schema.ts";
 import type { ConversationEvent } from "../../events.ts";
 import { toCollaborationPart } from "../../repository/collaboration-parts.ts";
 import { madeByPeople } from "../../repository/participants.ts";
 import { ConversationRepository } from "../../repository/repository.ts";
-import { lineageOf } from "../../repository/tree.ts";
 import { makeRecords, type WaitOutcome } from "./repository.ts";
 
 /**
@@ -111,13 +110,13 @@ export const make = Effect.gen(function* () {
 								reason: "A bot cannot collaborate with itself",
 							});
 						}
-						const hostsAbove = yield* hostsAboveOf(parent.id);
-						if (hostsAbove.length >= MAX_DEPTH) {
+						const askersAbove = yield* askersAboveOf(parent.id);
+						if (askersAbove.length >= MAX_DEPTH) {
 							return yield* new CollaborationRefused({
 								reason: `Collaboration may only nest ${MAX_DEPTH} deep; answer this yourself`,
 							});
 						}
-						if (hostsAbove.includes(collaborator.id)) {
+						if (askersAbove.includes(collaborator.id)) {
 							return yield* new CollaborationRefused({
 								reason: `${collaborator.name} is already waiting on this conversation; answer it yourself`,
 							});
@@ -226,13 +225,26 @@ const collaboratorNamed = (parent: schema.PlacedConversationRow, name: string) =
 		([row]) => row,
 	);
 
-/** Who hosts each conversation above `conversationId`, nearest first. */
-const hostsAboveOf = (conversationId: string) =>
+/**
+ * The bots waiting on `conversationId` through collaborations, nearest first:
+ * the bot that asked for it, the bot that asked for that one, and so on. One
+ * per collaboration above it, so the count is how deep it nests. Each is read
+ * from the asking turn, as a project people made has no one bot.
+ */
+const askersAboveOf = (conversationId: string) =>
 	Effect.map(
 		query((db) =>
 			db.execute<{ bot_id: string }>(
-				sql`select lineage.bot_id from ${lineageOf(sql`${conversationId}`)} as lineage
-					where lineage.depth > 0 order by lineage.depth`,
+				sql`with recursive asked as (
+					select ${collaboration.parentConversationId} as parent_conversation_id, ${turn.botId} as bot_id, 1 as depth
+					from ${collaboration} join ${turn} on ${turn.id} = ${collaboration.turnId}
+					where ${collaboration.conversationId} = ${conversationId}
+					union all
+					select ${collaboration.parentConversationId}, ${turn.botId}, below.depth + 1
+					from ${collaboration} join ${turn} on ${turn.id} = ${collaboration.turnId}
+					join asked below on ${collaboration.conversationId} = below.parent_conversation_id
+				)
+				select bot_id from asked order by depth`,
 				"objects",
 			),
 		),

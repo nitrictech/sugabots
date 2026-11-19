@@ -144,13 +144,8 @@ interface ConnectionLocation extends ProjectLocation {
 	connectionId: string;
 }
 
-/**
- * Where a sign-in's browser goes back to: the project, and the bot when it is
- * the bot's default project.
- */
-interface SignInReturn extends ProjectLocation {
-	botId: string | null;
-}
+/** Where a sign-in's browser goes back to: the project. */
+type SignInReturn = ProjectLocation;
 
 /**
  * How a sign-in ended. `at` is there once the sign-in is known to be for a
@@ -439,10 +434,7 @@ export const make = Effect.gen(function* () {
 					if (allowed._tag === "Failure") return { failure: "not_allowed" as const };
 
 					const project = { workspaceId: owner.workspaceId, projectId: owner.projectId };
-					const back: SignInReturn = {
-						...project,
-						botId: allowed.success.project.defaultOfBotId,
-					};
+					const back: SignInReturn = project;
 					if (callback.error || !callback.code) {
 						yield* Effect.logWarning("An authorization server refused a connection's sign-in", {
 							error: callback.error,

@@ -1,11 +1,12 @@
 import type { LivelyFace } from "@sugabots/avatars";
-import type { Bot, NotificationSettings } from "@sugabots/contracts";
+import type { Bot, NotificationSettings, ProjectMarker } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { useRef } from "react";
 import { useModels } from "@/lib/bots.ts";
 import { botLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
+import { OWNER_MARK_SIZE_PX, ownerMarkTransition } from "@/lib/owner-mark.ts";
 import { ownerProblems } from "@/lib/owner-pages.ts";
 import { useHideSidebar } from "@/lib/sidebar-hidden.tsx";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
@@ -13,19 +14,8 @@ import { TurnTakingAvatar } from "@/shell/Bot.tsx";
 import { type Attention, AttentionDot, ProblemMark } from "@/ui/attention-dot.tsx";
 import { sidebarRow } from "@/ui/sidebar-row.ts";
 
-/** How a bot stands for the viewer, as the sidebar marks it. */
-export interface BotStanding {
-	bot: Bot;
-	/** How many unread messages its threads and automations' feeds hold. */
-	unreadMessages: number;
-	/** Whether one of its conversations waits on the viewer. */
-	needsApproval: boolean;
-	/** How many of its automations failed their latest run. */
-	failedAutomations: number;
-}
-
-/** How a bot stands while the sidebar's markers have nothing for it, or have not loaded. */
-export const NOTHING_NEW = { unreadMessages: 0, needsApproval: false, failedAutomations: 0 };
+/** How a bot stands for the viewer, as the sidebar marks it: its default project's marker. */
+export type BotStanding = ProjectMarker & { bot: Bot };
 
 /**
  * A bot on one line, which opens its page, where a thread with it starts. At its
@@ -52,7 +42,7 @@ export function SidebarBot({
 		{ lead: bot, enabledModels, automationFailed: failedAutomations > 0 },
 	);
 	const problem = problems.settings ?? problems.automations;
-	const attention = unreadMessages > 0 || needsApproval;
+	const attention = hasNews(standing);
 	const notificationPlace = { kind: "bot", id: bot.id } as const;
 	return (
 		<li className="flex flex-col">
@@ -64,7 +54,9 @@ export function SidebarBot({
 					onPointerEnter={() => face.current?.play("hop")}
 					className={cn(sidebarRow({ selected, phone: true }), attention && "text-foreground")}
 				>
-					<TurnTakingAvatar bot={bot} size={18} faceRef={face} className="shrink-0" />
+					<span style={ownerMarkTransition(bot.id)} className="flex shrink-0">
+						<TurnTakingAvatar bot={bot} size={OWNER_MARK_SIZE_PX} faceRef={face} />
+					</span>
 					<span className={cn("min-w-0 flex-1 truncate-fade", attention && "font-semibold")}>
 						{bot.name}
 					</span>
@@ -90,9 +82,11 @@ export function SidebarBot({
 export const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
 
 /** What waits on the viewer in a bot or project. */
-interface Waiting {
-	unreadMessages: number;
-	needsApproval: boolean;
+type Waiting = Pick<ProjectMarker, "unreadMessages" | "needsApproval">;
+
+/** Whether a bot or project holds something the viewer has not seen: unread messages, or a decision. */
+export function hasNews({ unreadMessages, needsApproval }: Waiting): boolean {
+	return needsApproval || unreadMessages > 0;
 }
 
 /**

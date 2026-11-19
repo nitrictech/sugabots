@@ -206,7 +206,7 @@ export const FilesWhileSending = meta.story({
 });
 
 /**
- * An automation run's result, posted in the bot's chat when the run completed,
+ * An automation run's result, posted in the automation's thread when the run completed,
  * with a link under it to the run and the work behind it.
  */
 export const AutomationResult = meta.story({
@@ -1386,8 +1386,8 @@ const samReacting = { userId: person.id, onToggle: fn(), onAdd: fn() };
 
 /**
  * Reactions sit under a message's words, each emoji with how many reacted
- * with it. Yours are in the accent. Hovering one names who reacted; clicking
- * it adds yours or takes it back. The button after them adds another.
+ * with it, yours shaded apart. Hovering one names who reacted; clicking it
+ * adds yours or takes it back. Another is added from the message's toolbar.
  */
 export const Reactions = meta.story({
 	args: {
@@ -1404,24 +1404,6 @@ export const Reactions = meta.story({
 		await expect(await screen.findByText("Jay Park reacted with 🎉")).toBeVisible();
 		await userEvent.click(party);
 		await expect(args.reacting?.onToggle).toHaveBeenCalledWith(reactedTo, "🎉");
-
-		const reactions = canvas.getByRole("list", { name: "Reactions" });
-		await userEvent.click(within(reactions).getByRole("button", { name: "Add reaction" }));
-		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
-		const search = within(picker).getByRole("searchbox", { name: "Search emoji" });
-		await waitFor(() => expect(search).toHaveFocus());
-		await userEvent.keyboard("hundred points");
-		// The search's only result is active once it applies, and Enter chooses it. A
-		// click could miss, as the picker lays its rows out again while results arrive.
-		await waitFor(() =>
-			expect(within(picker).getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
-				"aria-selected",
-				"true",
-			),
-		);
-		await userEvent.keyboard("{Enter}");
-		await expect(args.reacting?.onAdd).toHaveBeenCalledWith(reactedTo, "💯");
-		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add reaction" })).toBeNull());
 	},
 });
 
@@ -1517,8 +1499,7 @@ const EVERY_SLOT = [
 
 /**
  * A message with as many different emoji as it can take says so in the
- * picker, opened here from the button after its reactions, and still takes
- * one of those.
+ * picker, opened here from its toolbar, and still takes one of those.
  */
 export const ReactionsAtTheLimit = meta.story({
 	args: {
@@ -1526,8 +1507,8 @@ export const ReactionsAtTheLimit = meta.story({
 		messages: [{ ...releaseNotes, reactions: EVERY_SLOT.map((emoji) => reacted(emoji, jay)) }],
 	},
 	play: async ({ canvas, userEvent }) => {
-		const reactions = canvas.getByRole("list", { name: "Reactions" });
-		await userEvent.click(within(reactions).getByRole("button", { name: "Add reaction" }));
+		canvas.getByRole("button", { name: "Add reaction" }).focus();
+		await userEvent.keyboard("{Enter}");
 		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
 		await expect(within(picker).getByText(/This message has 20 different reactions/)).toBeVisible();
 	},

@@ -1,18 +1,17 @@
-import { createRoute, Navigate, Outlet, useMatch, useParams } from "@tanstack/react-router";
+import { createRoute, Outlet, useMatch, useParams } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useBotWithHandle } from "@/lib/bots.ts";
 import { useOpenAutomationFeed } from "@/lib/chats.ts";
-import { findProject, useProjects } from "@/lib/projects.ts";
 import {
-	ownerLinkOptions,
 	type ResourceOwner,
 	resourcePermissions,
+	resourceProjectId,
 } from "@/lib/resource-owner.tsx";
-import { AutomationsPage, useListedAutomations } from "@/shell/Automations.tsx";
+import { AutomationsPage } from "@/shell/Automations.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { BotConversation, botRoute } from "./bots.tsx";
 import { ConversationPage } from "./conversation.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
+import { useBotRouteOwner, useProjectRouteOwner } from "./owner.ts";
 import { ProjectConversation, projectRoute } from "./projects.tsx";
 import { type ConversationSearch, validateConversationSearch } from "./search.ts";
 
@@ -32,20 +31,6 @@ const NewAutomation = lazyNamed(
  * place of.
  */
 
-/** The bot whose automations an address under `/bots/$bot/automations` names, once the roster has it. */
-function useBotOwner(): ResourceOwner | undefined {
-	const { bot: handle } = useParams({ from: "/$workspace/bots/$bot" });
-	const { bot } = useBotWithHandle(handle);
-	return bot && { bot };
-}
-
-/** The project whose automations an address under `/projects/$project/automations` names, once loaded. */
-function useProjectOwner(): ResourceOwner | undefined {
-	const { project: slug } = useParams({ from: "/$workspace/projects/$project" });
-	const project = findProject(useProjects().data, slug);
-	return project && { project };
-}
-
 /** The list, with what an address under it opens in its place as `children`. */
 function OwnerAutomations({
 	owner,
@@ -63,21 +48,6 @@ function OwnerAutomations({
 			{children}
 		</AutomationsPage>
 	);
-}
-
-/**
- * With none chosen, the list is the page. A bot or project with no automations
- * yet goes straight to making one, for someone who may.
- */
-function MakeFirstAutomation({ owner }: { owner: ResourceOwner | undefined }) {
-	if (!owner || !resourcePermissions(owner).manageAutomations) return null;
-	return <GoToNewAutomationWhenNone owner={owner} />;
-}
-
-function GoToNewAutomationWhenNone({ owner }: { owner: ResourceOwner }) {
-	const { automations } = useListedAutomations(owner);
-	if (automations?.length !== 0) return null;
-	return <Navigate {...ownerLinkOptions(owner, { page: "newAutomation" })} replace />;
 }
 
 /**
@@ -115,7 +85,7 @@ function AutomationFeed({
 	automationId: string;
 	feed: (owner: ResourceOwner, feedId: string) => ReactNode;
 }) {
-	const opened = useOpenAutomationFeed("bot" in owner ? owner.bot.id : undefined, automationId);
+	const opened = useOpenAutomationFeed(resourceProjectId(owner), automationId);
 	if (opened.isError) {
 		return (
 			<EmptyState title="Could not open this automation">
@@ -133,7 +103,7 @@ export const automationsRoute = createRoute({
 	path: "/automations",
 	component: () => (
 		<OwnerAutomations
-			owner={useBotOwner()}
+			owner={useBotRouteOwner()}
 			making={useMatch({ from: newAutomationRoute.id, shouldThrow: false }) !== undefined}
 		>
 			<Outlet />
@@ -146,7 +116,7 @@ export const newAutomationRoute = createRoute({
 	getParentRoute: () => automationsRoute,
 	path: "/new",
 	component: () => {
-		const owner = useBotOwner();
+		const owner = useBotRouteOwner();
 		return owner ? <NewAutomation owner={owner} /> : null;
 	},
 });
@@ -154,7 +124,7 @@ export const newAutomationRoute = createRoute({
 export const automationsIndexRoute = createRoute({
 	getParentRoute: () => automationsRoute,
 	path: "/",
-	component: () => <MakeFirstAutomation owner={useBotOwner()} />,
+	component: () => null,
 });
 
 export const automationFeedRoute = createRoute({
@@ -168,7 +138,7 @@ export const automationFeedRoute = createRoute({
 		const navigate = automationFeedRoute.useNavigate();
 		return (
 			<AutomationPage
-				owner={useBotOwner()}
+				owner={useBotRouteOwner()}
 				automationId={automation}
 				itemPage={search.itemPage}
 				feed={(owner, feedId) =>
@@ -192,7 +162,7 @@ export const projectAutomationsRoute = createRoute({
 	path: "/automations",
 	component: () => (
 		<OwnerAutomations
-			owner={useProjectOwner()}
+			owner={useProjectRouteOwner()}
 			making={useMatch({ from: projectNewAutomationRoute.id, shouldThrow: false }) !== undefined}
 		>
 			<Outlet />
@@ -204,7 +174,7 @@ export const projectNewAutomationRoute = createRoute({
 	getParentRoute: () => projectAutomationsRoute,
 	path: "/new",
 	component: () => {
-		const owner = useProjectOwner();
+		const owner = useProjectRouteOwner();
 		return owner ? <NewAutomation owner={owner} /> : null;
 	},
 });
@@ -212,7 +182,7 @@ export const projectNewAutomationRoute = createRoute({
 export const projectAutomationsIndexRoute = createRoute({
 	getParentRoute: () => projectAutomationsRoute,
 	path: "/",
-	component: () => <MakeFirstAutomation owner={useProjectOwner()} />,
+	component: () => null,
 });
 
 export const projectAutomationRoute = createRoute({
@@ -226,7 +196,7 @@ export const projectAutomationRoute = createRoute({
 		const navigate = projectAutomationRoute.useNavigate();
 		return (
 			<AutomationPage
-				owner={useProjectOwner()}
+				owner={useProjectRouteOwner()}
 				automationId={automation}
 				itemPage={search.itemPage}
 				feed={(owner, feedId) =>

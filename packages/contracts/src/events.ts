@@ -56,7 +56,6 @@ export const eventPayloadSchemas = {
 		conversationId,
 		messageId,
 		turnId: uuidSchema,
-		willRetry: Schema.Boolean,
 		error: Schema.String,
 	}),
 	/** Somebody reacted to the message or took a reaction back; `reactions` is all it has now. */

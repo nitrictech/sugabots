@@ -1,4 +1,4 @@
-import type { ConversationDetails, Message } from "@sugabots/contracts";
+import type { ConversationDetails, Message, WrittenFileSummary } from "@sugabots/contracts";
 import { type TestConnection, testPerson } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
@@ -12,7 +12,6 @@ import {
 	storyBots,
 	storyChatDetails,
 	storyListedThread,
-	storyProjects,
 	storyProjectThreadDetails,
 	storyProjectThreadFor,
 	storyThreadFor,
@@ -121,9 +120,13 @@ function expiredConnection(n: number, name: string, url: string): TestConnection
 				access: "allow",
 			},
 		],
-		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
-		connectedBy: "Sam Rivera",
+		connectedBy: {
+			id: "0199a3a0-0000-7000-8000-0000000000c3",
+			name: "Sam Rivera",
+			email: "sam.rivera@example.com",
+			image: null,
+		},
 		createdAt: "2026-09-01T00:00:00.000Z",
 	};
 }
@@ -165,7 +168,7 @@ export const SignInsExpired = meta.story({
 		await expect(await canvas.findByText("3 connections' sign-ins expired.")).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Open connections" })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/settings/projects/${revenue.slug}/connections`,
+			`/${storyWorkspace.slug}/bots/${growthDesk.handle}/connections`,
 		);
 	},
 });
@@ -198,10 +201,16 @@ export const SignInExpiredForSomeoneWhoCannotSignIn = meta.story({
 			...connectionHandlers([expiredLinear]),
 			...appHandlers({
 				messages: { [growthDesk.id]: conversation },
-				projects: storyProjects.map((project) =>
-					project.id === revenue.id
-						? { ...project, permissions: { ...project.permissions, manageConnections: false } }
-						: project,
+				bots: storyBots.map((bot) =>
+					bot.id === growthDesk.id
+						? {
+								...bot,
+								permissions: {
+									...bot.permissions,
+									resources: { ...bot.permissions.resources, manageConnections: false },
+								},
+							}
+						: bot,
 				),
 			}),
 		);
@@ -236,8 +245,8 @@ export const ProjectOpensNewestThread = meta.story({
 	play: async ({ canvas }) => {
 		await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(canvas.getByRole("heading", { name: "Planning", level: 1 })).toBeInTheDocument();
-		const list = canvas.getByRole("group", { name: "Revenue" });
-		await expect(within(list).getByRole("link", { name: /^Planning/ })).toHaveAttribute(
+		const list = await canvas.findByRole("region", { name: "Threads" });
+		await expect(await within(list).findByRole("link", { name: /^Planning/ })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
@@ -312,7 +321,7 @@ export const ProjectThreadAutomationResult = meta.story({
 	},
 });
 
-/** A project's thread before anyone has written in it opens on the project: who is in it, and what it is for. */
+/** A project's thread before anyone has written in it opens on its name and the project it is in. */
 export const ProjectThreadEmpty = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
@@ -320,7 +329,7 @@ export const ProjectThreadEmpty = meta.story({
 		await expect(
 			await within(log).findByRole("heading", { name: "Planning", level: 2 }),
 		).toBeVisible();
-		await expect(within(log).getByText(/This is the start of/)).toBeVisible();
+		await expect(within(log).getByText(`In ${revenue.name}`)).toBeVisible();
 	},
 });
 
@@ -380,8 +389,11 @@ function failingAutomationHandlers() {
 	];
 }
 
+/** The feed is Growth Desk's own, as the automation is in its default project. */
 const failingAutomationFeed = () => (
-	<StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}/${failingAutomation.feed}`} />
+	<StoryApp
+		path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/threads/${failingAutomation.feed}`}
+	/>
 );
 
 /**
@@ -427,9 +439,10 @@ export const NamedChat = meta.story({
 	beforeEach({ msw }) {
 		const details = storyProjectThreadDetails(revenue, storyBots);
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats`, () =>
+			http.get(`${API}/projects/${revenue.id}/threads`, () =>
 				HttpResponse.json({
-					chats: [
+					automations: [],
+					threads: [
 						storyListedThread(storyProjectThreadFor(revenue)),
 						storyListedThread(pricingChat),
 					],
@@ -457,8 +470,8 @@ export const NamedChat = meta.story({
 	),
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Pricing", level: 1 })).toBeVisible();
-		const list = canvas.getByRole("group", { name: "Revenue" });
-		await expect(within(list).getByRole("link", { name: /^Pricing/ })).toHaveAttribute(
+		const list = await canvas.findByRole("region", { name: "Threads" });
+		await expect(await within(list).findByRole("link", { name: /^Pricing/ })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
@@ -707,11 +720,13 @@ export const Details = meta.story({
 	},
 });
 
-/** On a phone, tapping the bot's name opens Details over the whole screen, header and all. */
+/** On a phone, tapping the thread's title opens Details over the whole screen, header and all. */
 export const DetailsOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: growthDesk.name }));
+		await userEvent.click(
+			await canvas.findByRole("button", { name: storyThreadFor(growthDesk).title }),
+		);
 		await expect(await canvas.findByRole("complementary", { name: "Details" })).toBeInTheDocument();
 	},
 });
@@ -949,31 +964,16 @@ export const ComputerInUse = meta.story({
 	},
 });
 
-/** The same on a phone: the pulse and a screen, at the right of the header. */
-export const ComputerInUseOnAPhone = meta.story({
-	globals: { viewport: { value: "iphone12", isRotated: false } },
-	beforeEach({ msw }) {
-		msw.use(...computerHandlers([...conversation, browsing]));
-	},
-	play: async ({ canvas }) => {
-		await expect(
-			await canvas.findByRole("button", {
-				name: `${growthDesk.name} is using the computer. Open its desktop`,
-			}),
-		).toBeVisible();
-	},
-});
-
-const pricing = {
+const pricing: WrittenFileSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000005f1",
-	projectId: revenue.id,
+	conversationId: storyThreadFor(growthDesk).id,
 	kind: "document",
 	title: "Competitor pricing",
 	version: 1,
 	createdBy: { botId: growthDesk.id, name: growthDesk.name },
 	createdAt: "2026-09-18T06:08:00.000Z",
 	updatedAt: "2026-09-18T06:08:00.000Z",
-} as const;
+};
 
 const pricingContent = `# Competitor pricing
 
@@ -1012,7 +1012,7 @@ const madePricing: Message = {
 };
 
 const fileHandlers = () => {
-	const files = `${import.meta.env.VITE_API_URL}/projects/:projectId/files/:fileId`;
+	const files = `${API}/files/:fileId`;
 	const shown = {
 		...pricing,
 		content: pricingContent,
@@ -1167,10 +1167,12 @@ export const SendRefusedFileGone = meta.story({
 		await expect(
 			canvas.getByText(/It was no longer there when the message was sent/),
 		).toBeVisible();
-		await expect(send).toBeDisabled();
+		// Send went with the files it sent and is back with them, so it is found again.
+		const sendAgain = canvas.getByRole("button", { name: "Send message" });
+		await expect(sendAgain).toBeDisabled();
 
 		await userEvent.click(retry);
-		await waitFor(() => expect(send).toBeEnabled());
+		await waitFor(() => expect(sendAgain).toBeEnabled());
 	},
 });
 

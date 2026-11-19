@@ -363,7 +363,7 @@ function anAutomation(): Automation {
 		triggers: [{ id: TRIGGER_ID, kind: "webhook", auth: { kind: "bearer" } }],
 		state: "enabled",
 		createdById: USER_ID,
-		createdByBotId: null,
+		pausedAfterFailures: false,
 		createdAt: "2026-10-15T00:00:00.000Z",
 		updatedAt: "2026-10-15T00:00:00.000Z",
 	};

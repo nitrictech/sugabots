@@ -18,10 +18,11 @@ import {
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { Stage, StageMark } from "@/shell/Stage.tsx";
+import { Stage } from "@/shell/Stage.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { IconTile } from "@/ui/icon-tile.tsx";
 import { LiveDot } from "@/ui/live-dot.tsx";
 
 /**
@@ -127,9 +128,9 @@ export function DesktopStage({
 		<Stage
 			label={title}
 			icon={
-				<StageMark>
+				<IconTile size="sm">
 					<Monitor strokeWidth={2} />
-				</StageMark>
+				</IconTile>
 			}
 			title={title}
 			byline={
@@ -480,7 +481,7 @@ export function DesktopScreen({
 				<div className="absolute inset-0 grid place-items-center content-center gap-3 px-6 text-center text-muted-foreground text-xs">
 					<p>{STANDING_TEXT[standing]}</p>
 					{offersReconnect && (standing === "idle" || standing === "ended") && (
-						<Button variant="outline" onClick={() => setAttempt((count) => count + 1)}>
+						<Button variant="secondary" onClick={() => setAttempt((count) => count + 1)}>
 							Reconnect
 						</Button>
 					)}

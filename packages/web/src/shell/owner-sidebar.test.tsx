@@ -45,8 +45,8 @@ describe("a project's own sidebar", () => {
 	it("moves a thread marked done under Done", async () => {
 		onWideScreen();
 		let doneAt: string | null = null;
-		client.api.chats.list.mockImplementation(() =>
-			Effect.succeed({ chats: [listedThread({ ...thread, doneAt })] }),
+		client.api.chats.threads.mockImplementation(() =>
+			Effect.succeed({ threads: [listedThread({ ...thread, doneAt })], automations: [] }),
 		);
 		client.api.chats.markDone.mockImplementation(() => {
 			doneAt = "2026-09-19T08:00:00.000Z";
@@ -54,10 +54,15 @@ describe("a project's own sidebar", () => {
 		});
 		mount(`/suga/projects/${project.slug}/files`, sam);
 
-		const work = await screen.findByRole("list", { name: `${project.name}'s work` });
+		const work = await screen.findByRole("region", { name: "Threads" });
 		fireEvent.click(await within(work).findByRole("button", { name: `Done: ${thread.title}` }));
 
-		expect(await screen.findByRole("button", { name: `Reopen: ${thread.title}` })).toBeDefined();
-		expect(within(work).queryByRole("link", { name: new RegExp(thread.title) })).toBeNull();
+		const done = await screen.findByRole("region", { name: "Done" });
+		expect(within(done).getByRole("button", { name: `Reopen: ${thread.title}` })).toBeDefined();
+		// Threads holds only what is still open, so with none it is gone.
+		const threads = screen.queryByRole("region", { name: "Threads" });
+		expect(
+			threads && within(threads).queryByRole("link", { name: new RegExp(thread.title) }),
+		).toBeFalsy();
 	});
 });

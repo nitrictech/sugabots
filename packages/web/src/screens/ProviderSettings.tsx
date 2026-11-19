@@ -72,6 +72,7 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
 import { SearchField } from "@/ui/search-field.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
@@ -86,7 +87,6 @@ import {
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
-import { LetterTile } from "./letter-tile.tsx";
 import { ModelChoiceList } from "./ModelChoiceList.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 import { ProviderFieldRow, savedKeyMask, valueText } from "./provider-field-row.tsx";
@@ -335,7 +335,7 @@ export function ProviderSettings({ providerId }: { providerId: string }) {
 	if (!provider) {
 		return (
 			<EmptyState
-				page
+				page="min"
 				title={providers.error ? "Could not load this provider" : "No such provider"}
 			>
 				{providers.error
@@ -441,7 +441,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 				// A preset every workspace starts with was seeded, not added: its date is when the
 				// workspace got it, not when anybody connected it.
 				!seeded && `Added ${formatTimeAfterVerb(new Date(provider.createdAt), new Date())}`,
-				provider.connectedBy && `Connected by ${provider.connectedBy}`,
+				provider.connectedBy && `Connected by ${provider.connectedBy.name}`,
 			]
 				.filter(Boolean)
 				.join(" · ")}

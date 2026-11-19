@@ -84,8 +84,8 @@ export interface ConnectionToolSet {
 	tools: Record<string, OfferedTool>;
 	/** Connections left out because their server couldn't be listed. */
 	unavailable: string[];
-	/** Connections left out until someone signs in again, by handle. */
-	signInExpired: string[];
+	/** Connections left out until someone signs in again, each with the project that holds it. */
+	signInExpired: ExpiredConnection[];
 	/** What each connection's server says about using its tools, by handle. */
 	instructions: Record<string, string>;
 	/** Catalog servers the bot has not added. */
@@ -97,6 +97,13 @@ export interface ConnectionToolSet {
 	fromProjectAndBot: boolean;
 	/** Ends every session behind these tools. */
 	close(): Promise<void>;
+}
+
+/** A connection left out of a turn until someone signs in again. */
+export interface ExpiredConnection {
+	handle: string;
+	/** The project whose Connections page it is signed in again from: a bot's default project, or one people made. */
+	projectId: string;
 }
 
 export interface Interface {
@@ -219,15 +226,16 @@ export function from({
 	const connectionsOf = (workspaceId: string, projectIds: readonly string[]) =>
 		Effect.gen(function* () {
 			const taken = new Set<string>();
-			const reached: ConnectionTarget[] = [];
-			const expired: Pick<ConnectionTarget, "handle" | "url">[] = [];
+			const reached: OwnedTarget[] = [];
+			const expired: (Pick<ConnectionTarget, "handle" | "url"> & ExpiredConnection)[] = [];
 			let gitHub: { connected: Connected; projectId: string } | undefined;
 			for (const projectId of projectIds) {
 				const found = yield* connections.targetsForProject(workspaceId, projectId);
 				const connected = github ? yield* github.forProject({ workspaceId, projectId }) : undefined;
 				const isFree = (connection: { handle: string }) => !taken.has(connection.handle);
-				reached.push(...found.targets.filter(isFree));
-				expired.push(...found.signInExpired.filter(isFree));
+				const owned = <Connection>(connection: Connection) => ({ ...connection, projectId });
+				reached.push(...found.targets.filter(isFree).map(owned));
+				expired.push(...found.signInExpired.filter(isFree).map(owned));
 				if (!gitHub && connected && isFree(connected.connection)) {
 					gitHub = { connected, projectId };
 				}
@@ -258,7 +266,7 @@ export function from({
 				} = yield* connectionsOf(workspaceId, projectIds);
 				// One waiting on a sign-in is still connected, so it isn't offered to be added again.
 				const addable = presetsAddableTo([...reached, ...expired]);
-				const signInExpired = expired.map((connection) => connection.handle);
+				const signInExpired = expired.map(({ handle, projectId }) => ({ handle, projectId }));
 				const endpointTools = reached
 					.filter((target) => target.kind === "http")
 					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
@@ -366,7 +374,7 @@ export function from({
 					return typeof listing === "object" ? [{ target, listing }] : [];
 				});
 				const leftOut = (outcome: ListingOutcome) =>
-					targets.filter((_, index) => listings[index] === outcome).map((target) => target.handle);
+					targets.filter((_, index) => listings[index] === outcome);
 				return {
 					tools: Object.assign(
 						{},
@@ -380,8 +388,11 @@ export function from({
 						})),
 						ownTools.tools,
 					),
-					unavailable: leftOut("unavailable"),
-					signInExpired: [...signInExpired, ...leftOut("sign_in_expired")],
+					unavailable: leftOut("unavailable").map((target) => target.handle),
+					signInExpired: [
+						...signInExpired,
+						...leftOut("sign_in_expired").map(({ handle, projectId }) => ({ handle, projectId })),
+					],
 					instructions: {
 						...Object.fromEntries(
 							listed.flatMap(({ target, listing }) =>
@@ -412,6 +423,9 @@ function presetsAddableTo(connections: readonly { url: string }[]): readonly Con
 	);
 	return connectionCatalog.filter((preset) => !installed.has(preset.id));
 }
+
+/** A connection a turn reaches, with the project that holds it. */
+type OwnedTarget = ConnectionTarget & { projectId: string };
 
 /** What asking a connection's server for its tools came to. */
 type ListingOutcome = ServerListing | "unavailable" | "sign_in_expired";

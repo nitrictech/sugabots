@@ -4,6 +4,16 @@ import type { Staged } from "@/screens/staged.ts";
 
 export const optionalString = (value: unknown) => (typeof value === "string" ? value : undefined);
 
+/** What a connections page's address carries back from an OAuth sign-in. */
+export interface SignInErrorSearch {
+	/** A code saying why the sign-in did not finish, shown only through `signInFailureReason`. */
+	oauth_error?: string;
+}
+
+export const validateSignInErrorSearch = (search: Record<string, unknown>): SignInErrorSearch => ({
+	oauth_error: optionalString(search.oauth_error),
+});
+
 export interface FileSearch {
 	/** An earlier version to show; the current one when absent. */
 	version?: number;

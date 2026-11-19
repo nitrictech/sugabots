@@ -71,14 +71,13 @@ export function workspaceSettingSection(section: string): SettingSection | undef
 
 /**
  * The pages of a project's settings, as the navigation lists them under it:
- * its own, its people and bots, and, as a bot's have, the services it is
- * connected to and its computer.
+ * its own, its people and bots, and, as a bot's have, its computer. Its
+ * connections are a page of the project's own, beside its threads.
  */
 export const projectSettingsPages = [
 	{ id: "general", label: "General" },
 	{ id: "people", label: "People" },
 	{ id: "bots", label: "Bots" },
-	{ id: "connections", label: "Connections" },
 	{ id: "computer", label: "Computer" },
 ] as const;
 
@@ -90,12 +89,12 @@ export function projectSettingsPage(segment: string): ProjectSettingsPage | unde
 }
 
 /**
- * The pages of a bot's settings besides its own: the services it is connected
- * to, and its computer, which is there only while the workspace has computers.
+ * The pages of a bot's settings besides its own: its computer, which is there
+ * only while the workspace has computers. Its connections are a page of the
+ * bot's own, beside its threads.
  */
 export const botSettingsPages = [
 	{ id: "general", label: "General" },
-	{ id: "connections", label: "Connections" },
 	{ id: "computer", label: "Computer" },
 ] as const;
 

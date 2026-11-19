@@ -10,7 +10,7 @@ import {
 	projectColors,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { useId } from "react";
+import { type CSSProperties, useId } from "react";
 import { projectPalettes } from "@/lib/project-looks.ts";
 import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
@@ -42,13 +42,7 @@ export function LookPicker({
 	return (
 		<>
 			<SettingsControlRow label="Colour" stackOnPhone>
-				<Swatches
-					colors={botColors}
-					swatch={(one) => botPalettes[one].face}
-					value={color}
-					onChange={onColorChange}
-					columns={8}
-				/>
+				<BotColourPicker value={color} onChange={onColorChange} />
 			</SettingsControlRow>
 			<SettingsControlRow label="Shape" stackOnPhone>
 				<ShapePicker value={shape} onChange={onShapeChange} />
@@ -57,6 +51,25 @@ export function LookPicker({
 				<EyesPicker value={face} onChange={onFaceChange} />
 			</SettingsControlRow>
 		</>
+	);
+}
+
+/** BotColourPicker picks a bot's colour from the bot palette, in rows of eight. */
+export function BotColourPicker({
+	value,
+	onChange,
+}: {
+	value: BotColor;
+	onChange: (color: BotColor) => void;
+}) {
+	return (
+		<Swatches
+			colors={botColors}
+			swatch={(color) => botPalettes[color].face}
+			value={value}
+			onChange={onChange}
+			columns={8}
+		/>
 	);
 }
 
@@ -76,11 +89,6 @@ export function ProjectColourPicker({
 			onChange={onChange}
 		/>
 	);
-}
-
-/** The ring round the chosen swatch: a gap in the panel's `--list` colour, then the swatch's colour. */
-function ring(color: string): string {
-	return `0 0 0 3px var(--list), 0 0 0 5px ${color}`;
 }
 
 function Swatches<Color extends string>({
@@ -105,9 +113,10 @@ function Swatches<Color extends string>({
 }) {
 	const name = useId();
 	return (
+		// `min-w-0`: a fieldset is otherwise as wide as its swatches, and would push what is beside it aside.
 		<fieldset
 			className={cn(
-				"m-0 grid flex-1 border-0 p-0",
+				"m-0 grid min-w-0 flex-1 border-0 p-0",
 				columns ? "gap-2.5" : "grid-cols-swatches justify-between gap-1.5",
 			)}
 			style={columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 2rem))` } : undefined}
@@ -116,14 +125,13 @@ function Swatches<Color extends string>({
 			{colors.map((color) => (
 				<label
 					key={color}
+					// The chosen one is ringed by an outline set out from it, so the gap shows whatever is behind.
 					className={cn(
-						"aspect-square cursor-pointer rounded-full has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4",
+						"aspect-square cursor-pointer rounded-full bg-(--swatch) has-focus-visible:outline-2 has-focus-visible:outline-ring has-focus-visible:outline-offset-4",
 						columns ? "w-full" : "size-7",
+						value === color && "outline-2 outline-(--swatch) outline-offset-2",
 					)}
-					style={{
-						background: swatch(color),
-						boxShadow: value === color ? ring(swatch(color)) : undefined,
-					}}
+					style={{ "--swatch": swatch(color) } as CSSProperties}
 				>
 					<input
 						type="radio"

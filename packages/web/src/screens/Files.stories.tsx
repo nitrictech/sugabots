@@ -172,7 +172,7 @@ export const ListWithOneOpen = meta.story({
 export const Empty = meta.story({
 	render: () => <FileListView owner={{ project: revenue }} files={[]} now={now} />,
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText(`No files in ${revenue.name} yet`)).toBeVisible();
+		await expect(canvas.getByText(`No files from ${revenue.name} yet`)).toBeVisible();
 	},
 });
 

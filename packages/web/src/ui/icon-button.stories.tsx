@@ -9,19 +9,13 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: { label: "Workspace settings", children: <SettingsIcon />, onClick: fn() },
 	argTypes: {
-		variant: { control: "select", options: ["quiet", "outline", "pane", "bar", "round"] },
+		variant: { control: "select", options: ["quiet", "bar", "round"] },
 		size: { control: "select", options: ["sm", "default", "lg"] },
 	},
 });
 
 /** Quiet keeps secondary actions compact while retaining a label and tooltip. */
 export const Quiet = meta.story({});
-
-/** Outline separates a standalone icon control from its surroundings. */
-export const Outline = meta.story({ args: { variant: "outline" } });
-
-/** Pane uses a recessed background for actions inside a panel. */
-export const Pane = meta.story({ args: { variant: "pane", size: "lg" } });
 
 /** Bar sits in the header across the top of a list, chat or sidebar, such as a sidebar's Close. */
 export const Bar = meta.story({

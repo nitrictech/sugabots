@@ -16,8 +16,7 @@ import { ModelProviderRepository } from "../../providers/model-providers/model-p
 import type { UserFacing } from "../../user-message.ts";
 import { type LeadsProjects, refuseWhileLeading } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
-import { personFacingBotRow, toBot } from "./bot.ts";
-import { isPinnedBy, systemBots, visiblePersonFacingBots } from "./bot-reads.ts";
+import { personFacingBot, systemBots, visiblePersonFacingBots } from "./bot-reads.ts";
 import { BotRepository } from "./bot-repository.ts";
 import { PersonalAssistants } from "./personal-assistants.ts";
 
@@ -117,17 +116,11 @@ export const make = Effect.gen(function* () {
 	const projectComputers = yield* ProjectComputers.Service;
 	const personalAssistants = yield* PersonalAssistants.Service;
 
-	/** The bot as `actor` is shown it, with whether they pinned it, unless told. */
-	const shown = (row: schema.BotRow, actor: Actor, pinned?: boolean) =>
-		Effect.gen(function* () {
-			const bot = personFacingBotRow(row);
-			if (!bot) return yield* new ResourceHidden({ resource: "bot" });
-			const defaultProjectId = yield* defaultProjectOf(bot.id);
-			return toBot(
-				{ ...bot, defaultProjectId },
-				{ actor, pinned: pinned ?? (yield* isPinnedBy(row.id, actor.userId)) },
-			);
-		});
+	/** The bot as `actor` is shown it, with whether they pinned it. */
+	const shown = (row: schema.BotRow, actor: Actor) =>
+		Effect.flatMap(personFacingBot(row.id, actor), (bot) =>
+			bot ? Effect.succeed(bot) : Effect.fail(new ResourceHidden({ resource: "bot" })),
+		);
 
 	return Service.of({
 		list: (input) =>
@@ -158,7 +151,7 @@ export const make = Effect.gen(function* () {
 					const { workspaceId, actor } = yield* authorization.workspace(workspace, "bot.create");
 					yield* modelProviders.requireEnabled(workspaceId, bot.model);
 					const made = yield* bots.create(workspaceId, { createdById: actor.userId, bot });
-					return yield* shown(made, actor, true);
+					return yield* shown(made, actor);
 				}),
 			),
 
@@ -190,7 +183,7 @@ export const make = Effect.gen(function* () {
 						model === undefined
 							? yield* personalAssistants.provision(person)
 							: yield* personalAssistants.provisionWithModel({ ...person, model });
-					return yield* shown(assistant, actor, false);
+					return yield* shown(assistant, actor);
 				}),
 			),
 

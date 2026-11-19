@@ -22,6 +22,7 @@ import { useConversationActivity } from "@/lib/conversations.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
 import { botSettingsLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
+import { projectHeadcount } from "@/lib/project-headcount.ts";
 import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { automationStartsLabel } from "@/lib/routine-schedule.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
@@ -212,11 +213,11 @@ export function ProjectDetails({
 			<div className={DETAILS_SCROLL}>
 				{/* On a phone, the project's mark large in the middle, the thread's name under it, then what can be done with it. */}
 				<div className="flex flex-col items-center gap-2.5 px-4 pt-1 pb-4 text-center md:hidden">
-					<ProjectInitial project={project} size="lg" className="size-22 rounded-3xl text-3xl" />
+					<ProjectInitial project={project} size="xl" />
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
 						<h3 className="m-0 truncate font-semibold text-foreground text-xl">{name}</h3>
 						<p className="m-0 truncate text-sm text-subtle-foreground">
-							{project.name} · {countOf(people, "person", "people")}, {countOf(bots, "bot", "bots")}
+							{project.name} · {projectHeadcount({ people, bots })}
 						</p>
 					</div>
 					{toChange && (
@@ -403,7 +404,7 @@ function Automations({
 							label={`${automation.name} on`}
 							checked={automation.state === "enabled"}
 							disabled={
-								!bot.permissions.manageAutomations ||
+								!bot.permissions.resources.manageAutomations ||
 								(actions.update.isPending &&
 									actions.update.variables?.automationId === automation.id)
 							}
@@ -535,7 +536,7 @@ function ExpiredTool({ bot, connection }: { bot: Bot; connection: Connection }) 
 				<span className="truncate text-foreground text-xs max-md:text-sm">{connection.name}</span>
 				<WarningText className="text-warning text-xs">Sign-in expired</WarningText>
 			</div>
-			{bot.permissions.manageConnections && (
+			{bot.permissions.resources.manageConnections && (
 				<Button
 					variant="secondary"
 					size="sm"

@@ -1,5 +1,6 @@
 import type { Bot, Project } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
+import { cn } from "cn";
 import { botLink, projectLink } from "@/lib/links.ts";
 import { OwnerLink, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
@@ -47,21 +48,26 @@ export function CrumbSeparator() {
 	);
 }
 
+/** The label each owner page has in a breadcrumb. */
+const OWNER_PAGE_LABELS = { automations: "Automations", connections: "Connections" } as const;
+
 /**
- * The head of an automation's breadcrumb: its bot or project, then that
- * one's Automations, which leads back to them.
+ * The head of an automation's or a connection's breadcrumb: its bot or
+ * project, then that one's `page`, which leads back to it.
  */
-export function AutomationsCrumb({ owner }: { owner: ResourceOwner }) {
+export function OwnerPageCrumb({
+	owner,
+	page,
+}: {
+	owner: ResourceOwner;
+	page: keyof typeof OWNER_PAGE_LABELS;
+}) {
 	return (
 		<>
 			<OwnerCrumb owner={owner} />
 			<CrumbSeparator />
-			<OwnerLink
-				owner={owner}
-				to={{ page: "automations" }}
-				className="focus-ring shrink-0 rounded-sm font-medium text-muted-foreground text-sm transition-colors hover:text-foreground"
-			>
-				Automations
+			<OwnerLink owner={owner} to={{ page }} className={cn(CRUMB, "shrink-0")}>
+				{OWNER_PAGE_LABELS[page]}
 			</OwnerLink>
 		</>
 	);

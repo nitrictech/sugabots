@@ -139,12 +139,12 @@ export const projectIndexRoute = createRoute({
 });
 
 function OpenNewestThread({ project }: { project: Project }) {
-	const list = useProjectThreads(project.slug);
+	const list = useProjectThreads(project.id);
 	if (list.isError) {
 		return <EmptyState title="Could not open this project">{API_DID_NOT_ANSWER}</EmptyState>;
 	}
 	if (!list.data) return null;
-	const [newest] = list.data.chats;
+	const [newest] = list.data.threads;
 	if (!newest) return <ProjectNewThread project={project} />;
 	return (
 		<Navigate {...conversationLink({ project, conversationId: newest.conversation.id })} replace />

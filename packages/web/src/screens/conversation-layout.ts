@@ -72,7 +72,7 @@ export function startsGroup(previous: Message | undefined, message: Message): bo
  * it, and the line would say the same thing twice.
  */
 export function isTyping(message: Message): boolean {
-	// While a collaboration runs the bot is quiet in its own chat; the collaboration line says so.
+	// While a collaboration runs the bot is quiet in its own thread; the collaboration line says so.
 	if (waitingOn(message)) return false;
 	const awaitingApproval = message.parts.some(
 		(part) => part.type === "tool_call" && awaitsApproval(part),

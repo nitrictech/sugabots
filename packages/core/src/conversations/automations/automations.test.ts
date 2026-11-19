@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import type { AcceptedRun } from "@sugabots/contracts";
 import { handleFromName, MAX_AUTOMATION_TRIGGERS } from "@sugabots/contracts";
+import { userText } from "@sugabots/errors";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { TestClock } from "effect/testing";
@@ -33,6 +34,7 @@ import {
 	type Promised,
 	runOnPostgres,
 } from "../../database/testing.ts";
+import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { conversationsForTests } from "../testing.ts";
 import {
@@ -56,13 +58,7 @@ import {
 import { AutomationRunner } from "./automation-runner.ts";
 import { Automations } from "./automations.ts";
 import { AutomationSettlement } from "./settlement.ts";
-import {
-	anAutomationOwner,
-	defaultProjectOf,
-	finishTurnsIn,
-	releaseRun,
-	startRunning,
-} from "./testing.ts";
+import { anAutomationOwner, finishTurnsIn, releaseRun, startRunning } from "./testing.ts";
 import type { Delivery } from "./webhook-auth.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", async () => {
@@ -205,7 +201,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				.returning(),
 		);
 		if (!helper) throw new Error("Could not create the joined bot");
-		const helperProjectId = await defaultProjectOf(helper.id);
+		const helperProjectId = await runOnPostgres(defaultProjectOf(helper.id));
 		const webhook = { kind: "webhook" as const };
 		await automations.create(
 			{ projectId: ownProjectId },
@@ -245,11 +241,11 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			Context.get(conversations, Automations.Service),
 		).listInWorkspace(workspaceId);
 
-		expect(listed.map((item) => item.automation.id)).toEqual([
+		expect(listed.map((automation) => automation.id)).toEqual([
 			sooner.automation.id,
 			later.automation.id,
 		]);
-		expect(listed[0]?.bot).toMatchObject({ id: helper.id, name: "Joined Bot", color: "sky" });
+		expect(listed[0]?.projectId).toBe(helperProjectId);
 	});
 
 	it("creates scoped automations started by a routine or a webhook, and admits a webhook's callers by its secret", async () => {
@@ -1389,6 +1385,31 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		).rejects.toThrow(Automations.InvalidRunCursor);
 	});
 
+	it("lists the runs of every automation of a project, removed ones' included, newest first", async () => {
+		const runOnce = async (as: typeof automations, projectId: string, name: string) => {
+			const { automation } = await as.create(
+				{ projectId },
+				{ name, instructions: "Handle it.", triggers: [{ kind: "webhook" }] },
+			);
+			const { runId } = await as.run({
+				projectId,
+				automationId: automation.id,
+				requestId: crypto.randomUUID(),
+			});
+			return { automationId: automation.id, runId };
+		};
+		const other = await anAutomationOwner();
+		const first = await runOnce(automations, ownProjectId, "Kept");
+		const second = await runOnce(automations, ownProjectId, "Removed");
+		await runOnce(automationsAs(other.userId), other.ownProjectId, "Elsewhere");
+		await automations.remove({ projectId: ownProjectId, automationId: second.automationId });
+
+		const page = await view.listProjectRuns({ projectId: ownProjectId });
+
+		expect(page.items.map((run) => run.id)).toEqual([second.runId, first.runId]);
+		expect(page.nextCursor).toBeNull();
+	});
+
 	describe("who reaches an automation", () => {
 		/** A person with `role` in the workspace. */
 		const somebody = async (role: "admin" | "member") => {
@@ -1423,6 +1444,47 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			expect((await admin.listRuns(automation)).items).toHaveLength(1);
 			expect(await admin.get(automation)).toMatchObject({ id: automation.automationId });
 			expect(await admin.list({ projectId: ownProjectId })).toHaveLength(1);
+		});
+
+		it("lists how each automation stands for those who read its runs, and not for an administrator of a private bot", async () => {
+			const automation = await anAutomationWithARun();
+			const neverRun = await automations.create(
+				{ projectId: ownProjectId },
+				{ name: "Unrun", instructions: "Run.", triggers: [{ kind: "webhook" }] },
+			);
+			await onDatabase((db) =>
+				db
+					.update(automationRun)
+					.set({ state: "failed", error: userText`It broke.`, finishedAt: new Date() })
+					.where(eq(automationRun.automationId, automation.automationId)),
+			);
+			const statusOf = (listed: Awaited<ReturnType<typeof view.list>>, id: string) =>
+				listed.find((one) => one.id === id)?.status;
+
+			const listed = await view.list({ projectId: ownProjectId });
+			expect(statusOf(listed, automation.automationId)).toEqual({
+				failing: true,
+				latestRun: {
+					id: expect.any(String),
+					state: "failed",
+					posted: false,
+					acceptedAt: expect.any(String),
+					error: "It broke.",
+				},
+			});
+			expect(statusOf(listed, neverRun.automation.id)).toEqual({ failing: false, latestRun: null });
+
+			// Paused by hand, it is not failing, whatever its last run did.
+			await automations.update(automation, { state: "paused" });
+			expect(
+				statusOf(await view.list({ projectId: ownProjectId }), automation.automationId),
+			).toEqual(expect.objectContaining({ failing: false }));
+
+			await makePrivate(botId);
+			const admin = viewAs(await somebody("admin"));
+			expect((await admin.list({ projectId: ownProjectId })).map((one) => "status" in one)).toEqual(
+				[false, false],
+			);
 		});
 
 		it("hides a private bot's automation and its history from a member who did not make it", async () => {

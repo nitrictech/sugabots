@@ -19,7 +19,7 @@ import {
 	useNavigateToOwnerPage,
 } from "@/lib/resource-owner.tsx";
 import { useSaving } from "@/lib/saving.ts";
-import { AutomationsCrumb } from "@/shell/BotCrumb.tsx";
+import { OwnerPageCrumb } from "@/shell/BotCrumb.tsx";
 import { PageHeader } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -42,6 +42,7 @@ import {
 	instructionsNote,
 	type PlacedAutomation,
 } from "./AutomationEditor.tsx";
+import { RUN_OUTCOME_LABELS, type RunOutcome, RunStatus } from "./AutomationRun.tsx";
 import {
 	TriggerDialog,
 	type TriggerSection,
@@ -50,6 +51,12 @@ import {
 } from "./AutomationTriggers.tsx";
 import { WebhookGroups } from "./AutomationWebhook.tsx";
 import { ChatSidebar, ShowMore } from "./ChatSidebar.tsx";
+
+/** What the panel reads of how the automation stands. */
+type PanelStanding = Pick<
+	NonNullable<ConversationDetails["automation"]>,
+	"id" | "projectId" | "state" | "pausedAfterFailures"
+>;
 
 /** What the panel has open over the page, if anything. */
 type PanelDialog =
@@ -82,7 +89,7 @@ export function AutomationPanel({
 	/** Its feed, refreshed when it changes; undefined where it is shown without one. */
 	conversationId: string | undefined;
 	/** How the automation stands, as its feed knows it. */
-	standing: NonNullable<ConversationDetails["automation"]>;
+	standing: PanelStanding;
 	/** Closes it beside the feed; undefined where it is the page. */
 	onClose: (() => void) | undefined;
 }) {
@@ -184,18 +191,9 @@ export function AutomationPanel({
 					{controlFailure !== undefined && <Alert>{failureMessage(controlFailure)}</Alert>}
 					{!asPage && (
 						<div className={cn(SETTINGS_CARD, "flex h-12 items-center gap-2.5 px-3.5")}>
-							<span
-								aria-hidden
-								className={cn(
-									"size-1.5 shrink-0 rounded-full",
-									active
-										? "bg-success"
-										: standing.pausedAfterFailures
-											? "bg-destructive-text"
-											: "bg-disabled-foreground",
-								)}
-							/>
-							<span className="flex-1 text-xs text-foreground">{stateWords(standing)}</span>
+							<span className="flex-1">
+								<RunStatus outcome={stateOutcome(standing)} />
+							</span>
 							{stateSwitch}
 						</div>
 					)}
@@ -228,13 +226,14 @@ export function AutomationPanel({
 									editable={mayManage}
 									onOpen={(triggerId) => setDialog({ kind: "trigger", triggerId })}
 									onAdd={() => setDialog({ kind: "new_trigger", section })}
+									headingLevel={asPage ? 2 : 3}
 								/>
 							))}
 						</>
 					)}
 					{!asPage && may.runAutomations && (
 						<Button
-							variant="outline"
+							variant="secondary"
 							disabled={controls.pending}
 							onClick={() => void control(() => controls.runAgain())}
 						>
@@ -305,18 +304,18 @@ export function AutomationPanel({
 			<section aria-label="Automation" className="flex min-h-0 min-w-0 flex-1 flex-col">
 				<PageHeader
 					title={automation?.name ?? "Automation"}
-					parent={<AutomationsCrumb owner={owner} />}
+					parent={<OwnerPageCrumb owner={owner} page="automations" />}
 					place={{ kind: "owner", owner }}
 					actions={
 						<span className="flex shrink-0 items-center gap-2">
 							{/* Whether it runs, and running it now, at the top as a page's own actions. */}
 							<span className="flex items-center gap-2 text-muted-foreground text-xs">
-								<span className="max-md:sr-only">{stateWords(standing)}</span>
+								<span className="max-md:sr-only">{RUN_OUTCOME_LABELS[stateOutcome(standing)]}</span>
 								{stateSwitch}
 							</span>
 							{may.runAutomations && (
 								<Button
-									variant="outline"
+									variant="secondary"
 									size="sm"
 									disabled={controls.pending}
 									onClick={() => void control(() => controls.runAgain())}
@@ -346,10 +345,10 @@ export function AutomationPanel({
 	);
 }
 
-/** Whether the automation runs, as the words beside its switch say it. */
-function stateWords(standing: NonNullable<ConversationDetails["automation"]>): string {
-	if (standing.state === "enabled") return "On";
-	return standing.pausedAfterFailures ? "Paused after failures" : "Paused";
+/** Whether the automation runs, as the status beside its switch says it. */
+function stateOutcome(standing: PanelStanding): RunOutcome {
+	if (standing.state === "enabled") return "on";
+	return standing.pausedAfterFailures ? "pausedAfterFailures" : "paused";
 }
 
 /** Instructions longer than this are folded to four lines until asked for the rest. */

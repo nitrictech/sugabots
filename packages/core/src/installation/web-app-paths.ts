@@ -21,14 +21,38 @@ export const projectPath = (workspaceSlug: string, projectSlug: string) =>
 export const botPath = (workspaceSlug: string, botHandle: string) =>
 	`/${workspaceSlug}/bots/${botHandle}`;
 
-export const botAutomationsPath = (workspaceSlug: string, botHandle: string) =>
-	`${botPath(workspaceSlug, botHandle)}/automations`;
+/**
+ * The automations page of a bot, by its handle, or of a project people made,
+ * by its slug: a bot's own automations are its default project's, shown on
+ * the bot's page. With `automationId`, that automation on it.
+ */
+export const automationsPagePath = (
+	place: { workspaceSlug: string } & ({ botHandle: string } | { projectSlug: string }),
+	automationId?: string,
+) => {
+	const owner =
+		"botHandle" in place
+			? botPath(place.workspaceSlug, place.botHandle)
+			: projectPath(place.workspaceSlug, place.projectSlug);
+	return automationId === undefined
+		? `${owner}/automations`
+		: `${owner}/automations/${automationId}`;
+};
 
 export const botSettingsPath = (workspaceSlug: string, botHandle: string) =>
 	`/${workspaceSlug}/settings/bots/${botHandle}`;
 
-export const botConnectionsPath = (workspaceSlug: string, botHandle: string) =>
-	`${botSettingsPath(workspaceSlug, botHandle)}/connections`;
+/**
+ * The Connections page of a bot, by its handle, or of a project people made,
+ * by its slug: the services it is connected to. A bot's are its default
+ * project's, shown on the bot's page.
+ */
+export const connectionsPagePath = (
+	place: { workspaceSlug: string } & ({ botHandle: string } | { projectSlug: string }),
+) =>
+	"botHandle" in place
+		? `${botPath(place.workspaceSlug, place.botHandle)}/connections`
+		: `${projectPath(place.workspaceSlug, place.projectSlug)}/connections`;
 
 export const searchSettingsPath = (workspaceSlug: string) => `/${workspaceSlug}/settings/search`;
 

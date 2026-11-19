@@ -13,7 +13,7 @@ const API = import.meta.env.VITE_API_URL;
 
 /** The bodies of the create requests a story sends, to check what the bot was made with. */
 let created: Record<string, unknown>[] = [];
-const createBot = http.post(`${API}/projects/:projectId/bots`, async ({ request }) => {
+const createBot = http.post(`${API}/workspaces/:workspace/bots`, async ({ request }) => {
 	const body = (await request.json()) as Record<string, unknown>;
 	created.push(body);
 	return HttpResponse.json({ ...growthDesk, ...body }, { status: 201 });
@@ -40,7 +40,6 @@ function Preview({ models, children }: { models: boolean; children: ReactNode })
 							providerId: "0199a3a0-0000-7000-8000-000000000201",
 							providerName: "Anthropic",
 							providerPreset: "anthropic",
-							providerActive: true,
 							modelId: "claude-sonnet",
 							displayName: "Claude Sonnet",
 							capabilities: ["tools", "vision", "reasoning"],
@@ -49,7 +48,6 @@ function Preview({ models, children }: { models: boolean; children: ReactNode })
 							providerId: "0199a3a0-0000-7000-8000-000000000202",
 							providerName: "OpenAI",
 							providerPreset: "openai",
-							providerActive: true,
 							modelId: "gpt-5",
 							displayName: "GPT-5",
 							capabilities: ["tools", "vision", "reasoning"],
@@ -58,7 +56,6 @@ function Preview({ models, children }: { models: boolean; children: ReactNode })
 							providerId: "0199a3a0-0000-7000-8000-000000000201",
 							providerName: "Anthropic",
 							providerPreset: "anthropic",
-							providerActive: true,
 							modelId: "claude-haiku",
 							displayName: "Claude Haiku",
 							capabilities: ["tools", "vision"],
@@ -67,7 +64,6 @@ function Preview({ models, children }: { models: boolean; children: ReactNode })
 							providerId: "0199a3a0-0000-7000-8000-000000000202",
 							providerName: "OpenAI",
 							providerPreset: "openai",
-							providerActive: true,
 							modelId: "gpt-5-mini",
 							displayName: "GPT-5 mini",
 							capabilities: ["tools"],
@@ -198,7 +194,7 @@ export const ChoosingAModel = meta.story({
 		await expect(sonnet).toHaveTextContent("Default");
 		await expect(sonnet).toHaveTextContent("reads images");
 		await expect(within(models).getByRole("region", { name: "OpenAI" })).toBeInTheDocument();
-		await userEvent.type(within(models).getByRole("textbox", { name: "Search models" }), "gpt");
+		await userEvent.type(within(models).getByRole("searchbox", { name: "Search models" }), "gpt");
 		await expect(within(models).queryByRole("region", { name: "Anthropic" })).toBeNull();
 		const gpt = within(models).getByRole("button", { name: /^GPT-5 uses tools/ });
 		await userEvent.click(gpt);

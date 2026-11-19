@@ -8,7 +8,8 @@ An automation is work a project's [lead bot](/docs/projects) does on its own:
 thank-you". The lead bot does it without being asked, in a thread of the
 project, on the project's computer and with the project's
 [connections](/docs/connections) as well as its own. It posts what it found in
-the automation's own conversation, in the project.
+the **automation feed**, the automation's own conversation in the project,
+where its runs are listed too.
 
 A bot's own automations are those of its hidden default project, which it
 leads, so they run on its own computer with its own connections. They're in the
@@ -42,10 +43,10 @@ one with none runs only when someone chooses **Run now**.
 
 ## Where the result goes
 
-When a run finishes, the bot's last reply is posted in the automation's
-conversation, where anyone in the project can answer it and carry on; there, the
-lead bot answers. Any
-file it wrote during the run is shown under that reply, at the version the run
+When a run finishes, the bot's last reply is posted in the automation feed,
+where anyone in the project can answer it and carry on. There the lead bot
+answers every message, unless it mentions only people; mentioning another bot
+doesn't bring it in. Any file it wrote during the run is shown under that reply, at the version the run
 left it at. The bot is told its last reply goes there, so it writes that reply
 for you: a morning check-in, the week's sales, a reminder.
 
@@ -210,7 +211,7 @@ and let the bot spot the repeat from the alert itself.
 ## Runs
 
 Each run has a thread of its own with everything the bot did, and shows in the
-automation's conversation as a line like "Morning inbox sweep ran". A posted
+automation feed as a line like "Morning inbox sweep ran". A posted
 result links back to its run, under the message. A run that fails or is
 stopped posts nothing; its line says what happened. If a run needs an
 [approval](/docs/tools-and-approvals), only whoever manages the project's

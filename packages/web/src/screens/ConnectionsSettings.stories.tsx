@@ -7,14 +7,14 @@ import { revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, connectionHandlers, StoryApp, storyProjects } from "../story-app.tsx";
 
 /*
- * A bot's connections, as its settings page shows them: each app its bots
+ * A project's connections, as its Connections page shows them: each app its bots
  * can reach, with Allow, Ask or Off for what they may do there and what needs
  * attention; and the Add connection dialog's steps. A connection opened is
  * `Views/Connection`.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
-const projectPath = `/nitric/settings/projects/${revenue.slug}/connections`;
+const projectPath = `/nitric/projects/${revenue.slug}/connections`;
 
 /** A connection whose tools are all at `access`. */
 function connection(
@@ -45,9 +45,13 @@ function connection(
 		appSettingsUrl: null,
 		status: "connected",
 		tools: tools.map((tool) => ({ ...tool, access })),
-		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
-		connectedBy: "Rowan Ellis",
+		connectedBy: {
+			id: "0199a3a0-0000-7000-8000-000000000009",
+			name: "Rowan Ellis",
+			email: "rowan@example.com",
+			image: null,
+		},
 		createdAt: "2026-09-01T00:00:00.000Z",
 		...over,
 	};
@@ -131,7 +135,6 @@ const connections: TestConnection[] = [
 		appSettingsUrl: null,
 		status: "missing_key",
 		tools: [],
-		lastTestedAt: null,
 	}),
 	connection(6, {
 		name: "Asana",
@@ -295,10 +298,13 @@ export const Member = meta.story({
 					...project,
 					permissions: {
 						...project.permissions,
-						manageConnections: false,
-						manageComputer: false,
 						rename: false,
 						manageMembers: false,
+						resources: {
+							...project.permissions.resources,
+							manageConnections: false,
+							manageComputer: false,
+						},
 					},
 				})),
 			}),

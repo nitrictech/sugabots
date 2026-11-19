@@ -75,7 +75,9 @@ export function DirectMessagesSection({
 	const [folded, toggleFolded] = useFolded();
 	const open = !folded.has(FOLD_KEY);
 	return (
-		<section aria-label="Direct messages" className="flex flex-col gap-px">
+		// A group rather than a region, as the sidebar's other sections are.
+		// biome-ignore lint/a11y/useSemanticElements: this groups links, not form controls, so a fieldset is wrong.
+		<div role="group" aria-label="Direct messages" className="flex flex-col gap-px">
 			<DirectMessagesHeading
 				open={open}
 				onToggle={() => toggleFolded(FOLD_KEY)}
@@ -113,7 +115,7 @@ export function DirectMessagesSection({
 					</Link>
 				</div>
 			)}
-		</section>
+		</div>
 	);
 }
 

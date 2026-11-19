@@ -88,7 +88,7 @@ export function TextEntryRow({
 							setReplacing(false);
 						}
 					}}
-					className="min-w-0 flex-1 rounded-md bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-subtle-foreground focus-visible:shadow-(--ring-shadow)"
+					className="focus-ring min-w-0 flex-1 rounded-md bg-transparent font-mono text-xs text-foreground placeholder:text-subtle-foreground"
 				/>
 			)}
 		</div>

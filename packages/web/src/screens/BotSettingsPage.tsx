@@ -19,14 +19,14 @@ import { characterCount } from "@/lib/character-count.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { botSettingsPageLink } from "@/lib/links.ts";
+import { botConnectionsLink, botSettingsPageLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { modelLogoOf } from "@/lib/model-logo.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useSession } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
-import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
+import { useWorkspace } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { type Look, LookStep, type Part } from "@/shell/NewBot.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -338,38 +338,26 @@ function LookEditor({
 }
 
 /**
- * Who added the bot, with their face, and when. Somebody since gone from the
- * workspace is named as such rather than left blank; a bot nobody added was
- * made with the workspace.
+ * Who added the bot, with their face, and when. One with nobody to name reads
+ * as made with the workspace: the API tells a bot made at setup from one
+ * whose creator's account was since deleted no more than that.
  */
 function AddedByRow({ bot }: { bot: Bot }) {
-	const { data: members } = useWorkspaceMembers(bot.workspaceId);
-	const adder = members?.find((member) => member.user.id === bot.createdById)?.user;
+	const adder = bot.createdBy;
 	const when = new Date(bot.createdAt).toLocaleDateString(undefined, {
 		day: "numeric",
 		month: "short",
 		year: "numeric",
 	});
-	// Said once the roster has answered, rather than guessed before it.
-	const who =
-		bot.createdById === null
-			? "With the workspace"
-			: adder
-				? adder.name
-				: members
-					? "Someone no longer here"
-					: undefined;
 	return (
 		<SettingsRow
 			label="Added by"
 			sub={when}
 			trailing={
-				who !== undefined && (
-					<span className="flex min-w-0 items-center gap-2">
-						{adder && <PersonAvatar person={adder} size={20} />}
-						<SettingsValue>{who}</SettingsValue>
-					</span>
-				)
+				<span className="flex min-w-0 items-center gap-2">
+					{adder && <PersonAvatar person={adder} size={20} />}
+					<SettingsValue>{adder?.name ?? "With the workspace"}</SettingsValue>
+				</span>
 			}
 		/>
 	);
@@ -558,18 +546,13 @@ const WEB_TOOLS: readonly BuiltInToolKey[] = builtInToolCatalog
  * bot nothing, so it is left out.
  */
 function BotConnections({ bot }: { bot: Bot }) {
-	const backToBot = useBackToHere(bot.name);
 	const connections = useConnections(bot.defaultProjectId);
 	const reachable = connections.data?.filter((connection) => usableToolCount(connection) > 0);
 	return (
 		<SettingsGroup
 			label="Connections"
 			action={
-				<SettingsGroupLink
-					render={<Link {...botSettingsPageLink(bot, "connections")} state={backToBot} />}
-				>
-					Manage
-				</SettingsGroupLink>
+				<SettingsGroupLink render={<Link {...botConnectionsLink(bot)} />}>Manage</SettingsGroupLink>
 			}
 		>
 			{connections.isError && (
@@ -652,7 +635,7 @@ function BuiltInTools({
 						: "Run commands, browse and edit files on a computer of its own"
 				}
 				on={bot.usesComputer && !computersOff}
-				canChange={bot.permissions.manageComputer}
+				canChange={bot.permissions.resources.manageComputer}
 				offReason={computersOff ? `Computers are off for ${workspaceName}` : undefined}
 				onChange={(next) => save({ usesComputer: next }).catch(() => {})}
 			/>
@@ -747,7 +730,8 @@ function VisibilityRow({
 	save: Save;
 }) {
 	const isPublic = bot.visibility === "public";
-	const mine = bot.createdById === useSession().user?.id;
+	const viewerId = useSession().user?.id;
+	const mine = bot.createdBy !== null && bot.createdBy.id === viewerId;
 	return (
 		<SettingsRow
 			label="Public"

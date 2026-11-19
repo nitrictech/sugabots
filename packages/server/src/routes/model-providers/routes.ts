@@ -92,9 +92,6 @@ export const modelProviderRoutes = HttpApiBuilder.group(ServerApi, "modelProvide
 					asHttpError(providerErrors),
 					Effect.map((moved) => ({ moved })),
 				),
-			)
-			.handle("removeModel", ({ params }) =>
-				providers.removeModel(params).pipe(asSessionUser, asHttpError(providerErrors)),
 			);
 	}),
 );
@@ -110,7 +107,6 @@ const providerErrors = {
 	ProviderModelAlreadyConfigured: Conflict,
 	FetchedModelCapabilitiesImmutable: BadRequest,
 	ProviderModelNotFound: NotFound,
-	ProviderModelRemovalNotAllowed: BadRequest,
 	DiscoveryCredentialsMissing: BadRequest,
 	DiscoveryCredentialsRejected: BadRequest,
 	DiscoverySignInLapsed: BadRequest,

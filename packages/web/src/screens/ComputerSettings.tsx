@@ -30,6 +30,7 @@ import { ownerLink, ownerName, type ResourceOwner } from "@/lib/resource-owner.t
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
 import { Note } from "@/ui/note.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
@@ -43,7 +44,6 @@ import {
 import { Toggle } from "@/ui/toggle.tsx";
 import { DiskMeter, DiskPercent, diskSummary } from "./ComputerDisk.tsx";
 import { ComputerNetworkSection } from "./ComputerNetworkSettings.tsx";
-import { LetterTile } from "./letter-tile.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
 /*

@@ -251,6 +251,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			status: "pending",
 			workspaceName: "Nitric",
 			inviterName: "Ada",
+			role: "member",
 		});
 		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			workspaceId: workspace.id,

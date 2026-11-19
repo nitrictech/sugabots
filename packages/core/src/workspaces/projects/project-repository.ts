@@ -3,6 +3,7 @@ export * as ProjectRepository from "./project-repository.ts";
 import {
 	administersWorkspace,
 	leastUsedProjectColor,
+	type NamedPerson,
 	type ProjectColor,
 	type ProjectUpdate,
 	type ProjectVisibility,
@@ -15,7 +16,7 @@ import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { bot, project, projectBot, projectMember, workspaceMember } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { defaultProjectIdOf, pinnedBy } from "../bots/bot.ts";
+import { creatorOf, defaultProjectIdOf, pinnedBy } from "../bots/bot.ts";
 import { projectColorOf } from "./project.ts";
 import { type LeadsProjects, refuseWhileLeading } from "./project-leads.ts";
 
@@ -27,8 +28,8 @@ import { type LeadsProjects, refuseWhileLeading } from "./project-leads.ts";
  * A project's own rules are enforced here, so they hold however it is
  * reached: its slug is unique in its workspace, only public bots are in one,
  * and its lead bot is one of them. Whether somebody may ask for any of this is
- * not decided here. `update` refuses a default project as gone; `remove` and
- * the member and bot methods don't check, so their callers pass a project
+ * not decided here. `update` refuses a default project as gone, before it
+ * writes anything; `remove` and the member and bot methods don't check, so their callers pass a project
  * people made, which they have already authorized.
  */
 export interface Interface {
@@ -49,7 +50,11 @@ export interface Interface {
 			leadBotId: string;
 		},
 	) => Effect.Effect<schema.ProjectRow, ProjectSlugTaken | BotNotPublic>;
-	/** Changes a project people made; a new lead bot, which must be public, is added to its bots. */
+	/**
+	 * Changes a project people made; a new lead bot, which must be public, is
+	 * added to its bots. A default project, or one not in `workspaceId`, fails
+	 * with `ProjectGone` before anything is written.
+	 */
 	readonly update: (
 		workspaceId: string,
 		projectId: string,
@@ -85,7 +90,11 @@ export interface Interface {
 	readonly bots: (
 		projectId: string,
 		viewerId: string,
-	) => Effect.Effect<Array<schema.BotRow & { defaultProjectId: string; pinned: boolean }>>;
+	) => Effect.Effect<
+		Array<
+			schema.BotRow & { defaultProjectId: string; pinned: boolean; createdBy: NamedPerson | null }
+		>
+	>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -189,24 +198,26 @@ export const make = Effect.gen(function* () {
 				"update",
 				transaction(
 					Effect.gen(function* () {
+						// Checked before anything is written, so a default project, or one
+						// gone, is refused without its lead being added to its bots.
+						const peopleMade = and(
+							eq(project.id, projectId),
+							eq(project.workspaceId, workspaceId),
+							isNull(project.defaultOfBotId),
+						);
+						const [found] = yield* query((db) =>
+							db.select({ id: project.id }).from(project).where(peopleMade).limit(1),
+						);
+						if (!found) {
+							return yield* new ProjectGone({ projectId });
+						}
 						if (changes.leadBotId !== undefined) {
 							yield* addBot(workspaceId, projectId, changes.leadBotId);
 						}
 						// An UPDATE has no `on conflict`, so a taken slug arrives as a unique
 						// violation. The slug is the only unique column a change can touch.
 						const [row] = yield* queryCatching(
-							(db) =>
-								db
-									.update(project)
-									.set(changes)
-									.where(
-										and(
-											eq(project.id, projectId),
-											eq(project.workspaceId, workspaceId),
-											isNull(project.defaultOfBotId),
-										),
-									)
-									.returning(),
+							(db) => db.update(project).set(changes).where(peopleMade).returning(),
 							(failure) =>
 								isUniqueViolation(failure) && changes.slug !== undefined
 									? new ProjectSlugTaken({ slug: changes.slug })
@@ -357,6 +368,7 @@ export const make = Effect.gen(function* () {
 							bot,
 							defaultProjectId: defaultProjectIdOf(bot.id),
 							pinned: pinnedBy(bot.id, viewerId),
+							createdBy: creatorOf(bot),
 						})
 						.from(projectBot)
 						.innerJoin(bot, eq(bot.id, projectBot.botId))
@@ -368,6 +380,7 @@ export const make = Effect.gen(function* () {
 							...row.bot,
 							defaultProjectId: row.defaultProjectId,
 							pinned: row.pinned,
+							createdBy: row.createdBy,
 						})),
 					),
 				),

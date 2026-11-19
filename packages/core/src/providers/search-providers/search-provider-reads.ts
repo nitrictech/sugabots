@@ -27,7 +27,6 @@ export function toSearchProvider(row: SearchProviderRow): SearchProvider {
 			lastTestError: row.lastTestError,
 		}),
 		hasApiKey: row.apiKeyEncrypted !== null,
-		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
 		createdAt: row.createdAt.toISOString(),
 	};

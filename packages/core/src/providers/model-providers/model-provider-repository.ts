@@ -124,12 +124,6 @@ export interface Interface {
 		modelId: string,
 		changes: ProviderModelUpdate,
 	) => Effect.Effect<number>;
-	/** Only a model added by hand goes. */
-	readonly removeModel: (
-		workspaceId: string,
-		providerId: string,
-		modelId: string,
-	) => Effect.Effect<boolean>;
 	/** How to reach a provider, or nothing while it lacks the key or sign-in its preset needs. */
 	readonly endpoint: (
 		workspaceId: string,
@@ -565,24 +559,6 @@ export const make = Effect.gen(function* () {
 						)
 						.returning({ id: providerModel.id }),
 				).pipe(Effect.map((rows) => rows.length)),
-			),
-
-		removeModel: (workspaceId, providerId, modelId) =>
-			operation(
-				"removeModel",
-				query((db) =>
-					db
-						.delete(providerModel)
-						.where(
-							and(
-								eq(providerModel.workspaceId, workspaceId),
-								eq(providerModel.providerId, providerId),
-								eq(providerModel.id, modelId),
-								eq(providerModel.source, "manual"),
-							),
-						)
-						.returning({ id: providerModel.id }),
-				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
 		endpoint: (workspaceId, providerId) => operation("endpoint", endpoint(workspaceId, providerId)),

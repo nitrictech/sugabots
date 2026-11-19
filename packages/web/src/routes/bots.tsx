@@ -1,8 +1,20 @@
 import type { Bot } from "@sugabots/contracts";
-import { createRoute, Link, Navigate, Outlet, useMatch, useSearch } from "@tanstack/react-router";
+import {
+	createRoute,
+	Link,
+	Navigate,
+	Outlet,
+	useMatchRoute,
+	useSearch,
+} from "@tanstack/react-router";
 import { useBotWithHandle } from "@/lib/bots.ts";
 import { prefetchConversation, useAnyConversationPlace, useBotThreadPlace } from "@/lib/chats.ts";
-import { botAutomationsLink, botSettingsLink, conversationLink } from "@/lib/links.ts";
+import {
+	botAutomationsLink,
+	botConnectionsLink,
+	botSettingsLink,
+	conversationLink,
+} from "@/lib/links.ts";
 import { useSession } from "@/lib/session.ts";
 import { FilesPage } from "@/screens/Files.tsx";
 import { BotsDirectory } from "@/shell/BotsDirectory.tsx";
@@ -48,13 +60,22 @@ export const botRoute = createRoute({
 function BotRoute() {
 	const { bot: handle } = botRoute.useParams();
 	const { bot, isPending, error } = useBotWithHandle(handle);
-	const onAutomations =
-		useMatch({ from: "/$workspace/bots/$bot/automations", shouldThrow: false }) !== undefined;
+	const matchRoute = useMatchRoute();
+	const onAutomations = Boolean(
+		matchRoute({ to: "/$workspace/bots/$bot/automations", fuzzy: true }),
+	);
+	const onConnections = Boolean(
+		matchRoute({ to: "/$workspace/bots/$bot/connections", fuzzy: true }),
+	);
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!bot) return <OwnerNotFound kind="bot" error={error} />;
-	// Someone else's private bot, which an administrator sees listed: it exists, and its settings
-	// and automations are theirs to manage, though its threads and what its automations posted are not.
-	if (!bot.permissions.talk && !(bot.permissions.manageAutomations && onAutomations)) {
+	// Someone else's private bot, which an administrator sees listed: it exists, and its settings,
+	// connections and automations are theirs to manage, though its threads and what its
+	// automations posted are not.
+	const managing =
+		(bot.permissions.resources.manageAutomations && onAutomations) ||
+		(bot.permissions.resources.manageConnections && onConnections);
+	if (!bot.permissions.talk && !managing) {
 		return (
 			<Panes>
 				<EmptyState title={bot.name}>
@@ -65,7 +86,12 @@ function BotRoute() {
 								Open its settings
 							</Link>
 						)}
-						{bot.permissions.manageAutomations && (
+						{bot.permissions.resources.manageConnections && (
+							<Link {...botConnectionsLink(bot)} className="text-link underline">
+								Open its connections
+							</Link>
+						)}
+						{bot.permissions.resources.manageAutomations && (
 							<Link {...botAutomationsLink(bot)} className="text-link underline">
 								Open its automations
 							</Link>

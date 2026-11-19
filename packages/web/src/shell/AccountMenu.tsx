@@ -13,6 +13,7 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
+import { initialOf } from "@/ui/letter-tile.tsx";
 
 /**
  * You, at the foot of the sidebar. The menu names you, leads to your
@@ -131,7 +132,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
 				aria-hidden
 				className="grid size-4.5 shrink-0 place-items-center rounded-xs bg-tile font-semibold text-3xs text-foreground"
 			>
-				{Array.from(workspace.name.trim())[0]?.toUpperCase() ?? "?"}
+				{initialOf(workspace.name)}
 			</span>
 			<span className="min-w-0 flex-1 truncate">{workspace.name}</span>
 		</>

@@ -66,20 +66,23 @@ export function SlidingSidebar({
 				/>
 			)}
 			{hiding.chatShowing && (
-				<IconButton
-					label={hiding.hidden ? "Show sidebar" : "Hide sidebar"}
-					variant="bar"
-					onMouseEnter={peek.enter}
-					onMouseLeave={peek.leave}
-					onClick={() => {
-						// Put away under the pointer, it stays away until the pointer comes back.
-						peek.dismiss();
-						hiding.toggle();
-					}}
-					className="absolute top-2.5 left-3 z-40 text-muted-foreground hover:text-foreground max-md:hidden"
-				>
-					<PanelLeft size={16} strokeWidth={1.75} />
-				</IconButton>
+				// As tall as a page's header, bottom border and all, so it centres on the header's line.
+				<div className="absolute top-0 left-3 z-40 flex h-13 items-center border-transparent border-b max-md:hidden">
+					<IconButton
+						label={hiding.hidden ? "Show sidebar" : "Hide sidebar"}
+						variant="bar"
+						onMouseEnter={peek.enter}
+						onMouseLeave={peek.leave}
+						onClick={() => {
+							// Put away under the pointer, it stays away until the pointer comes back.
+							peek.dismiss();
+							hiding.toggle();
+						}}
+						className="text-muted-foreground hover:text-foreground"
+					>
+						<PanelLeft size={16} strokeWidth={1.75} />
+					</IconButton>
+				</div>
 			)}
 			<div
 				inert={hidden && !peeking}

@@ -11,7 +11,7 @@ import {
 	useNavigateToOwnerPage,
 } from "@/lib/resource-owner.tsx";
 import { useListedAutomations } from "@/shell/Automations.tsx";
-import { AutomationsCrumb } from "@/shell/BotCrumb.tsx";
+import { OwnerPageCrumb } from "@/shell/BotCrumb.tsx";
 import { PageHeader } from "@/shell/Page.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
@@ -49,7 +49,7 @@ export function NewAutomation({ owner }: { owner: ResourceOwner }) {
 			<div className="max-md:hidden">
 				<PageHeader
 					title="New automation"
-					parent={<AutomationsCrumb owner={owner} />}
+					parent={<OwnerPageCrumb owner={owner} page="automations" />}
 					place={{ kind: "owner", owner }}
 				/>
 			</div>
@@ -109,8 +109,7 @@ export function AutomationSetup({
 					id: automation.id,
 					projectId: automation.projectId,
 					state: automation.state,
-					failed: listed?.automation.failed ?? false,
-					pausedAfterFailures: listed?.automation.pausedAfterFailures ?? false,
+					pausedAfterFailures: automation.pausedAfterFailures,
 				}}
 				onClose={undefined}
 			/>

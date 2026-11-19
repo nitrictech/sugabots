@@ -12,8 +12,9 @@ import { type Image, withImages } from "../images.ts";
 import playwrightTools from "./playwright-tools.json" with { type: "json" };
 
 /**
- * The browser tools: Playwright MCP's, run in the bot's computer by a browser
- * of the bot's own in each conversation, on the bot's own desktop there, so
+ * The browser tools: Playwright MCP's, run in the computer of the project the
+ * turn works in by a browser of the bot's own in each conversation, on the
+ * bot's own desktop there, so
  * people watching see what it does. The tools are offered from the list the
  * image's server was built with; the browser starts on the first call.
  */

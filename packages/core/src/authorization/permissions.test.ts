@@ -438,12 +438,16 @@ describe("what the API tells a client", () => {
 			leave: false,
 			join: false,
 			delete: true,
-			deleteFiles: true,
-			manageConnections: true,
-			manageComputer: true,
-			useDesktop: true,
-			manageAutomations: true,
-			runAutomations: true,
+			resources: {
+				readHistory: true,
+				openSettings: true,
+				deleteFiles: true,
+				manageConnections: true,
+				manageComputer: true,
+				useDesktop: true,
+				manageAutomations: true,
+				runAutomations: true,
+			},
 		});
 	});
 
@@ -457,12 +461,16 @@ describe("what the API tells a client", () => {
 			leave: true,
 			join: false,
 			delete: false,
-			deleteFiles: false,
-			manageConnections: false,
-			manageComputer: false,
-			useDesktop: true,
-			manageAutomations: false,
-			runAutomations: true,
+			resources: {
+				readHistory: true,
+				openSettings: true,
+				deleteFiles: false,
+				manageConnections: false,
+				manageComputer: false,
+				useDesktop: true,
+				manageAutomations: false,
+				runAutomations: true,
+			},
 		});
 	});
 
@@ -477,12 +485,16 @@ describe("what the API tells a client", () => {
 				leave: false,
 				join: true,
 				delete: false,
-				deleteFiles: false,
-				manageConnections: false,
-				manageComputer: false,
-				useDesktop: false,
-				manageAutomations: false,
-				runAutomations: false,
+				resources: {
+					readHistory: false,
+					openSettings: false,
+					deleteFiles: false,
+					manageConnections: false,
+					manageComputer: false,
+					useDesktop: false,
+					manageAutomations: false,
+					runAutomations: false,
+				},
 			});
 		}
 	});
@@ -502,12 +514,17 @@ describe("what the API tells a client", () => {
 		expect(botPermissions(actor("member"), publicBotBy(BOB))).toEqual({
 			update: false,
 			delete: false,
-			manageConnections: false,
-			manageComputer: false,
-			useDesktop: true,
-			manageAutomations: false,
-			runAutomations: true,
 			talk: true,
+			resources: {
+				readHistory: true,
+				openSettings: false,
+				deleteFiles: false,
+				manageConnections: false,
+				manageComputer: false,
+				useDesktop: true,
+				manageAutomations: false,
+				runAutomations: true,
+			},
 		});
 	});
 
@@ -515,18 +532,44 @@ describe("what the API tells a client", () => {
 		expect(botPermissions(actor("admin"), privateBotBy(BOB))).toEqual({
 			update: true,
 			delete: true,
-			manageConnections: true,
-			manageComputer: true,
-			useDesktop: false,
-			manageAutomations: true,
-			runAutomations: false,
 			talk: false,
+			resources: {
+				readHistory: false,
+				openSettings: true,
+				deleteFiles: false,
+				manageConnections: true,
+				manageComputer: true,
+				useDesktop: false,
+				manageAutomations: true,
+				runAutomations: false,
+			},
 		});
 	});
 
+	it.each(["owner", "admin", "member", "viewer"] as const)(
+		"tells a %s the same of what a bot holds as of its default project",
+		(role) => {
+			for (const bot of [
+				publicBotBy(BOB),
+				privateBotBy(BOB),
+				privateBotBy(ALICE),
+				assistantOf(ALICE),
+			]) {
+				expect(botPermissions(actor(role), bot).resources).toEqual(
+					projectPermissions(actor(role), { isMember: false, defaultOf: bot, isPublic: false })
+						.resources,
+				);
+			}
+		},
+	);
+
 	it("lets a person change their Personal Assistant but not delete it", () => {
 		const resolved = botPermissions(actor("member"), assistantOf(ALICE));
-		expect(resolved).toMatchObject({ update: true, manageConnections: true, talk: true });
+		expect(resolved).toMatchObject({
+			update: true,
+			talk: true,
+			resources: { manageConnections: true },
+		});
 		expect(resolved.delete).toBe(false);
 	});
 });

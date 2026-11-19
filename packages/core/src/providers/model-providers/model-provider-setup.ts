@@ -224,13 +224,6 @@ export interface Interface {
 		| ModelInUse,
 		CurrentActor.Service
 	>;
-	readonly removeModel: (
-		input: InProvider & { modelId: string },
-	) => Effect.Effect<
-		void,
-		AuthorizationDenied | ProviderModelRemovalNotAllowed | ModelInUse,
-		CurrentActor.Service
-	>;
 	/** Makes `model`, which the workspace must offer, the one its new bots start on. */
 	readonly setDefaultModel: (
 		input: InWorkspace & { model: string },
@@ -683,21 +676,6 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		removeModel: ({ workspace, providerId, modelId }) =>
-			operation(
-				"removeModel",
-				Effect.gen(function* () {
-					const workspaceId = yield* managed(workspace);
-					const removed = yield* keepingHeldModelsOffered(
-						workspaceId,
-						providers.removeModel(workspaceId, providerId, modelId),
-					);
-					if (!removed) {
-						return yield* new ProviderModelRemovalNotAllowed();
-					}
-				}),
-			),
-
 		setDefaultModel: ({ workspace, model }) =>
 			operation(
 				"setDefaultModel",
@@ -807,15 +785,6 @@ export class ProviderModelNotFound
 {
 	get userMessage() {
 		return userText`No such provider model`;
-	}
-}
-
-export class ProviderModelRemovalNotAllowed
-	extends Data.TaggedError("ProviderModelRemovalNotAllowed")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`Only manually added models can be removed`;
 	}
 }
 

@@ -91,7 +91,6 @@ const network: ProjectComputerNetwork = {
 		{
 			host: "api.stripe.com",
 			addedByName: "Sam Rivera",
-			addedAt: "2026-10-01T09:30:00.000Z",
 			blockedBy: null,
 		},
 	],
@@ -103,7 +102,13 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: {
 		owner: {
-			project: { ...project, permissions: { ...project.permissions, manageComputer: true } },
+			project: {
+				...project,
+				permissions: {
+					...project.permissions,
+					resources: { ...project.permissions.resources, manageComputer: true },
+				},
+			},
 		},
 		bots,
 	},
@@ -234,7 +239,13 @@ export const NoneYet = meta.story({
 export const AsAMember = meta.story({
 	args: {
 		owner: {
-			project: { ...project, permissions: { ...project.permissions, manageComputer: false } },
+			project: {
+				...project,
+				permissions: {
+					...project.permissions,
+					resources: { ...project.permissions.resources, manageComputer: false },
+				},
+			},
 		},
 	},
 	beforeEach({ msw }) {

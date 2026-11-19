@@ -263,7 +263,10 @@ describe("a turn's connection tools", () => {
 
 		const set = await run(offered.forTurn("w", OWN_PROJECT, NO_TURN));
 		try {
-			expect(set.signInExpired).toEqual(["notion", "linear"]);
+			expect(set.signInExpired).toEqual([
+				{ handle: "notion", projectId: "p" },
+				{ handle: "linear", projectId: "p" },
+			]);
 			// Notion is still the bot's, so the model isn't told to add it.
 			expect(set.addable.map((preset) => preset.id)).not.toContain("notion");
 			expect(set.unavailable).toEqual(["locked"]);
@@ -303,6 +306,32 @@ describe("a turn's connection tools", () => {
 		} finally {
 			await set.close();
 		}
+	});
+
+	it("names each connection whose sign-in expired with the project it is signed in again from", async () => {
+		const expired: Record<string, { handle: string; url: string }[]> = {
+			project: [{ handle: "notion", url: "https://mcp.notion.com/mcp" }],
+			own: [
+				{ handle: "notion", url: "https://mcp.notion.com/mcp" },
+				{ handle: "linear", url: "https://mcp.linear.app/mcp" },
+			],
+		};
+		const offered = ConnectionTools.from({
+			connections: {
+				targetsForProject: (_workspaceId, projectId) =>
+					Effect.succeed({ targets: [], signInExpired: expired[projectId] ?? [] }),
+			},
+			httpClients: { for: () => fetch },
+		});
+
+		const set = await run(
+			offered.forTurn("w", { projectId: "project", ownProjectId: "own" }, NO_TURN),
+		);
+
+		expect(set.signInExpired).toEqual([
+			{ handle: "notion", projectId: "project" },
+			{ handle: "linear", projectId: "own" },
+		]);
 	});
 
 	describe("from one turn to the next", () => {

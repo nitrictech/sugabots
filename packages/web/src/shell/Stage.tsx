@@ -70,7 +70,7 @@ export function Stage({
 }: {
 	/** Its name, as assistive technology announces it. */
 	label: string;
-	/** A `StageMark`, or another mark of what is shown. */
+	/** An `IconTile`, or another mark of what is shown. */
 	icon: ReactNode;
 	title: string;
 	/** A quieter line under the title, such as who made it and when. */
@@ -114,19 +114,5 @@ export function Stage({
 				{children}
 			</div>
 		</section>
-	);
-}
-
-/**
- * The square that marks what kind of thing a `Stage` or a card shows.
- */
-export function StageMark({ children }: { children: ReactNode }) {
-	return (
-		<span
-			aria-hidden
-			className="grid size-7 shrink-0 place-items-center rounded-sm bg-chip text-muted-foreground [&_svg]:size-3.75"
-		>
-			{children}
-		</span>
 	);
 }

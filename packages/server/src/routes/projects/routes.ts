@@ -78,6 +78,7 @@ export const projectRoutes = HttpApiBuilder.group(ServerApi, "projects", (handle
 const projectErrors = {
 	...refusals,
 	UnusableProjectName: BadRequest,
+	InvalidProjectDetails: BadRequest,
 	ProjectSlugTaken: Conflict,
 	EmptyProjectUpdate: BadRequest,
 	ProjectGone: NotFound,

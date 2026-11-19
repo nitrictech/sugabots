@@ -84,9 +84,9 @@ interface ToolDependencies {
 	approvalBoundTools?: ReadonlySet<string>;
 	/** The built-in tools this installation offers, by key. */
 	builtIn: BuiltInTools.Offered;
-	/** The tools that work in the bot's computer. */
+	/** The tools that work in the computer of the project the turn works in. */
 	computer: ComputerTools.Offered;
-	/** The bot's connections' tools, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
+	/** The tools of the project's and the bot's connections, keyed `handle__tool`, reached through `tool_search` and `call_tool`. */
 	connections: Readonly<Record<string, OfferedTool>>;
 	/** The conversation's files: where long tool results are kept, and what `read_conversation_file` reads. */
 	files: Pick<ConversationFiles.Interface, "read" | "readMessageFile" | "write">;

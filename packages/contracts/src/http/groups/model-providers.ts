@@ -132,9 +132,5 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			success: movedCountSchema,
 			error: [BadRequest, Conflict, ...refused],
 		}),
-		HttpApiEndpoint.delete("removeModel", `${root}/:providerId/models/:modelId`, {
-			params: model,
-			error: [BadRequest, Conflict, ...refused],
-		}),
 	)
 	.middleware(Session) {}

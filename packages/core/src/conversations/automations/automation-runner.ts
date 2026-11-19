@@ -120,7 +120,7 @@ export const make = Effect.gen(function* () {
 							conversationId: execution.conversationId,
 							botId: execution.botId,
 							triggerMessageId: triggerMessage.id,
-							reason: "routine",
+							reason: "automation",
 						});
 					}),
 				),

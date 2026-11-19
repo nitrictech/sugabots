@@ -3,8 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { useState } from "react";
 import { useConnectionActions, useConnections } from "@/lib/connections.ts";
-import { botSettingsPageLink } from "@/lib/links.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
+import { botConnectionsLink } from "@/lib/links.ts";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
@@ -22,7 +21,7 @@ export function ConnectionsNotice({ bot }: { bot: Bot }) {
 		(connection) => connection.signInExpired,
 	);
 	if (dismissed || !expired || expired.length === 0) return null;
-	const canSignIn = bot.permissions.manageConnections;
+	const canSignIn = bot.permissions.resources.manageConnections;
 	const who = canSignIn ? "you sign" : "someone who manages it signs";
 	const [only] = expired;
 	return (
@@ -51,7 +50,6 @@ export function ConnectionsNotice({ bot }: { bot: Bot }) {
 
 /** One connection goes straight to its sign-in; several open the bot's connections, each with its own. */
 function SignInAgain({ bot, expired }: { bot: Bot; expired: readonly Connection[] }) {
-	const backToThread = useBackToHere("Thread");
 	const actions = useConnectionActions(bot.defaultProjectId);
 	const [only] = expired;
 	if (only && expired.length === 1) {
@@ -71,8 +69,7 @@ function SignInAgain({ bot, expired }: { bot: Bot; expired: readonly Connection[
 	}
 	return (
 		<Link
-			{...botSettingsPageLink(bot, "connections")}
-			state={backToThread}
+			{...botConnectionsLink(bot)}
 			aria-label="Open connections"
 			className={buttonStyles({ variant: "secondary", size: "sm", className: "shrink-0" })}
 		>

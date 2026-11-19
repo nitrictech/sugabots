@@ -17,6 +17,7 @@ import { Effect, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
+import { refreshAutomations } from "@/lib/automations.ts";
 import { refreshAfterConversationChange, refreshConversationMarkers } from "@/lib/chats.ts";
 import { refreshFilesAfter } from "@/lib/files.ts";
 import { changeReactions } from "@/lib/reactions.ts";
@@ -348,6 +349,8 @@ async function applyWorkspaceEvent(
 				queries.invalidateQueries({
 					queryKey: ["conversation-history", update.rootConversationId],
 				}),
+				// Only a run being accepted or settled changes what an automation's feed shows beside it.
+				refreshAutomations(queries),
 				// A new message moves its conversation up the list, changes its preview, and may leave it unread.
 				refreshAfterConversationChange(queries, workspaceId),
 			]);
@@ -364,6 +367,7 @@ async function applyWorkspaceEvent(
 			await Promise.all([
 				queries.invalidateQueries({ queryKey: ["conversation-messages"] }),
 				queries.invalidateQueries({ queryKey: ["conversation-history"] }),
+				refreshAutomations(queries),
 				refreshAfterConversationChange(queries, workspaceId),
 			]);
 			return;

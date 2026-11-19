@@ -2,6 +2,9 @@ export * as ProjectAdministration from "./project-administration.ts";
 
 import {
 	type Bot,
+	newProjectSchema,
+	PROJECT_DESCRIPTION_MAX_LENGTH,
+	PROJECT_NAME_MAX_LENGTH,
 	type Project,
 	type ProjectColor,
 	type ProjectMember,
@@ -20,6 +23,7 @@ import {
 } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
+import { projectPermissions } from "../../authorization/permissions.ts";
 import type { Computers } from "../../computers/computers.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { query, serviceOperations } from "../../database/database.ts";
@@ -28,7 +32,7 @@ import type { UserFacing } from "../../user-message.ts";
 import { personFacingBotRow, toBot } from "../bots/bot.ts";
 import { projectSeenBy } from "./project.ts";
 import type { LeadsProjects } from "./project-leads.ts";
-import { projectMembers } from "./project-reads.ts";
+import { projectHeadcounts, projectMembers } from "./project-reads.ts";
 import { ProjectRepository } from "./project-repository.ts";
 
 /**
@@ -57,6 +61,7 @@ export interface Interface {
 	}) => Effect.Effect<
 		Project,
 		| AuthorizationDenied
+		| InvalidProjectDetails
 		| UnusableProjectName
 		| ProjectRepository.ProjectSlugTaken
 		| ProjectRepository.BotNotPublic,
@@ -166,7 +171,16 @@ export const make = Effect.gen(function* () {
 					const listed = yield* query((db) =>
 						listedProjectStandingsFor(db, workspaceId, actor.userId),
 					);
-					return listed.map(projectSeenBy);
+					// Counted only where the actor may list who is in the project, as its own lists would.
+					const headcountOf = yield* projectHeadcounts(
+						listed
+							.filter((standing) => standing.may("project.read"))
+							.map(({ project }) => project.id),
+					);
+					return listed.map((standing): Project => {
+						const seen = projectSeenBy(standing);
+						return standing.may("project.read") ? { ...seen, ...headcountOf(seen.id) } : seen;
+					});
 				}),
 			),
 
@@ -180,15 +194,22 @@ export const make = Effect.gen(function* () {
 					);
 					// A bot the person can't see is answered as if it weren't there.
 					yield* authorization.bot(input.leadBotId, "bot.read");
+					// Checked here, not only by the HTTP API, for callers such as the
+					// Personal Assistant that don't come through it.
+					const details = yield* Schema.decodeUnknownEffect(projectDetailsSchema)({
+						name: input.name,
+						description: input.description,
+					}).pipe(Effect.mapError(() => new InvalidProjectDetails()));
 					// Checked before anything is written, so an unsluggable name such as
 					// "!!!" is refused for the name rather than as a taken address.
 					const slug = yield* Schema.decodeUnknownEffect(projectSlugSchema)(
-						givenSlug ?? slugify(input.name),
+						givenSlug ?? slugify(details.name),
 					).pipe(Effect.mapError(() => new UnusableProjectName()));
 					const row = yield* projects.create(workspaceId, {
 						creatorId: actor.userId,
 						slug,
 						...input,
+						...details,
 					});
 					return projectSeenBy(joinedStanding(row, actor));
 				}),
@@ -270,9 +291,10 @@ export const make = Effect.gen(function* () {
 					const standing = yield* authorization.projectFound(projectId);
 					const project = standing.project;
 					if (!standing.facts.isMember) {
-						// Only a public project is joined from the directory; a private one
-						// is answered as if it weren't there.
-						if (project.visibility !== "public" || !standing.actor.workspaceRole) {
+						// A project the actor may not join, a private one or a bot's default
+						// project, is answered as if it weren't there.
+						const isPublic = project.visibility === "public";
+						if (!projectPermissions(standing.actor, { ...standing.facts, isPublic }).join) {
 							return yield* new ResourceHidden({ resource: "project" });
 						}
 						yield* projects.addMember(project.workspaceId, project.id, standing.actor.userId);
@@ -291,7 +313,7 @@ export const make = Effect.gen(function* () {
 						return bot
 							? [
 									toBot(
-										{ ...bot, defaultProjectId: row.defaultProjectId },
+										{ ...bot, defaultProjectId: row.defaultProjectId, createdBy: row.createdBy },
 										{ actor, pinned: row.pinned },
 									),
 								]
@@ -344,6 +366,22 @@ export class AdministratorInEveryProject
 {
 	get userMessage() {
 		return userText`Administrators are in every project`;
+	}
+}
+
+/** A project's name and description, as every caller must give them. */
+const projectDetailsSchema = Schema.Struct({
+	name: newProjectSchema.fields.name,
+	description: newProjectSchema.fields.description,
+});
+
+/** A project's name is empty or too long, or its description too long. */
+export class InvalidProjectDetails
+	extends Data.TaggedError("InvalidProjectDetails")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`A project's name must be 1 to ${PROJECT_NAME_MAX_LENGTH} characters, and its description at most ${PROJECT_DESCRIPTION_MAX_LENGTH}.`;
 	}
 }
 

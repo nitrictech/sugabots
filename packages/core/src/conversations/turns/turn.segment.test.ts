@@ -21,6 +21,7 @@ import { chunks, scriptedModel, streamed } from "../../providers/models/testing.
 import { INTERVIEW_PROMPT } from "../../workspaces/bots/interview-prompt.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Chats } from "../chats/chats.ts";
+import { startBotThread } from "../chats/testing.ts";
 import { conversationsForTests } from "../testing.ts";
 import { BuiltInTools } from "../tools/built-in.ts";
 import { ComputerTools } from "../tools/computer.ts";
@@ -166,7 +167,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		expect(deliveredEvents()).toContainEqual(
 			expect.objectContaining({
 				type: "message.failed",
-				willRetry: true,
 				error: providerDown.userMessage,
 			}),
 		);
@@ -185,9 +185,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 
 		expect(outcome).toEqual({ _tag: "Finished" });
 		expect(await storedTurn()).toMatchObject({ status: "failed", runs: MAX_TURN_RUNS });
-		expect(deliveredEvents()).toContainEqual(
-			expect.objectContaining({ type: "message.failed", willRetry: false }),
-		);
+		expect(deliveredEvents()).toContainEqual(expect.objectContaining({ type: "message.failed" }));
 	});
 
 	it("fails the turn for good when the provider refused the request", async () => {
@@ -200,9 +198,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		);
 
 		expect(outcome).toEqual({ _tag: "Finished" });
-		expect(deliveredEvents()).toContainEqual(
-			expect.objectContaining({ type: "message.failed", willRetry: false }),
-		);
+		expect(deliveredEvents()).toContainEqual(expect.objectContaining({ type: "message.failed" }));
 	});
 
 	it("fails the turn for good when the provider asks to be left too long", async () => {
@@ -219,9 +215,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 		);
 
 		expect(outcome).toEqual({ _tag: "Finished" });
-		expect(deliveredEvents()).toContainEqual(
-			expect.objectContaining({ type: "message.failed", willRetry: false }),
-		);
+		expect(deliveredEvents()).toContainEqual(expect.objectContaining({ type: "message.failed" }));
 	});
 
 	it("fails a reply the model finished without writing anything, for good", async () => {
@@ -234,15 +228,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 			status: "failed",
 			error: userText`The reply stopped before answering.`,
 		});
-		expect(deliveredEvents()).toContainEqual(
-			expect.objectContaining({ type: "message.failed", willRetry: false }),
-		);
+		expect(deliveredEvents()).toContainEqual(expect.objectContaining({ type: "message.failed" }));
 	});
 
 	describe("an optional turn, on a message in the bot's thread that mentions only people", () => {
 		/** Starts another of the bot's threads with `content`, and prepares the turn it asks for. */
 		const optionalTurnOn = async (content: string) => {
-			const started = await chatsAs(memberId).startThread({
+			const started = await startBotThread(chatsAs(memberId), {
 				botId: hostId,
 				messageId: crypto.randomUUID(),
 				content,

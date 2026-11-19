@@ -17,7 +17,6 @@ import {
 	juno,
 	linear,
 	mount,
-	pendingAnswer,
 	sam,
 	workspace,
 } from "@/test-api.tsx";
@@ -193,7 +192,7 @@ afterEach(() => {
 /** The sidebar's Direct messages. */
 async function directMessagesInSidebar() {
 	const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
-	return within(sidebar).getByRole("region", { name: "Direct messages" });
+	return within(sidebar).getByRole("group", { name: "Direct messages" });
 }
 
 describe("direct messages", () => {
@@ -497,6 +496,7 @@ describe("direct messages", () => {
 						preview: fromJuno.content,
 						projectId: null,
 						rootConversationId: withJuno.id,
+						place: { kind: "direct_message" },
 						at: fromJuno.createdAt,
 						unread: true,
 					},
@@ -511,56 +511,35 @@ describe("direct messages", () => {
 		expect(row.getAttribute("href")).toBe(`/suga/dm/${withJuno.id}?message=${fromJuno.id}`);
 	});
 
-	it("waits for the direct messages before opening a message from Inbox that is in none of the projects", async () => {
-		client.api.chats.inbox.mockReturnValue(
-			Effect.succeed({
-				items: [
-					{
-						kind: "message",
-						messageId: fromJuno.id,
-						author: junoParticipant,
-						preview: fromJuno.content,
-						projectId: null,
-						rootConversationId: withJuno.id,
-						at: fromJuno.createdAt,
-						unread: true,
-					},
-				],
-			}),
-		);
-		const directMessages = pendingAnswer();
-		client.api.chats.directMessages.mockReturnValue(directMessages.effect);
-		mount("/suga/inbox");
-
-		await screen.findByText(fromJuno.content);
-		// Not yet a way into a thread with a bot, which it may not be.
-		expect(screen.queryByRole("link", { name: new RegExp(`${juno.name} wrote`) })).toBeNull();
-		directMessages.answer(Effect.succeed({ items: [junoItem(1)] }));
-
-		const row = await screen.findByRole("link", { name: new RegExp(`${juno.name} wrote`) });
-		expect(row.getAttribute("href")).toBe(`/suga/dm/${withJuno.id}?message=${fromJuno.id}`);
-	});
-
-	it("counts every unread message in its direct messages as written to the person, as a mention is", async () => {
+	it("shows on the tabs the API's count of what waits for the person, a mention and direct messages together", async () => {
+		// One mention in Inbox, and two unread messages in a direct message, which Inbox doesn't list.
 		directMessageAnswers({ unread: 2 });
-		// The inbox holds the latest items only, so it is not where they are counted.
-		client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
+		client.api.chats.attention.mockReturnValue(
+			Effect.succeed({ unreadInInbox: 1, waitingApprovals: 0, unreadForYou: 3 }),
+		);
 		mount(`/suga/dm/${withJunoAndTheo.id}`);
 
 		const tabs = await screen.findByRole("navigation", { name: "Tabs" });
-		expect(await within(tabs).findByText("2 unread messages for you")).toBeDefined();
+		expect(await within(tabs).findByText("3 unread messages for you")).toBeDefined();
 	});
 
-	it("marks every direct message with anything unread read from Inbox, past what Inbox lists", async () => {
+	it("marks everything read from Inbox, direct messages past what Inbox lists among it", async () => {
 		directMessageAnswers({ unread: 1 });
 		client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
+		client.api.chats.attention.mockReturnValue(
+			Effect.succeed({
+				unreadInInbox: 0,
+				waitingApprovals: 0,
+				unreadForYou: 1,
+			}),
+		);
 		mount("/suga/inbox");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Mark all as read" }));
 
 		await waitFor(() =>
-			expect(client.api.chats.markRead).toHaveBeenCalledWith({
-				params: { conversationId: withJuno.id },
+			expect(client.api.chats.markAllRead).toHaveBeenCalledWith({
+				params: { workspace: workspace.id },
 			}),
 		);
 	});

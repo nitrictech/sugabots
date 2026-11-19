@@ -18,7 +18,6 @@ import {
 	resourceProjectId,
 	useNavigateToOwnerPage,
 } from "@/lib/resource-owner.tsx";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { Alert, Success } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
@@ -122,7 +121,6 @@ function ConnectionRow({
 }) {
 	const actions = useConnectionActions(resourceProjectId(owner));
 	const navigateToOwnerPage = useNavigateToOwnerPage();
-	const backToList = useBackToHere("Connections");
 	const page = { page: "connection", connectionId: connection.id } as const;
 	const needsSignIn = !connection.signedIn;
 	const failing =
@@ -133,7 +131,7 @@ function ConnectionRow({
 	const reconnect = () =>
 		connection.auth === "oauth"
 			? actions.signIn.mutate({ connectionId: connection.id })
-			: void navigateToOwnerPage(owner, page, { state: backToList });
+			: void navigateToOwnerPage(owner, page);
 	const line = error ? failureMessage(error) : lineFor(connection);
 
 	return (
@@ -145,7 +143,6 @@ function ConnectionRow({
 			<OwnerLink
 				owner={owner}
 				to={page}
-				state={backToList}
 				aria-label={`${connection.name}, ${line}. Open tools`}
 				className="focus-ring flex min-w-0 flex-1 items-center gap-3.5 rounded-lg text-left after:absolute after:inset-0"
 			>

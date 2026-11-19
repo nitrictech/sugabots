@@ -64,7 +64,7 @@ export function RepositoryGroups({
 		return (
 			<Note>
 				{ownerName} isn't connected to any GitHub repositories yet. Someone who manages its
-				connections can connect GitHub in its settings.
+				connections can connect GitHub on its Connections page.
 			</Note>
 		);
 	}

@@ -78,8 +78,6 @@ function provider(
 		signedIn: false,
 		customHeaders: [],
 		modelCount: models.length,
-		enabledModelCount: models.filter((one) => one.enabled).length,
-		lastTestedAt: null,
 		lastTestError: null,
 		connectedBy: null,
 		createdAt: "2026-09-11T00:00:00.000Z",
@@ -128,7 +126,14 @@ const openrouter = provider(
 			["tools", ...(index % 2 === 0 ? (["vision"] as const) : [])],
 		);
 	}),
-	{ connectedBy: "Theo Hart" },
+	{
+		connectedBy: {
+			id: "0199a3a0-0000-7000-8000-0000000000c2",
+			name: "Theo Hart",
+			email: "theo@example.com",
+			image: null,
+		},
+	},
 );
 const chatgpt = provider(5, "chatgpt", "ChatGPT", [], {
 	baseUrl: "https://chatgpt.com/backend-api/codex",
@@ -143,7 +148,6 @@ const chatgptSignedIn: ModelProvider = {
 	signedIn: true,
 	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "reasoning"])],
 	modelCount: 1,
-	enabledModelCount: 1,
 };
 const supergrok = provider(6, "supergrok", "SuperGrok", [], {
 	baseUrl: "https://api.x.ai/v1",
@@ -157,14 +161,27 @@ const pausedDeepseek = provider(
 	"deepseek",
 	"DeepSeek",
 	[model("deepseek-chat", "DeepSeek Chat", true)],
-	{ active: false, connectedBy: "Theo Hart" },
+	{
+		active: false,
+		connectedBy: {
+			id: "0199a3a0-0000-7000-8000-0000000000c2",
+			name: "Theo Hart",
+			email: "theo@example.com",
+			image: null,
+		},
+	},
 );
 /** A new key whose test failed: it holds the key, but stays off until a key passes. */
 const rejectedGroq = provider(8, "groq", "Groq", [], {
 	active: false,
 	status: "error",
 	lastTestError: "The provider rejected the API key",
-	connectedBy: "Theo Hart",
+	connectedBy: {
+		id: "0199a3a0-0000-7000-8000-0000000000c2",
+		name: "Theo Hart",
+		email: "theo@example.com",
+		image: null,
+	},
 });
 const providers = [anthropic, openai, ollama, openrouter, chatgpt];
 
@@ -233,7 +250,6 @@ function Preview({
 						providerId: provider.id,
 						providerName: provider.name,
 						providerPreset: provider.preset,
-						providerActive: provider.active,
 						modelId: model.modelId,
 						displayName: model.displayName,
 						capabilities: model.capabilities.filter(

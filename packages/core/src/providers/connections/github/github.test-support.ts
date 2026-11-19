@@ -1,5 +1,4 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import {
 	bot as botTable,
@@ -9,8 +8,9 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../../database/schema.ts";
-import { onDatabase } from "../../../database/testing.ts";
+import { onDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { Installation } from "../../../installation/installation.ts";
+import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Egress } from "../../network/egress.ts";
 import type { GitHubApps } from "./github-app.ts";
@@ -201,17 +201,14 @@ export async function workspaceWithProject(label: string) {
 			.returning(),
 	);
 	if (!bot) throw new Error("fixture");
-	const [own] = await onDatabase((db) =>
-		db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, bot.id)),
-	);
-	if (!own) throw new Error("default project fixture");
+	const ownProjectId = await runOnPostgres(defaultProjectOf(bot.id));
 	return {
 		workspaceId,
 		/** The project people made, whose GitHub app the tests make. */
 		projectId: shared.id,
 		botId: bot.id,
 		/** The bot's default project, which holds its own GitHub app. */
-		botProjectId: own.id,
+		botProjectId: ownProjectId,
 		adminId: admin.id,
 		memberId: member.id,
 	};

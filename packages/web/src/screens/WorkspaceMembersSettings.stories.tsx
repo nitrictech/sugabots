@@ -43,7 +43,6 @@ const inProject = (member: typeof rowan) => ({
 	name: member.user.name,
 	email: member.user.email,
 	image: null,
-	addedAt: member.joinedAt,
 	removable: member.role !== "owner" && member.role !== "admin",
 });
 
@@ -73,7 +72,13 @@ function SettingsPreview({ children }: { children: ReactNode }) {
 		});
 		// What a member's page reads besides the roster: the projects, their bots and who is in each.
 		client.setQueryData(["workspaces"], [workspace]);
-		client.setQueryData(["projects", workspace.id], [revenue, engineering]);
+		client.setQueryData(
+			["projects", workspace.id],
+			[
+				{ ...revenue, memberCount: 3 },
+				{ ...engineering, memberCount: 2 },
+			],
+		);
 		client.setQueryData(
 			["bots", workspace.id],
 			[growthDesk, accountManager, leadResearcher, linearHandler, oncall],

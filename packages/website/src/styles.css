@@ -63,7 +63,6 @@
 	--color-landing-text: #ededed;
 	/* The brightest ink, for hovered links and the marks drawn over the demo video. */
 	--color-landing-text-strong: #fff;
-	--color-landing-message: #ededed;
 	--color-landing-button-text: #ededed;
 	--color-landing-secondary: #c4c4ca;
 	--color-landing-muted: #a1a1aa;
@@ -197,7 +196,7 @@
 
 /* The rail joining one step to the next. */
 .docs-steps > ol > li:not(:last-child)::after {
-	@apply absolute top-11 bottom-2 left-[1.0625rem] w-0.5 rounded-full bg-border;
+	@apply absolute top-11 bottom-2 left-4.25 w-0.5 rounded-full bg-border;
 	content: "";
 }
 

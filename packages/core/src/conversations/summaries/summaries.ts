@@ -96,9 +96,9 @@ export const make = Effect.gen(function* () {
 						if (!scope) {
 							return skipped("The conversation, the bot that triggered it, or its message is gone");
 						}
-						// A thread of a project people made goes on and on, and keeps the name people
-						// gave it: only a bot's conversation, one piece of work, its threads included,
-						// is summarised and titled from its summary.
+						// Only a bot's conversation (see `isBotConversation`), such as a thread of a
+						// bot's default project or an automation feed, is summarised and retitled
+						// from its summary; a thread of a project people made keeps the name people gave it.
 						const served = {
 							id: scope.conversationId,
 							kind: scope.conversationKind,

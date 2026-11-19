@@ -1,6 +1,7 @@
 import type {
 	Automation,
 	AutomationCurrentSecret,
+	AutomationListStatus,
 	AutomationTriggerInput,
 	AutomationUpdate,
 	AutomationWriteResult,
@@ -8,9 +9,9 @@ import type {
 	Run,
 } from "@sugabots/contracts";
 import {
+	type QueryClient,
 	skipToken,
 	useMutation,
-	useQueries,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
@@ -18,100 +19,72 @@ import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { automationStartsLabel } from "@/lib/routine-schedule.ts";
-import { useWorkspace } from "@/lib/workspace.ts";
 
-/** Every automation query starts with this, so one change refreshes the workspace list and each project's. */
+/** Every automation query starts with this, so one change refreshes each project's automations and runs. */
 const AUTOMATIONS_KEY = "automations";
 
 /**
- * The workspace's automations in full, by id, as an automation's row reads
- * when it runs; empty until they are loaded.
+ * Fetches again every automation's definition, status and runs, for a run
+ * accepted or settled. A list with no run going does not poll, so without
+ * this a scheduled run could start and finish without showing in it.
  */
-export function useWorkspaceAutomationsById(): ReadonlyMap<string, Automation> {
-	const workspaceId = useWorkspace().workspace?.id;
-	const { data } = useQuery({
-		queryKey: [AUTOMATIONS_KEY, "workspace", workspaceId],
-		queryFn: workspaceId
-			? ({ signal }) =>
-					Effect.runPromise(
-						client.api.automations.listInWorkspace({ params: { workspace: workspaceId } }),
-						{ signal },
-					)
-			: skipToken,
-	});
-	return new Map(data?.items.map((item) => [item.automation.id, item.automation]));
+export function refreshAutomations(queries: QueryClient) {
+	return queries.invalidateQueries({ queryKey: [AUTOMATIONS_KEY] });
 }
-
-/** How many of an automation's latest runs its page shows. */
-const RECENT_RUN_COUNT = 5;
 
 /** How often the runs are read again while one has not ended, so its status stays current. */
 const RUN_POLL_MS = 3_000;
 
+/** Whether a run in `state` has not ended yet. */
+function going(state: Run["state"]): boolean {
+	return state === "queued" || state === "running";
+}
+
 /** A runs query's `refetchInterval`: every `RUN_POLL_MS` while one of its runs is queued or running. */
 function pollWhileRunning(query: { state: { data?: { items: readonly Run[] } } }): number | false {
-	return query.state.data?.items.some((run) => run.state === "queued" || run.state === "running")
+	return query.state.data?.items.some((run) => going(run.state)) ? RUN_POLL_MS : false;
+}
+
+/**
+ * A listed automations query's `refetchInterval`: every `RUN_POLL_MS` while
+ * one's latest run is queued or running, so how each stands stays current.
+ */
+export function pollWhileAutomationsRun(
+	automations: readonly { status?: AutomationListStatus }[] | undefined,
+): number | false {
+	return automations?.some(({ status }) => status?.latestRun && going(status.latestRun.state))
 		? RUN_POLL_MS
 		: false;
 }
 
+/** How many of a project's latest runs its sidebar lists among its threads. */
+const SIDEBAR_RUN_COUNT = 30;
+
 /**
- * An automation's latest runs, newest first, read again while one is queued or
- * running. Nothing is asked while `enabled` is false, as for somebody who
- * manages a bot's automations without reaching the bot, whom the API refuses.
+ * The latest runs of a project's automations, newest first, read again while
+ * one of them is queued or running.
  */
-export function useRecentRuns({
-	projectId,
-	automationId,
-	enabled = true,
-}: {
-	projectId: string;
-	automationId: string;
-	enabled?: boolean;
-}) {
-	return useQuery({
-		enabled,
-		queryKey: [AUTOMATIONS_KEY, "runs", automationId],
+export function useProjectRuns(projectId: string): Run[] {
+	const result = useQuery({
+		queryKey: [AUTOMATIONS_KEY, "project-runs", projectId],
 		queryFn: ({ signal }) =>
 			Effect.runPromise(
-				client.api.automations.runs({
-					params: { projectId, automationId },
-					query: { limit: RECENT_RUN_COUNT },
+				client.api.automations.projectRuns({
+					params: { projectId },
+					query: { limit: SIDEBAR_RUN_COUNT },
 				}),
 				{ signal },
 			),
 		refetchInterval: pollWhileRunning,
 	});
+	return result.data?.items ?? [];
 }
-
-/** How many of each automation's latest runs a bot's sidebar lists among its threads. */
-const SIDEBAR_RUN_COUNT = 10;
 
 /**
- * The latest runs of a project's automations, newest first, each automation's read
- * again while one of its runs is queued or running.
+ * The project `projectId`'s automations in full, as a bot's default project
+ * holds its own, with how each stands for whoever may read its runs, read
+ * again while one runs. Nothing is asked while it is undefined.
  */
-export function useProjectRuns(projectId: string, automationIds: readonly string[]): Run[] {
-	const results = useQueries({
-		queries: automationIds.map((automationId) => ({
-			queryKey: [AUTOMATIONS_KEY, "runs", automationId, "sidebar"],
-			queryFn: ({ signal }: { signal: AbortSignal }) =>
-				Effect.runPromise(
-					client.api.automations.runs({
-						params: { projectId, automationId },
-						query: { limit: SIDEBAR_RUN_COUNT },
-					}),
-					{ signal },
-				),
-			refetchInterval: pollWhileRunning,
-		})),
-	});
-	return results
-		.flatMap((result) => result.data?.items ?? [])
-		.toSorted((a, b) => Date.parse(b.acceptedAt) - Date.parse(a.acceptedAt));
-}
-
-/** The project `projectId`'s automations in full, as a bot's default project holds its own; nothing is asked while it is undefined. */
 export function useAutomations(projectId: string | undefined) {
 	return useQuery({
 		queryKey: [AUTOMATIONS_KEY, "project", projectId],
@@ -119,6 +92,7 @@ export function useAutomations(projectId: string | undefined) {
 			? ({ signal }) =>
 					Effect.runPromise(client.api.automations.list({ params: { projectId } }), { signal })
 			: skipToken,
+		refetchInterval: (query) => pollWhileAutomationsRun(query.state.data),
 	});
 }
 
@@ -154,9 +128,10 @@ export function useAutomationActions() {
 	const queries = useQueryClient();
 	const refresh = () =>
 		Promise.all([
-			queries.invalidateQueries({ queryKey: [AUTOMATIONS_KEY] }),
-			// A bot's list holds its automations, by name and how they stand.
-			queries.invalidateQueries({ queryKey: ["bot-threads"] }),
+			refreshAutomations(queries),
+			// A project's thread list holds its automations, by name and how they stand:
+			// `projectThreadsKey()` in chats.ts, which imports this module.
+			queries.invalidateQueries({ queryKey: ["project-threads"] }),
 		]);
 	const keepSecret = (triggerId: string, current: AutomationCurrentSecret) =>
 		queries.setQueryData([SECRET_KEY, triggerId], current);

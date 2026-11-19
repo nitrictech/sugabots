@@ -73,7 +73,6 @@ export const connectionRoutes = HttpApiBuilder.group(ServerApi, "connections", (
 					if (outcome.at) {
 						back.searchParams.set("workspace", outcome.at.workspaceId);
 						back.searchParams.set("project", outcome.at.projectId);
-						if (outcome.at.botId) back.searchParams.set("bot", outcome.at.botId);
 					}
 					if ("failure" in outcome) {
 						back.searchParams.set("oauth_error", outcome.failure);

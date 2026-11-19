@@ -19,7 +19,7 @@ import {
 	copyFileToComputerTool,
 	diskNote,
 	networkNote,
-	type OpenSandbox,
+	type OpenComputer,
 	openOncePerTurn,
 	type Place,
 	placeOf,
@@ -239,7 +239,7 @@ interface Behind {
 	readonly conversationId: string;
 	readonly place: Place;
 	readonly acceptsImages: boolean;
-	readonly openComputer: OpenSandbox;
+	readonly openComputer: OpenComputer;
 	readonly browser: BrowserSession;
 	readonly run: RunEffect<never>;
 	/** Hosts a request is refused for without asking anyone. */
@@ -250,7 +250,7 @@ interface Behind {
 }
 
 // Behind tools that aren't usable, whose calls are refused before they run.
-const NEVER_OPENED: OpenSandbox = () =>
+const NEVER_OPENED: OpenComputer = () =>
 	Promise.reject(new Error("The computer tools aren't usable"));
 const NEVER_RUN: RunEffect<never> = () =>
 	Promise.reject(new Error("The computer tools aren't usable"));
@@ -276,8 +276,10 @@ export interface Turn {
 	/** Whether the bot's model takes images, which results then may carry. */
 	readonly acceptsImages: boolean;
 	/**
-	 * Attaches a file to the turn's reply, where people can be shown it: only
-	 * in a chat's own conversation, whose files the chat serves. Without it, the
+	 * Attaches a file to the turn's reply, where people can be shown it. Given
+	 * only for a turn in a thread (`project_thread`), because a thread serves
+	 * the files in it to its project's people; a run, collaboration or
+	 * automation feed has no page that shows a reply's files. Without it, the
 	 * turn has no `share_file`.
 	 */
 	readonly attach?: AttachToReply;

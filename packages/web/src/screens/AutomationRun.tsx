@@ -7,7 +7,7 @@ import type {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { nextRunWords, useAutomations, useRecentRuns } from "@/lib/automations.ts";
+import { nextRunWords, useAutomations } from "@/lib/automations.ts";
 import { useAutomationControls } from "@/lib/chats.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { useOwnerOfProject } from "@/lib/owner-of-project.ts";
@@ -15,6 +15,7 @@ import { ownerLinkOptions } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { LabelledRule } from "@/ui/labelled-rule.tsx";
+import { TitleTag } from "@/ui/title-tag.tsx";
 import { TypingDots } from "@/ui/typing-dots.tsx";
 import { formatDay } from "./conversation-layout.ts";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
@@ -27,8 +28,9 @@ import { MessageMarkdown } from "./MessageMarkdown.tsx";
 
 type RunItem = Extract<ChatMessageItem, { kind: "run" }>;
 
-/** How a run went, or that its automation is paused, as the dot beside it says it. */
+/** How a run went, or whether its automation is on or paused, as the dot beside it says it. */
 export type RunOutcome =
+	| "on"
 	| "posted"
 	| "nothingToReport"
 	| "failed"
@@ -37,7 +39,9 @@ export type RunOutcome =
 	| "paused"
 	| "pausedAfterFailures";
 
-const OUTCOME_LABEL: Record<RunOutcome, string> = {
+/** Each outcome in words, as `RunStatus` says it beside its dot. */
+export const RUN_OUTCOME_LABELS: Record<RunOutcome, string> = {
+	on: "On",
 	posted: "Posted",
 	nothingToReport: "Nothing to report",
 	failed: "Failed",
@@ -48,6 +52,7 @@ const OUTCOME_LABEL: Record<RunOutcome, string> = {
 };
 
 const OUTCOME_DOT: Record<RunOutcome, string> = {
+	on: "bg-success",
 	posted: "bg-success",
 	nothingToReport: "bg-disabled-foreground",
 	failed: "bg-destructive-text",
@@ -64,19 +69,19 @@ const OUTCOME_DOT: Record<RunOutcome, string> = {
 export function outcomeOf(
 	state: RunItem["state"],
 	posted: boolean,
-): Exclude<RunOutcome, "paused" | "pausedAfterFailures"> {
+): Exclude<RunOutcome, "on" | "paused" | "pausedAfterFailures"> {
 	if (state === "completed") return posted ? "posted" : "nothingToReport";
 	if (state === "failed") return "failed";
 	if (state === "cancelled") return "cancelled";
 	return "running";
 }
 
-/** How a run went, or that its automation is paused, as a dot and a word. */
+/** How a run went, or whether its automation is on or paused, as a dot and a word. */
 export function RunStatus({ outcome }: { outcome: RunOutcome }) {
 	return (
 		<span className="inline-flex items-center gap-1.5 text-muted-foreground text-xs">
 			<span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", OUTCOME_DOT[outcome])} />
-			{OUTCOME_LABEL[outcome]}
+			{RUN_OUTCOME_LABELS[outcome]}
 		</span>
 	);
 }
@@ -132,7 +137,7 @@ export function RunMessage({
 	const report = item.state === "completed" ? item.report : null;
 	return (
 		<article
-			aria-label={`${item.automationName}: ${OUTCOME_LABEL[outcome]}`}
+			aria-label={`${item.automationName}: ${RUN_OUTCOME_LABELS[outcome]}`}
 			className="flex gap-3.5 px-5 pt-3.5 pb-0.5"
 		>
 			<span aria-hidden className="mt-0.5 flex w-9 shrink-0 justify-center">
@@ -141,9 +146,7 @@ export function RunMessage({
 			<div className="flex min-w-0 flex-1 flex-col items-start">
 				<div className="flex items-center gap-2 pb-px">
 					<span className="font-semibold text-sm text-foreground">{bot.name}</span>
-					<span className="rounded bg-chip px-1.25 py-px font-semibold text-2xs text-muted-foreground leading-snug">
-						Bot
-					</span>
+					<TitleTag>Bot</TitleTag>
 					<span className="text-subtle-foreground text-xs">
 						{formatClockTime(new Date(item.createdAt))}
 					</span>
@@ -197,10 +200,8 @@ export function FailedRunMessage({
 	bot: BotParticipant;
 }) {
 	const automation = { id: run.automationId, projectId };
-	const latestRun = useRecentRuns({
-		projectId,
-		automationId: run.automationId,
-	}).data?.items[0];
+	const latestRunId = useAutomations(projectId).data?.find((one) => one.id === run.automationId)
+		?.status?.latestRun?.id;
 	return (
 		<RunMessage
 			item={{
@@ -217,7 +218,7 @@ export function FailedRunMessage({
 			bot={bot}
 			automation={automation}
 			conversationId={run.rootConversationId}
-			latest={latestRun?.id === run.id}
+			latest={latestRunId === run.id}
 			mentionable={[]}
 		/>
 	);

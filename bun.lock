@@ -198,7 +198,6 @@
         "@tanstack/react-router": "^1.170.46",
         "class-variance-authority": "^0.7.1",
         "cn": "^0.5.2",
-        "date-fns": "4.4.0",
         "effect": "catalog:",
         "frimousse": "^0.4.0",
         "hast-util-to-string": "3.0.1",

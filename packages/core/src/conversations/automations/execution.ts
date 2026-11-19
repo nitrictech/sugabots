@@ -1,9 +1,10 @@
-import type { Run } from "@sugabots/contracts";
-import { eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import type { AutomationListStatus, Run, RunState } from "@sugabots/contracts";
+import { desc, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Executor, query } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import {
+	automation,
 	automationRun,
 	conversationRead,
 	message,
@@ -127,13 +128,98 @@ export const automationAcceptsWork = Effect.fn("Run.automationAcceptsWork")(func
 });
 
 /**
- * Whether the latest run of the automation `automationId` failed and `userId` has
- * not opened the automation's feed since it ended, as a value for a query.
- * Opening the conversation reads it through its newest run's end.
+ * Whether the automation `of` names is failing, as a value for a query over
+ * it: it paused itself after its runs kept failing, or it is enabled and its
+ * latest run failed. One paused by hand is not failing, whatever its last run
+ * did. `latestRunState` is the state of its latest run, null before it has
+ * one: a column of `latestRunOf` where a query joins it, else looked up. The
+ * lists, the sidebar, the details panel and the Personal Assistant all count
+ * failing automations by this.
  */
-export function latestRunFailedUnseen(automationId: SQLWrapper, userId: string): SQL<boolean> {
+export function automationFailing(
+	of: typeof automation = automation,
+	latestRunState: SQLWrapper = latestRunStateOf(of.id),
+): SQL<boolean> {
+	return sql<boolean>`(${of.pausedAfterFailuresAt} is not null or (${of.state} = 'enabled' and coalesce(${latestRunState} = 'failed', false)))`;
+}
+
+/**
+ * Whether the automation `of` names is failing (see `automationFailing`) and
+ * `userId` has not opened its feed since its latest run ended: what marks it
+ * for them until they look.
+ */
+export function unseenAutomationFailure(
+	userId: string,
+	of: typeof automation = automation,
+	latestRunState?: SQLWrapper,
+): SQL<boolean> {
+	return sql<boolean>`(${automationFailing(of, latestRunState)} and ${latestRunUnseenBy(of.id, userId)})`;
+}
+
+/**
+ * The latest run of each automation in a query over `automation`, by when it
+ * was accepted, the later id breaking a tie, as a subquery to left join
+ * laterally: `.leftJoinLateral(latest, sql\`true\`)`. No row before it has run.
+ */
+export function latestRunOf(db: Executor) {
+	return db
+		.select({
+			id: automationRun.id,
+			state: automationRun.state,
+			error: automationRun.error,
+			acceptedAt: automationRun.acceptedAt,
+			posted: sql<boolean>`${resultPosted(automationRun.id)}`.as("latest_run_posted"),
+		})
+		.from(automationRun)
+		.where(eq(automationRun.automationId, automation.id))
+		.orderBy(desc(automationRun.acceptedAt), desc(automationRun.id))
+		.limit(1)
+		.as("latest_run");
+}
+
+/**
+ * The columns {@link toListStatus} reads, to select in a query over
+ * `automation` that left joins `latest`, a {@link latestRunOf}, laterally.
+ */
+export function listStatusColumns(latest: ReturnType<typeof latestRunOf>) {
+	return {
+		latestRun: {
+			id: latest.id,
+			state: latest.state,
+			error: latest.error,
+			acceptedAt: latest.acceptedAt,
+			posted: latest.posted,
+		},
+		failing: automationFailing(automation, latest.state),
+	};
+}
+
+/** How a listed automation stands, from its `latestRunOf` row, none before it has run, and whether it is failing. */
+export function toListStatus(row: {
+	failing: boolean;
+	latestRun: {
+		id: string;
+		state: RunState;
+		error: string | null;
+		acceptedAt: Date;
+		posted: boolean;
+	} | null;
+}): AutomationListStatus {
+	const latest = row.latestRun;
+	return {
+		failing: row.failing,
+		latestRun: latest && { ...latest, acceptedAt: latest.acceptedAt.toISOString() },
+	};
+}
+
+/**
+ * Whether `userId` has not opened the feed of the automation `automationId`
+ * since its latest run ended, as a value for a query; false while it has no
+ * run that ended. Opening the feed reads it through its newest run's end.
+ */
+function latestRunUnseenBy(automationId: SQLWrapper, userId: string): SQL<boolean> {
 	return sql<boolean>`coalesce((
-		select ${automationRun.state} = 'failed' and not exists (
+		select ${automationRun.finishedAt} is not null and not exists (
 			select 1 from ${conversationRead} join ${placedConversation} on ${placedConversation.id} = ${conversationRead.conversationId}
 			where ${placedConversation.automationId} = ${automationId}
 				and ${conversationRead.userId} = ${userId}
@@ -146,12 +232,12 @@ export function latestRunFailedUnseen(automationId: SQLWrapper, userId: string):
 	), false)`;
 }
 
-/** Whether the latest run of the automation `automationId` failed, as a value for a query. */
-export function latestRunFailed(automationId: SQLWrapper): SQL<boolean> {
-	return sql<boolean>`coalesce((
-		select ${automationRun.state} = 'failed' from ${automationRun}
+/** The state of the latest run of the automation `automationId`, or null before it has run, as a value for a query. */
+function latestRunStateOf(automationId: SQLWrapper): SQL<RunState | null> {
+	return sql<RunState | null>`(
+		select ${automationRun.state} from ${automationRun}
 		where ${automationRun.automationId} = ${automationId}
 		order by ${automationRun.acceptedAt} desc, ${automationRun.id} desc
 		limit 1
-	), false)`;
+	)`;
 }

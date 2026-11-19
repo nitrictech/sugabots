@@ -3,8 +3,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { cast } from "@/cast";
 import { type ApprovalDecision, ChatApproval, ChatMessage, ChatToolLine } from "@/components/chat";
+import { DemoCard } from "@/components/demo-card";
 import { riseIn } from "@/components/reveal";
-import { Card } from "@/components/ui/card";
 import { ChoiceChips } from "@/components/ui/choice-chips";
 
 /** A tool's approval setting, as the app labels it. */
@@ -58,7 +58,7 @@ export function ApprovalPlayground() {
 	}
 
 	return (
-		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
+		<DemoCard>
 			<div className="flex flex-wrap gap-6 border-b px-5 py-4">
 				<ChoiceChips
 					label="The tool's approval"
@@ -104,6 +104,6 @@ export function ApprovalPlayground() {
 					<p className="text-pretty">{outcomeText[outcome]}</p>
 				</motion.div>
 			</AnimatePresence>
-		</Card>
+		</DemoCard>
 	);
 }

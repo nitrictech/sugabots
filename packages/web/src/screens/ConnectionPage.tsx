@@ -5,6 +5,7 @@ import {
 	connectionMarkFor,
 	connectionPresetFor,
 	connectionToolMutating,
+	type NamedPerson,
 } from "@sugabots/contracts";
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { cn } from "cn";
@@ -26,7 +27,6 @@ import {
 } from "@/lib/resource-owner.tsx";
 import { TOOL_ACCESS_LABELS } from "@/lib/tool-access-labels.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
-import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -61,13 +61,10 @@ const TROUBLESHOOTING_URL = `${projectLinks.documentation}/connections#troublesh
 export function ConnectionPage({
 	connection,
 	owner,
-	back,
 }: {
 	connection: Connection;
 	/** The bot or project the connection is of. */
 	owner: ResourceOwner;
-	/** The link back to its connections, or to wherever the page was opened from: a `PageBackLink`. */
-	back: ReactNode;
 }) {
 	const [page, setPage] = useState<"connection" | "tools">("connection");
 	const canManage = resourcePermissions(owner).manageConnections;
@@ -98,7 +95,6 @@ export function ConnectionPage({
 		<ConnectionCard
 			connection={connection}
 			owner={owner}
-			back={back}
 			tools={detail}
 			setToolAccess={setToolAccess}
 			onOpenTools={() => setPage("tools")}
@@ -111,14 +107,12 @@ type ToolsQuery = ReturnType<typeof useConnectionWithTools>;
 function ConnectionCard({
 	connection,
 	owner,
-	back,
 	tools,
 	setToolAccess,
 	onOpenTools,
 }: {
 	connection: Connection;
 	owner: ResourceOwner;
-	back: ReactNode;
 	tools: ToolsQuery;
 	setToolAccess: (toolAccess: Record<string, ConnectionAccess>) => void;
 	onOpenTools: () => void;
@@ -150,19 +144,17 @@ function ConnectionCard({
 	}
 
 	return (
-		// Back and the mark as Individual tools has them, so the title stays put between the two.
+		// Untitled: the page's header names the connection, so its groups head at level 2.
 		<SettingsPage
-			back={back}
-			backOnWide
 			hero={<ConnectionPageMark connection={connection} />}
-			title={connection.name}
 			description={
-				connection.connectedBy ? `Connected by ${connection.connectedBy}` : `For ${name}`
+				connection.connectedBy ? `Connected by ${connection.connectedBy.name}` : `For ${name}`
 			}
 		>
 			{error && <Alert>{failureMessage(error)}</Alert>}
 			<SettingsGroup
 				label={connection.auth === "oauth" || !isServer ? "Account" : "Connection"}
+				headingLevel={2}
 				// A test is a button under the group, with how it went beside it, so it never moves the page.
 				note={isServer && <TestConnection connection={connection} projectId={projectId} />}
 			>
@@ -179,7 +171,7 @@ function ConnectionCard({
 						trailing={
 							connection.signedIn ? (
 								<span className="flex min-w-0 items-center gap-3">
-									<SignedInPerson name={connection.connectedBy} />
+									<SignedInPerson person={connection.connectedBy} />
 									{canManage &&
 										(isServer ? (
 											connection.auth === "oauth" && (
@@ -346,23 +338,13 @@ function TestConnection({ connection, projectId }: { connection: Connection; pro
 	);
 }
 
-/**
- * Whoever signed the connection in, with their face. A connection records
- * only their name, so the face is found among the workspace's people by it,
- * and is their initials when it isn't there.
- */
-function SignedInPerson({ name }: { name: string | null }) {
-	const { workspace } = useWorkspace();
-	const { data: members } = useWorkspaceMembers(workspace?.id);
-	if (name === null) return <SettingsValue>Someone no longer here</SettingsValue>;
-	const person = members?.find((member) => member.user.name === name)?.user ?? {
-		name,
-		email: "",
-	};
+/** Whoever signed the connection in, with their face. */
+function SignedInPerson({ person }: { person: NamedPerson | null }) {
+	if (person === null) return <SettingsValue>Someone no longer here</SettingsValue>;
 	return (
 		<span className="flex min-w-0 items-center gap-2">
 			<PersonAvatar person={person} size={20} />
-			<SettingsValue>{name}</SettingsValue>
+			<SettingsValue>{person.name}</SettingsValue>
 		</span>
 	);
 }
@@ -523,7 +505,7 @@ function ToolSettings({
 	const kinds = toolKinds(tools.data.tools);
 	if (kinds.length === 0) {
 		return (
-			<SettingsGroup label="Tools">
+			<SettingsGroup label="Tools" headingLevel={2}>
 				<SettingsRow label={<span className="text-muted-foreground">No actions found yet</span>} />
 			</SettingsGroup>
 		);
@@ -537,6 +519,7 @@ function ToolSettings({
 					<SettingsGroup
 						key={kind}
 						label={words.heading}
+						headingLevel={2}
 						note={
 							kind === "change"
 								? "Ask first sends the action to Approvals before it runs."

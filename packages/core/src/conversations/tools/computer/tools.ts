@@ -77,23 +77,23 @@ export function placeOf(turn: { conversationId: string; botId: string }): Place 
 }
 
 /**
- * Opens the bot's computer on the first call that needs it, and reuses it for
+ * Opens the computer of the project the turn works in on the first call that needs it, and reuses it for
  * the rest of the turn, so a turn that never runs anything never starts one.
  */
-export type OpenSandbox = () => Promise<ProjectComputers.Opened>;
+export type OpenComputer = () => Promise<ProjectComputers.Opened>;
 
-/** The bot's computer as a turn's tools reach it. */
+/** The computer of the project the turn works in, as the turn's tools reach it. */
 export interface TurnComputer {
-	readonly open: OpenSandbox;
+	readonly open: OpenComputer;
 	/** Runs work in the computer with the turn's services, such as its tracing and logging. */
 	readonly run: RunEffect<never>;
 }
 
 /**
- * The bot's computer, opened once per turn. A failed opening is not kept, so
+ * The computer of the project the turn works in, opened once per turn. A failed opening is not kept, so
  * the next call tries again.
  */
-export function openOncePerTurn(open: () => Promise<ProjectComputers.Opened>): OpenSandbox {
+export function openOncePerTurn(open: () => Promise<ProjectComputers.Opened>): OpenComputer {
 	let opening: Promise<ProjectComputers.Opened> | undefined;
 	let told = false;
 	return async () => {
@@ -116,7 +116,7 @@ interface Failed {
 }
 
 /**
- * Runs `work` in the bot's computer, turning a refusal it can act on into a
+ * Runs `work` in the computer of the project the turn works in, turning a refusal it can act on into a
  * result. The work is interrupted when `abortSignal`, the tool call's, aborts,
  * as it does when the turn is cancelled.
  */

@@ -72,9 +72,7 @@ const runEntry: ChatHistoryEntry = {
 		automationId: AUTOMATION,
 		automationName: "Overnight outbound",
 		triggerKind: "routine",
-		triggeredAt: "2026-09-18T06:00:00.000Z",
 	},
-	latestActivityAt: "2026-09-18T06:02:00.000Z",
 };
 const run: ConversationDetails = {
 	...storyChatDetails(growthDesk),
@@ -134,8 +132,7 @@ const meta = preview.meta({
 	},
 });
 
-const opened = (search: string) =>
-	`/${storyWorkspace.slug}/inbox/${revenue.slug}/${chat.id}?${search}`;
+const opened = (search: string) => `/${storyWorkspace.slug}/inbox/${chat.id}?${search}`;
 
 /** A mention opened in its chat: the chat jumps to it, points it out, and puts the focus on it. */
 export const MessageJumpedTo = meta.story({

@@ -22,11 +22,12 @@ import {
 	closeDatabase,
 	onDatabase,
 	type Promised,
+	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
 import { BotAdministration } from "../../workspaces/bots/bot-administration.ts";
+import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
-import { defaultProjectOf } from "../automations/testing.ts";
 import { seedConversation } from "../seed.test-support.ts";
 import { AssistantGuide } from "./assistant-guide.ts";
 
@@ -231,7 +232,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 				]),
 			);
 		};
-		const own = await defaultProjectOf(writer.id);
+		const own = await runOnPostgres(defaultProjectOf(writer.id));
 		await anAutomation(own, "Failed last", "enabled", "failed");
 		await anAutomation(own, "Gave up", "paused", "failed", true);
 		await anAutomation(own, "Paused by hand", "paused", "failed");
@@ -252,7 +253,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 				{
 					project: "Launch",
 					failing: 1,
-					link: `http://sugabots.test/${workspaceSlug}/projects/launch`,
+					link: `http://sugabots.test/${workspaceSlug}/projects/launch/automations`,
 				},
 			]),
 		);

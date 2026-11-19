@@ -629,6 +629,7 @@ export const make = Effect.gen(function* () {
 						status: "pending" as const,
 						workspaceName: invitation.workspaceName,
 						inviterName: invitation.inviterName,
+						role: invitation.role,
 					};
 				}),
 			),

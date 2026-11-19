@@ -6,6 +6,7 @@ import { useBackToHere } from "@/lib/settings-back.tsx";
 import { chooseWorkspace, useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { SettingsListGroups } from "@/screens/SettingsLayout.tsx";
 import { PageHeader } from "@/shell/Page.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
@@ -33,7 +34,12 @@ export function You() {
 					{others.map((other) => (
 						<SettingsRow
 							key={other.id}
-							icon={<LetterTile letter={other.name} />}
+							icon={
+								<LetterTile
+									name={other.name}
+									className="size-6 rounded-md border-0 bg-foreground text-background"
+								/>
+							}
 							label={other.name}
 							chevron
 							render={
@@ -81,17 +87,5 @@ export function You() {
 				</SettingsGroup>
 			</div>
 		</section>
-	);
-}
-
-/** A workspace's mark: the first letter of its name on a light square. */
-function LetterTile({ letter }: { letter: string }) {
-	return (
-		<span
-			aria-hidden
-			className="grid size-6 shrink-0 place-items-center rounded-md bg-foreground font-semibold text-xs text-background"
-		>
-			{Array.from(letter.trim())[0]?.toUpperCase() ?? "?"}
-		</span>
 	);
 }

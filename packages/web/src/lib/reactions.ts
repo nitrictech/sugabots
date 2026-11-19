@@ -8,6 +8,7 @@ import type {
 import {
 	type InfiniteData,
 	type QueryClient,
+	type QueryKey,
 	useMutation,
 	useQueryClient,
 } from "@tanstack/react-query";
@@ -40,7 +41,10 @@ export function useReactions(user: SessionUser) {
 					: client.api.conversations.unreact(request),
 			);
 		},
-		onMutate: ({ message, emoji, reacting }) => {
+		onMutate: async ({ message, emoji, reacting }) => {
+			// A load already under way answers with the message as it was, which would put back
+			// what this changes; it is called off here and made again once this is settled.
+			const interrupted = await cancelMessageLoads(queries, message);
 			const before = message.reactions ?? [];
 			const person = { id: user.id, name: user.name, at: new Date().toISOString() };
 			const change = changeReactions(
@@ -48,7 +52,7 @@ export function useReactions(user: SessionUser) {
 				message,
 				reacting ? withReaction(before, emoji, person) : withoutReaction(before, emoji, user.id),
 			);
-			return { before, change };
+			return { before, change, interrupted };
 		},
 		onSuccess: (reactions, { message }, context) => {
 			if (isLatestChange(message.id, context.change))
@@ -57,6 +61,11 @@ export function useReactions(user: SessionUser) {
 		onError: (_error, { message }, context) => {
 			if (context && isLatestChange(message.id, context.change)) {
 				setMessageReactions(queries, message, context.before);
+			}
+		},
+		onSettled: (_result, _error, _change, context) => {
+			for (const queryKey of context?.interrupted ?? []) {
+				void queries.invalidateQueries({ queryKey });
 			}
 		},
 	});
@@ -106,6 +115,23 @@ function hasReacted(message: Message, emoji: string, userId: string): boolean {
 				reaction.emoji === emoji && reaction.people.some((person) => person.id === userId),
 		) ?? false
 	);
+}
+
+/**
+ * Calls off loads of the message's conversation and its pages that are under
+ * way, returning the keys of those it called off.
+ */
+async function cancelMessageLoads(
+	queries: QueryClient,
+	message: Pick<Message, "conversationId">,
+): Promise<QueryKey[]> {
+	const keys: QueryKey[] = [
+		["conversation", message.conversationId],
+		["conversation-messages", message.conversationId],
+	];
+	const loading = keys.filter((queryKey) => queries.isFetching({ queryKey }) > 0);
+	await Promise.all(loading.map((queryKey) => queries.cancelQueries({ queryKey })));
+	return loading;
 }
 
 /**

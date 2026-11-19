@@ -1,4 +1,6 @@
 import { Schema, Struct } from "effect";
+import { namedPersonSchema } from "./api.ts";
+import { resourcePermissionsSchema } from "./projects.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -141,16 +143,10 @@ export const botPermissionsSchema = Schema.Struct({
 	/** Change its name, look, model, instructions, tools and visibility. */
 	update: Schema.Boolean,
 	delete: Schema.Boolean,
-	manageConnections: Schema.Boolean,
-	/** Change what its computer may reach, and allow its requests for more. */
-	manageComputer: Schema.Boolean,
-	/** Click and type on its computer's desktop, rather than only watch it. */
-	useDesktop: Schema.Boolean,
-	/** Add, change and remove its automations, and rotate their webhook secrets. */
-	manageAutomations: Schema.Boolean,
-	runAutomations: Schema.Boolean,
 	/** Read and write in its threads. False for a private bot an admin only sees listed. */
 	talk: Schema.Boolean,
+	/** What the person may do with what its default project holds. */
+	resources: resourcePermissionsSchema,
 });
 
 export type BotPermissions = typeof botPermissionsSchema.Type;
@@ -190,11 +186,13 @@ export const botSchema = Schema.Struct({
 	 * typing pace. Slower, so off unless somebody turns it on, as for a demo.
 	 */
 	naturalBrowsing: Schema.Boolean,
+	/** Who added it, by name: null when nobody did, or they are no longer in the workspace. */
+	createdBy: Schema.NullOr(namedPersonSchema),
 	/**
-	 * Who added it, by user id. `null` when it was made for the workspace, such
-	 * as the first bot at setup, or once the person who added it is deleted.
+	 * Whether everyone in the workspace sees it, or only its creator.
+	 * Meaningless when `assistant` is true: a Personal Assistant is neither
+	 * public nor private, as only its person ever sees it.
 	 */
-	createdById: Schema.NullOr(uuidSchema),
 	visibility: botVisibilitySchema,
 	/** Whether it is the person's own Personal Assistant, which only they see. */
 	assistant: Schema.Boolean,

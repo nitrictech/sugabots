@@ -81,7 +81,10 @@ export const Listing = meta.story({
 			title="Automations"
 			description="What your bots do on a schedule, or when called."
 		>
-			<SettingsGroup label="Growth Desk" note="Automations post into the bot's chat when they run.">
+			<SettingsGroup
+				label="Growth Desk"
+				note="Each automation posts into its own thread when it runs."
+			>
 				<SettingsRow
 					icon={
 						<SettingsRowIcon>

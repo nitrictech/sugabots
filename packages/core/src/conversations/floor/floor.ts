@@ -131,6 +131,11 @@ export interface FloorMessage {
 	content: string;
 }
 
+/** What `decideFloor` needs, with whether each of the project's bots has a model. */
+export interface FloorScope extends Omit<FloorInput, "content"> {
+	mentionableBots: ReadonlyArray<{ id: string; handle: string; hasModel: boolean }>;
+}
+
 /**
  * What `decideFloor` needs from the database, for one conversation and message.
  *
@@ -144,7 +149,7 @@ export interface FloorMessage {
 export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 	db: Executor,
 	committed: FloorMessage,
-): Effect.fn.Return<Omit<FloorInput, "content">, QueryFailure> {
+): Effect.fn.Return<FloorScope, QueryFailure> {
 	// One round trip: the project's bots and the people ride along as JSON beside the conversation.
 	const [scope] = yield* db
 		.select({
@@ -155,8 +160,8 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 				inner join ${bot} on ${bot.id} = ${project.leadBotId}
 				where ${project.id} = ${placedConversation.projectId}
 			)`,
-			mentionableBots: sql<Array<{ id: string; handle: string }>>`(
-				select coalesce(json_agg(json_build_object('id', ${bot.id}, 'handle', ${bot.handle})), '[]'::json)
+			mentionableBots: sql<Array<{ id: string; handle: string; hasModel: boolean }>>`(
+				select coalesce(json_agg(json_build_object('id', ${bot.id}, 'handle', ${bot.handle}, 'hasModel', ${bot.model} is not null)), '[]'::json)
 				from ${bot}
 				where ${inProject(placedConversation.projectId)}
 			)`,
@@ -181,7 +186,7 @@ export const loadFloorScope = Effect.fn("Floor.loadFloorScope")(function* (
 		.where(eq(placedConversation.id, committed.conversationId))
 		.limit(1);
 	if (!scope) {
-		throw new Error("The conversation this message is in no longer exists");
+		return yield* Effect.die(new Error("The conversation this message is in no longer exists"));
 	}
 	return {
 		conversationKind: scope.conversationKind,

@@ -12,6 +12,9 @@ import {
 	event,
 	message,
 	placedConversation,
+	project,
+	projectBot,
+	projectMember,
 	turn,
 	user,
 	workspace,
@@ -20,6 +23,7 @@ import {
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../../database/testing.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Chats } from "../../chats/chats.ts";
+import { startBotThread } from "../../chats/testing.ts";
 import { ConversationView } from "../../conversation-view.ts";
 import { conversationsForTests } from "../../testing.ts";
 import {
@@ -126,7 +130,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		host = hostRow;
 		helper = helperRow;
 		checker = checkerRow;
-		const started = await chatsAs(memberId).startThread({
+		const started = await startBotThread(chatsAs(memberId), {
 			botId: host.id,
 			messageId: crypto.randomUUID(),
 			content: "Please look into the release",
@@ -290,6 +294,67 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 					atOffset: 0,
 				},
 				to: host.name,
+				brief: "Back",
+			}),
+		).rejects.toThrow(/already waiting on this conversation/);
+	});
+
+	it("never asks back up the chain in a project people made, where a bot other than the lead asked", async () => {
+		const [shared] = await onDatabase((db) =>
+			db
+				.insert(project)
+				.values({
+					workspaceId,
+					name: "Shared",
+					slug: `shared-${crypto.randomUUID()}`,
+					createdById: memberId,
+					leadBotId: host.id,
+				})
+				.returning(),
+		);
+		if (!shared) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.insert(projectMember).values({ workspaceId, projectId: shared.id, userId: memberId }),
+		);
+		await onDatabase((db) =>
+			db.insert(projectBot).values(
+				[host, helper, checker].map(({ id: botId }) => ({
+					workspaceId,
+					projectId: shared.id,
+					botId,
+				})),
+			),
+		);
+		// Mentioning the checker gives it the floor rather than the lead.
+		const started = await chatsAs(memberId).startProjectThread({
+			projectId: shared.id,
+			messageId: crypto.randomUUID(),
+			content: `@${handleFromName(checker.name)} can you check the release?`,
+		});
+		const checkerReply = await openReply(started.conversation.id, checker.id);
+		const asked = await collaborations.open({
+			from: {
+				conversationId: started.conversation.id,
+				botId: checker.id,
+				turnId: checkerReply.turnId,
+				messageId: checkerReply.messageId,
+				atOffset: 0,
+			},
+			to: helper.name,
+			brief: "Help me check",
+		});
+
+		const helperReply = await openReply(asked.collaboration.conversationId, helper.id);
+		await expect(
+			collaborations.open({
+				from: {
+					conversationId: asked.collaboration.conversationId,
+					botId: helper.id,
+					turnId: helperReply.turnId,
+					messageId: helperReply.messageId,
+					atOffset: 0,
+				},
+				to: checker.name,
 				brief: "Back",
 			}),
 		).rejects.toThrow(/already waiting on this conversation/);

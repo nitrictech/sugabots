@@ -20,6 +20,7 @@ import {
 	message,
 	messageReaction,
 	type StoredMessagePart,
+	storedTurnReason,
 	type TurnReason,
 	toolCall,
 	turn,
@@ -320,7 +321,7 @@ export const make = Effect.gen(function* () {
 						owner: request.owner ?? null,
 						runs: 1,
 						status: "running",
-						reason: request.reason,
+						reason: request.reason && storedTurnReason(request.reason),
 						model: request.model,
 						startedAt,
 					})

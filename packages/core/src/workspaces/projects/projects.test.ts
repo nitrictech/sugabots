@@ -1,9 +1,15 @@
-import type { ProjectColor, ProjectVisibility } from "@sugabots/contracts";
+import {
+	PROJECT_DESCRIPTION_MAX_LENGTH,
+	PROJECT_NAME_MAX_LENGTH,
+	type ProjectColor,
+	type ProjectVisibility,
+} from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
+import { projectPermissions } from "../../authorization/permissions.ts";
 import { noComputers } from "../../computers/testing.ts";
 import { transaction } from "../../database/database.ts";
 import {
@@ -221,6 +227,23 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			).rejects.toBeInstanceOf(ProjectAdministration.UnusableProjectName);
 		});
 
+		it("refuses a name or description longer than the API allows, from any caller", async () => {
+			const tooLong = (length: number) => "a".repeat(length + 1);
+			for (const details of [
+				{ name: tooLong(PROJECT_NAME_MAX_LENGTH) },
+				{ name: "Launch", description: tooLong(PROJECT_DESCRIPTION_MAX_LENGTH) },
+			]) {
+				await expect(
+					administrationAs(memberId).create({
+						workspace: workspaceId,
+						leadBotId: leadId,
+						...details,
+					}),
+				).rejects.toBeInstanceOf(ProjectAdministration.InvalidProjectDetails);
+			}
+			expect(await listedTo(memberId)).toEqual([]);
+		});
+
 		it("puts the creator in the project, and lists a public one to everybody to join", async () => {
 			const made = await create(memberId, { name: "Suga", slug: "suga" });
 
@@ -233,6 +256,21 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 					permissions: expect.objectContaining({ join: true, leave: false }),
 				}),
 			]);
+		});
+
+		it("counts the people and bots in each project it lists, for those who may list them", async () => {
+			const made = await create(memberId, { name: "Suga", slug: "suga" });
+			const helper = await aBot(adminId, "Triage");
+			await administrationAs(memberId).addBot({ projectId: made.id, botId: helper.id });
+
+			// The administrator, in every project, the creator, and the lead and the bot added.
+			expect(await visibleTo(memberId)).toEqual([
+				expect.objectContaining({ id: made.id, memberCount: 2, botCount: 2 }),
+			]);
+			// Somebody who may only join it is not told who is in it.
+			const [listed] = await visibleTo(viewerId);
+			expect(listed).not.toHaveProperty("memberCount");
+			expect(listed).not.toHaveProperty("botCount");
 		});
 
 		it("lists a private project only to the people in it", async () => {
@@ -258,17 +296,6 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await expect(
 				createIn(otherWorkspaceId, adminId, { name: "General", slug: "general" }),
 			).resolves.toMatchObject({ slug: "general" });
-		});
-
-		it("leaves nothing behind when the slug is taken", async () => {
-			await create(adminId, { name: "Suga", slug: "suga" });
-			await create(adminId, { name: "Sales", slug: "sales" }).catch(() => {});
-			await create(adminId, { name: "Dup", slug: "suga" }).catch(() => {});
-
-			const rows = await onDatabase((db) => db.select().from(project));
-			expect(
-				rows.filter((row) => row.workspaceId === workspaceId && row.defaultOfBotId === null),
-			).toHaveLength(2);
 		});
 
 		it("gives a project with no colour chosen one no other project in the workspace has yet", async () => {
@@ -549,9 +576,8 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			expect(await repository.removeMember(workspaceId, made.id, viewerId)).toBe("administrator");
 		});
 
-		it("gives a member the projects they are in, and nothing else", async () => {
+		it("lets a member of a project manage its bots, but not delete it", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
-			const apart = await create(adminId, { name: "Legal", slug: "legal" });
 			await repository.addMember(workspaceId, joined.id, memberId);
 
 			expect(
@@ -561,10 +587,6 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			});
 			await expect(authorizationAs(memberId).project(joined.id, "project.delete")).rejects.toThrow(
 				ActionForbidden,
-			);
-			// Listed to join, but not reached until they do.
-			await expect(authorizationAs(memberId).project(apart.id, "project.read")).rejects.toThrow(
-				ResourceHidden,
 			);
 		});
 
@@ -599,31 +621,20 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			}
 		});
 
-		it("carries the resolved permissions on each project it lists", async () => {
+		it("carries the caller's resolved permissions on each project it lists", async () => {
 			const made = await create(adminId, { name: "Sales", slug: "sales" });
 			await repository.addMember(workspaceId, made.id, memberId);
 
 			const [seen] = (await visibleTo(memberId)).filter(({ id }) => id === made.id);
+			const standing = await authorizationAs(memberId).project(made.id, "project.read");
 
-			expect(seen?.permissions).toEqual({
-				rename: false,
-				manageMembers: true,
-				manageBots: true,
-				leave: true,
-				join: false,
-				delete: false,
-				deleteFiles: false,
-				manageConnections: false,
-				manageComputer: false,
-				useDesktop: true,
-				manageAutomations: false,
-				runAutomations: true,
-			});
+			expect(seen?.permissions).toEqual(
+				projectPermissions(standing.actor, { ...standing.facts, isPublic: true }),
+			);
 		});
 
-		it("gives a viewer the projects they are in, to read and take part in", async () => {
+		it("lets a viewer in a project read it, but not decide approvals or manage its bots", async () => {
 			const joined = await create(adminId, { name: "Sales", slug: "sales" });
-			const apart = await create(adminId, { name: "Legal", slug: "legal", visibility: "private" });
 			await repository.addMember(workspaceId, joined.id, viewerId);
 
 			const standing = await authorizationAs(viewerId).project(joined.id, "project.read");
@@ -632,10 +643,6 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await expect(
 				authorizationAs(viewerId).project(joined.id, "project.bots.manage"),
 			).rejects.toThrow(ActionForbidden);
-			await expect(authorizationAs(viewerId).project(apart.id, "project.read")).rejects.toThrow(
-				ResourceHidden,
-			);
-			expect(await listedTo(viewerId)).toEqual([{ id: joined.id, isMember: true }]);
 		});
 
 		it("carries a viewer's permissions on the projects it lists, all closed but leaving", async () => {
@@ -681,22 +688,15 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			);
 		});
 
-		it("does not carry an administrator's reach into another workspace", async () => {
-			// Ada administers both, so the only thing keeping her out of the other
-			// one's projects would be the id, which is exactly what must not be true.
+		it("lists an administrator of two workspaces only the projects of the one asked about", async () => {
 			const here = await create(adminId, { name: "Sales", slug: "sales" });
-			const there = await createIn(otherWorkspaceId, adminId, {
+			await createIn(otherWorkspaceId, adminId, {
 				name: "Sales",
 				slug: "sales",
 				visibility: "private",
 			});
 
 			expect(await visibleTo(adminId)).toEqual([expect.objectContaining({ id: here.id })]);
-			await expect(authorizationAs(outsiderId).project(here.id, "project.read")).rejects.toThrow(
-				ResourceHidden,
-			);
-			expect((await visibleTo(outsiderId, otherWorkspaceId)).length).toBe(0);
-			expect(there.workspaceId).toBe(otherWorkspaceId);
 		});
 
 		it("gives nothing to somebody outside the workspace", async () => {
@@ -862,7 +862,11 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				(await administrationAs(memberId).bots({ projectId: own.id })).map(({ id }) => id),
 			).toEqual([diary.id]);
 			// Nobody is a member of one, administrators included.
-			expect(await membersOf(own.id).catch(() => [])).toEqual([]);
+			expect(
+				await onDatabase((db) =>
+					db.select().from(projectMember).where(eq(projectMember.projectId, own.id)),
+				),
+			).toEqual([]);
 
 			await botsAs(memberId).remove({ botId: diary.id });
 			expect(

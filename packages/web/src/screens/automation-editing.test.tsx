@@ -1,11 +1,12 @@
-import type { Automation, Bot, WorkspaceAutomation } from "@sugabots/contracts";
+import type { Automation, Bot } from "@sugabots/contracts";
 import { InternalServerError } from "@sugabots/contracts/http";
+import { formatTime } from "@sugabots/contracts/routine-schedule-label";
 import { automationTriggers, type TestAutomationTrigger } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { formatTime, today } from "@/lib/routine-schedule.ts";
+import { today } from "@/lib/routine-schedule.ts";
 import { apiAnswers, bots, linear, mount, open, threadDetails, triager } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
@@ -29,14 +30,15 @@ function automation(id: string, name: string, projectId: string, expression: str
 		}),
 		state: "enabled",
 		createdById: null,
-		createdByBotId: null,
+		pausedAfterFailures: false,
 		createdAt: "2026-09-18T00:00:00.000Z",
 		updatedAt: "2026-09-18T00:00:00.000Z",
 	};
 }
 
 /** An automation in the workspace list that is a bot's own, as these tests use. */
-type BotsAutomation = WorkspaceAutomation & { bot: Bot };
+/** An automation in a bot's default project, with the bot. */
+type BotsAutomation = { automation: Automation; bot: Bot };
 
 const morningBrief: BotsAutomation = {
 	automation: automation(
@@ -62,9 +64,6 @@ const churnReport: BotsAutomation = {
 
 beforeEach(() => {
 	apiAnswers();
-	client.api.automations.listInWorkspace.mockReturnValue(
-		Effect.succeed({ items: [morningBrief, churnReport] }),
-	);
 });
 
 afterEach(() => {
@@ -88,15 +87,13 @@ const feedOf = (one: BotsAutomation) =>
  */
 function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []) {
 	const feed = feedOf(one);
-	client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [one] }));
 	client.api.automations.list.mockImplementation(({ params }: { params: { projectId: string } }) =>
 		Effect.succeed(
 			[one.automation, ...others].filter((automation) => automation.projectId === params.projectId),
 		),
 	);
-	client.api.chats.botThreads.mockReturnValue(
+	client.api.chats.threads.mockReturnValue(
 		Effect.succeed({
-			bot: one.bot,
 			threads: [],
 			automations: [
 				{
@@ -104,7 +101,6 @@ function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []
 						id: one.automation.id,
 						name: one.automation.name,
 						state: one.automation.state,
-						failed: false,
 						pausedAfterFailures: false,
 					},
 					conversation: {
@@ -118,6 +114,7 @@ function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []
 						automationId: one.automation.id,
 					},
 					mentionsYou: false,
+					status: { failing: false, latestRun: null },
 				},
 			],
 		}),
@@ -391,7 +388,7 @@ describe("a bot's automations", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
 		await addTrigger("Webhook");
 		fireEvent.click(screen.getByRole("button", { name: "Source: Generic" }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Stripe" }));
+		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Stripe" }));
 		expect(screen.queryByLabelText("Header")).toBeNull();
 		expect(screen.getByLabelText("Signing secret").getAttribute("placeholder")).toBe("whsec_…");
 		fireEvent.change(screen.getByLabelText("Signing secret"), {
@@ -425,7 +422,6 @@ describe("a bot's automations", () => {
 			kind: "webhook",
 			auth: { kind: "api_key", header: "X-API-Key" },
 		});
-		client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		client.api.automations.updateTrigger.mockReturnValue(
 			Effect.succeed({ automation: webhook.automation, secrets: [] }),
 		);
@@ -444,7 +440,7 @@ describe("a bot's automations", () => {
 		);
 
 		fireEvent.click(screen.getByRole("button", { name: "Auth: API key" }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Basic" }));
+		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Basic" }));
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenCalledWith({
 				params: onlyTrigger(webhook),
@@ -467,7 +463,6 @@ describe("a bot's automations", () => {
 			auth: { kind: "bearer" },
 			deliveryIdHeader: "Idempotency-Key",
 		});
-		client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		client.api.automations.updateTrigger.mockReturnValue(
 			Effect.succeed({ automation: webhook.automation, secrets: [] }),
 		);
@@ -498,7 +493,6 @@ describe("a bot's automations", () => {
 
 	it("asks a known source for no delivery id header", async () => {
 		const webhook = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "github" } });
-		client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
@@ -523,9 +517,6 @@ describe("a bot's automations", () => {
 		});
 		await openPanel(webhook);
 		client.api.automations.list.mockImplementation(() => Effect.succeed([webhook.automation]));
-		client.api.automations.listInWorkspace.mockImplementation(() =>
-			Effect.succeed({ items: [webhook] }),
-		);
 		await openTrigger(/^Webhook/);
 		fireEvent.click(await screen.findByRole("button", { name: "Add condition" }));
 		fireEvent.change(screen.getByLabelText("JSON path"), {
@@ -601,7 +592,6 @@ describe("a bot's automations", () => {
 			auth: { kind: "linear" },
 			filter,
 		});
-		client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		client.api.automations.create.mockReturnValue(
 			Effect.succeed({ automation: webhook.automation, secrets: [] }),
 		);
@@ -626,7 +616,6 @@ describe("a bot's automations", () => {
 			kind: "webhook",
 			auth: { kind: "hmac", header: "X-Signature", algorithm: "sha256", encoding: "hex" },
 		});
-		client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		client.api.automations.rotateSecret.mockReturnValue(Effect.succeed({ secret: null }));
 		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
@@ -651,7 +640,6 @@ describe("a bot's automations", () => {
 
 	it("saves Slack's signing secret pasted over the one it had once the field is left", async () => {
 		const slack = withTrigger(morningBrief, { kind: "webhook", auth: { kind: "slack" } });
-		client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [slack] }));
 		client.api.automations.rotateSecret.mockReturnValue(
 			Effect.succeed({ secret: "8f742231b10e8888abcd99yyyzzz85a5" }),
 		);
@@ -685,7 +673,6 @@ describe("a bot's automations", () => {
 			kind: "webhook",
 			auth: { kind: "api_key", header: "X-API-Key" },
 		});
-		client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [webhook] }));
 		await openPanel(webhook);
 		await openTrigger(/^Webhook/);
 
@@ -871,7 +858,6 @@ describe("a bot's automations", () => {
 			timezone: "UTC",
 			nextScheduledAt: null,
 		});
-		client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [hourly] }));
 		client.api.automations.updateTrigger.mockReturnValue(
 			Effect.succeed({ automation: hourly.automation, secrets: [] }),
 		);
@@ -947,7 +933,11 @@ describe("a bot's automations", () => {
 		const theirs = {
 			...linear,
 			visibility: "private" as const,
-			permissions: { ...linear.permissions, talk: false, runAutomations: false },
+			permissions: {
+				...linear.permissions,
+				talk: false,
+				resources: { ...linear.permissions.resources, readHistory: false, runAutomations: false },
+			},
 		};
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed(bots.map((bot) => (bot.id === linear.id ? theirs : bot))),
@@ -976,7 +966,7 @@ describe("a bot's automations", () => {
 
 		// Its threads, its feed and how it ran are not theirs to read.
 		expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
-		expect(client.api.chats.botThreads).not.toHaveBeenCalled();
+		expect(client.api.chats.threads).not.toHaveBeenCalled();
 		expect(client.api.conversations.get).not.toHaveBeenCalled();
 		expect(client.api.automations.runs).not.toHaveBeenCalled();
 	});
@@ -986,7 +976,14 @@ describe("a bot's automations", () => {
 			Effect.succeed(
 				bots.map((bot) => ({
 					...bot,
-					permissions: { ...bot.permissions, manageAutomations: false, runAutomations: false },
+					permissions: {
+						...bot.permissions,
+						resources: {
+							...bot.permissions.resources,
+							manageAutomations: false,
+							runAutomations: false,
+						},
+					},
 				})),
 			),
 		);

@@ -3,7 +3,7 @@ import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { accountManager, growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { accountManager, growthDesk } from "@/shell/story-fixtures.ts";
 import { appHandlers, StoryApp, storyThreadFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
@@ -28,8 +28,8 @@ const feed: InboxFeed = {
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" }),
 			preview: "@rowan-ellis can you sign off the Acme quote before 5?",
 			at: minutesAgo(4),
-			projectId: null,
 			rootConversationId: storyThreadFor(growthDesk).id,
+			place: { kind: "bot", botId: growthDesk.id },
 		},
 		{
 			kind: "message",
@@ -46,8 +46,8 @@ const feed: InboxFeed = {
 			},
 			preview: "Renewal notes for Halcyon are ready.",
 			at: minutesAgo(40),
-			projectId: null,
 			rootConversationId: storyThreadFor(accountManager).id,
+			place: { kind: "bot", botId: accountManager.id },
 		},
 		{
 			kind: "run",
@@ -70,6 +70,7 @@ const feed: InboxFeed = {
 			at: minutesAgo(90),
 			unread: true,
 			rootConversationId: storyThreadFor(growthDesk).id,
+			place: { kind: "bot", botId: growthDesk.id },
 		},
 		{
 			kind: "collaboration",
@@ -97,6 +98,7 @@ const feed: InboxFeed = {
 			at: minutesAgo(120),
 			unread: false,
 			rootConversationId: storyThreadFor(growthDesk).id,
+			place: { kind: "bot", botId: growthDesk.id },
 		},
 		{
 			kind: "mention",
@@ -105,8 +107,8 @@ const feed: InboxFeed = {
 			author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Priya Kaur" }),
 			preview: "Thanks @rowan-ellis, that fixed it.",
 			at: minutesAgo(26 * 60),
-			projectId: null,
 			rootConversationId: storyThreadFor(growthDesk).id,
+			place: { kind: "bot", botId: growthDesk.id },
 		},
 	],
 };
@@ -126,16 +128,12 @@ const meta = preview.meta({
 
 /**
  * What is unread, newest first: mentions, messages, automation runs and
- * collaborations together, each with its project and when; the sidebar's Inbox
- * counts what is unread.
+ * collaborations together, each with its project and when.
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText(/can you sign off the Acme quote/)).toBeInTheDocument();
 		await expect(canvas.queryByText(/that fixed it/)).toBeNull();
-		const inbox = canvas.getByRole("link", { name: /^Inbox/ });
-		await expect(inbox).toHaveAttribute("aria-current", "page");
-		await expect(inbox).toHaveTextContent("1 unread message for you");
 	},
 });
 
@@ -170,20 +168,18 @@ export const Filtered = meta.story({
 	},
 });
 
-/** Mark all as read reads every conversation with something unread, and Inbox has nothing unread. */
+/** Mark all as read reads everything at once, and Inbox has nothing unread. */
 export const MarkAllAsRead = meta.story({
 	beforeEach({ msw }) {
-		const read = new Set<string>();
+		let allRead = false;
 		msw.use(
 			http.get(`${API}/workspaces/:workspace/chats/inbox`, () =>
 				HttpResponse.json({
-					items: feed.items.map((item) =>
-						read.has(item.rootConversationId) ? { ...item, unread: false } : item,
-					),
+					items: feed.items.map((item) => (allRead ? { ...item, unread: false } : item)),
 				}),
 			),
-			http.post(`${API}/conversations/:conversationId/read`, ({ params }) => {
-				read.add(String(params.conversationId));
+			http.post(`${API}/workspaces/:workspace/chats/read`, () => {
+				allRead = true;
 				return new HttpResponse(null, { status: 204 });
 			}),
 		);
@@ -266,7 +262,7 @@ export const Opened = meta.story({
 	},
 	render: () => (
 		<StoryApp
-			path={`/${storyWorkspace.slug}/inbox/${revenue.slug}/${storyThreadFor(growthDesk).id}?message=${mentionInLongChat}`}
+			path={`/${storyWorkspace.slug}/inbox/${storyThreadFor(growthDesk).id}?message=${mentionInLongChat}`}
 		/>
 	),
 	play: async ({ canvas }) => {

@@ -51,16 +51,13 @@ import { ComputerSettings } from "./ComputerSettings.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { NotificationsSettings } from "./NotificationsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
-import {
-	ComputerSettingsPage,
-	ConnectionSettingsPage,
-	ConnectionsSettingsPage,
-} from "./ResourceSettings.tsx";
+import { ComputerSettingsPage } from "./ResourceSettings.tsx";
 import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
+import { WorkspaceBotsSettings } from "./WorkspaceBotsSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
-import { WorkspaceBotsSettings, WorkspaceProjectsSettings } from "./WorkspaceProjectsSettings.tsx";
+import { WorkspaceProjectsSettings } from "./WorkspaceProjectsSettings.tsx";
 
 export function WorkspaceSettings({
 	section,
@@ -68,8 +65,6 @@ export function WorkspaceSettings({
 	selectedProjectId,
 	projectPage,
 	botPage,
-	selectedConnectionId,
-	connectionSignInError,
 	selectedProviderId,
 	modelChoice,
 	selectedMemberId,
@@ -82,9 +77,6 @@ export function WorkspaceSettings({
 	projectPage?: ProjectSettingsPage;
 	/** Which of the selected bot's pages is open. */
 	botPage?: BotSettingsPageId;
-	/** The connection of the selected bot or project open on its own page. */
-	selectedConnectionId?: string;
-	connectionSignInError?: string;
 	/** The provider open on the Models page. */
 	selectedProviderId?: string;
 	/** Which model the Models page shows the choice of instead: new bots' or the system bots'. */
@@ -112,18 +104,6 @@ export function WorkspaceSettings({
 				) : (
 					<ModelsSettings />
 				)
-			) : selectedBot && selectedConnectionId ? (
-				<ConnectionSettingsPage
-					key={selectedConnectionId}
-					owner={{ bot: selectedBot }}
-					connectionId={selectedConnectionId}
-				/>
-			) : selectedBot && botPage === "connections" ? (
-				<ConnectionsSettingsPage
-					key={selectedBot.id}
-					owner={{ bot: selectedBot }}
-					signInError={connectionSignInError}
-				/>
 			) : selectedBot && botPage === "computer" ? (
 				<ComputerSettingsPage key={selectedBot.id} owner={{ bot: selectedBot }} />
 			) : selectedBot ? (
@@ -132,8 +112,6 @@ export function WorkspaceSettings({
 				<WorkspaceProjectsSettings
 					selectedProjectId={selectedProjectId}
 					projectPage={projectPage}
-					selectedConnectionId={selectedConnectionId}
-					connectionSignInError={connectionSignInError}
 					canCreateProjects={may.createProjects}
 				/>
 			) : section === "bots" ? (

@@ -25,6 +25,7 @@ import { Notifications } from "@sugabots/core/notifications/notifications";
 import { Models } from "@sugabots/core/providers/models/models";
 import { streamed } from "@sugabots/core/providers/models/testing";
 import { unimplemented } from "@sugabots/core/testing";
+import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
 import { and, eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
@@ -155,8 +156,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			return runtime.runPromise(
 				Effect.gen(function* () {
 					const chats = yield* Chats.Service;
-					const started = yield* chats.startThread({
-						botId: input.hostBotId,
+					const started = yield* chats.startProjectThread({
+						projectId: yield* defaultProjectOf(input.hostBotId),
 						messageId: crypto.randomUUID(),
 						content: input.content,
 					});

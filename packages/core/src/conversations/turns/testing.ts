@@ -10,12 +10,14 @@ import {
 	workspace,
 	workspaceMember,
 } from "../../database/schema.ts";
-import { onDatabase, type Promised } from "../../database/testing.ts";
+import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { ConversationFiles } from "../../files/conversation-files.ts";
 import { Files } from "../../files/files.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
+import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import type { Chats } from "../chats/chats.ts";
+import { startBotThread } from "../chats/testing.ts";
 import { lanesForTests } from "../testing.ts";
 import { ApprovedToolCalls } from "./approvals/approved-calls.ts";
 import { type PreparedTurn, TurnExecution, type TurnRun, turnRunFor } from "./execution.ts";
@@ -116,7 +118,7 @@ export async function prepareRunnable(
  * that need one.
  */
 export async function aChatAwaitingReply(
-	chatsAs: (userId: string) => Pick<Promised<Chats.Interface>, "startThread">,
+	chatsAs: (userId: string) => Pick<Promised<Chats.Interface>, "startProjectThread">,
 ) {
 	const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 	const [space] = await onDatabase((db) =>
@@ -168,16 +170,13 @@ export async function aChatAwaitingReply(
 	);
 	if (!host) throw new Error("fixture");
 	// The bot's own connection, which its default project holds.
-	const [own] = await onDatabase((db) =>
-		db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, host.id)),
-	);
-	if (!own) throw new Error("default project fixture");
+	const ownProjectId = await runOnPostgres(defaultProjectOf(host.id));
 	const [connected] = await onDatabase((db) =>
 		db
 			.insert(connection)
 			.values({
 				workspaceId,
-				projectId: own.id,
+				projectId: ownProjectId,
 				name: `Linear ${suffix}`,
 				handle: `linear-${suffix}`,
 				url: "https://linear.example.com/mcp",
@@ -187,7 +186,7 @@ export async function aChatAwaitingReply(
 			.returning({ id: connection.id }),
 	);
 	if (!connected) throw new Error("fixture");
-	const started = await chatsAs(memberId).startThread({
+	const started = await startBotThread(chatsAs(memberId), {
 		botId: host.id,
 		messageId: crypto.randomUUID(),
 		content: "What does example.com say?",

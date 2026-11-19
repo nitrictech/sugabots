@@ -206,23 +206,38 @@ export function projectAutomationFeedLink(
 	});
 }
 
-/** A connection's own page, under its bot's settings. */
-export function botConnectionSettingsLink(bot: BotRef, connection: Pick<Connection, "id">) {
+/** The services a bot is connected to: its default project's. */
+export function botConnectionsLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/bots/$bot/connections/$connection",
+		to: "./bots/$bot/connections",
+		params: { bot: bot.handle },
+	});
+}
+
+/** One of a bot's connections, on its own page. */
+export function botConnectionLink(bot: BotRef, connection: Pick<Connection, "id">) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./bots/$bot/connections/$connection",
 		params: { bot: bot.handle, connection: connection.id },
 	});
 }
 
-/** A connection's own page, under its project's settings. */
-export function projectConnectionSettingsLink(
-	project: ProjectRef,
-	connection: Pick<Connection, "id">,
-) {
+/** The services a project is connected to. */
+export function projectConnectionsLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/projects/$project/connections/$connection",
+		to: "./projects/$project/connections",
+		params: { project: project.slug },
+	});
+}
+
+/** One of a project's connections, on its own page. */
+export function projectConnectionLink(project: ProjectRef, connection: Pick<Connection, "id">) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./projects/$project/connections/$connection",
 		params: { project: project.slug, connection: connection.id },
 	});
 }

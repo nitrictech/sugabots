@@ -2,7 +2,7 @@ import { RotateCcwIcon } from "lucide-react";
 import { Children, type ReactNode, useState } from "react";
 import { type CastName, cast } from "@/cast";
 import { ChatCollaboration, ChatMessage, ChatText } from "@/components/chat";
-import { MotionCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
+import { MotionDemoCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { Button } from "@/components/ui/button";
 
 /** Seconds between one line of a demo conversation and the next. */
@@ -39,8 +39,8 @@ interface ChatProps {
 export function Chat({ title, children }: ChatProps) {
 	const [playCount, setPlayCount] = useState(0);
 	return (
-		<Reveal className="my-8">
-			<MotionCard variants={riseIn} className="gap-0 rounded-3xl py-0 shadow-xl">
+		<Reveal>
+			<MotionDemoCard variants={riseIn}>
 				<div className="flex items-center gap-3 border-b px-5 py-3">
 					<p className="flex-1 text-sm font-semibold">{title}</p>
 					<Button
@@ -63,7 +63,7 @@ export function Chat({ title, children }: ChatProps) {
 						<RevealItem>{line}</RevealItem>
 					))}
 				</Reveal>
-			</MotionCard>
+			</MotionDemoCard>
 		</Reveal>
 	);
 }

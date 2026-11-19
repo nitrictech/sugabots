@@ -8,6 +8,7 @@ import {
 	type Project,
 	type ProjectPermissions,
 	type ProjectThread,
+	type ResourcePermissions,
 	type SessionUser,
 	type StreamEvent,
 	type SystemBot,
@@ -59,6 +60,9 @@ export const sam: SessionUser = {
 	image: null,
 };
 
+/** Sam, as a bot names who added it. */
+const samAsCreator = { id: sam.id, name: sam.name, email: sam.email, image: null };
+
 /** A second person in the workspace, so the roster has somebody who is not you. */
 export const juno: SessionUser = {
 	id: "0199a3a0-0000-7000-8000-00000000000a",
@@ -77,14 +81,10 @@ export const workspace = {
 	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 
-/** Every project permission, as an admin gets them. */
-const ADMIN_IN_PROJECT: ProjectPermissions = {
-	rename: true,
-	manageMembers: true,
-	manageBots: true,
-	leave: false,
-	join: false,
-	delete: true,
+/** Everything with what a project or bot holds, as an admin gets it. */
+const MANAGER_OF_RESOURCES: ResourcePermissions = {
+	readHistory: true,
+	openSettings: true,
 	deleteFiles: true,
 	manageConnections: true,
 	manageComputer: true,
@@ -93,16 +93,33 @@ const ADMIN_IN_PROJECT: ProjectPermissions = {
 	runAutomations: true,
 };
 
+/** What anyone else who reaches a project or bot gets with what it holds: running its automations and using its desktop. */
+const USER_OF_RESOURCES: ResourcePermissions = {
+	...MANAGER_OF_RESOURCES,
+	deleteFiles: false,
+	manageConnections: false,
+	manageComputer: false,
+	manageAutomations: false,
+};
+
+/** Every project permission, as an admin gets them. */
+const ADMIN_IN_PROJECT: ProjectPermissions = {
+	rename: true,
+	manageMembers: true,
+	manageBots: true,
+	leave: false,
+	join: false,
+	delete: true,
+	resources: MANAGER_OF_RESOURCES,
+};
+
 /** What a member gets in a project they are in. */
 const MEMBER_IN_PROJECT: ProjectPermissions = {
 	...ADMIN_IN_PROJECT,
 	rename: false,
 	leave: true,
 	delete: false,
-	deleteFiles: false,
-	manageConnections: false,
-	manageComputer: false,
-	manageAutomations: false,
+	resources: USER_OF_RESOURCES,
 };
 
 /** What a viewer gets there: nothing they could change. */
@@ -116,12 +133,8 @@ const VIEWER_IN_PROJECT: ProjectPermissions = {
 const MANAGER_OF_BOT: BotPermissions = {
 	update: true,
 	delete: true,
-	manageConnections: true,
-	manageComputer: true,
-	useDesktop: true,
-	manageAutomations: true,
-	runAutomations: true,
 	talk: true,
+	resources: MANAGER_OF_RESOURCES,
 };
 
 /** What anyone else in the workspace gets with a public bot: talking to it, and running its automations. */
@@ -129,9 +142,7 @@ const USER_OF_BOT: BotPermissions = {
 	...MANAGER_OF_BOT,
 	update: false,
 	delete: false,
-	manageConnections: false,
-	manageComputer: false,
-	manageAutomations: false,
+	resources: { ...USER_OF_RESOURCES, openSettings: false },
 };
 
 /** The two projects the dev seed makes. */
@@ -148,6 +159,9 @@ export const projects: Project[] = [
 		leadBotId: "0199a3a0-0000-7000-8000-0000000000b1",
 		isMember: true,
 		permissions: ADMIN_IN_PROJECT,
+		// As the API counts what `apiAnswers` lists of it: nobody, and two bots.
+		memberCount: 0,
+		botCount: 2,
 		createdAt: "2026-09-09T00:00:00.000Z",
 	},
 	{
@@ -162,6 +176,9 @@ export const projects: Project[] = [
 		leadBotId: "0199a3a0-0000-7000-8000-0000000000b1",
 		isMember: true,
 		permissions: ADMIN_IN_PROJECT,
+		// As the API counts what `apiAnswers` lists of it: nobody, and two bots.
+		memberCount: 0,
+		botCount: 2,
 		createdAt: "2026-09-09T00:00:00.000Z",
 	},
 ];
@@ -182,8 +199,6 @@ export const modelProviders: ModelProvider[] = [
 		signedIn: false,
 		customHeaders: [],
 		modelCount: 1,
-		enabledModelCount: 1,
-		lastTestedAt: "2026-09-11T00:00:00.000Z",
 		lastTestError: null,
 		connectedBy: null,
 		createdAt: "2026-09-09T00:00:00.000Z",
@@ -213,8 +228,6 @@ export const modelProviders: ModelProvider[] = [
 		signedIn: false,
 		customHeaders: [],
 		modelCount: 1,
-		enabledModelCount: 1,
-		lastTestedAt: "2026-09-11T00:00:00.000Z",
 		lastTestError: null,
 		connectedBy: null,
 		createdAt: "2026-09-09T00:00:00.000Z",
@@ -249,7 +262,7 @@ export const bots: Bot[] = [
 		disabledTools: [],
 		usesComputer: false,
 		naturalBrowsing: false,
-		createdById: null,
+		createdBy: null,
 		visibility: "public",
 		assistant: false,
 		pinned: true,
@@ -271,7 +284,7 @@ export const bots: Bot[] = [
 		disabledTools: [],
 		usesComputer: false,
 		naturalBrowsing: false,
-		createdById: null,
+		createdBy: null,
 		visibility: "public",
 		assistant: false,
 		pinned: true,
@@ -293,7 +306,7 @@ export const bots: Bot[] = [
 		disabledTools: [],
 		usesComputer: false,
 		naturalBrowsing: false,
-		createdById: sam.id,
+		createdBy: samAsCreator,
 		visibility: "public",
 		assistant: false,
 		pinned: true,
@@ -321,7 +334,7 @@ export const personalAssistant: Bot = {
 	disabledTools: [],
 	usesComputer: false,
 	naturalBrowsing: false,
-	createdById: sam.id,
+	createdBy: samAsCreator,
 	visibility: "private",
 	assistant: true,
 	pinned: false,
@@ -435,7 +448,6 @@ export function listedThread(
 		lastMessage: null,
 		participants: [],
 		messageCount: 1,
-		waitingOn: null,
 		unreadMessages: 0,
 		needsApproval: false,
 		mentionsYou: false,
@@ -447,11 +459,20 @@ export function listedThread(
 export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): void {
 	client.events.conversation.mockImplementation(() => quietEventStream());
 	client.events.workspace.mockImplementation(() => quietEventStream());
-	client.api.chats.projectMarkers.mockReturnValue(Effect.succeed({ projects: {}, bots: {} }));
+	client.api.chats.projectMarkers.mockReturnValue(Effect.succeed({ projects: {} }));
+	client.api.chats.attention.mockReturnValue(
+		Effect.succeed({
+			unreadInInbox: 0,
+			waitingApprovals: 0,
+			unreadForYou: 0,
+		}),
+	);
+	client.api.chats.recentThreads.mockReturnValue(Effect.succeed({ threads: [] }));
 	client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
 	client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.chats.directMessages.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.chats.markRead.mockReturnValue(Effect.succeed(undefined));
+	client.api.chats.markAllRead.mockReturnValue(Effect.succeed(undefined));
 	client.api.chats.markItemRead.mockReturnValue(Effect.succeed(undefined));
 	client.api.events.typing.mockReturnValue(Effect.succeed(undefined));
 	client.api.notifications.reportPresence.mockReturnValue(Effect.succeed(undefined));
@@ -532,23 +553,20 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	serveConnections();
 	client.api.conversations.list.mockReturnValue(Effect.succeed([]));
 	client.api.automations.list.mockReturnValue(Effect.succeed([]));
-	client.api.automations.listInWorkspace.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.automations.runs.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
+	client.api.automations.projectRuns.mockReturnValue(
+		Effect.succeed({ items: [], nextCursor: null }),
+	);
 	client.api.automations.getSecret.mockReturnValue(
 		Effect.succeed({ kind: "set", secret: "whsec_0123456789abcdefghijklmnop" }),
 	);
-	// A project has nothing in it until a case says so.
-	client.api.chats.list.mockReturnValue(Effect.succeed({ chats: [] }));
 	const reachable = [...bots, personalAssistant];
-	// Each bot has one thread, nothing said in it yet.
-	client.api.chats.botThreads.mockImplementation(({ params }: { params: { botId: string } }) => {
-		const bot = reachable.find((one) => one.id === params.botId);
-		if (!bot) return Effect.fail(new NotFound({ message: userText`No such bot` }));
+	// Each bot has one thread, nothing said in it yet; a project has nothing in it until a case says so.
+	client.api.chats.threads.mockImplementation(({ params }: { params: { projectId: string } }) => {
+		const bot = reachable.find((one) => one.defaultProjectId === params.projectId);
 		return Effect.succeed({
-			bot,
-			threads: [listedThread(threadWith(bot))],
+			threads: bot ? [listedThread(threadWith(bot))] : [],
 			automations: [],
-			summary: null,
 		});
 	});
 	client.api.chats.startInterview.mockReturnValue(Effect.succeed(null));
@@ -592,7 +610,6 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				providerId: "0199a3a0-0000-7000-8000-0000000000c1",
 				providerName: "Anthropic",
 				providerPreset: "anthropic",
-				providerActive: true,
 				modelId,
 				displayName: null,
 				capabilities: ["tools"],

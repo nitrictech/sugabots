@@ -10,20 +10,31 @@ import type { ReactNode } from "react";
 export function EmptyState({
 	title,
 	icon,
-	page = false,
+	page,
 	children,
 	className,
 }: {
 	title: ReactNode;
-	/** Standing in for a whole page, such as one whose address names nothing: held at least 320px tall. */
-	page?: boolean;
+	/**
+	 * Standing in for a whole page: `min`, such as one whose address names
+	 * nothing, is held at least 320px tall; `fill` is as tall as the page leaves
+	 * above the tabs, so there is nothing to scroll.
+	 */
+	page?: "min" | "fill";
 	/** A mark of what would be here, on a tile above the title. */
 	icon?: ReactNode;
 	children?: ReactNode;
 	className?: string;
 }) {
 	return (
-		<div className={cn("grid flex-1 place-items-center p-6", page && "min-h-80", className)}>
+		<div
+			className={cn(
+				"grid place-items-center",
+				page === "fill" ? "h-above-tab-bar px-6 pt-6 pb-26" : "flex-1 p-6",
+				page === "min" && "min-h-80",
+				className,
+			)}
+		>
 			<div className="flex max-w-100 flex-col items-center gap-2.5 text-center">
 				{icon && (
 					<span

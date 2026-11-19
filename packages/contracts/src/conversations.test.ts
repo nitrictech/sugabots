@@ -207,7 +207,6 @@ describe("conversation contracts", () => {
 		expect(
 			Schema.decodeSync(conversationSummarySchema)({
 				content: " ready ",
-				sourceMessageId: ID,
 				updatedAt: "2026-09-11T00:00:00Z",
 			}).content,
 		).toBe("ready");

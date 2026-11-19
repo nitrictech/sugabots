@@ -54,6 +54,7 @@ import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 import { AuthBackButton, AuthHeading, QuietLink } from "./AuthLayout.tsx";
@@ -113,7 +114,9 @@ function SetupSteps({ session, workspace, onAddress, onCancel }: SetupProps) {
 	// The Personal Assistant the workspace made for its maker, which the model step sets up,
 	// and the first bot they make here, a public one of the workspace's.
 	const assistant = bots?.find((bot) => bot.assistant);
-	const firstBot = bots?.find((bot) => !bot.assistant && bot.createdById === session.user?.id);
+	const firstBot = bots?.find(
+		(bot) => !bot.assistant && bot.createdBy !== null && bot.createdBy.id === session.user?.id,
+	);
 	const assistantHasModel =
 		models.data?.models.some((model) => model.modelId === assistant?.model) ?? false;
 	// Coming back part way through picks up where the workspace says it got to.
@@ -698,14 +701,14 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 						className="flex items-center gap-1.5 rounded-full bg-border-strong py-1 pr-1.5 pl-2.5 text-xs"
 					>
 						{email}
-						<button
-							type="button"
-							aria-label={`Remove ${email}`}
+						<IconButton
+							size="sm"
+							label={`Remove ${email}`}
 							onClick={() => setEmails((current) => current.filter((one) => one !== email))}
-							className="focus-ring grid size-4.5 place-items-center rounded-full text-soft-foreground"
+							className="size-4.5 text-soft-foreground [&_svg]:size-2.5"
 						>
-							<X aria-hidden size={10} strokeWidth={3} />
-						</button>
+							<X aria-hidden strokeWidth={3} />
+						</IconButton>
 					</span>
 				))}
 				<label htmlFor={inputId} className="sr-only">

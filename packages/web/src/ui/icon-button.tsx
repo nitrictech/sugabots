@@ -7,13 +7,8 @@ import { Tooltip } from "@/ui/tooltip.tsx";
  * A control that is only an icon.
  *
  * `label` is required and does two jobs: it names the button for a screen
- * reader and it is the tooltip. Making it one required prop is the point — the
- * three hand-rolled icon buttons this replaces had three different hover
- * treatments and only some of them had an accessible name.
- *
- * The hover wash comes from `--surface-accent`, so the same component is right
- * in the sidebar, in a panel header and in a dialog without being told which
- * it is in. See the surface tokens in app.css.
+ * reader and it is the tooltip, so no icon button goes without an accessible
+ * name.
  */
 
 const sizes = {
@@ -28,7 +23,7 @@ export interface IconButtonProps extends Omit<ComponentProps<"button">, "childre
 	children: ReactNode;
 	size?: keyof typeof sizes;
 	/**
-	 * `outline` for a bordered control that sits on a card or panel. `bar` for
+	 * `quiet` for a small control with no background until hovered. `bar` for
 	 * one in the header bar across the top of a list, chat or sidebar: a 30px
 	 * rounded square, whatever `size`, whose icon keeps the size it is given.
 	 * `round` for a close or a ⋯: a 29px filled circle, whatever `size`.
@@ -47,15 +42,7 @@ export interface IconButtonProps extends Omit<ComponentProps<"button">, "childre
 	render?: useRender.RenderProp;
 }
 
-type IconButtonVariant =
-	| "quiet"
-	| "outline"
-	| "pane"
-	| "bar"
-	| "round"
-	| "toolbar"
-	| "row"
-	| "destructive";
+type IconButtonVariant = "quiet" | "bar" | "round" | "toolbar" | "row" | "destructive";
 
 /** The variants drawn at one size whatever `size` says, and how. */
 const FIXED_SIZE_VARIANTS: Partial<Record<IconButtonVariant, string>> = {
@@ -93,13 +80,7 @@ export function iconButtonClassName(
 		"focus-ring grid shrink-0 cursor-pointer place-items-center rounded-full transition-colors disabled:cursor-default disabled:opacity-50 [&_svg]:pointer-events-none";
 	const fixed = FIXED_SIZE_VARIANTS[variant];
 	if (fixed) return cn(base, fixed);
-	return cn(
-		base,
-		variant === "quiet"
-			? "text-muted-foreground hover:bg-hover hover:text-foreground"
-			: "bg-chip text-foreground hover:bg-hover",
-		size === "lg" && variant === "pane" ? "size-8.5" : sizes[size],
-	);
+	return cn(base, "text-muted-foreground hover:bg-hover hover:text-foreground", sizes[size]);
 }
 
 /** IconButton uses label for both its accessible name and tooltip, with surface-relative styling. */

@@ -4,10 +4,11 @@ import type { BotStartedThread } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
-import { AuthenticatedUserId, CurrentActor } from "../../authorization/current-actor.ts";
+import { asAsker, type NobodyAsked } from "../../authorization/current-actor.ts";
 import { query, serviceOperations } from "../../database/database.ts";
 import { bot, conversation } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
+import type { FloorControl } from "../floor/floor-control.ts";
 import { madeByPeople } from "../repository/participants.ts";
 import { Chats } from "./chats.ts";
 
@@ -37,24 +38,12 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("BotThreads");
 	const chats = yield* Chats.Service;
 
-	/**
-	 * Runs `work` as the person the bot is answering. They signed in to post
-	 * the message the turn answers, which is the claim `vouchedFor` makes.
-	 */
-	const forAsker = <A, E, R>(
-		bot: Bot,
-		work: Effect.Effect<A, E, R>,
-	): Effect.Effect<A, E | NobodyAsked, Exclude<R, CurrentActor.Service>> =>
-		bot.askedBy
-			? work.pipe(CurrentActor.provide(AuthenticatedUserId.vouchedFor(bot.askedBy)))
-			: Effect.fail(new NobodyAsked());
-
 	return Service.of({
 		start: (bot, input) =>
 			operation(
 				"start",
-				forAsker(
-					bot,
+				asAsker(
+					bot.askedBy,
 					Effect.gen(function* () {
 						const host = input.withHandle
 							? yield* botWithHandle(bot.workspaceId, input.withHandle)
@@ -80,7 +69,7 @@ export const make = Effect.gen(function* () {
 		markDone: (bot, conversationId) =>
 			operation(
 				"markDone",
-				forAsker(bot, chats.setDone({ conversationId, done: true })).pipe(
+				asAsker(bot.askedBy, chats.setDone({ conversationId, done: true })).pipe(
 					Effect.catchTag("ResourceHidden", () =>
 						Effect.flatMap(conversationKind(bot.workspaceId, conversationId), (kind) =>
 							Effect.fail(
@@ -163,13 +152,7 @@ export type Refused =
 	| NotAThread
 	| ThreadHiddenFromAsker
 	| Chats.HostUnavailable
-	| Chats.HostHasNoModel;
-
-export class NobodyAsked extends Data.TaggedError("NobodyAsked") implements UserFacing {
-	get userMessage() {
-		return userText`Only a person can ask a bot to start a thread or mark one done, and this turn answers no one.`;
-	}
-}
+	| FloorControl.BotHasNoModel;
 
 export class NoBotWithHandle extends Data.TaggedError("NoBotWithHandle") implements UserFacing {
 	get userMessage() {

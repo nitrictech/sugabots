@@ -1,6 +1,6 @@
 import type { Project } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Lock, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { projectLink } from "@/lib/links.ts";
@@ -8,7 +8,7 @@ import { useJoinProject, useProjects } from "@/lib/projects.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { NewProjectDialog } from "@/shell/NewProject.tsx";
 import { Page } from "@/shell/Page.tsx";
-import { ProjectInitial } from "@/shell/SidebarProject.tsx";
+import { PrivateMark, ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -105,9 +105,7 @@ function ProjectRow({
 	const label = (
 		<span className="flex min-w-0 items-center gap-1.5">
 			<span className="truncate">{project.name}</span>
-			{project.visibility === "private" && (
-				<Lock role="img" aria-label="Private" size={11} strokeWidth={2.25} className="shrink-0" />
-			)}
+			{project.visibility === "private" && <PrivateMark />}
 		</span>
 	);
 	if (project.isMember) {

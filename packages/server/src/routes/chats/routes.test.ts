@@ -1,6 +1,7 @@
 import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
+import { FloorControl } from "@sugabots/core/conversations/floor/floor-control";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
@@ -13,7 +14,7 @@ import { createTestApp, identifiedBy, type UserResolver } from "../../http/app.t
 
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
 const MESSAGE = "0199a3a0-0000-7000-8000-000000000501";
-const BOT = "0199a3a0-0000-7000-8000-000000000601";
+const PROJECT = "0199a3a0-0000-7000-8000-000000000601";
 const UPLOAD = "0199a3a0-0000-7000-8000-000000000701";
 
 const resolveUser: UserResolver = async () => ({
@@ -40,28 +41,28 @@ const signedIn = (init: RequestInit = {}) => ({
 const startThread = (body: object = {}) =>
 	signedIn({ method: "POST", body: JSON.stringify({ id: MESSAGE, message: "Hi", ...body }) });
 
-describe("starting a thread with a bot", () => {
-	it("hands on the bot and the message, and no files, which can't be uploaded before it starts", async () => {
-		let asked: Parameters<Chats.Interface["startThread"]>[0] | undefined;
+describe("starting a thread in a project", () => {
+	it("hands on the project and the message, and no files, which can't be uploaded before it starts", async () => {
+		let asked: Parameters<Chats.Interface["startProjectThread"]>[0] | undefined;
 		await app({
-			startThread: (input) => {
+			startProjectThread: (input) => {
 				asked = input;
-				return Effect.fail(new Chats.HostHasNoModel());
+				return Effect.fail(new FloorControl.BotHasNoModel());
 			},
-		}).request(`/bots/${BOT}/threads`, startThread({ attachments: [UPLOAD] }));
+		}).request(`/projects/${PROJECT}/threads`, startThread({ attachments: [UPLOAD] }));
 
-		expect(asked).toEqual({ botId: BOT, messageId: MESSAGE, content: "Hi" });
+		expect(asked).toEqual({ projectId: PROJECT, messageId: MESSAGE, content: "Hi" });
 	});
 
-	it("is a conflict with a bot that has no model, and not found with one the person cannot see", async () => {
-		const refusing = (failure: Chats.HostHasNoModel | ResourceHidden) =>
-			app({ startThread: () => Effect.fail(failure) }).request(
-				`/bots/${BOT}/threads`,
+	it("is a conflict when a bot given the floor has no model, and not found in a project the person cannot see", async () => {
+		const refusing = (failure: FloorControl.BotHasNoModel | ResourceHidden) =>
+			app({ startProjectThread: () => Effect.fail(failure) }).request(
+				`/projects/${PROJECT}/threads`,
 				startThread(),
 			);
 
-		expect((await refusing(new Chats.HostHasNoModel())).status).toBe(409);
-		expect((await refusing(new ResourceHidden({ resource: "bot" }))).status).toBe(404);
+		expect((await refusing(new FloorControl.BotHasNoModel())).status).toBe(409);
+		expect((await refusing(new ResourceHidden({ resource: "project" }))).status).toBe(404);
 	});
 });
 

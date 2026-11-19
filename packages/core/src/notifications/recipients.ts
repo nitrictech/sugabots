@@ -175,7 +175,7 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 					? "mention"
 					: person.id === written.repliesTo
 						? "reply"
-						: person.participant && place.kind === "project_thread" && place.botId !== null
+						: person.participant && place.kind === "project_thread"
 							? "participant"
 							: "activity";
 		if (automationResult && reason !== "mention") return [];
@@ -510,7 +510,6 @@ const audienceOf = Effect.fn("Notifications.audienceOf")(function* (
 						kind: sql`${place.kind}`,
 						rootConversationId: sql`${place.rootConversationId}::uuid`,
 						projectId: sql`${place.projectId}::uuid`,
-						botId: sql`${place.botId}::uuid`,
 					},
 					user.id,
 				),

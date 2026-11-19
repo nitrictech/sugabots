@@ -1,6 +1,6 @@
 import { cn } from "cn";
 import { Search } from "lucide-react";
-import { useDeferredValue, useState } from "react";
+import { type KeyboardEvent, useDeferredValue, useState } from "react";
 
 /*
  * A box to search a list by typing, with a magnifier at its start. Escape
@@ -38,6 +38,8 @@ export function SearchField({
 	onChange,
 	placeholder = label,
 	look = "dialog",
+	autoComplete,
+	onKeyDown,
 	className,
 }: {
 	/** Names the field for assistive technology, such as "Search models". */
@@ -46,6 +48,9 @@ export function SearchField({
 	onChange: (value: string) => void;
 	placeholder?: string;
 	look?: keyof typeof looks;
+	autoComplete?: string;
+	/** Keys other than the Escape that clears it, such as arrows into the list it searches. */
+	onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
 	className?: string;
 }) {
 	const { box, icon, iconSize, input } = looks[look];
@@ -57,12 +62,13 @@ export function SearchField({
 				value={value}
 				onChange={(event) => onChange(event.target.value)}
 				onKeyDown={(event) => {
-					if (event.key !== "Escape" || value === "") return;
+					if (event.key !== "Escape" || value === "") return onKeyDown?.(event);
 					// Clearing takes this Escape, so a dialog around the field stays open.
 					event.stopPropagation();
 					onChange("");
 				}}
 				placeholder={placeholder}
+				autoComplete={autoComplete}
 				aria-label={label}
 				className={cn(
 					"min-w-0 flex-1 bg-transparent text-foreground outline-none [&::-webkit-search-cancel-button]:hidden",
@@ -89,12 +95,20 @@ export function useSearchFilter<Item>(
 	matches: readonly Item[];
 } {
 	const [query, setQuery] = useState("");
-	const needle = useDeferredValue(query.trim().toLowerCase());
-	const matches =
-		needle === ""
-			? items
-			: items.filter((item) =>
-					fields(item).some((field) => field?.toLowerCase().includes(needle) ?? false),
-				);
-	return { query, setQuery, searching: needle !== "", matches };
+	const deferred = useDeferredValue(query);
+	const searching = deferred.trim() !== "";
+	const matches = searching ? items.filter((item) => matchesSearch(fields(item), deferred)) : items;
+	return { query, setQuery, searching, matches };
+}
+
+/**
+ * Whether one of `fields` holds `query`, ignoring case and the spaces around
+ * it. Anything matches an empty query.
+ */
+export function matchesSearch(
+	fields: readonly (string | null | undefined)[],
+	query: string,
+): boolean {
+	const needle = query.trim().toLowerCase();
+	return needle === "" || fields.some((field) => field?.toLowerCase().includes(needle) ?? false);
 }

@@ -1,4 +1,4 @@
-import type { ModelProvider, WorkspaceModelsResponse } from "@sugabots/contracts";
+import type { ModelProvider, NamedPerson, WorkspaceModelsResponse } from "@sugabots/contracts";
 import {
 	presetSignsIn,
 	providerIsConnected,
@@ -7,6 +7,7 @@ import {
 } from "@sugabots/contracts";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
+import { namedPersonColumns } from "../../conversations/repository/participants.ts";
 import { type Executor, query } from "../../database/database.ts";
 import {
 	type ModelProviderRow,
@@ -14,6 +15,7 @@ import {
 	type ProviderModelRow,
 	providerModel,
 	user,
+	workspaceMember,
 } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
 import { defaultModelOf, offeredIn } from "./model-provider-repository.ts";
@@ -96,7 +98,6 @@ export const offeredModels = (workspaceId: string) =>
 					providerId: provider.id,
 					providerName: provider.name,
 					providerPreset: provider.preset,
-					providerActive: provider.active,
 					modelId: model.modelId,
 					displayName: model.displayName,
 					capabilities: model.capabilities.filter(
@@ -117,17 +118,24 @@ function inListOrder<Row extends { provider: ModelProviderRow }>(rows: Row[]): R
 	return rows.toSorted((a, b) => rank(a) - rank(b));
 }
 
-/** Providers with the name of whoever connected each, while they still have an account. */
+/** Providers with whoever connected each, while they are still in the workspace. */
 function withConnectedBy(db: Executor) {
 	return db
-		.select({ provider: modelProvider, connectedBy: user.name })
+		.select({ provider: modelProvider, connectedBy: namedPersonColumns })
 		.from(modelProvider)
-		.leftJoin(user, eq(user.id, modelProvider.connectedById));
+		.leftJoin(
+			workspaceMember,
+			and(
+				eq(workspaceMember.workspaceId, modelProvider.workspaceId),
+				eq(workspaceMember.userId, modelProvider.connectedById),
+			),
+		)
+		.leftJoin(user, eq(user.id, workspaceMember.userId));
 }
 
 function toProvider(
 	row: ModelProviderRow,
-	connectedBy: string | null,
+	connectedBy: NamedPerson | null,
 	models: ProviderModelRow[],
 ): ModelProvider {
 	const hasApiKey = row.apiKeyEncrypted !== null;
@@ -158,8 +166,6 @@ function toProvider(
 		signedIn,
 		customHeaders: row.customHeadersEncrypted.map(({ name }) => ({ name })),
 		modelCount: models.length,
-		enabledModelCount: models.filter(({ enabled }) => enabled).length,
-		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
 		connectedBy: connected ? connectedBy : null,
 		createdAt: row.createdAt.toISOString(),

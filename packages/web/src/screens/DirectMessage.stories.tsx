@@ -109,7 +109,7 @@ export const WithAPerson = meta.story({
 		await expect(canvas.getByRole("heading", { level: 1, name: priya.name })).toBeVisible();
 		await expect(canvas.getByRole("textbox", { name: `Message ${priya.name}` })).toBeVisible();
 		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
-		const section = canvas.getByRole("region", { name: "Direct messages" });
+		const section = canvas.getByRole("group", { name: "Direct messages" });
 		await expect(within(section).getByRole("link", { name: /^Priya Shah(?!,)/ })).toHaveAttribute(
 			"aria-current",
 			"page",

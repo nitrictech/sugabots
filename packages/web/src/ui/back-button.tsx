@@ -63,7 +63,7 @@ export function BackButton({
  * - `leaveFor(isHome, toHome)` goes back only when the page behind is home,
  *   as `isHome` tells it, and otherwise `toHome`: for a page that is gone,
  *   whose Back would otherwise return to it, or a run or collaboration that must close onto
- *   its own chat rather than whatever was open before it.
+ *   the thread it is in rather than whatever was open before it.
  * - `label(home)` names where `leave` goes: plainly "Back" to the opener, or
  *   "Back to" `home`.
  */

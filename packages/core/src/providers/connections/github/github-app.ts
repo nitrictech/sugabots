@@ -156,7 +156,6 @@ export const make = Effect.gen(function* () {
 						step: "make",
 						workspaceId: project.workspaceId,
 						projectId: project.id,
-						botId: project.defaultOfBotId,
 						connectionId,
 					});
 					const manifest = GitHub.appManifest({
@@ -266,7 +265,6 @@ export const make = Effect.gen(function* () {
 						step: "install",
 						workspaceId: project.workspaceId,
 						projectId: project.id,
-						botId: project.defaultOfBotId,
 						connectionId,
 					});
 					return GitHub.installAppUrl(row.settings.slug, state);
@@ -295,17 +293,15 @@ export type SetupOutcome =
 			readonly failure: GitHubSetupFailure;
 	  };
 
-/** The project being connected, and its bot when it is the bot's default project. */
+/** The project being connected. */
 interface SetupProject {
 	readonly workspaceId: string;
 	readonly projectId: string;
-	readonly botId: string | null;
 }
 
-const setupProjectOf = ({ workspaceId, projectId, botId }: SetupProject): SetupProject => ({
+const setupProjectOf = ({ workspaceId, projectId }: SetupProject): SetupProject => ({
 	workspaceId,
 	projectId,
-	botId,
 });
 
 /** How long a person has to finish a step on GitHub's pages. */
@@ -328,7 +324,6 @@ const SetupStateJson = Schema.fromJsonString(
 		step: Schema.Literals(["make", "install"]),
 		workspaceId: Schema.String,
 		projectId: Schema.String,
-		botId: Schema.NullOr(Schema.String),
 		connectionId: Schema.String,
 		userId: Schema.String,
 		expiresAt: Schema.Finite,

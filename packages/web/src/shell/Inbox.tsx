@@ -3,12 +3,7 @@ import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import { CheckCheck, Inbox as InboxIcon, ListFilter, MessageCircle } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
-import {
-	useAttentionCounts,
-	useDirectMessages,
-	useInboxFeed,
-	useMarkConversationsRead,
-} from "@/lib/chats.ts";
+import { useAttentionCounts, useInboxFeed, useMarkAllRead } from "@/lib/chats.ts";
 import { directMessageLink, inboxItemPageLink, inboxMessageLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
@@ -17,13 +12,15 @@ import {
 	automationText,
 	collaborationText,
 	collaborationWorkState,
-	type WorkState,
+	workStateOf,
 } from "@/lib/work-state.ts";
 import { AutomationTriggerIcon } from "@/screens/RunRow.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ListTime, PageHeader } from "@/shell/Page.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
+import { AttentionDot } from "@/ui/attention-dot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { Button } from "@/ui/button.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -33,7 +30,6 @@ import {
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton, ROOMY_ON_PHONE } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
 
 /** A kind of item in the feed, which the filter can narrow Inbox to. */
 type Kind = InboxItem["kind"];
@@ -77,34 +73,11 @@ export function Inbox({ children }: { children: ReactNode }) {
 		if (!next.delete(kind)) next.add(kind);
 		setKinds(next);
 	};
-	const markRead = useMarkConversationsRead();
-	const directMessages = useDirectMessages();
-	const directIds = new Set(directMessages.data?.items.map((item) => item.conversation.id));
-	// A direct message between people opens among them; the rest open here, in a project or with a bot.
-	const placeOf = (item: InboxItem): RowPlace | undefined => {
-		// Runs and collaborations are bots' work, never in a direct message.
-		if (item.kind === "run" || item.kind === "collaboration") return { kind: "bot" };
-		if (item.projectId !== null) {
-			const project = projects?.find((candidate) => candidate.id === item.projectId);
-			return project && { kind: "project", project };
-		}
-		// Outside a project, a message is in a bot's thread or a direct message: which, once the direct messages are known.
-		if (!directMessages.isSuccess) return undefined;
-		return directIds.has(item.rootConversationId) ? { kind: "direct" } : { kind: "bot" };
-	};
-	// Each item is read as its conversation is, so marking those reads them all;
-	// and every direct message with anything unread, which the app's badge counts
-	// however long ago it was written, past what the feed holds.
-	const unreadConversationIds = [
-		...new Set([
-			...(feed.data?.items ?? [])
-				.filter((item) => item.unread)
-				.map((item) => item.rootConversationId),
-			...(directMessages.data?.items ?? [])
-				.filter((item) => item.unreadMessages > 0)
-				.map((item) => item.conversation.id),
-		]),
-	];
+	const markAllRead = useMarkAllRead();
+	const { unreadInInbox, unreadForYou } = useAttentionCounts();
+	// What the feed lists, and what the app's badge counts, which reaches past the feed's window.
+	const anythingUnread =
+		unreadInInbox > 0 || unreadForYou > 0 || (feed.data?.items ?? []).some((item) => item.unread);
 
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1">
@@ -142,13 +115,13 @@ export function Inbox({ children }: { children: ReactNode }) {
 								<UnreadOnlyIcon />
 							</IconButton>
 							<KindFilter kinds={counted} chosen={kinds} onToggle={toggleKind} />
-							{unreadConversationIds.length > 0 && (
+							{anythingUnread && (
 								<IconButton
 									label="Mark all as read"
 									variant="bar"
 									className={ROOMY_ON_PHONE}
-									disabled={markRead.isPending}
-									onClick={() => markRead.mutate(unreadConversationIds)}
+									disabled={markAllRead.isPending}
+									onClick={() => markAllRead.mutate()}
 								>
 									<CheckCheck size={16} strokeWidth={1.75} />
 								</IconButton>
@@ -173,19 +146,24 @@ export function Inbox({ children }: { children: ReactNode }) {
 								{unreadOnly ? "Nothing unread" : "Nothing here yet"}
 							</p>
 							{unreadOnly && (
-								<button
-									type="button"
+								<Button
+									variant="quiet"
+									size="text"
 									onClick={() => setUnreadOnly(false)}
-									className="focus-ring rounded-md font-medium text-xs text-foreground max-md:text-sm"
+									className="max-md:text-sm"
 								>
 									Show everything
-								</button>
+								</Button>
 							)}
 						</li>
 					)}
 					{items.map((item) => (
 						<li key={itemIdOf(item)}>
-							<InboxRow item={item} place={placeOf(item)} selected={isChosen(item, chosen)} />
+							<InboxRow
+								item={item}
+								project={projectOf(item, projects)}
+								selected={isChosen(item, chosen)}
+							/>
 						</li>
 					))}
 				</ul>
@@ -306,13 +284,6 @@ function isChosen(item: InboxItem, chosen: ChosenItem | undefined): boolean {
 		: item.messageId === chosen.messageId;
 }
 
-/** How an automation run's state reads in its row, as its line in the conversation says it. */
-function runState(state: Extract<InboxItem, { kind: "run" }>["state"]): WorkState {
-	if (state === "completed") return "done";
-	if (state === "failed" || state === "cancelled") return "failed";
-	return "running";
-}
-
 /** What a row says happened, and the line under it. */
 function wordsOf(item: InboxItem): { title: string; detail: string } {
 	switch (item.kind) {
@@ -328,7 +299,7 @@ function wordsOf(item: InboxItem): { title: string; detail: string } {
 			return {
 				title: item.mentionsYou
 					? `${item.automationName} needs you`
-					: automationText(item.automationName, runState(item.state)),
+					: automationText(item.automationName, workStateOf(item.state)),
 				detail: item.preview ?? item.bot.name,
 			};
 		case "collaboration":
@@ -402,8 +373,12 @@ function itemIdOf(item: InboxItem): string {
 		: item.messageId;
 }
 
-/** Where a row's item is: in a project, with a bot, or in a direct message between people. */
-type RowPlace = { kind: "project"; project: Project } | { kind: "bot" } | { kind: "direct" };
+/** The project an item is in, once the projects are loaded; none in a bot's own threads or a direct message. */
+function projectOf(item: InboxItem, projects: readonly Project[] | undefined): Project | undefined {
+	const { place } = item;
+	if (place.kind !== "project") return undefined;
+	return projects?.find((project) => project.id === place.projectId);
+}
 
 /**
  * Where a row opens: a run or collaboration as a page of its own, and a
@@ -423,27 +398,21 @@ function linkOf(item: InboxItem) {
  */
 function InboxRow({
 	item,
-	place,
+	project,
 	selected,
 }: {
 	item: InboxItem;
-	/** Where the item is, once the projects are loaded; until then the row cannot open. */
-	place: RowPlace | undefined;
+	/** The project it is in, marked on the row once the projects are loaded. */
+	project: Project | undefined;
 	/** Whether it is the one open beside the list. */
 	selected: boolean;
 }) {
 	const { title, detail } = wordsOf(item);
-	const project = place?.kind === "project" ? place.project : undefined;
+	const direct = item.place.kind === "direct_message";
 	const content = (
 		<>
 			<span className="w-1.5 shrink-0 pt-1.75">
-				{item.unread && (
-					<Tooltip label="Unread" side="right">
-						<span className="block size-1.5 rounded-full bg-foreground">
-							<span className="sr-only">Unread</span>
-						</span>
-					</Tooltip>
-				)}
+				{item.unread && <AttentionDot attention="unread" label="Unread" className="block" />}
 			</span>
 			<span aria-hidden className="flex shrink-0">
 				<FaceOf item={item} />
@@ -464,7 +433,7 @@ function InboxRow({
 							<span className="sr-only">in {project.name}</span>
 						</span>
 					)}
-					{place?.kind === "direct" && (
+					{direct && (
 						<span title="Direct message" className="flex text-muted-foreground">
 							<MessageCircle aria-hidden size={14} strokeWidth={2} />
 							<span className="sr-only">in a direct message</span>
@@ -478,17 +447,14 @@ function InboxRow({
 			</span>
 		</>
 	);
-	const layout = "flex gap-3 rounded-lg p-2.5";
-	if (!place) return <div className={layout}>{content}</div>;
 	return (
 		<Link
-			{...(place.kind !== "direct"
-				? linkOf(item)
-				: directMessageLink(item.rootConversationId, { message: itemMessageId(item) }))}
+			{...(direct
+				? directMessageLink(item.rootConversationId, { message: itemMessageId(item) })
+				: linkOf(item))}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
-				layout,
-				"focus-ring transition-colors",
+				"focus-ring flex gap-3 rounded-lg p-2.5 transition-colors",
 				selected ? "bg-row-selected" : "hover:bg-row-hover max-md:active:bg-row-selected",
 			)}
 		>

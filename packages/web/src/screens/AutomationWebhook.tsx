@@ -33,8 +33,12 @@ import { resourcePermissions } from "@/lib/resource-owner.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { SettingsMenuRow } from "@/ui/settings-menu-row.tsx";
-import { SettingsControlRow, SettingsFieldLabel, SettingsGroup } from "@/ui/settings-page.tsx";
+import {
+	SettingsControlRow,
+	SettingsFieldLabel,
+	SettingsGroup,
+	SettingsMenuRow,
+} from "@/ui/settings-page.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import type { PlacedAutomation } from "./AutomationEditor.tsx";
 import { FilterGroup } from "./AutomationWebhookFilter.tsx";
@@ -46,7 +50,7 @@ import { FilterGroup } from "./AutomationWebhookFilter.tsx";
  */
 
 /** What a webhook starts with until somebody chooses: a signature, which most senders make. */
-export const DEFAULT_WEBHOOK_AUTH: WebhookAuth = {
+const DEFAULT_WEBHOOK_AUTH: WebhookAuth = {
 	kind: "hmac",
 	header: "X-Signature",
 	algorithm: "sha256",
@@ -427,7 +431,7 @@ function CommittedFieldRow({
 				autoComplete="off"
 				spellCheck={false}
 				placeholder={placeholder}
-				className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
+				className="focus-ring -mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-xs text-foreground placeholder:text-muted-foreground"
 			/>
 		</SettingsControlRow>
 	);
@@ -527,7 +531,7 @@ function SecretField({
 					autoComplete="off"
 					spellCheck={false}
 					placeholder={secretPlaceholder(auth)}
-					className="-mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-xs text-foreground outline-none placeholder:font-sans placeholder:text-sm placeholder:text-muted-foreground focus-visible:shadow-(--ring-shadow)"
+					className="focus-ring -mx-1 -my-1 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 font-mono text-xs text-foreground placeholder:font-sans placeholder:text-sm placeholder:text-muted-foreground"
 				/>
 				{field.value !== "" && (
 					<>

@@ -25,6 +25,7 @@ import { PlainChatHeader } from "@/screens/ChatHeader.tsx";
 import { ConversationPage } from "@/screens/ConversationPage.tsx";
 import { DirectPeopleAvatar } from "@/shell/DirectMessages.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { useSearchFilter } from "@/ui/search-field.tsx";
 
 /** The most others a direct message holds: everyone in it but the sender. */
@@ -269,14 +270,14 @@ export function NewDirectMessagePage() {
 									<PersonAvatar person={person} size={20} />
 								</span>
 								{person.name}
-								<button
-									type="button"
-									aria-label={`Remove ${person.name}`}
+								<IconButton
+									size="sm"
+									label={`Remove ${person.name}`}
 									onClick={() => remove(person.id)}
-									className="focus-ring grid size-5 place-items-center rounded-xs text-muted-foreground hover:bg-hover hover:text-foreground"
+									className="rounded-xs [&_svg]:size-3"
 								>
-									<X size={12} strokeWidth={2.4} />
-								</button>
+									<X aria-hidden strokeWidth={2.4} />
+								</IconButton>
 							</li>
 						))}
 					</ul>

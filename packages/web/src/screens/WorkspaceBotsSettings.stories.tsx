@@ -5,14 +5,7 @@ import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import {
-	appHandlers,
-	connectionHandlers,
-	StoryApp,
-	storyBots,
-	storyModel,
-	storyProjects,
-} from "../story-app.tsx";
+import { appHandlers, connectionHandlers, StoryApp, storyBots, storyModel } from "../story-app.tsx";
 
 /*
  * A bot's settings, opened from Bots: its contact card, with its profile,
@@ -26,7 +19,7 @@ import {
 const API = import.meta.env.VITE_API_URL as string;
 const cardPath = `/nitric/settings/bots/${growthDesk.handle}`;
 
-/** The workspace's switched-on models across three providers, so the Model page groups them. */
+/** The workspace's switched-on models across three providers, to choose the bot's model from. */
 const models = [
 	storyModel,
 	{ ...storyModel, modelId: "claude-opus-4-1", displayName: "Claude Opus" },
@@ -70,7 +63,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		projectId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: growthDesk.defaultProjectId,
 		name,
 		handle,
 		url,
@@ -83,7 +76,6 @@ function connection(
 		appSettingsUrl: null,
 		status: "connected",
 		tools: tools.map((tool) => ({ ...tool, access: "allow" as const })),
-		lastTestedAt: "2026-09-18T06:00:00.000Z",
 		lastTestError: null,
 		connectedBy: null,
 		createdAt: "2026-09-01T00:00:00.000Z",
@@ -117,7 +109,7 @@ function automation(
 		triggers: automationTriggers(id, trigger),
 		state,
 		createdById: null,
-		createdByBotId: null,
+		pausedAfterFailures: false,
 		createdAt: "2026-09-01T00:00:00.000Z",
 		updatedAt: "2026-09-01T00:00:00.000Z",
 	};
@@ -191,66 +183,65 @@ export const Look = meta.story({
 	},
 });
 
-/** The Model page: the switched-on models grouped by provider, the one in use checked. */
+/** The model, chosen in its profile from the models switched on for the workspace, each by its provider, the one in use checked. */
 export const ModelPage = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: /^Model/ }));
-		await expect(await canvas.findByRole("heading", { name: "OpenAI" })).toBeInTheDocument();
-		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
-		// The model in use is checked and pressed.
+		await userEvent.click(await canvas.findByRole("button", { name: "Model: Claude Sonnet" }));
+		const menu = await screen.findByRole("menu");
+		await expect(within(menu).getByRole("menuitemradio", { name: /^GPT-5/ })).toHaveAttribute(
+			"aria-checked",
+			"false",
+		);
 		await expect(
-			canvas.getByRole("button", { name: "Claude Sonnet", pressed: true }),
-		).toBeInTheDocument();
-		await expect(
-			within(canvas.getByRole("main")).getByRole("link", { name: "Models" }),
-		).toHaveAttribute("href", "/nitric/settings/providers");
+			within(menu).getByRole("menuitemradio", { name: /^Claude Sonnet/ }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(within(menu).getByText("OpenAI")).toBeInTheDocument();
 	},
 });
 
-/** A member of the workspace who may not change its bots or its models. */
+/** A member of the workspace who may not change the bot. */
 function memberHandlers() {
 	return appHandlers({
 		models,
-		bots,
-		role: "member",
-		projects: storyProjects.map((project) => ({
-			...project,
+		bots: bots.map((bot) => ({
+			...bot,
 			permissions: {
-				...project.permissions,
-				createBots: false,
-				updateBots: false,
-				deleteBots: false,
-				manageAutomations: false,
-				manageConnections: false,
-				manageComputer: false,
+				...bot.permissions,
+				update: false,
+				delete: false,
+				resources: {
+					...bot.permissions.resources,
+					manageAutomations: false,
+					manageConnections: false,
+					manageComputer: false,
+				},
 			},
 		})),
+		role: "member",
 	});
 }
 
-/** The Model page for a member: the models stated, and a workspace admin named as who adds more. */
+/** The model for a member: stated, not a menu to choose from. */
 export const MemberModelPage = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...memberHandlers());
 	},
 	play: async ({ canvas }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: /^Model/ }));
-		await expect(await canvas.findByText(/ask a workspace admin/)).toBeInTheDocument();
 		await expect(
-			within(canvas.getByRole("main")).queryByRole("link", { name: "Models" }),
-		).toBeNull();
+			await canvas.findByRole("button", { name: "Model: Claude Sonnet" }),
+		).toBeDisabled();
 	},
 });
 
 /** The bot's instructions, on its card, counted against their limit. */
 export const InstructionsPage = meta.story({
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByLabelText("Instructions")).toBeInTheDocument();
+		await expect(await canvas.findByRole("textbox", { name: "Instructions" })).toBeInTheDocument();
 		await expect(canvas.getByText(/of 20,000 characters/)).toBeInTheDocument();
 	},
 });
 
-/** A bot with its connections, shown but not changed here, and its two automations counted, with the way to its automations page. */
+/** A bot with its connections, each with how many tools it can use, and its two automations counted, with the way to its Automations page. */
 export const ToolsAndAutomations = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
@@ -259,14 +250,15 @@ export const ToolsAndAutomations = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		const inherited = await canvas.findByRole("region", { name: /^Inherited from / });
-		await expect(await within(inherited).findByText("HubSpot")).toBeInTheDocument();
-		await expect(within(inherited).queryByRole("switch")).toBeNull();
+		const connections = await canvas.findByRole("region", { name: "Connections" });
+		await expect(await within(connections).findByText("HubSpot")).toBeInTheDocument();
+		await expect(within(connections).getAllByText("2 tools")).not.toHaveLength(0);
+		await expect(within(connections).queryByRole("switch")).toBeNull();
 		const automationsRow = canvas.getByRole("link", { name: /^Automations/ });
 		await waitFor(() => expect(within(automationsRow).getByText("2")).toBeInTheDocument());
 		await expect(automationsRow).toHaveAttribute(
 			"href",
-			expect.stringMatching(/\/automations\?bot=/),
+			`/nitric/bots/${growthDesk.handle}/automations`,
 		);
 	},
 });

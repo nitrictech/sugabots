@@ -35,9 +35,11 @@ import { Models } from "../../providers/models/models.ts";
 import { lane } from "../../workflows/sql.ts";
 import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
 import { SYSTEM_BOTS } from "../../workspaces/bots/system-bots.ts";
+import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatView } from "../chats/chat-view.ts";
 import { Chats } from "../chats/chats.ts";
+import { startBotThread } from "../chats/testing.ts";
 import { compactionLane } from "../compaction/compaction.workflow.ts";
 import { Compactions } from "../compaction/compactions.ts";
 import { compactionLineTokens } from "../compaction/window.ts";
@@ -96,7 +98,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 
 	/** A thread the person starts with the bot by sending it `message`, which the bot is asked to answer. */
 	async function startThread(input: { botId: string; startedById: string; message: string }) {
-		const started = await chatsAs(input.startedById).startThread({
+		const started = await startBotThread(chatsAs(input.startedById), {
 			botId: input.botId,
 			messageId: crypto.randomUUID(),
 			content: input.message,
@@ -264,10 +266,10 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				{ workspaceId, projectId, botId: otherRow.id },
 			]),
 		);
-		const chats = chatsAs(memberId);
-		const projectThread = await chats.startNamedThread({ projectId, name: "General" });
-		const posted = await chats.post({
-			conversationId: projectThread.id,
+		const { conversation: projectThread, message: posted } = await chatsAs(
+			memberId,
+		).startProjectThread({
+			projectId,
 			messageId: crypto.randomUUID(),
 			content: "Who should answer this?",
 		});
@@ -577,7 +579,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				]),
 		);
 		const recentIds = async () =>
-			(await threadsAs(memberId).botThreads(botId)).threads
+			(await threadsAs(memberId).threads(await runOnPostgres(defaultProjectOf(botId)))).threads
 				.find((listed) => listed.conversation.id === details.conversation.id)
 				?.participants.map(({ id }) => id);
 
@@ -673,7 +675,6 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		expect(summariesConversation?.title).toBe("Summaries of Verify the release");
 		expect((await viewAs(memberId).activity(started.id))?.summary).toMatchObject({
 			content: "The release work is complete.",
-			sourceMessageId: preparedTurn.responseMessage.id,
 		});
 		// The Summariser's own turn, measured at 1,000 tokens, is in a conversation of its own, so
 		// the context is the bot reply's.
@@ -786,10 +787,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		);
 		if (!host) throw new Error("The bot is gone");
 		await onDatabase((db) => db.insert(projectBot).values({ workspaceId, projectId, botId }));
-		const chats = chatsAs(memberId);
-		const projectThread = await chats.startNamedThread({ projectId, name: "General" });
-		await chats.post({
-			conversationId: projectThread.id,
+		const { conversation: projectThread } = await chatsAs(memberId).startProjectThread({
+			projectId,
 			messageId: crypto.randomUUID(),
 			content: `@${host.handle} what changed?`,
 		});
@@ -876,18 +875,6 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				.where(eq(event.type, "turn.cancel_requested")),
 		);
 		expect(announced.filter(({ payload }) => payload.turnId === prepared.turnId)).toHaveLength(1);
-	});
-
-	it("does not expose a private bot's thread to another workspace member", async () => {
-		await makeBotPrivate();
-		const details = await startThreadShown({
-			botId,
-			startedById: memberId,
-			message: "Private to its creator",
-		});
-
-		await expect(viewAs(outsiderId).get(details.conversation.id)).rejects.toThrow(ResourceHidden);
-		expect(await viewAs(outsiderId).list(workspaceId)).toEqual([]);
 	});
 
 	it("compacts a long thread into a summary and the newest messages, and searches what came before", async () => {

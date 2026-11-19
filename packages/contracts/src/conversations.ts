@@ -639,15 +639,8 @@ export const MAX_SUMMARY_CHARACTERS = 4_000;
 /** The most a bot's summary of what it has been doing may say. */
 export const MAX_BOT_SUMMARY_CHARACTERS = 1_000;
 
-/** What a bot has been doing lately, written by the Summariser from its threads' summaries. */
-export const botSummarySchema = Schema.Struct({
-	content: Schema.String,
-	updatedAt: isoTimestampSchema,
-});
-
 export const conversationSummarySchema = Schema.Struct({
 	content: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_SUMMARY_CHARACTERS)),
-	sourceMessageId: uuidSchema,
 	updatedAt: isoTimestampSchema,
 });
 
@@ -688,7 +681,7 @@ export const conversationDetailsSchema = Schema.Struct({
 			id: uuidSchema,
 			projectId: uuidSchema,
 			state: automationStateSchema,
-			/** Its latest run failed, and nothing has run it since. */
+			/** It is failing: it paused itself after failing, or it is enabled and its latest run failed. */
 			failed: Schema.Boolean,
 			/** It paused itself after failing twice in a row. */
 			pausedAfterFailures: Schema.Boolean,

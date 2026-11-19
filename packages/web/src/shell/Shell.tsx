@@ -40,7 +40,6 @@ export function Shell() {
 				<div className="relative flex min-h-0 min-w-0 flex-1">
 					<SlidingSidebar hiding={sidebarHiding}>
 						<Sidebar
-							toggleRoom={sidebarHiding.chatShowing}
 							// Peeking over a conversation, it is only borrowed, so it keeps the width it has.
 							resizable={!(sidebarHiding.hidden && sidebarHiding.chatShowing)}
 						/>

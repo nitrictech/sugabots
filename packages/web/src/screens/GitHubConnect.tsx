@@ -122,6 +122,8 @@ export function GitHubRepositoriesGroup({
 		<>
 			<SettingsGroup
 				label="Repositories"
+				// On the connection's page, straight under the page's own heading.
+				headingLevel={2}
 				note={
 					<>
 						The project's bots read these from its computer, and work on them with the tools below.

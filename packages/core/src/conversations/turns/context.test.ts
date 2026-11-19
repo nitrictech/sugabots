@@ -92,7 +92,7 @@ describe("modelPrompt", () => {
 		const inProject = context();
 		inProject.conversation.kind = "project_thread";
 		inProject.conversation.botId = null;
-		inProject.project = { name: "Release" };
+		inProject.project = { name: "Release", slug: "release" };
 		const instruction = modelPrompt(inProject, environment()).messages.at(-1)?.content ?? "";
 		expect(instruction).toContain('You are in "Check the release" in the project Release');
 		expect(instruction).toContain(`call ${START_THREAD_TOOL}`);
@@ -163,7 +163,7 @@ describe("modelPrompt", () => {
 			"In Sydney time (Australia/Sydney), it is Friday, 25 September 2026, 13:00.",
 		);
 		expect(instruction([])).toContain(
-			'naming the zone once when you confirm a schedule ("8am Sydney time")',
+			'naming the zone once when you confirm when it runs ("8am Sydney time")',
 		);
 		expect(instruction([])).toContain("Don't ask the person for their timezone");
 		expect(instruction(["automations"])).not.toContain("Routines you set up");
