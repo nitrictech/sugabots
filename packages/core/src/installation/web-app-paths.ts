@@ -5,8 +5,6 @@
  * for a link that leaves the app.
  */
 
-import type { PlacedConversationRow } from "../database/schema.ts";
-
 /** Optional query parameters, such as the message to show. */
 type Search = Record<string, string>;
 
@@ -21,38 +19,38 @@ export const projectPath = (workspaceSlug: string, projectSlug: string) =>
 export const botPath = (workspaceSlug: string, botHandle: string) =>
 	`/${workspaceSlug}/bots/${botHandle}`;
 
+/** A bot, by its handle, or a project people made, by its slug. */
+type PagePlace = { workspaceSlug: string } & ({ botHandle: string } | { projectSlug: string });
+
+/**
+ * The page of a bot, by its handle, or of a project people made, by its slug;
+ * a bot's default project is shown on the bot's page.
+ */
+const ownerPagePath = (place: PagePlace) =>
+	"botHandle" in place
+		? botPath(place.workspaceSlug, place.botHandle)
+		: projectPath(place.workspaceSlug, place.projectSlug);
+
 /**
  * The automations page of a bot, by its handle, or of a project people made,
  * by its slug: a bot's own automations are its default project's, shown on
  * the bot's page. With `automationId`, that automation on it.
  */
-export const automationsPagePath = (
-	place: { workspaceSlug: string } & ({ botHandle: string } | { projectSlug: string }),
-	automationId?: string,
-) => {
-	const owner =
-		"botHandle" in place
-			? botPath(place.workspaceSlug, place.botHandle)
-			: projectPath(place.workspaceSlug, place.projectSlug);
-	return automationId === undefined
-		? `${owner}/automations`
-		: `${owner}/automations/${automationId}`;
-};
+export const automationsPagePath = (place: PagePlace, automationId?: string) =>
+	automationId === undefined
+		? `${ownerPagePath(place)}/automations`
+		: `${ownerPagePath(place)}/automations/${automationId}`;
 
+/** A bot's settings, by its handle: a page of the bot's own, beside its threads. */
 export const botSettingsPath = (workspaceSlug: string, botHandle: string) =>
-	`/${workspaceSlug}/settings/bots/${botHandle}`;
+	`${botPath(workspaceSlug, botHandle)}/settings`;
 
 /**
  * The Connections page of a bot, by its handle, or of a project people made,
  * by its slug: the services it is connected to. A bot's are its default
  * project's, shown on the bot's page.
  */
-export const connectionsPagePath = (
-	place: { workspaceSlug: string } & ({ botHandle: string } | { projectSlug: string }),
-) =>
-	"botHandle" in place
-		? `${botPath(place.workspaceSlug, place.botHandle)}/connections`
-		: `${projectPath(place.workspaceSlug, place.projectSlug)}/connections`;
+export const connectionsPagePath = (place: PagePlace) => `${ownerPagePath(place)}/connections`;
 
 export const searchSettingsPath = (workspaceSlug: string) => `/${workspaceSlug}/settings/search`;
 
@@ -64,22 +62,15 @@ export const inboxPath = (workspaceSlug: string, rootConversationId: string, sea
 	withSearch(`/${workspaceSlug}/inbox/${rootConversationId}`, search);
 
 /**
- * Where the conversation `conversationId` opens: in the direct messages, in
- * its project, or as a bot's thread. `projectSlug` is null outside a project.
+ * Where the conversation `conversationId` opens: in its project, or as a
+ * bot's thread. `projectSlug` is null outside a project people made.
  */
 export const conversationPath = (
-	place: {
-		workspaceSlug: string;
-		kind: PlacedConversationRow["kind"];
-		projectSlug: string | null;
-	},
+	place: { workspaceSlug: string; projectSlug: string | null },
 	conversationId: string,
 	search?: Search,
 ) => {
-	const { workspaceSlug, kind, projectSlug } = place;
-	if (kind === "direct_message") {
-		return withSearch(`/${workspaceSlug}/dm/${conversationId}`, search);
-	}
+	const { workspaceSlug, projectSlug } = place;
 	if (projectSlug !== null) {
 		return withSearch(`${projectPath(workspaceSlug, projectSlug)}/${conversationId}`, search);
 	}

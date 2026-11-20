@@ -1,9 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { Effect, Layer } from "effect";
+import { query } from "../database/database.ts";
+import { computer } from "../database/schema.ts";
+import { holdTransaction } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
 import { ComputerCredentials } from "./computer-credentials.ts";
+import { Computers } from "./computers.ts";
 import { workVolume } from "./implementations/opensandbox.ts";
 
 /**
@@ -15,6 +19,25 @@ export const noComputers = Layer.mergeAll(
 	unimplemented(ComputerCredentials.Service, {}),
 	unimplemented(Egress.Service, {}),
 );
+
+/**
+ * Records the project's first computer, made by the provider, in a
+ * transaction held open, as a turn in another process would while a deletion
+ * finds none to destroy. Resolves once the record is held; `release` commits it.
+ */
+export async function recordingFirstComputer(input: {
+	workspaceId: string;
+	projectId: string;
+	computerProviderId: string;
+}): Promise<{ release: () => Promise<void> }> {
+	const recording = holdTransaction(
+		query((db) =>
+			db.insert(computer).values({ ...input, providerComputerId: Computers.ComputerId("first") }),
+		),
+	);
+	await recording.held;
+	return { release: recording.release };
+}
 
 /**
  * Ids that remember every UUID v7 they hand out in `handedOut`. A bot's

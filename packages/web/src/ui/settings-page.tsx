@@ -64,7 +64,7 @@ export function SettingsPage({
 	/**
 	 * Whether `back` shows on a wide screen too, where it otherwise gives way to
 	 * the trail: for a step inside another page with no address of its own,
-	 * such as a bot's Instructions, which the trail can't lead back from, and
+	 * such as an automation's Instructions, which the trail can't lead back from, and
 	 * for a page opened from one beside it, such as a provider from Models.
 	 */
 	backOnWide?: boolean;

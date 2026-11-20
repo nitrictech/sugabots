@@ -6,7 +6,6 @@ import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
-	chief,
 	engineering,
 	growthDesk,
 	linearHandler,
@@ -69,7 +68,7 @@ const scheduled = (expression: string): TestAutomationTrigger => ({
 });
 
 const overnight = placed(1, "Overnight outbound", growthDesk, scheduled("0 6 * * *"));
-const morningBrief = placed(2, "Morning brief", chief, scheduled("0 8 * * 1-5"));
+const morningBrief = placed(2, "Morning brief", growthDesk, scheduled("0 8 * * 1-5"));
 const churnReport = placed(3, "Weekly churn report", accountManager, scheduled("0 9 * * 1,3,5"), {
 	state: "paused",
 });
@@ -85,7 +84,7 @@ const signups = placed(7, "New signup triage", linearHandler, {
 	kind: "webhook",
 	auth: { kind: "basic", username: "sugabots" },
 });
-const standups = placed(8, "Standup notes", chief, {
+const standups = placed(8, "Standup notes", oncall, {
 	kind: "routine",
 	schedule: {
 		repeat: "weekly",

@@ -23,6 +23,7 @@ import {
 	ownerName,
 	type ResourceOwner,
 	resourcePermissions,
+	resourceProjectId,
 } from "@/lib/resource-owner.tsx";
 import { OwnerCrumb } from "@/shell/BotCrumb.tsx";
 import { Page } from "@/shell/Page.tsx";
@@ -300,8 +301,13 @@ export function FileStage({
 }) {
 	const shown = useFile(fileId, version);
 	const versions = useFileVersions(fileId);
+	const ownerFiles = useFiles(resourceProjectId(owner));
 	const remove = useDeleteFile();
 	const mayDelete = resourcePermissions(owner).deleteFiles;
+	// A file another project keeps is not shown here, where its link and Delete would be this owner's.
+	const ownersFile = ownerFiles.data?.some((file) => file.id === fileId);
+	const notOwners =
+		ownerFiles.isError || (ownerFiles.isSuccess && !ownersFile && !ownerFiles.isFetching);
 	async function deleteFile() {
 		try {
 			await remove.mutateAsync(fileId);
@@ -314,7 +320,9 @@ export function FileStage({
 	return (
 		<FileStageView
 			owner={owner}
-			file={shown.data ?? (shown.isError ? "failed" : "loading")}
+			file={
+				shown.isError || notOwners ? "failed" : ownersFile && shown.data ? shown.data : "loading"
+			}
 			versions={versions.data ?? []}
 			now={new Date()}
 			onVersionChange={onVersionChange}

@@ -18,15 +18,6 @@ import { type AttachedFileRow, fileColumns, toFilePart } from "./file-parts.ts";
 import type { PlacedPartsOf } from "./placed-parts.ts";
 import { toToolCallPart } from "./tool-calls.ts";
 
-/**
- * Turning joined rows into the API's people-and-bots shapes.
- *
- * A participant, and a message's author, is either a person or a bot. Both
- * are read by left-joining `user` and `bot` onto a row that has one of the
- * two ids, so every query that needs an author selects `participantColumns`
- * and hands the result to `toParticipant`.
- */
-
 /** The columns to select, left-joined from `user` and `bot`. */
 export const participantColumns = {
 	userId: user.id,
@@ -131,6 +122,9 @@ export function toMessage(
 export const personColumns = {
 	columns: { id: true, name: true, email: true, image: true },
 } as const;
+
+/** A person as one JSON value, with the columns of {@link personColumns}, for a SQL select over `user`. */
+export const personJson = sql<PersonIdentity>`json_build_object('id', ${user.id}, 'name', ${user.name}, 'email', ${user.email}, 'image', ${user.image})`;
 
 /**
  * A person's id, name, email and image, for a select that names who did

@@ -16,7 +16,6 @@ import {
 	type SessionUser,
 	type StartedThread,
 } from "@sugabots/contracts";
-import { isApiFailure } from "@sugabots/sdk";
 import {
 	infiniteQueryOptions,
 	type QueryClient,
@@ -29,14 +28,14 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { Effect } from "effect";
-import { useEffect, useEffectEvent, useMemo } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { pollWhileAutomationsRun, useAutomationActions } from "@/lib/automations.ts";
 import { useBots } from "@/lib/bots.ts";
 import { conversationQuery } from "@/lib/conversations.ts";
-import { countOf, listNames } from "@/lib/name-list.ts";
 import { findProject, useProjects } from "@/lib/projects.ts";
+import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
 const PAGE_SIZE = 30;
@@ -52,18 +51,10 @@ export const projectThreadsKey = (...scope: [workspaceId?: string, projectId?: s
 	"project-threads",
 	...scope,
 ];
-/** Among the workspace's thread lists, so whatever refreshes those refreshes it. */
-const recentThreadsKey = (workspaceId: string | undefined, limit: number) => [
-	...projectThreadsKey(workspaceId),
-	"recent",
-	limit,
-];
 const attentionCountsKey = (...scope: [workspaceId?: string]) => ["attention-counts", ...scope];
 const projectMarkersKey = (workspaceId: string | undefined) => ["project-markers", workspaceId];
 const inboxFeedKey = (workspaceId: string | undefined) => ["inbox", workspaceId];
 const approvalInboxKey = (...scope: [workspaceId?: string]) => ["approval-inbox", ...scope];
-const directMessagesKey = (workspaceId: string | undefined) => ["direct-messages", workspaceId];
-const directMessageKey = (conversationId: string) => ["direct-message", conversationId];
 const conversationMessagesKey = (...scope: [conversationId?: string]) => [
 	"conversation-messages",
 	...scope,
@@ -108,34 +99,6 @@ export function useProjectThreads(projectId: string | undefined) {
 }
 
 /** One of a bot's threads, with the bot. */
-export type BotThread = ListedThread & { bot: Bot };
-
-/**
- * The threads the person has been working on most lately, newest first: those
- * still open that they take part in, with the bots they pinned and their
- * Personal Assistant, whose threads the sidebar reads too.
- */
-export function useRecentThreads(limit: number): BotThread[] {
-	const workspaceId = useWorkspace().workspace?.id;
-	const bots = useBots().bots;
-	const recent = useQuery({
-		queryKey: recentThreadsKey(workspaceId, limit),
-		queryFn: workspaceId
-			? ({ signal }) =>
-					Effect.runPromise(
-						client.api.chats.recentThreads({
-							params: { workspace: workspaceId },
-							query: { limit },
-						}),
-						{ signal },
-					)
-			: skipToken,
-	});
-	return (recent.data?.threads ?? []).flatMap((thread) => {
-		const bot = bots?.find((one) => one.id === thread.conversation.botId);
-		return bot ? [{ ...thread, bot }] : [];
-	});
-}
 
 /** When a thread last had something in it: its newest message, else when it was started. */
 export function lastMovedAt(row: ListedThread): number {
@@ -203,64 +166,8 @@ export function useApprovalInbox() {
 	});
 }
 
-/** The person's direct messages with other people, the most recent first. */
-export function useDirectMessages() {
-	const workspaceId = useWorkspace().workspace?.id;
-	return useQuery({
-		queryKey: directMessagesKey(workspaceId),
-		queryFn: workspaceId
-			? ({ signal }) =>
-					Effect.runPromise(
-						client.api.chats.directMessages({ params: { workspace: workspaceId } }),
-						{ signal },
-					)
-			: skipToken,
-	});
-}
-
-/**
- * Sends a message to `userIds`, in the direct message between the person and
- * them, which the API opens when they have none. Resolves once the lists that
- * show it know of it, with the direct message it went to.
- */
-export function useSendDirectMessage() {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	const requiredWorkspaceId = useRequiredWorkspaceId();
-	return useMutation({
-		mutationFn: ({ userIds, message }: { userIds: readonly string[]; message: string }) =>
-			Effect.runPromise(
-				client.api.chats.sendDirectMessage({
-					params: { workspace: requiredWorkspaceId() },
-					payload: { userIds: [...userIds], id: uuidv4(), message },
-				}),
-			),
-		onSuccess: ({ conversation }) =>
-			Promise.all([
-				queries.invalidateQueries({ queryKey: directMessagesKey(workspaceId) }),
-				queries.invalidateQueries({ queryKey: directMessageKey(conversation.id) }),
-				queries.invalidateQueries({ queryKey: conversationMessagesKey(conversation.id) }),
-				queries.invalidateQueries({ queryKey: conversationQuery(conversation.id).queryKey }),
-			]),
-	});
-}
-
-/** What a direct message with somebody who has left the workspace goes by. */
-const FORMER_MEMBER = "Former member";
-
-/** The others in a direct message between people: those still here, by name, and how many have left. */
-export interface DirectPeople {
-	people: readonly PersonParticipant[];
-	formerMembers: number;
-}
-
-/** How many have left, as words: "1 former member". */
-function formerMembersOf(count: number): string {
-	return countOf(count, "former member", "former members");
-}
-
 /** A person, as a message's author or somebody it is written to. */
-export function personParticipantOf(person: {
+function personParticipantOf(person: {
 	id: string;
 	name: string;
 	email: string;
@@ -273,88 +180,6 @@ export function personParticipantOf(person: {
 		email: person.email,
 		handle: handleFromName(person.name),
 		image: person.image ?? null,
-	};
-}
-
-/** Whether a direct message is with one other person, rather than a group; who has left counts as one. */
-export function isOneToOne({ people, formerMembers }: DirectPeople): boolean {
-	return people.length + formerMembers <= 1;
-}
-
-/**
- * The others in a direct message as its title says them: "Juno, Theo and
- * Sam", then any who have left, "and 1 former member". One person who has
- * left is a Former member.
- */
-export function directPeopleTitle({ people, formerMembers }: DirectPeople): string {
-	if (people.length === 0)
-		return formerMembers <= 1 ? FORMER_MEMBER : formerMembersOf(formerMembers);
-	const names = people.map((person) => person.name);
-	if (formerMembers === 0) return listNames(names);
-	return `${names.join(", ")} and ${formerMembersOf(formerMembers)}`;
-}
-
-/** The others in a direct message as a list's row names them, shortest first: "Juno, Theo". */
-export function directPeopleRowName(direct: DirectPeople): string {
-	if (direct.people.length === 0) return directPeopleTitle(direct);
-	return directPeopleNames(direct).join(", ");
-}
-
-/** The others in a direct message, by name, then those who have left as how many: "1 former member". */
-export function directPeopleNames({ people, formerMembers }: DirectPeople): string[] {
-	return [
-		...people.map((person) => person.name),
-		...(formerMembers > 0 ? [formerMembersOf(formerMembers)] : []),
-	];
-}
-
-/**
- * The direct message `conversationId`, and who is in it, once loaded:
- * `found` is `undefined` when it is not one of the person's in the workspace
- * open, as one from another of their workspaces is not shown in this one's
- * place, and `error` set only when it could not be loaded at all.
- */
-export function useDirectMessage(
-	conversationId: string,
-	/** False while it isn't known to be a direct message, so nothing is asked for one that isn't. */
-	enabled = true,
-): {
-	found: DirectPlace | undefined;
-	isPending: boolean;
-	error: unknown;
-} {
-	const workspace = useWorkspace();
-	// The list is fetched afresh as the workspace's events come and the window
-	// regains focus, so once it has the conversation, who is in it comes from
-	// there. Until the list is loaded the conversation is asked for alongside
-	// it, so the page does not wait on both in turn; once loaded, only one it
-	// does not have is.
-	const listed = useDirectMessages().data?.items.find(
-		(candidate) => candidate.conversation.id === conversationId,
-	);
-	const item = useQuery({
-		queryKey: directMessageKey(conversationId),
-		queryFn: ({ signal }) =>
-			Effect.runPromise(client.api.chats.directMessage({ params: { conversationId } }), {
-				signal,
-			}),
-		enabled: enabled && !listed,
-	});
-	const missing = isApiFailure(item.error) && item.error._tag === "NotFound";
-	const loaded = listed ?? item.data;
-	const shown = loaded?.conversation.workspaceId === workspace.workspace?.id ? loaded : undefined;
-	// Kept while the conversation's people stay the same, so its screen is not
-	// handed a new one at every render.
-	const people = shown?.people;
-	const formerMembers = shown?.formerMembers;
-	const found = useMemo((): DirectPlace | undefined => {
-		if (!people || formerMembers === undefined) return undefined;
-		return { project: null, conversation: { kind: "directMessage", people, formerMembers } };
-	}, [people, formerMembers]);
-	return {
-		found,
-		isPending: (!listed && item.isPending) || workspace.isPending,
-		error: missing ? undefined : item.error,
 	};
 }
 
@@ -490,7 +315,6 @@ export function refreshConversationMarkers(queries: QueryClient, workspaceId: st
 		queries.invalidateQueries({ queryKey: projectMarkersKey(workspaceId) }),
 		queries.invalidateQueries({ queryKey: inboxFeedKey(workspaceId) }),
 		queries.invalidateQueries({ queryKey: attentionCountsKey(workspaceId) }),
-		queries.invalidateQueries({ queryKey: directMessagesKey(workspaceId) }),
 	]);
 }
 
@@ -520,43 +344,15 @@ export function refreshAfterConversationChange(
 }
 
 /**
- * Which kind of conversation is open, and the bot it is with when it has one:
- * a project's thread, one of a bot's threads or automations' feeds, or a
- * direct message between people, one other or a group, with no bot.
+ * Whose a conversation is: a project people made, for its threads and its
+ * automations' feeds; or a bot, for its own, which are its default project's.
+ * That project is hidden and has no address of its own, so the place names the bot.
  */
-type ConversationPlaceKind =
-	| { kind: "projectThread" }
-	| { kind: "botThread"; bot: Bot }
-	| ({ kind: "directMessage" } & DirectPeople);
-
-/** A thread in a project people made. */
-interface ProjectPlace {
-	project: Project;
-	conversation: { kind: "projectThread" };
-}
-
-/**
- * One of a bot's threads or automations' feeds, which are its default
- * project's. That project is hidden and has no address of its own, so the
- * place names the bot, and `project` is null.
- */
-interface BotPlace {
-	project: null;
-	conversation: { kind: "botThread"; bot: Bot };
-}
-
-/** A conversation with bots in it: in a project, or a bot's own. */
-export type ConversationPlace = ProjectPlace | BotPlace;
-
-/** A direct message between people, which belongs to no project, and who is in it. */
-interface DirectPlace {
-	project: null;
-	conversation: Extract<ConversationPlaceKind, { kind: "directMessage" }>;
-}
+export type ConversationPlace = ResourceOwner;
 
 /** The bot a place's conversation is with, if any. */
-export function placeBot(place: { conversation: ConversationPlaceKind }): Bot | undefined {
-	return place.conversation.kind === "botThread" ? place.conversation.bot : undefined;
+export function placeBot(place: ConversationPlace): Bot | undefined {
+	return "bot" in place ? place.bot : undefined;
 }
 
 /**
@@ -568,7 +364,7 @@ export function placeBot(place: { conversation: ConversationPlaceKind }): Bot | 
 export function useProjectThreadPlace(
 	projectSlug: string,
 	conversationId: string | undefined,
-): { found: ProjectPlace | undefined; isPending: boolean; error: unknown } {
+): { found: { project: Project } | undefined; isPending: boolean; error: unknown } {
 	const projects = useProjects();
 	const project = findProject(projects.data, projectSlug);
 	const list = useProjectThreads(project?.id);
@@ -584,7 +380,7 @@ export function useProjectThreadPlace(
 		((unlistedKind === "project_thread" || unlistedKind === "automation_feed") &&
 			unlisted.data?.conversation?.projectId === project?.id);
 	return {
-		found: project && inProject ? { project, conversation: { kind: "projectThread" } } : undefined,
+		found: project && inProject ? { project } : undefined,
 		isPending:
 			projects.isPending || list.isPending || (list.isSuccess && !listed && unlisted.isPending),
 		error: projects.error ?? list.error ?? unlisted.error,
@@ -599,7 +395,7 @@ export function useProjectThreadPlace(
 export function useBotThreadPlace(
 	bot: Bot,
 	conversationId: string | undefined,
-): { found: BotPlace | undefined; isPending: boolean; error: unknown } {
+): { found: { bot: Bot } | undefined; isPending: boolean; error: unknown } {
 	const list = useProjectThreads(bot.defaultProjectId);
 	const listed =
 		list.data?.threads.some((item) => item.conversation.id === conversationId) ||
@@ -609,9 +405,14 @@ export function useBotThreadPlace(
 		...conversationQuery(conversationId),
 		enabled: conversationId !== undefined && list.isSuccess && !listed,
 	});
-	const ours = listed || unlisted.data?.conversation?.botId === bot.id;
+	// Not by its bot, which on a collaboration names the bot asked, whoever's thread it hangs under.
+	const unlistedKind = unlisted.data?.conversation?.kind;
+	const ours =
+		listed ||
+		((unlistedKind === "project_thread" || unlistedKind === "automation_feed") &&
+			unlisted.data?.conversation?.projectId === bot.defaultProjectId);
 	return {
-		found: ours ? { project: null, conversation: { kind: "botThread", bot } } : undefined,
+		found: ours ? { bot } : undefined,
 		isPending: list.isPending || (list.isSuccess && !listed && unlisted.isPending),
 		error: list.error ?? unlisted.error,
 	};
@@ -619,11 +420,11 @@ export function useBotThreadPlace(
 
 /**
  * Where any conversation `conversationId` is, read from the conversation
- * itself: in a project, a bot's, or a direct message. For a page, such as
+ * itself: in a project, or a bot's. For a page, such as
  * Inbox's, whose address names only the conversation.
  */
 export function useAnyConversationPlace(conversationId: string): {
-	found: ConversationPlace | DirectPlace | undefined;
+	found: ConversationPlace | undefined;
 	isPending: boolean;
 	error: unknown;
 } {
@@ -631,18 +432,11 @@ export function useAnyConversationPlace(conversationId: string): {
 	const roster = useBots();
 	const opened = useQuery(conversationQuery(conversationId));
 	const details = opened.data?.conversation;
-	const isDirect = details?.kind === "direct_message";
-	const direct = useDirectMessage(conversationId, isDirect);
-	if (isDirect) return direct;
 	const project = details?.projectId
 		? projects.data?.find((one) => one.id === details.projectId)
 		: undefined;
 	const bot = details?.botId ? roster.bots?.find((one) => one.id === details.botId) : undefined;
-	const found: ConversationPlace | undefined = project
-		? { project, conversation: { kind: "projectThread" } }
-		: bot
-			? { project: null, conversation: { kind: "botThread", bot } }
-			: undefined;
+	const found: ConversationPlace | undefined = project ? { project } : bot ? { bot } : undefined;
 	return {
 		found,
 		isPending: opened.isPending || projects.isPending || roster.isPending,
@@ -841,11 +635,25 @@ export function useThreadStarter(starting: { projectId: string }) {
 			),
 		onSettled: () => queries.invalidateQueries({ queryKey: projectThreadsKey(workspaceId) }),
 	});
+	/**
+	 * The last draft sent that did not come back started, with its message's id.
+	 * Its thread may have started all the same, its answer lost, so sending the
+	 * same draft to the same project again reuses the id, which the API answers
+	 * with the thread it started rather than starting a second.
+	 */
+	const unconfirmed = useRef<{ projectId: string; message: string; id: string }>(undefined);
 	async function start(draft: string): Promise<ThreadStart> {
 		const message = draft.trim();
 		if (startThread.isPending || message === "") return { outcome: "notSent" };
+		const retried = unconfirmed.current;
+		const id =
+			retried?.projectId === starting.projectId && retried.message === message
+				? retried.id
+				: uuidv4();
+		unconfirmed.current = { projectId: starting.projectId, message, id };
 		try {
-			const thread = await startThread.mutateAsync({ id: uuidv4(), message });
+			const thread = await startThread.mutateAsync({ id, message });
+			unconfirmed.current = undefined;
 			return { outcome: "started", thread };
 		} catch {
 			return { outcome: "refused" };

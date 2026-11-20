@@ -94,7 +94,10 @@ export const make = Effect.gen(function* () {
 					Effect.gen(function* () {
 						const workspace = person.workspaceId;
 						const projects = yield* projectAdministration.list({ workspace });
-						const workspaceBots = (yield* bots.list({ workspace })).filter((bot) => !bot.assistant);
+						// The person's own Personal Assistant is among the bots they reach, but is
+						// no bot to suggest to them: it is only named for its failing automations.
+						const reachedBots = yield* bots.list({ workspace });
+						const workspaceBots = reachedBots.filter((bot) => !bot.assistant);
 						const handleOf = new Map(workspaceBots.map((bot) => [bot.id, `@${bot.handle}`]));
 						const leadHandleOf = (botId: string | null) => (botId && handleOf.get(botId)) ?? null;
 						const talkable = workspaceBots.filter((bot) => bot.permissions.talk);
@@ -176,7 +179,7 @@ export const make = Effect.gen(function* () {
 								// A bot's own automations are in its default project, and named by the bot.
 								failingAutomations: failing.flatMap(
 									({ projectId, defaultOfBotId, count }): FailingAutomations[] => {
-										const bot = talkable.find((one) => one.id === defaultOfBotId);
+										const bot = reachedBots.find((one) => one.id === defaultOfBotId);
 										if (bot) {
 											return [
 												{

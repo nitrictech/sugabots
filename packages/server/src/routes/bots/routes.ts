@@ -59,5 +59,6 @@ const botErrors = {
 	AssistantInstructionsManaged: BadRequest,
 	AssistantManaged: BadRequest,
 	ComputerUnavailable: Conflict,
+	ComputerMadeMeanwhile: Conflict,
 	LeadsProjects: Conflict,
 };

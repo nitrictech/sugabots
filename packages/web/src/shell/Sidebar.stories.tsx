@@ -5,7 +5,6 @@ import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
 import { SessionContext } from "@/lib/session.ts";
 import { appHandlers, storyUser } from "@/story-app.tsx";
-import { DirectMessagesSection } from "./DirectMessages.tsx";
 import { IconRail } from "./IconRail.tsx";
 import { OwnerSidebar } from "./OwnerSidebar.tsx";
 import { SidebarView } from "./Sidebar.tsx";
@@ -17,9 +16,6 @@ import {
 	growthDesk,
 	linearHandler,
 	revenue,
-	withMarco,
-	withPriya,
-	withPriyaAndTheo,
 } from "./story-fixtures.ts";
 
 const suga = {
@@ -51,16 +47,12 @@ const meta = preview.meta({
 			{ bot: accountManager, ...nothing, unreadMessages: 2 },
 			{ bot: linearHandler, ...nothing, failedAutomations: 1 },
 		],
-		currentProjectSlug: revenue.slug,
 		view: undefined,
 		workspace: suga,
 		workspaces: [suga],
 		user: { name: "Rowan Ellis", email: "rowan@example.com" },
 		onSignOut: fn(),
 		onNewBot: fn(),
-		directMessages: (
-			<DirectMessagesSection items={[withPriya, withPriyaAndTheo, withMarco]} status="ready" />
-		),
 	},
 	decorators: [
 		(Story) => (
@@ -81,8 +73,9 @@ const meta = preview.meta({
 });
 
 /**
- * Default: the projects with Revenue open, then the bots,
- * the Personal Assistant first, and Settings in the foot.
+ * Default: the workspace's sidebar, as on Inbox or a page of the workspace's
+ * own: the projects, then the bots, the Personal Assistant first, and Settings
+ * in the foot. Opening a project narrows it to the rail; see Owner open.
  */
 export const Default = meta.story({
 	play: async ({ canvas }) => {

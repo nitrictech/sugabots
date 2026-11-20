@@ -352,13 +352,17 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(
-	Layer.provide([
-		Authorization.layer,
-		ProjectComputers.layer,
-		ComputerProviderRepository.layer,
-		Computers.layer,
-	]),
+// Suspended: the authorization and computers modules import this one, so their
+// layers aren't defined yet while it loads.
+export const layer = Layer.suspend(() =>
+	layerNoDeps.pipe(
+		Layer.provide([
+			Authorization.layer,
+			ProjectComputers.layer,
+			ComputerProviderRepository.layer,
+			Computers.layer,
+		]),
+	),
 );
 
 interface Project {

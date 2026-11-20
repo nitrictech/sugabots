@@ -3,7 +3,6 @@ import { Result, Schema, SchemaIssue } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	conversationHistoryQuerySchema,
-	conversationKindSchema,
 	conversationSummarySchema,
 	DEFAULT_CONVERSATION_HISTORY_LIMIT,
 	jsonValueSchema,
@@ -26,18 +25,24 @@ import { testPerson } from "./testing.ts";
 
 const ID = "0199a3a0-0000-7000-8000-000000000001";
 
-describe("conversation contracts", () => {
-	it.each([
-		"project_thread",
-		"direct_message",
-		"collaboration",
-		"run",
-		"automation_feed",
-		"system",
-	])("accepts conversation kind %s", (type) => {
-		expect(Schema.decodeUnknownSync(conversationKindSchema)(type)).toBe(type);
-	});
+/** A project's thread, placed, as it decodes. */
+const placedThread = {
+	id: ID,
+	workspaceId: ID,
+	projectId: ID,
+	botId: ID,
+	rootConversationId: ID,
+	kind: "project_thread",
+	title: "Release notes",
+	status: "done",
+	parentConversationId: null,
+	doneAt: null,
+	startedById: ID,
+	createdAt: "2026-09-11T00:00:00.000Z",
+	updatedAt: "2026-09-11T00:00:00.000Z",
+};
 
+describe("conversation contracts", () => {
 	it("requires a client message id for optimistic reconciliation", () => {
 		expect(Schema.decodeUnknownResult(newMessageSchema)({ message: "Follow up" })._tag).toBe(
 			"Failure",
@@ -57,26 +62,11 @@ describe("conversation contracts", () => {
 	});
 
 	it("bounds generated conversation titles", () => {
-		const conversation = {
-			id: ID,
-			workspaceId: ID,
-			projectId: ID,
-			botId: ID,
-			title: "Release notes",
-			status: "done",
-			parentConversationId: null,
-			startedById: ID,
-			createdAt: "2026-09-11T00:00:00.000Z",
-			updatedAt: "2026-09-11T00:00:00.000Z",
-		};
+		const decode = Schema.decodeUnknownResult(placedConversationSchema);
+		expect(decode(placedThread)._tag).toBe("Success");
+		expect(decode({ ...placedThread, title: "" })._tag).toBe("Failure");
 		expect(
-			Schema.decodeUnknownResult(placedConversationSchema)({ ...conversation, title: "" })._tag,
-		).toBe("Failure");
-		expect(
-			Schema.decodeUnknownResult(placedConversationSchema)({
-				...conversation,
-				title: "x".repeat(MAX_CONVERSATION_TITLE_CHARACTERS + 1),
-			})._tag,
+			decode({ ...placedThread, title: "x".repeat(MAX_CONVERSATION_TITLE_CHARACTERS + 1) })._tag,
 		).toBe("Failure");
 	});
 
@@ -102,20 +92,9 @@ describe("conversation contracts", () => {
 	});
 
 	it("requires semantic ISO timestamps", () => {
-		const conversation = {
-			id: ID,
-			workspaceId: ID,
-			projectId: ID,
-			botId: ID,
-			title: "Release notes",
-			status: "running",
-			parentConversationId: null,
-			startedById: ID,
-			createdAt: "2026-02-30T00:00:00.000Z",
-			updatedAt: "2026-09-11T00:00:00.000Z",
-		};
-
-		expect(Schema.decodeUnknownResult(placedConversationSchema)(conversation)._tag).toBe("Failure");
+		const decode = Schema.decodeUnknownResult(placedConversationSchema);
+		expect(decode(placedThread)._tag).toBe("Success");
+		expect(decode({ ...placedThread, createdAt: "2026-02-30T00:00:00.000Z" })._tag).toBe("Failure");
 	});
 
 	it("requires message content to exactly match its text parts", () => {

@@ -432,6 +432,7 @@ const startReply = (bot: BotRow, inConversation: PlacedConversationRow, triggerM
 				yield* emit([
 					ConversationEvent.TurnStarted({
 						conversationId: inConversation.id,
+						workspaceId: inConversation.workspaceId,
 						turnId: started.id,
 						botId: bot.id,
 						reply: toMessage(replyRow, authorRow(null, bot)),

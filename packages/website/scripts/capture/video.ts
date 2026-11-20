@@ -258,9 +258,25 @@ function ffmpeg(args: string[]) {
 
 type Director = ReturnType<typeof directorFor>;
 
-/** The id a `/conversations/:id/messages` or `/bots/:id/threads` request names. */
+/** The id a `/conversations/:id/messages` or `/projects/:id/threads` request names. */
 function addressedIdOf(url: string) {
 	return new URL(url).pathname.split("/").at(-2) ?? "";
+}
+
+/**
+ * The bot whose default project a `/projects/:id/threads` request starts a
+ * thread in, read from the workspace's bots as the signed-in page would: the
+ * stage starts a bot's thread by its bot.
+ */
+async function botOfDefaultProject(context: BrowserContext, url: string): Promise<string> {
+	const projectId = addressedIdOf(url);
+	const answer = await context.request.get(
+		new URL(`/api/workspaces/${WORKSPACE}/bots`, url).toString(),
+	);
+	const bots = (await answer.json()) as Array<{ id: string; defaultProjectId: string }>;
+	const bot = bots.find((one) => one.defaultProjectId === projectId);
+	if (!bot) throw new Error(`No bot has the default project ${projectId}`);
+	return bot.id;
 }
 
 /**
@@ -312,11 +328,11 @@ function directorFor(environment: Environment) {
 		 * stage plays the rest.
 		 */
 		async answerFor(context: BrowserContext) {
-			await context.route("**/api/bots/*/threads", async (route) => {
+			await context.route("**/api/projects/*/threads", async (route) => {
 				const request = route.request();
 				if (request.method() !== "POST") return route.continue();
 				const sent = request.postDataJSON() as { id: string; message: string };
-				const botId = addressedIdOf(request.url());
+				const botId = await botOfDefaultProject(context, request.url());
 				const started = await stage(["start", botId, sent.id, sent.message]);
 				await answerAfterEvent(route, started);
 			});

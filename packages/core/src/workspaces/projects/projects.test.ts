@@ -4,16 +4,19 @@ import {
 	type ProjectColor,
 	type ProjectVisibility,
 } from "@sugabots/contracts";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import { projectPermissions } from "../../authorization/permissions.ts";
-import { noComputers } from "../../computers/testing.ts";
-import { transaction } from "../../database/database.ts";
+import { ProjectComputers } from "../../computers/project-computers.ts";
+import { noComputers, recordingFirstComputer } from "../../computers/testing.ts";
+import { query, transaction } from "../../database/database.ts";
 import {
 	bot,
+	computer,
+	computerProvider,
 	modelProvider,
 	project,
 	projectMember,
@@ -24,10 +27,12 @@ import {
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	type Promised,
 	runOnPostgres,
 	servedOnPostgres,
+	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
 import { BotAdministration } from "../bots/bot-administration.ts";
 import { BotRepository } from "../bots/bot-repository.ts";
@@ -263,7 +268,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const helper = await aBot(adminId, "Triage");
 			await administrationAs(memberId).addBot({ projectId: made.id, botId: helper.id });
 
-			// The administrator, in every project, the creator, and the lead and the bot added.
+			// The administrator, in every project people made, the creator, and the lead and the bot added.
 			expect(await visibleTo(memberId)).toEqual([
 				expect.objectContaining({ id: made.id, memberCount: 2, botCount: 2 }),
 			]);
@@ -277,7 +282,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			const made = await create(memberId, { name: "Suga", slug: "suga", visibility: "private" });
 
 			expect(await listedTo(memberId)).toEqual([{ id: made.id, isMember: true }]);
-			// Administrators are in every project, private ones included.
+			// Administrators are in every project people made, private ones included.
 			expect(await listedTo(adminId)).toEqual([{ id: made.id, isMember: true }]);
 			expect(await visibleTo(viewerId)).toEqual([]);
 		});
@@ -319,6 +324,18 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			expect((await membersOf(made.id)).map((row) => row.name)).toEqual(["Ada"]);
 		});
 
+		it("names its members as the people reaching it", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga" });
+			await repository.addMember(workspaceId, made.id, memberId);
+
+			const people = await administrationAs(memberId).peopleReaching({ projectId: made.id });
+
+			expect(people.map(({ name, handle }) => ({ name, handle }))).toEqual([
+				{ name: "Ada", handle: "ada" },
+				{ name: "Sam", handle: "sam" },
+			]);
+		});
+
 		it("is idempotent, so adding twice is not an error", async () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 
@@ -331,9 +348,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 		it("does not add somebody from another workspace", async () => {
 			const made = await create(adminId, { name: "Suga", slug: "suga" });
 
-			expect(await repository.addMember(workspaceId, made.id, outsiderId)).toBe(
-				"not_workspace_member",
-			);
+			expect(await repository.addMember(workspaceId, made.id, outsiderId)).toBe(false);
 		});
 
 		it("rejects a cross-workspace membership at the database boundary", async () => {
@@ -393,6 +408,43 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await expect(administrationAs(outsiderId).join({ projectId: made.id })).rejects.toThrow(
 				ResourceHidden,
 			);
+		});
+
+		it("lets somebody join a project they are joining at the same time, once", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga" });
+			// The other join, which has found them not yet in it and added them.
+			const otherJoin = holdTransaction(
+				query((db) =>
+					db.insert(projectMember).values({ workspaceId, projectId: made.id, userId: memberId }),
+				),
+			);
+			await otherJoin.held;
+
+			const joining = administrationAs(memberId).join({ projectId: made.id });
+			await waitUntilWaitingOnLocks(1);
+			await otherJoin.release();
+
+			await expect(joining).resolves.toMatchObject({ id: made.id });
+			expect((await membersOf(made.id)).map(({ userId }) => userId).toSorted()).toEqual(
+				[adminId, memberId].toSorted(),
+			);
+		});
+
+		it("does not let somebody join a project made private as they join it", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga" });
+			const hiding = holdTransaction(
+				Effect.flatMap(ProjectRepository.Service, (projects) =>
+					projects.update(workspaceId, made.id, { visibility: "private" }),
+				).pipe(Effect.provide(ProjectRepository.layer)),
+			);
+			await hiding.held;
+
+			const joining = administrationAs(memberId).join({ projectId: made.id });
+			await waitUntilWaitingOnLocks(1);
+			await hiding.release();
+
+			await expect(joining).rejects.toThrow(ResourceHidden);
+			expect((await membersOf(made.id)).map(({ userId }) => userId)).toEqual([adminId]);
 		});
 
 		it("lets a member in a project invite and remove people, and a viewer neither", async () => {
@@ -487,7 +539,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				transaction(
 					Effect.gen(function* () {
 						const bots = yield* BotRepository.Service;
-						yield* bots.update(workspaceId, bot.id, { visibility: "private" });
+						yield* bots.update(workspaceId, bot.id, { visibility: "private" }, adminId);
 						madePrivate();
 						yield* Effect.promise(() => released);
 					}),
@@ -841,6 +893,76 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			).toEqual([triage.id]);
 			await botsAs(adminId).remove({ botId: leadId });
 		});
+
+		it("names to whoever is refused only the projects they see among those the bot leads", async () => {
+			const triage = await aBot(memberId, "Triage");
+			const ops = await create(adminId, { name: "Ops", slug: "ops" });
+			const secret = await create(adminId, {
+				name: "Secret",
+				slug: "secret",
+				visibility: "private",
+			});
+			for (const projectId of [ops.id, secret.id]) {
+				await administrationAs(adminId).update({ projectId, changes: { leadBotId: triage.id } });
+			}
+
+			const toCreator = {
+				userMessage:
+					"Triage leads Ops and private projects you aren't in. Each needs another lead bot first.",
+			};
+			await expect(
+				botsAs(memberId).update({ botId: triage.id, changes: { visibility: "private" } }),
+			).rejects.toMatchObject(toCreator);
+			await expect(botsAs(memberId).remove({ botId: triage.id })).rejects.toMatchObject(toCreator);
+			await expect(botsAs(adminId).remove({ botId: triage.id })).rejects.toMatchObject({
+				userMessage: "Triage leads Ops and Secret. Choose another lead bot for each first.",
+			});
+		});
+
+		it("refuses to take out a bot being chosen as lead, though the choice is not yet written", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga" });
+			const triage = await aBot(adminId, "Triage");
+			await repository.addBot(workspaceId, made.id, triage.id);
+			// Stalls the new lead's write after the choice has found Triage among
+			// the project's bots, without stopping anything from locking its row.
+			const projectWrites = holdTransaction(
+				query((db) => db.execute(sql`lock table ${project} in share mode`)),
+			);
+			await projectWrites.held;
+
+			const choosing = repository.update(workspaceId, made.id, { leadBotId: triage.id });
+			await waitUntilWaitingOnLocks(1);
+			const removing = repository.removeBot(workspaceId, made.id, triage.id, adminId);
+			await waitUntilWaitingOnLocks(2);
+			await projectWrites.release();
+
+			await expect(choosing).resolves.toMatchObject({ leadBotId: triage.id });
+			await expect(removing).rejects.toBeInstanceOf(LeadsProjects);
+			expect(
+				(await administrationAs(adminId).bots({ projectId: made.id })).map(({ id }) => id),
+			).toEqual([leadId, triage.id]);
+		});
+
+		it("puts a bot back in its project when chosen as lead while being taken out", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga" });
+			const triage = await aBot(adminId, "Triage");
+			await repository.addBot(workspaceId, made.id, triage.id);
+			const removing = holdTransaction(
+				Effect.flatMap(ProjectRepository.Service, (projects) =>
+					projects.removeBot(workspaceId, made.id, triage.id, adminId),
+				).pipe(Effect.provide(ProjectRepository.layer)),
+			);
+			await removing.held;
+
+			const choosing = repository.update(workspaceId, made.id, { leadBotId: triage.id });
+			await waitUntilWaitingOnLocks(1);
+			await removing.release();
+
+			await expect(choosing).resolves.toMatchObject({ leadBotId: triage.id });
+			expect(
+				(await administrationAs(adminId).bots({ projectId: made.id })).map(({ id }) => id),
+			).toEqual([leadId, triage.id]);
+		});
 	});
 
 	describe("a bot's default project", () => {
@@ -906,6 +1028,20 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			).rejects.toThrow(ResourceHidden);
 		});
 
+		it("names as the people reaching it whoever reaches its bot, though it has no members", async () => {
+			const diary = await aBot(memberId, "Diary", "private");
+			const triage = await aBot(adminId, "Triage");
+			const peopleReaching = async (botId: string) =>
+				(
+					await administrationAs(memberId).peopleReaching({
+						projectId: (await defaultProjectOf(botId)).id,
+					})
+				).map(({ name }) => name);
+
+			expect(await peopleReaching(triage.id)).toEqual(["Ada", "Lee", "Sam"]);
+			expect(await peopleReaching(diary.id)).toEqual(["Sam"]);
+		});
+
 		it("is never joined, left, staffed, changed or deleted on its own", async () => {
 			const triage = await aBot(adminId, "Triage");
 			const other = await aBot(adminId, "Other");
@@ -936,6 +1072,60 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 					.where(and(eq(project.workspaceId, workspaceId), isNotNull(project.defaultOfBotId))),
 			);
 			expect(members).toEqual([]);
+		});
+	});
+
+	describe("deleting while a first computer is recorded", () => {
+		/** Records a first computer for the project, made by a new provider. */
+		const recordingFirstComputerOf = async (projectId: string) => {
+			const [provider] = await onDatabase((db) =>
+				db
+					.insert(computerProvider)
+					.values({
+						workspaceId,
+						settings: {
+							preset: "opensandbox",
+							serverUrl: "http://computers.test",
+							image: "debian",
+						},
+						enabled: true,
+					})
+					.returning(),
+			);
+			if (!provider) throw new Error("could not create the test computer provider");
+			return recordingFirstComputer({ workspaceId, projectId, computerProviderId: provider.id });
+		};
+		const computersOf = (projectId: string) =>
+			onDatabase((db) =>
+				db.select({ id: computer.id }).from(computer).where(eq(computer.projectId, projectId)),
+			);
+
+		it("keeps the project, and its computer's record", async () => {
+			const made = await create(adminId, { name: "Suga", slug: "suga" });
+			const recording = await recordingFirstComputerOf(made.id);
+
+			const removing = administrationAs(adminId).remove({ projectId: made.id });
+			await waitUntilWaitingOnLocks(1);
+			await recording.release();
+
+			await expect(removing).rejects.toBeInstanceOf(ProjectComputers.ComputerMadeMeanwhile);
+			expect(await computersOf(made.id)).toHaveLength(1);
+		});
+
+		it("keeps a bot whose default project it is, and the computer's record", async () => {
+			const triage = await aBot(adminId, "Triage");
+			const [own] = await onDatabase((db) =>
+				db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, triage.id)),
+			);
+			if (!own) throw new Error("The bot has no default project");
+			const recording = await recordingFirstComputerOf(own.id);
+
+			const removing = botsAs(adminId).remove({ botId: triage.id });
+			await waitUntilWaitingOnLocks(1);
+			await recording.release();
+
+			await expect(removing).rejects.toBeInstanceOf(ProjectComputers.ComputerMadeMeanwhile);
+			expect(await computersOf(own.id)).toHaveLength(1);
 		});
 	});
 });

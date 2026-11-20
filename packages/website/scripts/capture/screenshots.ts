@@ -46,14 +46,15 @@ const SHOTS: Shot[] = [
 		name: "automations",
 		backdrop: { form: "rings", family: "graphite" },
 		async prepare(stage) {
-			// Ticket Desk's automations page, with its morning queue's feed open beside the list.
+			// Ticket Desk's automations page, with its morning queue's setup open beside the list.
 			await stage.open(`/${WORKSPACE}/bots/ticket-desk/automations`);
 			await stage.app
 				.getByRole("region", { name: "Automations" })
 				.getByRole("link", { name: /^Morning queue/ })
 				.first()
 				.click();
-			await stage.app.getByText("Morning queue: 7 new tickets overnight.").last().waitFor();
+			await stage.app.getByRole("heading", { name: "Morning queue" }).first().waitFor();
+			await stage.app.getByRole("switch", { name: "Automation on" }).waitFor();
 		},
 	},
 	{
@@ -79,7 +80,7 @@ const SHOTS: Shot[] = [
 		backdrop: { form: "petals", family: "graphite" },
 		async prepare(stage) {
 			// Code Reviewer's connections, then Linear's tools one by one: those that change things ask first.
-			await stage.open(`/${WORKSPACE}/settings/bots/code-reviewer/connections`);
+			await stage.open(`/${WORKSPACE}/bots/code-reviewer/connections`);
 			await stage.app.getByRole("link", { name: /^Linear, / }).click();
 			await stage.app.getByRole("button", { name: /^Individual tools/ }).click();
 			await stage.app.getByText("prepare_attachment_upload", { exact: true }).waitFor();
@@ -88,18 +89,26 @@ const SHOTS: Shot[] = [
 ];
 
 /**
- * Researcher's desktop, open beside its thread: the computer's button is on a
- * bot's thread's header, and Code Reviewer, whose review is in one of
- * Engineering's threads, has no thread of its own. Taken in a context of its own:
- * showing the desktop says computers are on, which puts the desktop's button
- * on every thread with a bot that uses one.
+ * Researcher's desktop, open beside its thread: at the capture's width the
+ * computer is a card in the thread's Details, which a wide screen opens unless
+ * this browser last closed them; Code Reviewer, whose review is in one of
+ * Engineering's threads, has no thread of its own. Taken in a context of its
+ * own: showing the desktop says computers are on, which puts the computer's
+ * card in Details of every thread with a bot that uses one. The seeded
+ * computer is idle, so its card's button says so.
  */
 const COMPUTERS: Shot = {
 	name: "computers",
 	backdrop: { form: "petals", family: "ink" },
 	async prepare(stage) {
 		await openSeededThread(stage, "researcher", "What changed in Postgres 18");
-		await stage.app.getByRole("button", { name: "Computer" }).click();
+		await stage.app.getByRole("log", { name: "Chat messages" }).waitFor();
+		const details = stage.app.getByRole("button", { name: "Details" });
+		if ((await details.getAttribute("aria-pressed")) === "false") await details.click();
+		await stage.app
+			.getByRole("complementary", { name: "Details" })
+			.getByRole("button", { name: "Not running" })
+			.click();
 		await stage.app.locator("canvas").first().waitFor();
 		await stage.app.getByText("Starting the desktop…").waitFor({ state: "detached" });
 	},
@@ -165,15 +174,14 @@ async function openProject(stage: Stage, project: string, thread: string) {
 
 /**
  * Opens the seeded thread whose title starts `title`: the bot's own address
- * opens its newest open thread, which is the bot's only one in the seed. A long
- * title is cut short, so the start is what to match.
+ * starts a new thread, so the thread is opened from its row in the bot's
+ * sidebar, whose link is named by the title and then what else the row says.
  */
 async function openSeededThread(stage: Stage, botHandle: string, title: string) {
+	const startsWithTitle = new RegExp(`^${escapeRegExp(title)}`);
 	await stage.open(`/${WORKSPACE}/bots/${botHandle}`);
-	await stage.app
-		.getByRole("heading", { name: new RegExp(`^${escapeRegExp(title)}`) })
-		.first()
-		.waitFor();
+	await stage.app.getByRole("link", { name: startsWithTitle }).first().click();
+	await stage.app.getByRole("heading", { name: startsWithTitle }).first().waitFor();
 }
 
 function escapeRegExp(text: string) {

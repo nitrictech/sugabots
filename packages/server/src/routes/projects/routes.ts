@@ -36,6 +36,11 @@ export const projectRoutes = HttpApiBuilder.group(ServerApi, "projects", (handle
 					.members({ projectId: params.projectId })
 					.pipe(asSessionUser, asHttpError(projectErrors)),
 			)
+			.handle("listPeople", ({ params }) =>
+				projects
+					.peopleReaching({ projectId: params.projectId })
+					.pipe(asSessionUser, asHttpError(projectErrors)),
+			)
 			.handle("addMember", ({ params, payload }) =>
 				projects
 					.addMember({ projectId: params.projectId, userId: payload.userId })
@@ -88,4 +93,5 @@ const projectErrors = {
 	BotNotPublic: BadRequest,
 	LeadsProjects: Conflict,
 	ComputerUnavailable: Conflict,
+	ComputerMadeMeanwhile: Conflict,
 };

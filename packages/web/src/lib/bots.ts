@@ -3,13 +3,15 @@ import {
 	queryOptions,
 	skipToken,
 	useMutation,
+	useMutationState,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
 import { Effect } from "effect";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { client } from "@/api.ts";
 import { projectThreadsKey } from "@/lib/chats.ts";
+import { projectsQuery } from "@/lib/projects.ts";
 import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
 /**
@@ -95,6 +97,7 @@ export function useEnsureAssistant() {
 	const invalidate = useInvalidateBots();
 	const workspaceId = useRequiredWorkspaceId();
 	return useMutation({
+		mutationKey: ensureAssistantKey(useWorkspace().workspace?.id),
 		mutationFn: (model?: string) =>
 			Effect.runPromise(
 				client.api.bots.ensureAssistant({
@@ -106,17 +109,39 @@ export function useEnsureAssistant() {
 	});
 }
 
+/** The mutations that make the person's Personal Assistant in `workspaceId`. */
+function ensureAssistantKey(workspaceId: string | undefined) {
+	return ["ensure-assistant", workspaceId];
+}
+
 /**
- * Makes the person's Personal Assistant once, while `missing`; the returned
- * mutation says whether making it failed.
+ * Makes the person's Personal Assistant, once for each workspace, when its
+ * roster has loaded without one. For the workspace's shell alone, so a page
+ * however it is reached has one made, and only one request asks;
+ * `useEnsuringAssistantFailed` tells a page how it went.
  */
-export function useEnsuredAssistant(missing: boolean) {
-	const ensure = useEnsureAssistant();
-	const { mutate, isIdle } = ensure;
+export function useEnsuredAssistant(): void {
+	const workspaceId = useWorkspace().workspace?.id;
+	const { isPending, error } = useBots();
+	const assistant = useAssistant();
+	const missing = !isPending && !error && !assistant;
+	const { mutate } = useEnsureAssistant();
+	const ensuredIn = useRef<string | undefined>(undefined);
 	useEffect(() => {
-		if (missing && isIdle) mutate(undefined);
-	}, [missing, isIdle, mutate]);
-	return ensure;
+		if (!missing || !workspaceId || ensuredIn.current === workspaceId) return;
+		ensuredIn.current = workspaceId;
+		mutate(undefined);
+	}, [missing, workspaceId, mutate]);
+}
+
+/** Whether making the person's Personal Assistant in the workspace last failed. */
+export function useEnsuringAssistantFailed(): boolean {
+	const workspaceId = useWorkspace().workspace?.id;
+	const statuses = useMutationState({
+		filters: { mutationKey: ensureAssistantKey(workspaceId) },
+		select: (mutation) => mutation.state.status,
+	});
+	return statuses.at(-1) === "error";
 }
 
 /** Pins a bot to the person's sidebar, or unpins it. */
@@ -172,31 +197,52 @@ export function useCreateBot() {
 
 /**
  * Saves a change to one bot. The roster is patched before the API answers,
- * so a switch moves under the pointer rather than after a round trip, and put
- * back if the save fails. The roster is refetched afterwards either way.
+ * so a switch moves under the pointer rather than after a round trip. Changes
+ * to one bot are sent one at a time, in the order made, so the last one made
+ * is the one kept. The roster is refetched once every bot's changes are
+ * settled, which also takes back any that failed; while none are left, a
+ * failed one is put back at once.
  */
 export function useUpdateBot(botId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	const invalidate = useInvalidateBots();
 	const rosterKey = ["bots", workspaceId];
+	const mutationKey = ["bot-update", workspaceId];
+	// Counts this change itself until its own callbacks are done.
+	const othersPending = () => queries.isMutating({ mutationKey }) > 1;
 
 	return useMutation({
+		mutationKey,
+		scope: { id: `bot-update:${botId}` },
 		mutationFn: (input: BotUpdate) =>
 			Effect.runPromise(client.api.bots.update({ params: { botId }, payload: input })),
 		onMutate: async (input) => {
 			await queries.cancelQueries({ queryKey: rosterKey });
-			const before = queries.getQueryData<Bot[]>(rosterKey);
+			const before = queries.getQueryData<Bot[]>(rosterKey)?.find((bot) => bot.id === botId);
 			queries.setQueryData<Bot[]>(rosterKey, (roster) =>
 				roster?.map((bot) => (bot.id === botId ? { ...bot, ...input } : bot)),
 			);
 			return { before };
 		},
 		onError: (_error, _input, context) => {
-			if (context?.before) queries.setQueryData(rosterKey, context.before);
+			const before = context?.before;
+			// Changes still on their way are shown over it; the refetch after the last sorts it out.
+			if (!before || othersPending()) return;
+			queries.setQueryData<Bot[]>(rosterKey, (roster) =>
+				roster?.map((bot) => (bot.id === botId ? before : bot)),
+			);
+		},
+		onSuccess: (bot, input) => {
+			// Whoever reaches the bot reaches its default project, and making a bot
+			// public or private changes who that is.
+			if (input.visibility !== undefined) {
+				void queries.invalidateQueries({ queryKey: ["project-people", bot.defaultProjectId] });
+			}
 		},
 		// Not awaited: the save's outcome should not wait on the roster refetch.
 		onSettled: () => {
+			if (othersPending()) return;
 			void invalidate();
 		},
 	});
@@ -220,6 +266,10 @@ function useInvalidateBots(): () => Promise<void> {
 			queries.invalidateQueries({ queryKey: ["bots", workspaceId] }),
 			// A bot's threads list shows it.
 			queries.invalidateQueries({ queryKey: projectThreadsKey(workspaceId) }),
+			// So do the bots lists of the projects it is in, which the list of
+			// projects counts. A bot made private or deleted leaves every project.
+			queries.invalidateQueries({ queryKey: ["project-bots"] }),
+			queries.invalidateQueries({ queryKey: projectsQuery(workspaceId).queryKey }),
 		]);
 	};
 }

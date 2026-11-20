@@ -105,7 +105,7 @@ export const BotsUsingAComputer = meta.story({
 		const using = await canvas.findByRole("region", { name: "Bots using a computer" });
 		const [first] = storyBots;
 		const row = await within(using).findByRole("link", { name: new RegExp(`^${first?.name}`) });
-		await expect(row).toHaveAttribute("href", expect.stringMatching(/\/settings\/bots\/[^/]+$/));
+		await expect(row).toHaveAttribute("href", expect.stringMatching(/\/bots\/[^/]+\/settings$/));
 		await expect(within(using).getAllByRole("link")).toHaveLength(2);
 	},
 });
@@ -347,15 +347,10 @@ export const DiskUse = meta.story({
 		await expect(rows[0]).toHaveTextContent("93%");
 		await expect(rows[1]).toHaveTextContent(storyProjects[0]?.name ?? "");
 		await expect(rows[2]).toHaveTextContent(first?.name ?? "");
-		await expect(rows[0]).toHaveAttribute(
-			"href",
-			expect.stringMatching(/\/settings\/bots\/.+\/computer$/),
-		);
+		await expect(rows[0]).toHaveAttribute("href", expect.stringMatching(/\/bots\/.+\/computer$/));
 		await expect(rows[1]).toHaveAttribute(
 			"href",
-			expect.stringMatching(
-				new RegExp(`/settings/projects/${storyProjects[0]?.slug ?? ""}/computer$`),
-			),
+			expect.stringMatching(new RegExp(`/projects/${storyProjects[0]?.slug ?? ""}/computer$`)),
 		);
 	},
 });

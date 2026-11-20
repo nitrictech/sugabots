@@ -50,7 +50,7 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 		BotsJoined: ({ conversationId }) => [
 			onConversation(conversationId, streamEvent("conversation.changed", { conversationId })),
 		],
-		TurnStarted: ({ conversationId, turnId, botId, reply }) => [
+		TurnStarted: ({ conversationId, workspaceId, turnId, botId, reply }) => [
 			onConversation(
 				conversationId,
 				streamEvent("turn.started", { conversationId, turnId, botId }),
@@ -59,6 +59,8 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 				conversationId,
 				streamEvent("message.created", { conversationId, message: reply }),
 			),
+			// A list shows a bot working in the conversation.
+			listedConversationChanged(workspaceId, conversationId),
 		],
 		TurnCompleted: ({ conversationId, workspaceId, turnId, messageId, content }) => [
 			onConversation(

@@ -1,32 +1,23 @@
-import type { Bot, Project } from "@sugabots/contracts";
 import { createRoute, Navigate } from "@tanstack/react-router";
-import type { ReactNode } from "react";
-import { useBotWithHandle } from "@/lib/bots.ts";
 import {
+	botComputerLink,
 	botConnectionLink,
 	botConnectionsLink,
 	botSettingsLink,
+	botsLink,
+	projectBotsLink,
+	projectComputerLink,
 	projectConnectionLink,
 	projectConnectionsLink,
+	projectPeopleLink,
 	projectSettingsLink,
+	projectsLink,
 } from "@/lib/links.ts";
-import { findProject, useProjects } from "@/lib/projects.ts";
-import {
-	botSettingsPage,
-	projectSettingsPage,
-	workspaceSettingSection,
-} from "@/lib/workspace-settings.ts";
+import { workspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
-import { Panes } from "@/shell/Shell.tsx";
-import { EmptyState } from "@/ui/empty-state.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { shellRoute } from "./workspace.tsx";
 
-/*
- * The settings sections are a chunk of their own; the window they open in is
- * not. `SettingsDialog` is imported eagerly so the click opens something, and
- * its `Suspense` holds the space the sections land in.
- */
 const WorkspaceSettings = lazyNamed(
 	() => import("@/screens/WorkspaceSettings.tsx"),
 	"WorkspaceSettings",
@@ -66,27 +57,37 @@ function SettingsMemberRoute() {
 	);
 }
 
+/*
+ * Addresses a bot's and a project's settings pages had before they were the
+ * owner's own, kept for links already sent out, such as in emails and bots'
+ * replies: each goes on to the page it names now.
+ */
+
+export const settingsProjectsRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/projects",
+	component: () => <Navigate {...projectsLink()} replace />,
+});
+
 export const settingsProjectRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/projects/$project",
-	// The dialog waits for the rosters, so its code downloads alongside rather than after.
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsProjectRoute,
+	component: () => {
+		const { project } = settingsProjectRoute.useParams();
+		return <Navigate {...projectSettingsLink({ slug: project })} replace />;
+	},
 });
 
-/**
- * One of a project's pages besides General: People, Bots or Computer.
- * `connections` here redirects to the project's own Connections page, for
- * links already sent out.
- */
+/** A project's People, Bots, Computer or Connections, as they were named after its settings. */
 export const settingsProjectPageRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/projects/$project/$page",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsProjectPageRoute,
+	component: () => {
+		const { project, page } = settingsProjectPageRoute.useParams();
+		return <Navigate {...movedProjectPageLink({ slug: project }, page)} replace />;
+	},
 });
 
-/** Redirects a project's connection's settings address to its own page, for links already sent out. */
 export const settingsProjectConnectionRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/projects/$project/connections/$connection",
@@ -96,25 +97,31 @@ export const settingsProjectConnectionRoute = createRoute({
 	},
 });
 
+export const settingsBotsRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/settings/bots",
+	component: () => <Navigate {...botsLink()} replace />,
+});
+
 export const settingsBotRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/bots/$bot",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsBotRoute,
+	component: () => {
+		const { bot } = settingsBotRoute.useParams();
+		return <Navigate {...botSettingsLink({ handle: bot })} replace />;
+	},
 });
 
-/**
- * One of a bot's pages besides its own: Computer. `connections` here
- * redirects to the bot's own Connections page, for links already sent out.
- */
+/** A bot's Computer or Connections, as they were named after its settings. */
 export const settingsBotPageRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/bots/$bot/$page",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsBotPageRoute,
+	component: () => {
+		const { bot, page } = settingsBotPageRoute.useParams();
+		return <Navigate {...movedBotPageLink({ handle: bot }, page)} replace />;
+	},
 });
 
-/** Redirects a bot's connection's settings address to its own page, for links already sent out. */
 export const settingsBotConnectionRoute = createRoute({
 	getParentRoute: () => shellRoute,
 	path: "/settings/bots/$bot/connections/$connection",
@@ -124,8 +131,33 @@ export const settingsBotConnectionRoute = createRoute({
 	},
 });
 
-/** The settings page segment that redirects to the owner's Connections page. */
-const MOVED_CONNECTIONS_PAGE = "connections";
+/** Where a project's page, named after its old settings address, is now; its settings for any other name. */
+function movedProjectPageLink(project: { slug: string }, page: string) {
+	switch (page) {
+		case "people":
+			return projectPeopleLink(project);
+		case "bots":
+			return projectBotsLink(project);
+		case "computer":
+			return projectComputerLink(project);
+		case "connections":
+			return projectConnectionsLink(project);
+		default:
+			return projectSettingsLink(project);
+	}
+}
+
+/** Where a bot's page, named after its old settings address, is now; its settings for any other name. */
+function movedBotPageLink(bot: { handle: string }, page: string) {
+	switch (page) {
+		case "computer":
+			return botComputerLink(bot);
+		case "connections":
+			return botConnectionsLink(bot);
+		default:
+			return botSettingsLink(bot);
+	}
+}
 
 /** One model provider, by its id. */
 export const settingsProviderRoute = createRoute({
@@ -167,122 +199,6 @@ export const settingsDefaultModelRoute = createRoute({
 		</SettingsLayout>
 	),
 });
-
-function SettingsProjectRoute() {
-	const { project: slug } = settingsProjectRoute.useParams();
-	const { data: projects, isPending, error } = useProjects();
-	// A project's settings are for the people in it.
-	const project = memberProject(projects, slug);
-	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!project) return <ProjectSettingsMissing projects={projects} slug={slug} error={error} />;
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section="projects" selectedProjectId={project.id} />
-		</SettingsLayout>
-	);
-}
-
-function SettingsProjectPageRoute() {
-	const { project: slug, page: pageSegment } = settingsProjectPageRoute.useParams();
-	const { data: projects, isPending, error } = useProjects();
-	const project = memberProject(projects, slug);
-	const page = projectSettingsPage(pageSegment);
-	if (pageSegment === MOVED_CONNECTIONS_PAGE) {
-		return <Navigate {...projectConnectionsLink({ slug })} replace />;
-	}
-	if (!page) {
-		return <Navigate {...projectSettingsLink({ slug })} replace />;
-	}
-	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!project) return <ProjectSettingsMissing projects={projects} slug={slug} error={error} />;
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section="projects" selectedProjectId={project.id} projectPage={page} />
-		</SettingsLayout>
-	);
-}
-
-/**
- * Why a project's settings are not shown: it could not be loaded, it is not
- * here, or the person is not in it, which a public project's own page joins.
- */
-function ProjectSettingsMissing({
-	projects,
-	slug,
-	error,
-}: {
-	projects: readonly Project[] | undefined;
-	slug: string;
-	error: unknown;
-}) {
-	const project = findProject(projects, slug);
-	return (
-		<Panes>
-			{project ? (
-				<EmptyState title="You're not in this project">
-					Join it from its page to see its settings.
-				</EmptyState>
-			) : (
-				<EmptyState title={error ? "Could not load this project" : "No such project here"} />
-			)}
-		</Panes>
-	);
-}
-
-/** The project at `slug` when the person is in it, as its settings need. */
-function memberProject(
-	projects: readonly Project[] | undefined,
-	slug: string,
-): Project | undefined {
-	const project = findProject(projects, slug);
-	return project?.isMember ? project : undefined;
-}
-
-/** The bot at `handle` for a settings page, once found; while it loads nothing, and if missing, why. */
-function SettingsBot({ handle, children }: { handle: string; children: (bot: Bot) => ReactNode }) {
-	const { bot, isPending, error } = useBotWithHandle(handle);
-	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!bot) {
-		return (
-			<Panes>
-				<EmptyState title={error ? "Could not load this bot" : "No such bot here"} />
-			</Panes>
-		);
-	}
-	return <SettingsLayout>{children(bot)}</SettingsLayout>;
-}
-
-function SettingsBotRoute() {
-	const { bot } = settingsBotRoute.useParams();
-	return (
-		<SettingsBot handle={bot}>
-			{(bot) => <WorkspaceSettings section="bots" selectedBot={bot} />}
-		</SettingsBot>
-	);
-}
-
-function SettingsBotPageRoute() {
-	const { bot, page: pageSegment } = settingsBotPageRoute.useParams();
-	const page = botSettingsPage(pageSegment);
-	if (pageSegment === MOVED_CONNECTIONS_PAGE) {
-		return <Navigate {...botConnectionsLink({ handle: bot })} replace />;
-	}
-	if (!page) {
-		return <Navigate {...botSettingsLink({ handle: bot })} replace />;
-	}
-	return (
-		<SettingsBot handle={bot}>
-			{(bot) =>
-				// A Personal Assistant's computer is ours to set up; its person changes its look and connections.
-				bot.assistant && page === "computer" ? (
-					<Navigate {...botSettingsLink(bot)} replace />
-				) : (
-					<WorkspaceSettings section="bots" selectedBot={bot} botPage={page} />
-				)
-			}
-		</SettingsBot>
-	);
-}
 
 function SettingsSectionRoute() {
 	const { section } = settingsSectionRoute.useParams();

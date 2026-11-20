@@ -8,16 +8,16 @@ import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, connectionHandlers, StoryApp, storyBots, storyModel } from "../story-app.tsx";
 
 /*
- * A bot's settings, opened from Bots: its contact card, with its profile,
- * model and instructions edited in place, its tools, connections and
- * automations, and on a phone Back to the list.
+ * A bot's settings, a page of its own beside its threads: its contact card,
+ * with its profile, model and instructions edited in place, its tools,
+ * connections and automations, and on a phone Back to the bot.
  *
  * Handlers a story adds with `msw.use` are tried before the meta's, so each
  * story answers only what it is about.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
-const cardPath = `/nitric/settings/bots/${growthDesk.handle}`;
+const cardPath = `/nitric/bots/${growthDesk.handle}/settings`;
 
 /** The workspace's switched-on models across three providers, to choose the bot's model from. */
 const models = [
@@ -131,7 +131,7 @@ const automations: Automation[] = [
 ];
 
 const meta = preview.meta({
-	title: "Views/Bots",
+	title: "Views/Bot settings",
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
@@ -141,15 +141,14 @@ const meta = preview.meta({
 });
 
 /**
- * Growth Desk's contact card, a page of its own in Bots: its
+ * Growth Desk's contact card, its Settings page: its
  * face, with the pencil that changes its look, and the way to message it,
  * about, tools and automations.
  */
 export const ContactCard = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: growthDesk.name })).toBeInTheDocument();
-		const trail = canvas.getByRole("navigation", { name: "Breadcrumb" });
-		await expect(within(trail).getByRole("link", { name: "Bots" })).toBeInTheDocument();
+		await expect(canvas.getByRole("heading", { name: "Settings", level: 1 })).toBeInTheDocument();
 		await expect(canvas.getByRole("heading", { name: "Built-in tools" })).toBeInTheDocument();
 		await expect(canvas.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
 		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(growthDesk.name);
@@ -254,7 +253,9 @@ export const ToolsAndAutomations = meta.story({
 		await expect(await within(connections).findByText("HubSpot")).toBeInTheDocument();
 		await expect(within(connections).getAllByText("2 tools")).not.toHaveLength(0);
 		await expect(within(connections).queryByRole("switch")).toBeNull();
-		const automationsRow = canvas.getByRole("link", { name: /^Automations/ });
+		// Its settings' row, not the Automations beside its threads.
+		const settings = canvas.getByRole("region", { name: "Settings" });
+		const automationsRow = within(settings).getByRole("link", { name: /^Automations/ });
 		await waitFor(() => expect(within(automationsRow).getByText("2")).toBeInTheDocument());
 		await expect(automationsRow).toHaveAttribute(
 			"href",
@@ -276,13 +277,13 @@ export const Member = meta.story({
 	},
 });
 
-/** On a phone the card covers the list, with the way back to it. */
+/** On a phone the card is a page of the bot's, with the way back to it. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: growthDesk.name })).toBeInTheDocument();
 		await expect(
-			within(canvas.getByRole("main")).getByRole("link", { name: "Bots" }),
+			canvas.getByRole("link", { name: `Back to ${growthDesk.name}` }),
 		).toBeInTheDocument();
 	},
 });

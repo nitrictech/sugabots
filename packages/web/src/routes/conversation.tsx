@@ -5,8 +5,9 @@ import { MessageSquareOff } from "lucide-react";
 import { type ReactNode, Suspense } from "react";
 import type { ConversationPlace } from "@/lib/chats.ts";
 import { matchesMedia, SIDE_BY_SIDE } from "@/lib/media.ts";
-import { ownerLinkOptions, type ResourceOwner } from "@/lib/resource-owner.tsx";
+import { ownerLinkOptions } from "@/lib/resource-owner.tsx";
 import { useSession } from "@/lib/session.ts";
+import { backToOwner } from "@/screens/ChatHeader.tsx";
 import type { StagedChange } from "@/screens/staged.ts";
 import { useLeave } from "@/ui/back-button.tsx";
 import { buttonStyles } from "@/ui/button.tsx";
@@ -63,21 +64,15 @@ export function RoutedConversation({
 	const searchProps = useConversationSearchProps(search, navigate);
 	// A run or collaboration a notification names is the page itself, with the way back to where it is.
 	if (search.itemPage) {
-		const owner: ResourceOwner =
-			found.project !== null ? { project: found.project } : { bot: found.conversation.bot };
 		return (
 			<ItemConversationPage
 				conversationPlace={found}
 				conversationId={conversationId}
 				itemConversationId={search.itemPage}
-				back={
-					found.project !== null
-						? { to: "project", project: found.project }
-						: { to: "bot", bot: found.conversation.bot }
-				}
+				back={backToOwner(found)}
 				trailing={
 					<Link
-						{...ownerLinkOptions(owner, { page: "thread", conversationId })}
+						{...ownerLinkOptions(found, { page: "thread", conversationId })}
 						className={cn(
 							buttonStyles({ variant: "secondary", size: "sm" }),
 							"shrink-0 max-md:hidden",

@@ -1,6 +1,5 @@
 import type { Bot, Connection, Project } from "@sugabots/contracts";
 import { linkOptions } from "@tanstack/react-router";
-import type { BotSettingsPage, ProjectSettingsPage } from "@/lib/workspace-settings.ts";
 
 /*
  * Where a project or a bot lives in the workspace being looked at.
@@ -19,30 +18,6 @@ type BotRef = Pick<Bot, "handle">;
 /** What is new across the workspace. */
 export function inboxLink() {
 	return linkOptions({ from: "/$workspace", to: "./inbox" });
-}
-
-/** The person's direct messages with other people. */
-export function directMessagesLink() {
-	return linkOptions({ from: "/$workspace", to: "./dm" });
-}
-
-/** Starting a direct message: choosing whom to, and writing the first message. */
-export function newDirectMessageLink() {
-	return linkOptions({ from: "/$workspace", to: "./dm/new" });
-}
-
-/**
- * One direct message, by its conversation's id, jumped to `message` when one
- * is given. The address names no project, as a direct message between people
- * is in none.
- */
-export function directMessageLink(conversationId: string, search: { message?: string } = {}) {
-	return linkOptions({
-		from: "/$workspace",
-		to: "./dm/$conversation",
-		params: { conversation: conversationId },
-		search,
-	});
 }
 
 /** Every project the person could open or join. */
@@ -64,9 +39,18 @@ export function projectLink(project: ProjectRef) {
 	});
 }
 
-/** A bot's own page, where a thread with it starts. */
+/** A bot's own page: on a phone, its threads and pages; on a wider screen, starting a thread with it. */
 export function botLink(bot: BotRef) {
 	return linkOptions({ from: "/$workspace", to: "./bots/$bot", params: { bot: bot.handle } });
+}
+
+/** Starting a thread with a bot, from its first message. */
+export function botNewThreadLink(bot: BotRef) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./bots/$bot/new",
+		params: { bot: bot.handle },
+	});
 }
 
 /** Starting a thread in a project, from its first message. */
@@ -120,21 +104,39 @@ export function botFileLink(bot: BotRef, fileId: string, search: { version?: num
 	});
 }
 
+/** A project's settings: its name, lead bot, look and visibility. */
 export function projectSettingsLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/projects/$project",
+		to: "./projects/$project/settings",
 		params: { project: project.slug },
 	});
 }
 
-/** One of a project's settings pages, General being the project's own address. */
-export function projectSettingsPageLink(project: ProjectRef, page: ProjectSettingsPage) {
-	if (page === "general") return projectSettingsLink(project);
+/** The people in a project, a page of its settings. */
+export function projectPeopleLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/projects/$project/$page",
-		params: { project: project.slug, page },
+		to: "./projects/$project/settings/people",
+		params: { project: project.slug },
+	});
+}
+
+/** The bots added to a project, a page of its settings. */
+export function projectBotsLink(project: ProjectRef) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./projects/$project/settings/bots",
+		params: { project: project.slug },
+	});
+}
+
+/** A project's computer: how it stands, its disk, and the hosts it may reach. */
+export function projectComputerLink(project: ProjectRef) {
+	return linkOptions({
+		from: "/$workspace",
+		to: "./projects/$project/computer",
+		params: { project: project.slug },
 	});
 }
 
@@ -325,21 +327,21 @@ export function conversationLink(
 		: botThreadLink(place.bot, place.conversationId, search);
 }
 
+/** A bot's settings: its look, model, instructions and tools. */
 export function botSettingsLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/bots/$bot",
+		to: "./bots/$bot/settings",
 		params: { bot: bot.handle },
 	});
 }
 
-/** One of a bot's settings pages, General being the bot's own address. */
-export function botSettingsPageLink(bot: BotRef, page: BotSettingsPage) {
-	if (page === "general") return botSettingsLink(bot);
+/** A bot's computer: its default project's. */
+export function botComputerLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/bots/$bot/$page",
-		params: { bot: bot.handle, page },
+		to: "./bots/$bot/computer",
+		params: { bot: bot.handle },
 	});
 }
 

@@ -151,7 +151,7 @@ const Http = listeningLayer.pipe(
  * everything is traced: routes, better-auth's hooks, the background work, and
  * the statements they all send.
  */
-const Main = Layer.mergeAll(Http, Background).pipe(
+export const Main = Layer.mergeAll(Http, Background).pipe(
 	Layer.provide(ConversationServices),
 	Layer.provide(WorkspacesAndProviders),
 	Layer.provide(OutsideSystems),
@@ -161,4 +161,7 @@ const Main = Layer.mergeAll(Http, Background).pipe(
 	Layer.provide(observabilityLayer),
 );
 
-Layer.launch(Main).pipe(NodeRuntime.runMain);
+// Only when run, as `node src/index.ts`, so a test can import `Main` to check it loads.
+if (import.meta.main) {
+	Layer.launch(Main).pipe(NodeRuntime.runMain);
+}

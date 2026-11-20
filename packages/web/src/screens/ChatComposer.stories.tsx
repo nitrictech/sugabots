@@ -2,7 +2,7 @@ import type { Participant } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { expect, fn, spyOn, waitFor, within } from "storybook/test";
+import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import type { ComposerAttachment } from "@/lib/composer-attachments.ts";
 import { growthDesk } from "@/shell/story-fixtures.ts";
@@ -66,7 +66,6 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	args: {
 		label: "Message Growth Desk",
-		pill: true,
 		value: "",
 		onValueChange: fn(),
 		onSubmit: fn(),
@@ -244,20 +243,6 @@ export const EditMention = meta.story({
 });
 
 /**
- * In New message, whose composer has a row of tools under the draft, the @
- * starts a mention where the cursor is, opening the same list as typing `@`.
- */
-export const MentionButton = meta.story({
-	args: { pill: false, value: "Can you ask" },
-	play: async ({ args, canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("textbox", { name: "Message Growth Desk" }));
-		await userEvent.click(canvas.getByRole("button", { name: "Mention a bot or person" }));
-		await expect(args.onValueChange).toHaveBeenLastCalledWith("Can you ask @");
-		await expect(await canvas.findByRole("listbox", { name: "Who to mention" })).toBeVisible();
-	},
-});
-
-/**
  * Typing `:` and part of a shortcode offers the emoji it names, best match
  * first, and Enter writes the highlighted one without sending. A `:` in a time
  * or a smiley like `:)` offers nothing.
@@ -286,27 +271,6 @@ export const ClosedShortcode = meta.story({
 		await canvas.findByRole("listbox", { name: "Emoji matching what was typed" });
 		await userEvent.type(input, "a:");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Shipped 🎉");
-	},
-});
-
-/** In New message the smile opens the emoji picker, and the emoji chosen goes in at the cursor. */
-export const EmojiButton = meta.story({
-	args: { pill: false, value: "Nice work" },
-	play: async ({ args, canvas, userEvent }) => {
-		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
-		await userEvent.click(canvas.getByRole("button", { name: "Add emoji" }));
-		const page = within(document.body);
-		await page.findByRole("gridcell", { name: "Grinning face" });
-		await userEvent.keyboard("hundred points");
-		await waitFor(() =>
-			expect(page.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
-				"aria-selected",
-				"true",
-			),
-		);
-		await userEvent.keyboard("{Enter}");
-		await expect(args.onValueChange).toHaveBeenLastCalledWith("Nice work💯");
-		await waitFor(() => expect(input).toHaveFocus());
 	},
 });
 
@@ -495,33 +459,18 @@ export const ReplyingTo = meta.story({
 	},
 });
 
-/** In New message the paperclip sits left of the @ and opens the system's file picker straight away. */
-export const AttachFiles = meta.story({
-	args: { pill: false },
-	play: async ({ canvas, canvasElement, userEvent }) => {
-		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
-		if (!picker) throw new Error("The composer has no file picker");
-		// The real picker is the system's own window, which a test cannot close.
-		const openPicker = spyOn(picker, "click").mockImplementation(() => {});
-		await userEvent.click(canvas.getByRole("button", { name: "Attach files" }));
-		await expect(openPicker).toHaveBeenCalledOnce();
-	},
-});
-
 /**
- * Before New message's conversation exists there is nowhere to upload to: the
- * paperclip is off, and a pasted file writes nothing into the draft.
+ * Before a new thread exists there is nowhere to upload to: Upload files is
+ * off, and a pasted file writes nothing into the draft.
  */
 export const BeforeTheChatExists = meta.story({
-	args: { pill: false, attachments: { ...withFiles([]), attach: undefined } },
-	play: async ({ canvas, canvasElement, userEvent }) => {
-		const attachButton = canvas.getByRole("button", { name: "Attach files" });
-		await expect(attachButton).toHaveAttribute("aria-disabled", "true");
-		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
-		if (!picker) throw new Error("The composer has no file picker");
-		const openPicker = spyOn(picker, "click").mockImplementation(() => {});
-		await userEvent.click(attachButton);
-		await expect(openPicker).not.toHaveBeenCalled();
+	args: { attachments: { ...withFiles([]), attach: undefined } },
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Add" }));
+		await expect(
+			await within(document.body).findByRole("menuitem", { name: "Upload files" }),
+		).toHaveAttribute("aria-disabled", "true");
+		await userEvent.keyboard("{Escape}");
 
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		const pasted = new DataTransfer();

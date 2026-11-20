@@ -3,15 +3,16 @@ import type { ReactNode } from "react";
 import { formatAge } from "@/lib/list-time.ts";
 import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useSidebarHiddenBesideChat } from "@/lib/sidebar-hidden.tsx";
-import { HeaderBack } from "@/screens/ChatHeader.tsx";
+import { backToOwner, HeaderBack } from "@/screens/ChatHeader.tsx";
 import { CrumbSeparator } from "@/shell/BotCrumb.tsx";
 
 /**
  * Where a page sits on a phone: one of its tabs, titled large with no Back,
  * or a page of a project's or a bot's, such as its Files, which leads back
- * to the project or the bot.
+ * to the project or the bot, or, `under` its Settings as a project's People
+ * is, back to its Settings.
  */
-type PagePlace = { kind: "tab" } | { kind: "owner"; owner: ResourceOwner };
+type PagePlace = { kind: "tab" } | { kind: "owner"; owner: ResourceOwner; under?: "settings" };
 
 /**
  * A page beside the sidebar, such as Inbox: its `PageHeader`, and what it
@@ -19,6 +20,7 @@ type PagePlace = { kind: "tab" } | { kind: "owner"; owner: ResourceOwner };
  */
 export function Page({
 	title,
+	label = title,
 	parent,
 	place,
 	actions,
@@ -26,6 +28,11 @@ export function Page({
 	children,
 }: {
 	title: string;
+	/**
+	 * Its name for a screen reader, when its title alone is another landmark's
+	 * too, as a project's Bots is the icon rail's: "Revenue's bots".
+	 */
+	label?: string;
 	/** What the page belongs to, before its title in the breadcrumb, such as its bot. */
 	parent?: ReactNode;
 	place: PagePlace;
@@ -34,7 +41,7 @@ export function Page({
 	children: ReactNode;
 }) {
 	return (
-		<section aria-label={title} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
+		<section aria-label={label} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
 			<PageHeader title={title} parent={parent} place={place} actions={actions} />
 			<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">{children}</div>
 		</section>
@@ -75,9 +82,9 @@ export function PageHeader({
 			{place.kind === "owner" && (
 				<HeaderBack
 					back={
-						"bot" in place.owner
-							? { to: "bot", bot: place.owner.bot }
-							: { to: "project", project: place.owner.project }
+						place.under === "settings"
+							? { to: "ownerSettings", owner: place.owner }
+							: backToOwner(place.owner)
 					}
 				/>
 			)}

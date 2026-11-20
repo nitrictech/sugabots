@@ -15,7 +15,7 @@ type ConversationPageProps = Omit<ComponentProps<typeof ConversationChat>, "plac
 };
 
 export function ConversationPage({ away, ...chat }: ConversationPageProps) {
-	usePresence(chat.covered ? undefined : chat.conversationId);
+	usePresence(chat.conversationId);
 	const bot = placeBot(chat.conversationPlace);
 	return (
 		<div

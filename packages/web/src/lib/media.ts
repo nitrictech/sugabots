@@ -1,5 +1,8 @@
 import { useSyncExternalStore } from "react";
 
+/** Whether the person asks for less motion: no slides, glides or other movement that can be left out. */
+export const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
 /** Tailwind's `md`, from which the list and the chat sit side by side. */
 export const SIDE_BY_SIDE = "(min-width: 48rem)";
 

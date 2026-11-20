@@ -129,9 +129,8 @@ export const make = Effect.gen(function* () {
 						);
 						if (!loaded) return yield* refuseRun(run, "The conversation is gone", CANCELLED);
 						// In a project the bot has to be one of the project's, whoever a
-						// mention picks; in a bot's own conversation, it has to be that bot. A
-						// direct message between people has no bot at all. This is what
-						// stops a turn request naming a bot from elsewhere.
+						// mention picks; in a bot's own conversation, it has to be that bot.
+						// This is what stops a turn request naming a bot from elsewhere.
 						const speaker = loaded.project
 							? loaded.project.bots.find(({ id }) => id === request.botId)
 							: loaded.bot?.id === request.botId
@@ -318,7 +317,7 @@ export interface TurnContext {
 		workspaceId: string;
 		title: string;
 		kind: ConversationKind;
-		/** The bot the conversation is with; none in a project's thread or between people. */
+		/** The bot the conversation is with; none in a project people made. */
 		botId: string | null;
 		/** Set when another bot opened this conversation by asking this one for help. */
 		parentConversationId: string | null;

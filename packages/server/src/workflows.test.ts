@@ -1,20 +1,21 @@
-import { clientLayer } from "@sugabots/core/database/database";
+import { noDatabaseClient } from "@sugabots/core/database/testing";
 import { ConfigProvider, Effect, Layer } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { describe, expect, it } from "vitest";
 import { Workflows } from "./workflows.ts";
 
-// The single runner needs the app's Postgres, so every engine's layer asks for it.
-const database = Layer.provide(clientLayer);
-
 const withEnv = (env: Record<string, string>) =>
 	Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })));
 
-describe.skipIf(!process.env.DATABASE_URL)("choosing the workflow engine", () => {
-	it("builds the engine WORKFLOW_ENGINE names", async () => {
+// The single runner's layer uses the database as it is built, and fails on this one.
+const engineFor = (env: Record<string, string>) =>
+	Workflows.engine.pipe(withEnv(env), Layer.provide(noDatabaseClient));
+
+describe("choosing the workflow engine", () => {
+	it("builds the in-memory engine, which needs no database, when WORKFLOW_ENGINE names it", async () => {
 		const engine = await Effect.runPromise(
 			Effect.service(WorkflowEngine.WorkflowEngine).pipe(
-				Effect.provide(Workflows.engine.pipe(withEnv({ WORKFLOW_ENGINE: "memory" }), database)),
+				Effect.provide(engineFor({ WORKFLOW_ENGINE: "memory" })),
 			),
 		);
 
@@ -23,11 +24,7 @@ describe.skipIf(!process.env.DATABASE_URL)("choosing the workflow engine", () =>
 
 	it("refuses an engine it does not know", async () => {
 		await expect(
-			Effect.runPromise(
-				Effect.scoped(
-					Layer.build(Workflows.engine.pipe(withEnv({ WORKFLOW_ENGINE: "celery" }), database)),
-				),
-			),
+			Effect.runPromise(Effect.scoped(Layer.build(engineFor({ WORKFLOW_ENGINE: "celery" })))),
 		).rejects.toThrow(/WORKFLOW_ENGINE/);
 	});
 });

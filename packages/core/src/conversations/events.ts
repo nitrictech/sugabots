@@ -53,6 +53,7 @@ export type ConversationEvent = Data.TaggedEnum<{
 	/** A bot's turn opened, with its reply as an empty `streaming` message. Not emitted when a suspended turn resumes. */
 	TurnStarted: {
 		readonly conversationId: string;
+		readonly workspaceId: string;
 		readonly turnId: string;
 		readonly botId: string;
 		readonly reply: Message;

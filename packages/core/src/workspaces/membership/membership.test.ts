@@ -3,9 +3,13 @@ import { ConfigProvider, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import { Accounts } from "../../accounts/accounts.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
-import { noComputers } from "../../computers/testing.ts";
+import { ComputerProviderRepository } from "../../computers/computer-provider-repository.ts";
+import { Computers } from "../../computers/computers.ts";
+import { noComputers, recordingFirstComputer } from "../../computers/testing.ts";
+import { query } from "../../database/database.ts";
 import {
 	bot,
+	computer,
 	modelProvider,
 	project,
 	projectMember,
@@ -15,14 +19,24 @@ import {
 	workspaceDefaultModel,
 	workspaceInvite,
 	workspaceMember,
+	workspace as workspaceTable,
 } from "../../database/schema.ts";
-import { closeDatabase, onDatabase, testInfrastructure } from "../../database/testing.ts";
+import {
+	closeDatabase,
+	holdTransaction,
+	onDatabase,
+	runOnPostgres,
+	testInfrastructure,
+	waitUntilWaitingOnLocks,
+} from "../../database/testing.ts";
 import { Email } from "../../email/email.ts";
 import { Installation } from "../../installation/installation.ts";
 import { unimplemented } from "../../testing.ts";
 import { Membership } from "./membership.ts";
 
 const WEB_APP_URL = "http://localhost:5173";
+/** A computer provider's address nothing listens on. */
+const UNREACHABLE_URL = "http://127.0.0.1:9";
 
 /**
  * The real service over a migrated database, with the emails it sends kept in
@@ -536,7 +550,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
-	it("puts an administrator in every project, whether invited or promoted", async () => {
+	it("puts an administrator in every project people made, whether invited or promoted", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const kim = await person("Kim");
@@ -649,7 +663,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
 	});
 
-	it("transfers ownership, putting the new owner in every project and making the old one an admin", async () => {
+	it("transfers ownership, putting the new owner in every project people made and making the old one an admin", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const bobMember = await join(workspace.id, ada.id, bob, "viewer");
@@ -693,6 +707,76 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
+	/**
+	 * Holds the workspace's membership lock, as a transfer of ownership to
+	 * `newOwnerId` in progress does, and makes that transfer once released.
+	 */
+	function holdTransferTo(workspaceId: string, newOwnerId: string) {
+		return holdTransaction(
+			query((db) =>
+				db
+					.select({ id: workspaceTable.id })
+					.from(workspaceTable)
+					.where(eq(workspaceTable.id, workspaceId))
+					.for("no key update"),
+			),
+			query((db) =>
+				Effect.gen(function* () {
+					yield* db
+						.update(workspaceMember)
+						.set({ role: "admin" })
+						.where(
+							and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.role, "owner")),
+						);
+					yield* db
+						.update(workspaceMember)
+						.set({ role: "owner" })
+						.where(
+							and(
+								eq(workspaceMember.workspaceId, workspaceId),
+								eq(workspaceMember.userId, newOwnerId),
+							),
+						);
+				}),
+			),
+		);
+	}
+
+	it("refuses a second transfer of ownership from an owner whose first has handed it on", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const kim = await person("Kim");
+		await join(workspace.id, ada.id, bob);
+		const kimMember = await join(workspace.id, ada.id, kim);
+		const firstTransfer = holdTransferTo(workspace.id, bob.id);
+		await firstTransfer.held;
+
+		const secondTransfer = run(ada.id, (m) =>
+			m.transferOwnership({ workspace: workspace.id, memberId: kimMember.id }),
+		);
+		await waitUntilWaitingOnLocks(1);
+		await firstTransfer.release();
+
+		expect(await secondTransfer).toEqual({ failed: "ActionForbidden" });
+		expect(await membershipOf(workspace.id, bob.id)).toMatchObject({ role: "owner" });
+		expect(await membershipOf(workspace.id, kim.id)).toMatchObject({ role: "member" });
+	});
+
+	it("keeps a workspace whose owner hands it on while their deletion of it waits", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		await join(workspace.id, ada.id, bob);
+		const transfer = holdTransferTo(workspace.id, bob.id);
+		await transfer.held;
+
+		const deleting = run(ada.id, (m) => m.delete({ workspace: workspace.id }));
+		await waitUntilWaitingOnLocks(1);
+		await transfer.release();
+
+		expect(await deleting).toEqual({ failed: "ActionForbidden" });
+		expect(await run(bob.id, (m) => m.workspaces)).toMatchObject([{ id: workspace.id }]);
+	});
+
 	it("lets only the owner delete a workspace, which takes it from every member", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
@@ -708,6 +792,94 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(ada.id, (m) => m.members({ workspace: workspace.id }))).toEqual({
 			failed: "ResourceHidden",
 		});
+	});
+
+	it("keeps a workspace while its computers' provider can't be reached to destroy them", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const provider = await runOnPostgres(
+			Effect.flatMap(ComputerProviderRepository.Service, (providers) =>
+				providers.create(workspace.id, {
+					createdById: ada.id,
+					provider: {
+						settings: { preset: "opensandbox", serverUrl: UNREACHABLE_URL, image: "debian" },
+						enabled: true,
+						apiKey: "key",
+					},
+				}),
+			).pipe(Effect.provide(ComputerProviderRepository.layer)),
+		);
+		const [launch] = await onDatabase((db) =>
+			db
+				.insert(project)
+				.values({ workspaceId: workspace.id, name: "Launch", slug: "launch" })
+				.returning(),
+		);
+		if (!launch) throw new Error("The project was not created");
+		await onDatabase((db) =>
+			db.insert(computer).values({
+				workspaceId: workspace.id,
+				projectId: launch.id,
+				computerProviderId: provider.id,
+				providerComputerId: Computers.ComputerId("running"),
+			}),
+		);
+
+		expect(await run(ada.id, (m) => m.delete({ workspace: workspace.id }))).toEqual({
+			failed: "ComputerUnavailable",
+		});
+		expect(
+			await onDatabase((db) =>
+				db.select({ id: computer.id }).from(computer).where(eq(computer.projectId, launch.id)),
+			),
+		).toHaveLength(1);
+		expect(await run(ada.id, (m) => m.workspaces)).toMatchObject([{ id: workspace.id }]);
+	});
+
+	it("keeps a member whose Personal Assistant's first computer is recorded as they are removed", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const bobMember = await join(workspace.id, ada.id, bob);
+		const provider = await runOnPostgres(
+			Effect.flatMap(ComputerProviderRepository.Service, (providers) =>
+				providers.create(workspace.id, {
+					createdById: ada.id,
+					provider: {
+						settings: { preset: "opensandbox", serverUrl: UNREACHABLE_URL, image: "debian" },
+						enabled: true,
+						apiKey: "key",
+					},
+				}),
+			).pipe(Effect.provide(ComputerProviderRepository.layer)),
+		);
+		const [assistantProject] = await onDatabase((db) =>
+			db
+				.select({ id: project.id })
+				.from(project)
+				.innerJoin(bot, eq(bot.id, project.defaultOfBotId))
+				.where(and(eq(bot.workspaceId, workspace.id), eq(bot.assistantOf, bob.id))),
+		);
+		if (!assistantProject) throw new Error("Bob has no Personal Assistant");
+		const recording = await recordingFirstComputer({
+			workspaceId: workspace.id,
+			projectId: assistantProject.id,
+			computerProviderId: provider.id,
+		});
+
+		const removing = run(ada.id, (m) =>
+			m.remove({ workspace: workspace.id, memberId: bobMember.id }),
+		);
+		await waitUntilWaitingOnLocks(1);
+		await recording.release();
+
+		expect(await removing).toEqual({ failed: "ComputerMadeMeanwhile" });
+		expect(
+			await onDatabase((db) =>
+				db
+					.select({ id: computer.id })
+					.from(computer)
+					.where(eq(computer.projectId, assistantProject.id)),
+			),
+		).toHaveLength(1);
 	});
 
 	it("lets a workspace have only one owner", async () => {
@@ -774,6 +946,51 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 					.where(and(eq(bot.workspaceId, workspace.id), eq(bot.assistantOf, bob.id))),
 			),
 		).toHaveLength(1);
+	});
+
+	it("lets the workspace's projects be made while a member's removal waits", async () => {
+		const { ada, workspace } = await workspaceOfAda();
+		const bob = await person("Bob");
+		const bobMember = await join(workspace.id, ada.id, bob);
+		// Holds Bob's membership, so his removal waits there with the workspace locked,
+		// as it would on his Personal Assistant's computer at its provider.
+		const hold = holdTransaction(
+			query((db) =>
+				db
+					.select({ id: workspaceMember.id })
+					.from(workspaceMember)
+					.where(eq(workspaceMember.id, bobMember.id))
+					.for("update"),
+			),
+		);
+		await hold.held;
+		const removed = run(ada.id, (m) =>
+			m.remove({ workspace: workspace.id, memberId: bobMember.id }),
+		);
+		await waitUntilWaitingOnLocks(1);
+
+		const made = onDatabase((db) =>
+			db
+				.insert(project)
+				.values({ workspaceId: workspace.id, name: "Launch", slug: `launch-${unique()}` }),
+		);
+		expect(
+			await Promise.race([
+				made.then(() => "made"),
+				waitUntilWaitingOnLocks(2).then(
+					() => "held up",
+					() => "never held up",
+				),
+			]),
+		).toBe("made");
+
+		await hold.release();
+		await removed;
+		expect(
+			await onDatabase((db) =>
+				db.select().from(workspaceMember).where(eq(workspaceMember.id, bobMember.id)),
+			),
+		).toEqual([]);
 	});
 
 	it("lets somebody who created a project leave, and keeps the project", async () => {

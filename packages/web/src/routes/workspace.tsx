@@ -1,9 +1,8 @@
 import type { Workspace, WorkspacePermissions } from "@sugabots/contracts";
 import { createRoute, Navigate } from "@tanstack/react-router";
-import { useAssistant, useBots, useEnsuredAssistant } from "@/lib/bots.ts";
+import { useAssistant, useBots, useEnsuringAssistantFailed } from "@/lib/bots.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { loadFailure } from "@/lib/query.ts";
-import { useSession } from "@/lib/session.ts";
 import { useWorkspace, useWorkspaceStanding, useWorkspaces } from "@/lib/workspace.ts";
 import { LoadFailure } from "@/shell/LoadFailure.tsx";
 import { MobileHome } from "@/shell/MobileHome.tsx";
@@ -70,18 +69,18 @@ export const workspaceIndexRoute = createRoute({
 });
 
 function AssistantRoute() {
-	const { isPending, error } = useBots();
+	const { error } = useBots();
 	const assistant = useAssistant();
-	const { user } = useSession();
-	const ensure = useEnsuredAssistant(!isPending && !error && !assistant);
-	if (assistant && user) {
+	// The shell makes the assistant when the person has none; this shows whether that failed.
+	const ensureFailed = useEnsuringAssistantFailed();
+	if (assistant) {
 		return (
 			<Panes>
-				<NewThreadPage key={assistant.id} owner={{ bot: assistant }} userId={user.id} />
+				<NewThreadPage key={assistant.id} owner={{ bot: assistant }} />
 			</Panes>
 		);
 	}
-	if (error || ensure.isError) {
+	if (error || ensureFailed) {
 		return (
 			<Panes>
 				<EmptyState title="Could not open your Personal Assistant">{API_DID_NOT_ANSWER}</EmptyState>

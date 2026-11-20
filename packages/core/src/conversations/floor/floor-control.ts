@@ -8,13 +8,13 @@ import type { UserFacing } from "../../user-message.ts";
 import type { ConversationEvent } from "../events.ts";
 import { ConversationRepository } from "../repository/repository.ts";
 import { Turns } from "../turns/turns.ts";
-import { decideFloor, type FloorMessage, loadFloorScope } from "./floor.ts";
+import { type FloorMessage, floorOf, loadFloorScope } from "./floor.ts";
 
 /** Who speaks after a person's message, in a conversation of any type. */
 export interface Interface {
 	/**
 	 * Decides who speaks after the committed message `committed` (see
-	 * `decideFloor`) and asks for them: brings each addressed bot into the
+	 * `floorOf`) and asks for them: brings each addressed bot into the
 	 * conversation and asks for its turn. Runs in the caller's transaction, so it
 	 * commits with the message. Refused, before any turn is asked for, when a
 	 * bot given the floor has no model, so the caller's transaction rolls the
@@ -42,12 +42,11 @@ export const make = Effect.gen(function* () {
 			transaction(
 				Effect.gen(function* () {
 					const scope = yield* query((db) => loadFloorScope(db, committed));
-					const decision = decideFloor({ ...scope, content: committed.content });
+					const decision = floorOf({ ...scope, content: committed.content });
 					if (decision.kind !== "turns") return;
 					const modelled = new Set(
 						scope.mentionableBots.flatMap((member) => (member.hasModel ? [member.id] : [])),
 					);
-					if (scope.lead?.hasModel) modelled.add(scope.lead.id);
 					if (decision.bots.some(({ botId }) => !modelled.has(botId))) {
 						return yield* new BotHasNoModel();
 					}

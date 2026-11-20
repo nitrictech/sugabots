@@ -37,9 +37,8 @@ UPDATE "agent" SET "assistant_of" = "pod"."owner_id"
 FROM "pod"
 WHERE "pod"."id" = "agent"."pod_id" AND "pod"."kind" = 'personal'
 	AND "agent"."provisioned_key" = 'personal-assistant';--> statement-breakpoint
--- Sugabots manages a Personal Assistant, which has no automations: nobody can
--- change or run one now, nor would its runs reach its person in a thread. Any
--- an assistant had are paused, with no next time, rather than running unmanaged.
+-- A Personal Assistant's automations become its person's to manage. Any an
+-- assistant had are paused, with no next time, until its person resumes them.
 UPDATE "routine" SET "state" = 'paused'
 FROM "agent"
 WHERE "agent"."id" = "routine"."agent_id" AND "agent"."assistant_of" IS NOT NULL

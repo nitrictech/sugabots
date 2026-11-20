@@ -5,8 +5,7 @@ import { COUNT_BADGE_SIZES, CountBadge, type CountBadgeSize } from "@/ui/count-b
 
 /**
  * What is new in Inbox, where a place leads to it: how many unread messages
- * are written to the viewer, mentioning them or in their direct messages, or
- * a dot while only other things are unread. Only what needs the viewer is
+ * mention the viewer, or a dot while only other things are unread. Only what needs the viewer is
  * counted, as the app's badge counts it.
  */
 export function InboxNews({

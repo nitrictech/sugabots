@@ -5,10 +5,8 @@ import { useState } from "react";
 import { useApprovalApp, useAskedIn } from "@/lib/approval-app.ts";
 import { useApprovalInbox } from "@/lib/chats.ts";
 import { useReviewToolCall } from "@/lib/conversations.ts";
-import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { RequestConversationLink } from "@/screens/ApprovalPage.tsx";
-import { Answer, FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
-import { awaitsApproval } from "@/screens/tool-activity.ts";
+import { PendingApprovalAnswer, RequestConversationLink } from "@/screens/ApprovalPage.tsx";
+import { FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ListTime, Page } from "@/shell/Page.tsx";
 
@@ -133,8 +131,6 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 	const { action } = useApprovalApp(request);
 	const { project, askedIn: asked } = useAskedIn(request);
 	const review = useReviewToolCall(request.conversationId);
-	// A phone answers with two wide buttons, and opens the request whole from its name.
-	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	return (
 		<article
 			aria-label={`${bot.name}: ${action}`}
@@ -164,19 +160,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 				<FoldedRequest input={call.input} />
 			</div>
 			<div className="ml-9 flex flex-wrap items-center gap-3 max-md:ml-0 max-md:flex-col max-md:items-stretch">
-				{awaitsApproval(call) ? (
-					<Answer
-						pending={review.isPending || review.isSuccess}
-						error={review.error}
-						onDecide={(decision) => review.mutate({ toolCallId: call.id, decision })}
-						actionLabel={action}
-						pinned={phone}
-					/>
-				) : (
-					<p className="m-0 text-xs text-muted-foreground">
-						No longer waiting: {bot.name} stopped before it was answered.
-					</p>
-				)}
+				<PendingApprovalAnswer request={request} actionLabel={action} review={review} />
 				<span className="flex-1 max-md:hidden" />
 				<RequestConversationLink
 					request={request}

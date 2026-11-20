@@ -20,8 +20,8 @@ import { CurrentActor } from "./current-actor.ts";
 /**
  * What the current actor can see. A project's threads are seen by the
  * people in it; a bot, and its threads and automations, by whoever reaches the
- * bot; a collaboration by whoever sees the conversation it was opened from;
- * a direct message by the people in it. Lists are scoped by
+ * bot; and a collaboration by whoever sees the conversation it was opened
+ * from. Lists are scoped by
  * `reachesProjectFor`, `reachesBotFor` and `reachesConversationFor`, the rules
  * `Authorization` checks for one project, bot or conversation written as SQL, so a
  * list holds what reading each one directly would allow.

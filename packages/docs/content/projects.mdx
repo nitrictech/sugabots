@@ -20,7 +20,7 @@ When you make a project, you choose who can find it:
 - **Private** projects are invitation only. Nobody sees them unless they're in
   them.
 
-The owner and admins are in every project, public or private.
+The owner and admins are in every project people made, public or private.
 
 ## Make a project
 
@@ -48,7 +48,7 @@ remove anyone.
 
 Anyone in a project, except viewers, can add bots to it and take them out. Only
 [public bots](/docs/bots#public-and-private) can be added, and a bot that's
-made private leaves every project it was in.
+made private leaves every project people made that it was in.
 
 ## Lead bot
 
@@ -56,8 +56,9 @@ Every project has one **lead bot**, chosen from the public bots, which works on
 the project and answers its threads unless another is asked. Mention one or
 more bots by handle and each of them answers at once, or reply to a bot's
 message and that bot answers. A message that mentions only people is read by
-the lead bot, which answers only if it can help, and otherwise reacts 👀. Any
-other message the lead bot answers. See
+the lead bot, if it has a model, which answers only if it can help and
+otherwise reacts 👀. If the lead bot has no model, the message is posted
+without a bot reply. Any other message the lead bot answers. See
 [Conversations](/docs/conversations#who-answers).
 
 The owner and admins can choose another lead bot in the project's settings.
@@ -69,8 +70,9 @@ had lead bots, which had no bots then, asks for one when it's opened.
 
 Anyone in the project can start a thread with **New thread** in the project's
 own sidebar, or beside the project's row in the sidebar, by writing its first
-message, which the lead bot answers. Everyone in the project sees every thread,
-with all the project's people and bots in it.
+message, which is answered like any other (see
+[who answers](/docs/conversations#who-answers)). Everyone in the project sees
+every thread, with all the project's people and bots in it.
 
 The project's own sidebar lists its threads, the most recently active first,
 and can search them or show only some. Opening the project opens its newest

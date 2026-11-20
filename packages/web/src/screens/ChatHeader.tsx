@@ -5,8 +5,9 @@ import { CircleCheck, Monitor, PanelRight, RefreshCcw, RotateCcw } from "lucide-
 import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/bots.ts";
 import { useAttentionCounts } from "@/lib/chats.ts";
-import { botLink, directMessagesLink, inboxLink, projectLink } from "@/lib/links.ts";
+import { botLink, inboxLink, projectLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
+import { ownerLinkOptions, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useSession } from "@/lib/session.ts";
 import { useSidebarHiddenBesideChat } from "@/lib/sidebar-hidden.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
@@ -34,8 +35,15 @@ export type BackTo =
 	| { to: "inbox" }
 	/** A bot's thread goes back to its bot. */
 	| { to: "bot"; bot: Bot }
-	/** A direct message goes back to the list of them. */
-	| { to: "directMessages" };
+	/** A page under a project's or a bot's Settings, such as a project's People, goes back to them. */
+	| { to: "ownerSettings"; owner: ResourceOwner };
+
+/** Back to `owner`'s page: a project's, or a bot's. */
+export function backToOwner(owner: ResourceOwner): BackTo {
+	return "project" in owner
+		? { to: "project", project: owner.project }
+		: { to: "bot", bot: owner.bot };
+}
 
 /**
  * Where a chat is shown. On its own page it has Details, opened and closed
@@ -235,7 +243,7 @@ function ConversationMenu({
 }
 
 /** How big a chat's face is beside its name in a phone's header, in pixels: `size-8`. */
-export const PHONE_FACE_SIZE_PX = 32;
+const PHONE_FACE_SIZE_PX = 32;
 
 /**
  * The bar across the top of a chat: the same height and inset as a page's.
@@ -425,8 +433,8 @@ function CardsIcon() {
 }
 
 /**
- * The bar across the top of any chat but a bot's thread: a project's thread, a
- * direct message, or an automation's feed. Its title, after where it sits as
+ * The bar across the top of any chat but a bot's thread: a project's thread or
+ * an automation's feed. Its title, after where it sits as
  * a breadcrumb, then what can be done with it and its Details where it has
  * them. Unlike `ChatHeader` it has no bot's breadcrumb or computer: a
  * project's thread reaches its lead bot's work through its Details.
@@ -437,7 +445,6 @@ export function PlainChatHeader({
 	done,
 	within,
 	face,
-	detail,
 	crumbs,
 	overChat = false,
 	cards = false,
@@ -455,10 +462,8 @@ export function PlainChatHeader({
 	done?: DoneToggle;
 	/** What the thread is in, its project, which a phone names under it. */
 	within?: string;
-	/** Whose the chat is, as a face, such as a direct message's people, which a phone shows beside its name. */
+	/** Whose the chat is, as a face, such as an automation's, which a phone shows beside its name. */
 	face?: ReactNode;
-	/** At the right of the title, before its Details, such as who is in a group direct message. */
-	detail?: ReactNode;
 	/** Over the chat, which scrolls up under it, rather than a bar of its own above it. */
 	overChat?: boolean;
 	/** Whether its Details float as cards over the chat, as a thread's do, rather than a column beside it. */
@@ -491,7 +496,6 @@ export function PlainChatHeader({
 					<h1 className="m-0 min-w-0 truncate font-medium text-foreground text-sm">{title}</h1>
 				</div>
 			</div>
-			{detail}
 			{done && <DoneButton {...done} />}
 			{details && <DetailsButton {...details} cards={cards} />}
 			{menu}
@@ -601,7 +605,10 @@ function backAddress(router: ReturnType<typeof useRouter>, back: BackTo) {
 			return { href: router.buildLocation(botLink(back.bot)).href, name: back.bot.name };
 		case "inbox":
 			return { href: router.buildLocation(inboxLink()).href, name: "Inbox" };
-		case "directMessages":
-			return { href: router.buildLocation(directMessagesLink()).href, name: "Direct messages" };
+		case "ownerSettings":
+			return {
+				href: router.buildLocation(ownerLinkOptions(back.owner, { page: "settings" })).href,
+				name: "Settings",
+			};
 	}
 }

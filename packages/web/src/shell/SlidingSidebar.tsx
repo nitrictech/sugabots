@@ -1,7 +1,7 @@
 import { cn } from "cn";
 import { PanelLeft } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useMediaQuery } from "@/lib/media.ts";
+import { REDUCED_MOTION, useMediaQuery } from "@/lib/media.ts";
 import type { SidebarHiding } from "@/lib/sidebar-hidden.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 
@@ -13,7 +13,6 @@ const SLIDE = "width 280ms cubic-bezier(0.2, 0.6, 0.2, 1)";
  * keeping a peeking sidebar leaves it as it is.
  */
 const FADE = "opacity 220ms ease";
-const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 /** How long the pointer may be off a peeking sidebar, crossing between it and the button, before it goes. */
 const PEEK_LINGER_MS = 200;
 

@@ -321,7 +321,7 @@ describe("runSegment", () => {
 		});
 	});
 
-	it("gives a Personal Assistant answering its person its guide, and asks them before it acts, with no instructions or automations of its own", async () => {
+	it("gives a Personal Assistant answering its person its guide, and asks them before it acts, with no instructions of its own nor tools for its automations", async () => {
 		const { execution, turns } = fakes();
 		const connectionTool = (name: string, mutating: boolean) => ({
 			tool: tool({

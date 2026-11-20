@@ -18,7 +18,7 @@ import { ChevronRight, CornerUpLeft, Reply, SquareArrowOutUpRight } from "lucide
 import { type CSSProperties, Fragment, type ReactNode, useMemo, useRef, useState } from "react";
 import { type ApprovalCapabilities, mayAnswer } from "@/lib/approvals.ts";
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
-import { useConnectionLooks } from "@/lib/connections.ts";
+import { type ConnectionLook, useConnectionLooks } from "@/lib/connections.ts";
 import { useConversationEvents } from "@/lib/conversation-events.ts";
 import { useConversation } from "@/lib/conversations.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
@@ -79,7 +79,7 @@ export function ConversationMessages({
 	host,
 	isRunning,
 	participants,
-	members,
+	peopleReachingProject,
 	conversationKind,
 	projectId,
 	dividers = true,
@@ -116,13 +116,13 @@ export function ConversationMessages({
 	 * collaboration's other bot is found, and who a mention can name.
 	 */
 	participants: Participant[];
-	/** The project's people, whom a person's `@here` or `@channel` would notify. */
-	members: readonly PersonParticipant[];
+	/** The people who reach the project, whom a person's `@here` or `@channel` would notify. */
+	peopleReachingProject: readonly PersonParticipant[];
 	/** What kind of conversation it is, which decides whether `@here` and `@channel` notify anyone. */
 	conversationKind: ConversationKind;
 	/**
 	 * The project the conversation is in, a bot's default one or one people
-	 * made, whose connections its tools may come from; null in a direct message.
+	 * made, whose connections its tools may come from.
 	 */
 	projectId?: string | null;
 	/**
@@ -220,7 +220,7 @@ export function ConversationMessages({
 	const lastReplyTyping =
 		lastMessage !== undefined && lastMessage.author.kind === "bot" && isTyping(lastMessage);
 	const speakers = useMemo(() => speakersIn(messages), [messages]);
-	const looks = useConnectionLooks(speakers, projectId);
+	const looksOf = useConnectionLooks(speakers, projectId);
 	const fileNames = useMemo(() => fileNamesIn(messages), [messages]);
 	const watchedWritten = useRepliesWatchedBeingWritten(messages);
 	return (
@@ -255,9 +255,11 @@ export function ConversationMessages({
 										: undefined
 								}
 								participants={participants}
-								members={members}
+								peopleReachingProject={peopleReachingProject}
 								conversationKind={conversationKind}
-								looks={looks}
+								looks={
+									message.author.kind === "bot" ? looksOf(message.author.id) : NO_CONNECTION_LOOKS
+								}
 								fileNames={fileNames}
 								approvalCapabilities={approvalCapabilities}
 								compact={compact}
@@ -390,7 +392,7 @@ function ThreadMessage({
 	namedBotId,
 	nameColorsFor,
 	participants,
-	members,
+	peopleReachingProject,
 	conversationKind,
 	looks,
 	fileNames,
@@ -424,9 +426,10 @@ function ThreadMessage({
 	/** The conversation people's name colours are picked for; each message's own without it. */
 	nameColorsFor: string | undefined;
 	participants: Participant[];
-	members: readonly PersonParticipant[];
+	peopleReachingProject: readonly PersonParticipant[];
 	conversationKind: ConversationKind;
-	looks: ReturnType<typeof useConnectionLooks>;
+	/** The connections its bot's calls were made with, by handle. */
+	looks: ReadonlyMap<string, ConnectionLook>;
 	/** The conversation's files by id, for the work line's calls that read them. */
 	fileNames: ReadonlyMap<string, string>;
 	approvalCapabilities: ApprovalCapabilities | undefined;
@@ -469,7 +472,10 @@ function ThreadMessage({
 	const calls = message.parts.filter((part): part is ToolCallPart => part.type === "tool_call");
 	const files = message.parts.filter((part): part is FilePart => part.type === "file");
 	const segments = segmentsOf(message);
-	const mentionable = [...participants, ...groupMentionsBy(author, members, conversationKind)];
+	const mentionable = [
+		...participants,
+		...groupMentionsBy(author, peopleReachingProject, conversationKind),
+	];
 	const words = segments
 		.flatMap((segment) => (segment.type === "text" && segment.text ? [segment.text] : []))
 		.join("\n\n");
@@ -685,8 +691,7 @@ function ThreadMessage({
 									className={cn(
 										"min-w-0 rounded-bubble px-3.5 py-2 transition-shadow duration-700",
 										highlighted && "ring-2 ring-ring ring-offset-2 ring-offset-background",
-										side === "mine" ? "rounded-br-tail bubble-mine" : "bg-bubble",
-										side === "person" && startsGroup && "rounded-tl-tail",
+										side === "mine" ? "bubble-mine" : "bg-bubble",
 									)}
 								>
 									{/* Someone else's face and name head their bubble. */}
@@ -801,7 +806,7 @@ function MessageToolbar({
 			{children && (
 				<div
 					className={cn(
-						"flex items-center gap-0.5 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100 [@media(hover:none)]:opacity-100",
+						"flex items-center gap-0.5 transition-opacity group-has-focus-visible/message:opacity-100 group-hover/message:opacity-100 [@media(hover:none)]:opacity-100",
 						!reacted && (side === "mine" ? "-mr-1.5" : "-ml-1.5"),
 						picking ? "opacity-100" : "opacity-0",
 					)}
@@ -1011,7 +1016,7 @@ function CollaborationCard({
 				side="top"
 				variant="toolbar"
 				onClick={onOpen}
-				className="absolute top-2 right-2 opacity-0 transition-opacity group-focus-within/collaboration:opacity-100 group-hover/collaboration:opacity-100 [@media(hover:none)]:opacity-100 [&_svg]:size-3.5"
+				className="absolute top-2 right-2 opacity-0 transition-opacity group-has-focus-visible/collaboration:opacity-100 group-hover/collaboration:opacity-100 [@media(hover:none)]:opacity-100 [&_svg]:size-3.5"
 			>
 				<SquareArrowOutUpRight aria-hidden />
 			</IconButton>
@@ -1131,6 +1136,9 @@ function messageStatus(message: Message, { queued }: { queued: boolean }): strin
 	}
 	return formatTime(message.createdAt);
 }
+
+/** A person's message makes no calls, so no connection names any. */
+const NO_CONNECTION_LOOKS: ReadonlyMap<string, ConnectionLook> = new Map();
 
 /** The bots who wrote in the conversation, whose connections its tool calls went through. */
 function speakersIn(messages: readonly Message[]): string[] {

@@ -1,12 +1,12 @@
 import { type HistoryState, useLocation, useRouter } from "@tanstack/react-router";
-import type { MouseEvent } from "react";
+import { isPlainClick } from "@/ui/back-button.tsx";
 import type { BackTarget } from "@/ui/settings-page.tsx";
 
 /*
  * Where Back goes in settings: the page you came from, as a browser's Back
  * does, rather than a fixed parent. A link that goes deeper from where you are
- * (a project to one of its bots, a thread to its bot's settings) writes the page it
- * leaves into the history entry it opens, and Back is the browser's own Back
+ * (a thread to Models, a message to its author's page among the members)
+ * writes the page it leaves into the history entry it opens, and Back is the browser's own Back
  * to that entry. A navigation that writes nothing, such as picking a section,
  * leaves the page its parent's Back, so a link that forgets never offers a way
  * back to somewhere you chose to leave.
@@ -67,8 +67,4 @@ function parseCameFrom(state: HistoryState): CameFrom | undefined {
 	if (typeof value !== "object" || value === null) return undefined;
 	const { href, label } = value as Record<string, unknown>;
 	return typeof href === "string" && typeof label === "string" ? { href, label } : undefined;
-}
-
-function isPlainClick(event: MouseEvent): boolean {
-	return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 }

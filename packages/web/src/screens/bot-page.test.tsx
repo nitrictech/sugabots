@@ -22,7 +22,7 @@ import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
 
-const page = `/suga/settings/bots/${linear.handle}`;
+const page = `/suga/bots/${linear.handle}/settings`;
 const webhookAutomation = {
 	id: "0199a3a0-0000-7000-8000-0000000000a1",
 	workspaceId: linear.workspaceId,
@@ -78,7 +78,7 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 	return {
 		id: "0199a3a0-0000-7000-8000-0000000000f1",
 		workspaceId: linear.workspaceId,
-		projectId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: linear.defaultProjectId,
 		name: "Linear",
 		handle: "linear",
 		url: "https://mcp.linear.app/mcp",
@@ -187,25 +187,27 @@ describe("a member", () => {
 });
 
 describe("your Personal Assistant", () => {
-	it("offers only its look and its connections to change", async () => {
-		mount(`/suga/settings/bots/${personalAssistant.handle}`);
+	it("offers only its look, its connections and its automations to change", async () => {
+		onWideScreen();
+		mount(`/suga/bots/${personalAssistant.handle}/settings`);
 
 		expect(await screen.findByRole("textbox", { name: "Name" })).toBeDefined();
 		expect(screen.getByRole("button", { name: "Change look" })).toBeDefined();
 		expect(screen.getByRole("region", { name: "Connections" })).toBeDefined();
+		const settings = screen.getByRole("region", { name: "Settings" });
+		expect(within(settings).getByRole("link", { name: /^Automations/ })).toBeDefined();
 		expect(screen.queryByRole("button", { name: /^Model/ })).toBeNull();
 		expect(screen.queryByRole("textbox", { name: "Instructions" })).toBeNull();
 		expect(screen.queryByRole("region", { name: "Built-in tools" })).toBeNull();
-		expect(screen.queryByRole("link", { name: /^Automations/ })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Delete bot" })).toBeNull();
 	});
 
 	it("keeps its computer to us", async () => {
-		const router = mount(`/suga/settings/bots/${personalAssistant.handle}/computer`);
+		const { router } = mount(`/suga/bots/${personalAssistant.handle}/computer`);
 
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe(
-				`/suga/settings/bots/${personalAssistant.handle}`,
+				`/suga/bots/${personalAssistant.handle}/settings`,
 			),
 		);
 	});
@@ -244,20 +246,22 @@ describe("an admin", () => {
 		);
 		mount(page);
 
-		const row = await screen.findByRole("link", { name: /^Automations/ });
+		// Its settings' row, not the Automations beside its threads.
+		const settings = await screen.findByRole("region", { name: "Settings" });
+		const row = await within(settings).findByRole("link", { name: /^Automations/ });
 		await waitFor(() => expect(within(row).getByText("2")).toBeDefined());
 		expect(row.getAttribute("href")).toBe(`/suga/bots/${linear.handle}/automations`);
 		expect(screen.queryByRole("button", { name: "New automation" })).toBeNull();
 	});
 
 	it("discards the previous bot's draft instructions when another bot is opened", async () => {
-		const router = mount(page);
+		const { router } = mount(page);
 		fireEvent.change(await screen.findByRole("textbox", { name: "Instructions" }), {
 			target: { value: "Private draft" },
 		});
 
 		await router.navigate({
-			to: "/$workspace/settings/bots/$bot",
+			to: "/$workspace/bots/$bot/settings",
 			params: { workspace: "suga", bot: triager.handle },
 		});
 
@@ -520,7 +524,7 @@ describe("an admin", () => {
 
 	it("deletes the bot after asking, and returns to the workspace's bots", async () => {
 		client.api.bots.remove.mockReturnValue(Effect.void);
-		const router = mount(page);
+		const { router } = mount(page);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Delete bot" }));
 		expect(client.api.bots.remove).not.toHaveBeenCalled();
@@ -531,13 +535,13 @@ describe("an admin", () => {
 				params: { botId: linear.id },
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/bots"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/bots"));
 	});
 
 	it("goes back to the bots it was opened from when deleted, rather than opening them again", async () => {
 		client.api.bots.remove.mockReturnValue(Effect.void);
-		const bots = "/suga/settings/bots";
-		const router = mount(bots);
+		const bots = "/suga/bots";
+		const { router } = mount(bots);
 		await screen.findAllByRole("heading", { name: "Bots" });
 		await router.navigate({ href: page });
 

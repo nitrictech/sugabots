@@ -238,6 +238,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 		await anAutomation(own, "Paused by hand", "paused", "failed");
 		await anAutomation(own, "Fine", "enabled", "completed");
 		await anAutomation(launch.id, "Launch report", "enabled", "failed");
+		const assistant = await botsAs(samId).ensureAssistant({ workspace: workspaceId });
+		const assistantProject = await runOnPostgres(defaultProjectOf(assistant.id));
+		await anAutomation(assistantProject, "Morning brief", "enabled", "failed");
 		// Sam isn't in the project, so its automations aren't theirs to hear about.
 		await anAutomation(hidden.id, "Secret report", "enabled", "failed");
 
@@ -255,9 +258,14 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 					failing: 1,
 					link: `http://sugabots.test/${workspaceSlug}/projects/launch/automations`,
 				},
+				{
+					bot: assistant.name,
+					failing: 1,
+					link: `http://sugabots.test/${workspaceSlug}/bots/${assistant.handle}/automations`,
+				},
 			]),
 		);
-		expect(seen.waitingOnYou.failingAutomations).toHaveLength(2);
+		expect(seen.waitingOnYou.failingAutomations).toHaveLength(3);
 	});
 
 	it("makes a project for the person, led by a public bot, adds another to it, and refuses a private one", async () => {

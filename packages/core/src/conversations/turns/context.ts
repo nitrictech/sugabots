@@ -15,7 +15,7 @@ import {
 	formatHistoryTime,
 	SEARCH_HISTORY_TOOL,
 } from "../repository/message-text.ts";
-import { AUTOMATIONS_KEY, spokenTimeZone } from "../tools/automations/tool.ts";
+import { AUTOMATIONS_KEY, hasAutomationTools, spokenTimeZone } from "../tools/automations/tool.ts";
 import { WEB_SEARCH_TOOL } from "../tools/web-search/tool.ts";
 import type { TurnCompaction, TurnContext } from "./execution.ts";
 
@@ -349,7 +349,8 @@ function environmentInstruction(context: TurnContext, environment: TurnEnvironme
 function todayInstruction(now: Date, context: TurnContext): string {
 	const timeZone = context.workspaceTimeZone;
 	const spoken = spokenTimeZone(timeZone);
-	const automationsOn = !context.bot.disabledTools.includes(AUTOMATIONS_KEY);
+	const automationsOn =
+		hasAutomationTools(context) && !context.bot.disabledTools.includes(AUTOMATIONS_KEY);
 	return [
 		`Current time: ${currentDate.format(now)}, ${now.toISOString().slice(11, 16)} UTC.`,
 		`In ${spoken} (${timeZone}), it is ${workspaceTime(now, timeZone)}.`,

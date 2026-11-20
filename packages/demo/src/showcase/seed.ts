@@ -91,7 +91,7 @@ const WORKSPACE = { name: "Fieldnote", slug: "fieldnote" };
 
 type PersonKey = "anita" | "gary" | "lorraine" | "doreen" | "rob";
 
-/** Anita owns the workspace, which puts her in every project. */
+/** Anita owns the workspace, which puts her in every project people made. */
 const OWNER: PersonKey = "anita";
 
 /**
@@ -1540,7 +1540,12 @@ const ensureBot = (input: {
 		);
 		if (!existing) return yield* Effect.die(new Error(`${bot.name} was not made`));
 		yield* bots
-			.update(input.workspaceId, existing.id, { model: input.model, shape: bot.shape })
+			.update(
+				input.workspaceId,
+				existing.id,
+				{ model: input.model, shape: bot.shape },
+				input.createdById,
+			)
 			.pipe(Effect.orDie);
 		return existing.id;
 	});

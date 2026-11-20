@@ -192,7 +192,7 @@ export const make = Effect.gen(function* () {
 				"remove",
 				Effect.gen(function* () {
 					const { found, standing } = yield* inReachedConversation(fileId);
-					if (standing.kind !== "project" || !standing.standing.may("project.threads.manage")) {
+					if (!standing.standing.may("project.threads.manage")) {
 						return yield* new ActionForbidden({ permission: "project.threads.manage" });
 					}
 					// The versions go with it, and the `file_blob_deletion` trigger queues its blobs.

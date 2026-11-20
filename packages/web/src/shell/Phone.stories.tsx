@@ -58,24 +58,6 @@ export const Home = meta.story({
 	},
 });
 
-/** Direct messages, under Home: going to Inbox and back to Home returns to them, not to a project. */
-export const DirectMessagesHome = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/dm`} />,
-	play: async ({ canvas, userEvent }) => {
-		const tabs = await canvas.findByRole("navigation", { name: "Tabs" });
-		const home = within(tabs).getByRole("link", { name: "Home" });
-		await expect(home).toHaveAttribute("aria-current", "page");
-		await expect(home).toHaveAttribute("href", `/${storyWorkspace.slug}/dm`);
-
-		await userEvent.click(within(tabs).getByRole("link", { name: /^Inbox/ }));
-
-		await expect(within(tabs).getByRole("link", { name: "Home" })).toHaveAttribute(
-			"href",
-			`/${storyWorkspace.slug}/dm`,
-		);
-	},
-});
-
 /** Inbox as a tab: titled large, with no Back, over the tabs. */
 export const Inbox = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/inbox`} />,
@@ -151,13 +133,13 @@ export const Profile = meta.story({
 	},
 });
 
-/** A project's Bots, opened from You: that part alone, under the project's name. */
+/** A project's Bots, a page under its settings: that part alone, under the project's name. */
 export const ProjectPart = meta.story({
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/settings/projects/${revenue.slug}/bots`} />
+		<StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}/settings/bots`} />
 	),
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { level: 2, name: "Bots" })).toBeVisible();
+		await expect(await canvas.findByRole("heading", { level: 1, name: "Bots" })).toBeVisible();
 		await expect(await canvas.findByRole("link", { name: growthDesk.name })).toBeVisible();
 		await expect(canvas.queryByRole("group", { name: "Members" })).toBeNull();
 	},
@@ -204,11 +186,11 @@ export const OpenFile = meta.story({
 });
 
 /**
- * A bot's new-thread composer, opened from Home: the tabs stay, with Home
+ * A bot's new-thread composer, opened from its page: the tabs stay, with Home
  * marked, until the composer is typed in.
  */
 export const Opened = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/growth-desk`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/new`} />,
 	play: async ({ canvas, userEvent }) => {
 		const composer = await canvas.findByRole("textbox");
 		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
@@ -299,6 +281,24 @@ export const Project = meta.story({
 		await expect(await within(work).findByRole("link", { name: /Planning/ })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Files" })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: `New thread in ${revenue.name}` })).toBeVisible();
+	},
+});
+
+/** A bot, as a project is: its threads to pick from, its Files, and + to start a thread. */
+export const Bot = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}`} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("heading", { level: 1, name: growthDesk.name }),
+		).toBeInTheDocument();
+		const work = await canvas.findByRole("region", { name: "Threads" });
+		await expect(
+			await within(work).findByRole("link", { name: new RegExp(storyThreadFor(growthDesk).title) }),
+		).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "Files" })).toBeVisible();
+		await expect(
+			canvas.getByRole("link", { name: `New thread with ${growthDesk.name}` }),
+		).toBeVisible();
 	},
 });
 

@@ -71,7 +71,7 @@ const collaboration: ConversationDetails = {
 	automationRun: null,
 	participants: [answerer, asker],
 	projectBots: [asker, answerer],
-	members: [],
+	peopleReachingProject: [],
 	olderMessagesCursor: null,
 	queuedSince: null,
 	reads: [],

@@ -49,11 +49,16 @@ export function CrumbSeparator() {
 }
 
 /** The label each owner page has in a breadcrumb. */
-const OWNER_PAGE_LABELS = { automations: "Automations", connections: "Connections" } as const;
+const OWNER_PAGE_LABELS = {
+	automations: "Automations",
+	connections: "Connections",
+	settings: "Settings",
+} as const;
 
 /**
- * The head of an automation's or a connection's breadcrumb: its bot or
- * project, then that one's `page`, which leads back to it.
+ * The head of the breadcrumb of an automation, a connection or a page of a
+ * project's settings: its bot or project, then that one's `page`, which
+ * leads back to it.
  */
 export function OwnerPageCrumb({
 	owner,

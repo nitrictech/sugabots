@@ -5,14 +5,14 @@ import { revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, StoryApp, storyProjects, storyUser, storyWorkspace } from "../story-app.tsx";
 
 /*
- * A project in settings, listed in the navigation with its pages: General,
- * its people, its bots and its computer. On a phone a project's page
- * opens full screen, with the way back to the list of settings.
+ * A project's settings, a page of its own beside its threads, with its people
+ * and its bots each a page under it. On a phone each opens full screen, with
+ * the way back to the project, or from its people or bots back to its settings.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
-const projects = `/${storyWorkspace.slug}/settings/projects`;
-const revenuePage = (page: "people" | "bots") => `${projects}/${revenue.slug}/${page}`;
+const revenueSettings = `/${storyWorkspace.slug}/projects/${revenue.slug}/settings`;
+const revenuePage = (page: "people" | "bots") => `${revenueSettings}/${page}`;
 const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 
 const people = [
@@ -59,7 +59,7 @@ const projectsWithPeople = storyProjects.map((project) =>
 );
 
 const meta = preview.meta({
-	title: "Views/Projects",
+	title: "Views/Project settings",
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
@@ -67,25 +67,20 @@ const meta = preview.meta({
 	},
 });
 
-/** Every project in the navigation, and the open one's pages under it. */
-export const Navigation = meta.story({
-	render: () => <StoryApp path={`${projects}/${revenue.slug}`} />,
-	play: async ({ canvas }) => {
-		const nav = await canvas.findByRole("navigation", { name: "Settings" });
-		await expect(await within(nav).findByRole("button", { name: "Revenue" })).toHaveAttribute(
-			"aria-expanded",
-			"true",
-		);
-		await expect(await within(nav).findByRole("link", { name: /^Bots/ })).toBeInTheDocument();
-		await expect(within(nav).getByRole("button", { name: "New project" })).toBeInTheDocument();
-	},
-});
-
-/** A project's General: its name and colour, and deleting it. */
+/** A project's settings, picked out among its pages beside its threads: its name and colour, its people and bots, and deleting it. */
 export const General = meta.story({
-	render: () => <StoryApp path={`${projects}/${revenue.slug}`} />,
+	render: () => <StoryApp path={revenueSettings} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
+		const pages = await canvas.findByRole("navigation", { name: "Revenue's pages" });
+		await expect(within(pages).getByRole("link", { name: "Settings" })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+		await expect(canvas.getByRole("link", { name: /^People/ })).toHaveAttribute(
+			"href",
+			revenuePage("people"),
+		);
 		await expect(canvas.getByRole("button", { name: "Delete project" })).toBeInTheDocument();
 	},
 });
@@ -113,8 +108,8 @@ export const People = meta.story({
 export const Bots = meta.story({
 	render: () => <StoryApp path={revenuePage("bots")} />,
 	play: async ({ canvas }) => {
-		const page = await canvas.findByRole("main");
-		await expect(await within(page).findByRole("heading", { name: "Bots" })).toBeInTheDocument();
+		const page = await canvas.findByRole("region", { name: `${revenue.name}'s bots` });
+		await expect(within(page).getByRole("heading", { level: 1, name: "Bots" })).toBeVisible();
 		await expect(
 			await within(page).findByRole("link", { name: /^Growth Desk/ }),
 		).toBeInTheDocument();
@@ -151,7 +146,7 @@ export const AsAMember = meta.story({
 /** A member's General for the same project: nothing to rename and no Delete project. */
 export const GeneralAsAMember = meta.story({
 	beforeEach: AsAMember.input.beforeEach,
-	render: () => <StoryApp path={`${projects}/${revenue.slug}`} />,
+	render: () => <StoryApp path={revenueSettings} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Delete project" })).toBeNull();
@@ -159,15 +154,28 @@ export const GeneralAsAMember = meta.story({
 	},
 });
 
-/** On a phone a project's page opens full screen, with the way back to Settings in You. */
+/** On a phone a project's settings open full screen, with the way back to the project. */
 export const Phone = meta.story({
 	globals: PHONE,
-	render: () => <StoryApp path={`${projects}/${revenue.slug}`} />,
+	render: () => <StoryApp path={revenueSettings} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("link", { name: "Settings" })).toHaveAttribute(
+		await expect(await canvas.findByRole("link", { name: "Back to Revenue" })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/you`,
+			`/${storyWorkspace.slug}/projects/${revenue.slug}`,
 		);
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
+	},
+});
+
+/** On a phone a project's people, under its settings, have the way back to its settings. */
+export const PeopleOnAPhone = meta.story({
+	globals: PHONE,
+	render: () => <StoryApp path={revenuePage("people")} />,
+	play: async ({ canvas }) => {
+		await expect(await canvas.findByRole("link", { name: "Back to Settings" })).toHaveAttribute(
+			"href",
+			revenueSettings,
+		);
+		await expect(await canvas.findByRole("heading", { name: "People" })).toBeInTheDocument();
 	},
 });

@@ -40,24 +40,33 @@ export function useNotificationSettings() {
 
 /**
  * Changes some of the person's notification preferences. The API takes them
- * all at once, so the rest are sent as `settings` has them.
+ * all at once, so the rest are sent as last saved. Changes are sent one at a
+ * time, in the order made, each once the one before has been saved, so a quick
+ * second change never sends the first one's old value back. Only for a page
+ * that has the settings loaded.
  */
-export function useChangeNotificationPreferences(settings: NotificationSettings) {
+export function useChangeNotificationPreferences() {
 	const queries = useQueryClient();
 	const update = useMutation({
-		mutationFn: (preferences: NotificationPreferences) =>
-			Effect.runPromise(client.api.notifications.updatePreferences({ payload: preferences })),
+		scope: { id: "notification-preferences" },
+		mutationFn: (change: Partial<NotificationPreferences>) => {
+			const saved = queries.getQueryData<NotificationSettings>(settingsKey);
+			if (!saved) return Promise.reject(new Error("Notification settings aren't loaded"));
+			const preferences: NotificationPreferences = {
+				level: saved.level,
+				pausedUntil: saved.pausedUntil,
+				quietHours: saved.quietHours,
+				turnFailures: saved.turnFailures,
+				automationRuns: saved.automationRuns,
+				...change,
+			};
+			return Effect.runPromise(
+				client.api.notifications.updatePreferences({ payload: preferences }),
+			);
+		},
 		onSuccess: (saved) => queries.setQueryData(settingsKey, saved),
 	});
-	return (change: Partial<NotificationPreferences>) =>
-		update.mutate({
-			level: settings.level,
-			pausedUntil: settings.pausedUntil,
-			quietHours: settings.quietHours,
-			turnFailures: settings.turnFailures,
-			automationRuns: settings.automationRuns,
-			...change,
-		});
+	return (change: Partial<NotificationPreferences>) => update.mutate(change);
 }
 
 /**

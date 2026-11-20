@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import { botSchema } from "../../bots.ts";
+import { personParticipantSchema } from "../../conversations.ts";
 import {
 	newProjectMemberSchema,
 	newProjectSchema,
@@ -44,6 +45,16 @@ export class ProjectsApi extends HttpApiGroup.make("projects")
 		HttpApiEndpoint.get("listMembers", "/projects/:projectId/members", {
 			params: { projectId: uuidSchema },
 			success: Schema.Array(projectMemberSchema),
+			error: refused,
+		}),
+		/**
+		 * The people who reach the project, by name: in a project people made, its
+		 * members; in a bot's default project, whoever reaches the bot. Who a
+		 * mention in a thread's first message can name, before the thread has details.
+		 */
+		HttpApiEndpoint.get("listPeople", "/projects/:projectId/people", {
+			params: { projectId: uuidSchema },
+			success: Schema.Array(personParticipantSchema),
 			error: refused,
 		}),
 		HttpApiEndpoint.post("addMember", "/projects/:projectId/members", {

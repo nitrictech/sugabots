@@ -24,59 +24,6 @@ export function useConversationDraft(
 }
 
 /**
- * Takes the unsent draft out of one person's chat, as `useConversationDraft` keeps
- * it, for it to go on elsewhere. Read before that chat is next shown, as it
- * is only read when shown.
- */
-export function takeConversationDraft(
-	userId: string,
-	projectId: string | null,
-	conversationId: string,
-): string {
-	const key = draftKey(userId, projectId, conversationId);
-	const draft = read(key);
-	write(key, "");
-	return draft;
-}
-
-/**
- * Adds `text` to the end of the unsent draft in one person's chat, as
- * `useConversationDraft` keeps it. Written before that chat is next shown, as it is
- * only read when shown.
- */
-export function addToConversationDraft(
-	userId: string,
-	projectId: string | null,
-	conversationId: string,
-	text: string,
-): void {
-	const key = draftKey(userId, projectId, conversationId);
-	write(key, joinDrafts(read(key), text));
-}
-
-/** Two drafts as one, a line apart, or whichever has words when the other is blank. */
-export function joinDrafts(first: string, second: string): string {
-	if (!first.trim()) return second;
-	if (!second.trim()) return first;
-	return `${first}\n${second}`;
-}
-
-/**
- * A chat's draft `current`, which was `before` until more was added to it
- * with `joinDrafts`, split into what was there (`kept`) and what was added
- * (`added`). Once what was there has been changed the two can no longer be
- * told apart, so all of it is kept and nothing counts as added.
- */
-export function splitDraft(before: string, current: string): { kept: string; added: string } {
-	if (!before.trim()) return { kept: "", added: current };
-	if (current === before) return { kept: before, added: "" };
-	if (current.startsWith(`${before}\n`)) {
-		return { kept: before, added: current.slice(before.length + 1) };
-	}
-	return { kept: current, added: "" };
-}
-
-/**
  * The message the unsent draft in the same chat answers, kept beside it as
  * `useConversationDraft` keeps the draft. A stored value that no longer reads as a
  * quote is dropped.
@@ -166,8 +113,7 @@ function draftKey(userId: string, projectId: string | null, conversationId: stri
 
 /**
  * Whose draft in which chat a stored key holds: the person's, in the
- * conversation, under `projectId`, which is null for a bot's thread or a
- * direct message.
+ * conversation, under `projectId`, which is null for a bot's thread.
  */
 function draftPlace(userId: string, projectId: string | null, conversationId: string): string {
 	return [userId, ...(projectId === null ? [] : [projectId]), conversationId].join(":");

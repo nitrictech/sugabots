@@ -62,13 +62,29 @@ export interface Interface {
 	) => Effect.Effect<schema.ProjectRow, ProjectGone | ProjectSlugTaken | BotNotPublic>;
 	/** Removes a project. One already gone counts as removed. */
 	readonly remove: (workspaceId: string, projectId: string) => Effect.Effect<void>;
-	/** Adds a member of the project's workspace. Adding somebody already in it changes nothing. */
+	/**
+	 * Adds a member of the project's workspace, and says whether `userId` is in
+	 * the project now: `false` when they aren't in its workspace. Adding
+	 * somebody already in it changes nothing.
+	 */
 	readonly addMember: (
 		workspaceId: string,
 		projectId: string,
 		userId: string,
-	) => Effect.Effect<"added" | "already_member" | "not_workspace_member">;
-	/** Refuses an administrator, who belongs to every project. */
+	) => Effect.Effect<boolean>;
+	/**
+	 * Puts `userId` in the public project people made, checking its visibility
+	 * under the project's lock, so the join can't follow a change making it
+	 * private. Returns the project as it then is, with `userId` in it, or
+	 * undefined when it is private, a bot's default project or gone, or
+	 * `userId` is not in its workspace. Somebody already in it stays in it.
+	 */
+	readonly join: (
+		workspaceId: string,
+		projectId: string,
+		userId: string,
+	) => Effect.Effect<schema.ProjectRow | undefined>;
+	/** Refuses an administrator, who belongs to every project people made. */
 	readonly removeMember: (
 		workspaceId: string,
 		projectId: string,
@@ -80,11 +96,15 @@ export interface Interface {
 		projectId: string,
 		botId: string,
 	) => Effect.Effect<void, BotNotPublic>;
-	/** Refused for the project's lead bot, which stays until another is chosen. */
+	/**
+	 * Refused for the project's lead bot, which stays until another is chosen;
+	 * the refusal is worded for `viewerId`.
+	 */
 	readonly removeBot: (
 		workspaceId: string,
 		projectId: string,
 		botId: string,
+		viewerId: string,
 	) => Effect.Effect<void, LeadsProjects>;
 	/** The project's bots by name, each with its own default project's id. */
 	readonly bots: (
@@ -140,6 +160,55 @@ export const make = Effect.gen(function* () {
 					.limit(1),
 			);
 			if (!present) return yield* new BotNotPublic();
+		});
+
+	/**
+	 * Puts `userId` in the project if they are in its workspace, and says
+	 * whether this added them. Somebody already in it is left as they are.
+	 */
+	const insertMember = (workspaceId: string, projectId: string, userId: string) =>
+		query((db) =>
+			db.execute<{ id: string }>(
+				sql`
+				insert into ${projectMember} ("workspace_id", "project_id", "user_id")
+				select ${project.workspaceId}, ${project.id}, ${userId}
+				from ${project}
+				inner join ${workspaceMember}
+					on ${workspaceMember.workspaceId} = ${project.workspaceId}
+					and ${workspaceMember.userId} = ${userId}
+				where ${project.id} = ${projectId}
+				and ${project.workspaceId} = ${workspaceId}
+				on conflict ("project_id", "user_id") do nothing
+				returning "id"
+			`,
+				"objects",
+			),
+		).pipe(Effect.map((inserted) => inserted.length > 0));
+
+	/**
+	 * Adds a member of the project's workspace, as {@link insertMember} does,
+	 * and says whether `userId` is in the project now: added, or already in it,
+	 * as when another request added them at the same time.
+	 */
+	const addedOrAlreadyMember = (workspaceId: string, projectId: string, userId: string) =>
+		Effect.gen(function* () {
+			if (yield* insertMember(workspaceId, projectId, userId)) return true;
+			// `project_member`'s foreign key to `workspace_member` means somebody
+			// already in the project is in its workspace.
+			const [existing] = yield* query((db) =>
+				db
+					.select({ id: projectMember.id })
+					.from(projectMember)
+					.where(
+						and(
+							eq(projectMember.workspaceId, workspaceId),
+							eq(projectMember.projectId, projectId),
+							eq(projectMember.userId, userId),
+						),
+					)
+					.limit(1),
+			);
+			return existing !== undefined;
 		});
 
 	return Service.of({
@@ -199,14 +268,16 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						// Checked before anything is written, so a default project, or one
-						// gone, is refused without its lead being added to its bots.
+						// gone, is refused without its lead being added to its bots. Locked,
+						// as `removeBot` locks it, so a bot is not taken out of the project
+						// between being found among its bots here and being made its lead.
 						const peopleMade = and(
 							eq(project.id, projectId),
 							eq(project.workspaceId, workspaceId),
 							isNull(project.defaultOfBotId),
 						);
 						const [found] = yield* query((db) =>
-							db.select({ id: project.id }).from(project).where(peopleMade).limit(1),
+							db.select({ id: project.id }).from(project).where(peopleMade).limit(1).for("update"),
 						);
 						if (!found) {
 							return yield* new ProjectGone({ projectId });
@@ -242,49 +313,40 @@ export const make = Effect.gen(function* () {
 			),
 
 		addMember: (workspaceId, projectId, userId) =>
+			operation("addMember", addedOrAlreadyMember(workspaceId, projectId, userId)),
+
+		join: (workspaceId, projectId, userId) =>
 			operation(
-				"addMember",
-				Effect.gen(function* () {
-					const inserted = yield* query((db) =>
-						db.execute<{ id: string }>(
-							sql`
-							insert into ${projectMember} ("workspace_id", "project_id", "user_id")
-							select ${project.workspaceId}, ${project.id}, ${userId}
-							from ${project}
-							inner join ${workspaceMember}
-								on ${workspaceMember.workspaceId} = ${project.workspaceId}
-								and ${workspaceMember.userId} = ${userId}
-							where ${project.id} = ${projectId}
-							and ${project.workspaceId} = ${workspaceId}
-							on conflict ("project_id", "user_id") do nothing
-							returning "id"
-						`,
-							"objects",
-						),
-					);
-
-					if (inserted.length > 0) {
-						return "added";
-					}
-
-					const [existing] = yield* query((db) =>
-						db
-							.select({ id: projectMember.id })
-							.from(projectMember)
-							.innerJoin(project, eq(project.id, projectMember.projectId))
-							.innerJoin(
-								workspaceMember,
-								and(
-									eq(workspaceMember.workspaceId, project.workspaceId),
-									eq(workspaceMember.userId, userId),
-								),
-							)
-							.where(and(eq(projectMember.projectId, projectId), eq(projectMember.userId, userId)))
-							.limit(1),
-					);
-
-					return existing ? "already_member" : "not_workspace_member";
-				}),
+				"join",
+				transaction(
+					Effect.gen(function* () {
+						// Shared, so a change of visibility waits for the join, and the
+						// join for it.
+						const [found] = yield* query((db) =>
+							db
+								.select()
+								.from(project)
+								.where(and(eq(project.id, projectId), eq(project.workspaceId, workspaceId)))
+								.limit(1)
+								.for("share"),
+						);
+						if (!found) return undefined;
+						const [already] = yield* query((db) =>
+							db
+								.select({ id: projectMember.id })
+								.from(projectMember)
+								.where(
+									and(eq(projectMember.projectId, projectId), eq(projectMember.userId, userId)),
+								)
+								.limit(1),
+						);
+						if (already) return found;
+						if (found.visibility !== "public" || found.defaultOfBotId !== null) return undefined;
+						return (yield* addedOrAlreadyMember(workspaceId, projectId, userId))
+							? found
+							: undefined;
+					}),
+				),
 			),
 
 		removeMember: (workspaceId, projectId, userId) =>
@@ -330,7 +392,7 @@ export const make = Effect.gen(function* () {
 		addBot: (workspaceId, projectId, botId) =>
 			operation("addBot", addBot(workspaceId, projectId, botId)),
 
-		removeBot: (workspaceId, projectId, botId) =>
+		removeBot: (workspaceId, projectId, botId, viewerId) =>
 			operation(
 				"removeBot",
 				transaction(
@@ -343,7 +405,7 @@ export const make = Effect.gen(function* () {
 								.where(and(eq(project.id, projectId), eq(project.workspaceId, workspaceId)))
 								.for("update"),
 						);
-						yield* refuseWhileLeading(botId, { projectId });
+						yield* refuseWhileLeading(botId, { viewerId, projectId });
 						yield* query((db) =>
 							db
 								.delete(projectBot)

@@ -35,8 +35,9 @@ export const assignableWorkspaceRoleSchema = Schema.Literals(ASSIGNABLE_WORKSPAC
 export type AssignableWorkspaceRole = typeof assignableWorkspaceRoleSchema.Type;
 
 /**
- * The roles that administer the workspace. Each is in every project, put
- * there by database triggers, and can neither leave one nor be taken out.
+ * The roles that administer the workspace. Each is in every project people
+ * made, put there by database triggers, and can neither leave one nor be taken
+ * out. A bot's default project has no members: it is reached through its bot.
  */
 export const ADMINISTERING_WORKSPACE_ROLES = [
 	"owner",
@@ -80,7 +81,8 @@ const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
  */
 const WORKSPACE_ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
 	owner: "Administers the workspace, decides who else does, and can hand it on.",
-	admin: "Administers the workspace, its providers, every project and every bot.",
+	admin:
+		"Administers the workspace, its providers, every project people made and every bot but others' Personal Assistants.",
 	member: "Makes bots and projects, and works with the public bots.",
 	viewer: "Reads and takes part in projects and with public bots.",
 };

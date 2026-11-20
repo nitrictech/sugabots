@@ -13,7 +13,7 @@ import { Clock, Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
-import { serviceOperations } from "../database/database.ts";
+import { serviceOperations, transaction } from "../database/database.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../providers/tested-configuration.ts";
 import type { UserFacing } from "../user-message.ts";
@@ -62,13 +62,19 @@ export interface Interface {
 		| ComputerProviderRepository.ComputerProviderPresetFixed,
 		CurrentActor.Service
 	>;
-	/** Destroys the provider's computers, then removes it. */
+	/**
+	 * Destroys the provider's computers, then removes it. When one is made
+	 * meanwhile the provider is kept, to try again.
+	 */
 	readonly remove: (input: {
 		workspace: string;
 		providerId: string;
 	}) => Effect.Effect<
 		void,
-		AuthorizationDenied | ComputerProviderNotFound | ComputersNotDestroyed,
+		| AuthorizationDenied
+		| ComputerProviderNotFound
+		| ComputersNotDestroyed
+		| ProjectComputers.ComputerMadeMeanwhile,
 		CurrentActor.Service
 	>;
 	/**
@@ -194,9 +200,13 @@ export const make = Effect.gen(function* () {
 							.destroyAllMadeBy(workspaceId, configured)
 							.pipe(Effect.mapError((cause) => new ComputersNotDestroyed({ cause })));
 					}
-					if (!(yield* providers.remove(workspaceId, providerId))) {
-						return yield* new ComputerProviderNotFound();
-					}
+					const removed = yield* transaction(
+						Effect.andThen(
+							ProjectComputers.lockProviderWithoutComputers(workspaceId, providerId),
+							providers.remove(workspaceId, providerId),
+						),
+					);
+					if (!removed) return yield* new ComputerProviderNotFound();
 				}),
 			),
 

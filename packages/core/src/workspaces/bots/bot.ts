@@ -1,6 +1,7 @@
 import type { Bot, NamedPerson } from "@sugabots/contracts";
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { type Actor, botPermissions } from "../../authorization/permissions.ts";
+import { personJson } from "../../conversations/repository/participants.ts";
 import type * as schema from "../../database/schema.ts";
 import { pinnedBot, project, user, workspaceMember } from "../../database/schema.ts";
 import { outerColumn } from "../../database/sql.ts";
@@ -42,7 +43,7 @@ export function creatorOf(bot: {
 	createdById: SQLWrapper;
 	workspaceId: SQLWrapper;
 }): SQL<NamedPerson | null> {
-	return sql<NamedPerson | null>`(select json_build_object('id', ${user.id}, 'name', ${user.name}, 'email', ${user.email}, 'image', ${user.image}) from ${workspaceMember} inner join ${user} on ${user.id} = ${workspaceMember.userId} where ${workspaceMember.workspaceId} = ${bot.workspaceId} and ${workspaceMember.userId} = ${bot.createdById})`;
+	return sql<NamedPerson | null>`(select ${personJson} from ${workspaceMember} inner join ${user} on ${user.id} = ${workspaceMember.userId} where ${workspaceMember.workspaceId} = ${bot.workspaceId} and ${workspaceMember.userId} = ${bot.createdById})`;
 }
 
 /**

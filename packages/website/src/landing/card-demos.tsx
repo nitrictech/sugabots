@@ -63,7 +63,7 @@ export function ApprovalDemo() {
 
 	return (
 		<div className={cn(demoArea, "justify-center p-4 sm:p-6")}>
-			<div className="flex min-w-0 flex-col gap-2.5 rounded-3xl rounded-tl-sm bg-landing-bubble py-2.5 pr-3 pb-3 pl-2.5 text-landing-text">
+			<div className="flex min-w-0 flex-col gap-2.5 rounded-3xl bg-landing-bubble py-2.5 pr-3 pb-3 pl-2.5 text-landing-text">
 				<div className="flex min-w-0 items-start gap-2.5">
 					<span className="mt-px grid size-6 shrink-0 place-items-center rounded-md bg-landing-stripe text-landing-text-strong">
 						<StripeIcon className="size-3.25" />

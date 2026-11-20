@@ -117,7 +117,8 @@ export const newAutomationRoute = createRoute({
 	path: "/new",
 	component: () => {
 		const owner = useBotRouteOwner();
-		return owner ? <NewAutomation owner={owner} /> : null;
+		// Keyed by where it is made, so moving to another bot's starts a new one there.
+		return owner ? <NewAutomation key={resourceProjectId(owner)} owner={owner} /> : null;
 	},
 });
 
@@ -175,7 +176,7 @@ export const projectNewAutomationRoute = createRoute({
 	path: "/new",
 	component: () => {
 		const owner = useProjectRouteOwner();
-		return owner ? <NewAutomation owner={owner} /> : null;
+		return owner ? <NewAutomation key={resourceProjectId(owner)} owner={owner} /> : null;
 	},
 });
 

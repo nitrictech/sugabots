@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideFloor, type FloorInput } from "./floor.ts";
+import { type FloorInput, floorOf } from "./floor.ts";
 
 /**
  * The floor decision on its own. What each layer does, and that the
@@ -30,70 +30,71 @@ function input(overrides: Partial<FloorInput> = {}): FloorInput {
 }
 
 const turns = (...bots: Array<{ botId: string; reason: string }>) => ({ kind: "turns", bots });
+const nobody = { kind: "nobody" };
 
 describe("a person's message in a project's thread", () => {
 	it("goes to every project bot it mentions, each at once", () => {
-		expect(decideFloor(input({ content: "@reviewer and @scout, thoughts?" }))).toEqual(
+		expect(floorOf(input({ content: "@reviewer and @scout, thoughts?" }))).toEqual(
 			turns({ botId: reviewer, reason: "mention" }, { botId: scout, reason: "mention" }),
 		);
 	});
 
 	it("goes to the project bot it replies to, unless it mentions other project bots", () => {
 		const replyToScout = { repliedToBotId: scout };
-		expect(decideFloor(input({ ...replyToScout, content: "And the automations?" }))).toEqual(
+		expect(floorOf(input({ ...replyToScout, content: "And the automations?" }))).toEqual(
 			turns({ botId: scout, reason: "reply" }),
 		);
-		expect(decideFloor(input({ ...replyToScout, content: "@reviewer can you check?" }))).toEqual(
+		expect(floorOf(input({ ...replyToScout, content: "@reviewer can you check?" }))).toEqual(
 			turns({ botId: reviewer, reason: "mention" }),
 		);
 		// A reply to a bot is for that bot, though it names a person.
-		expect(decideFloor(input({ ...replyToScout, content: "@sam what do you think?" }))).toEqual(
+		expect(floorOf(input({ ...replyToScout, content: "@sam what do you think?" }))).toEqual(
 			turns({ botId: scout, reason: "reply" }),
 		);
 	});
 
 	it("gives the lead an optional turn when it mentions only people", () => {
-		expect(decideFloor(input({ content: "@sam can you look?" }))).toEqual(
+		expect(floorOf(input({ content: "@sam can you look?" }))).toEqual(
 			turns({ botId: lead, reason: "optional" }),
 		);
-		expect(decideFloor(input({ content: "@here quick poll: lunch?" }))).toEqual(
+		expect(floorOf(input({ content: "@here quick poll: lunch?" }))).toEqual(
 			turns({ botId: lead, reason: "optional" }),
 		);
 	});
 
 	it("goes to the lead when it mentions nobody", () => {
-		expect(decideFloor(input({ content: "Morning all" }))).toEqual(
+		expect(floorOf(input({ content: "Morning all" }))).toEqual(
 			turns({ botId: lead, reason: "default" }),
 		);
 	});
 
 	it("ignores the bots it mentions from outside the project", () => {
-		expect(decideFloor(input({ content: "Raise it with @Backlog Manager" }))).toEqual(
+		expect(floorOf(input({ content: "Raise it with @Backlog Manager" }))).toEqual(
 			turns({ botId: lead, reason: "default" }),
 		);
 		// Mentioning a person beside one is mentioning only people.
-		expect(decideFloor(input({ content: "@sam and @Backlog Manager, look" }))).toEqual(
+		expect(floorOf(input({ content: "@sam and @Backlog Manager, look" }))).toEqual(
 			turns({ botId: lead, reason: "optional" }),
 		);
 	});
 
 	it("goes to the lead when it mentions the lead", () => {
-		expect(decideFloor(input({ content: "@lead-bot can you check?" }))).toEqual(
+		expect(floorOf(input({ content: "@lead-bot can you check?" }))).toEqual(
 			turns({ botId: lead, reason: "mention" }),
 		);
 	});
 
 	it("goes to nobody but the bots it addresses in a project with no lead yet", () => {
-		expect(decideFloor(input({ lead: null, content: "Morning all" }))).toEqual({ kind: "nobody" });
-		expect(decideFloor(input({ lead: null, content: "@scout?" }))).toEqual(
+		expect(floorOf(input({ lead: null, content: "Morning all" }))).toEqual(nobody);
+		expect(floorOf(input({ lead: null, content: "@scout?" }))).toEqual(
 			turns({ botId: scout, reason: "mention" }),
 		);
 	});
 
 	it("offers no optional turn to a lead with no model, which could only fail", () => {
 		expect(
-			decideFloor(input({ lead: { id: lead, hasModel: false }, content: "@sam can you look?" })),
-		).toEqual({ kind: "nobody" });
+			floorOf(input({ lead: { id: lead, hasModel: false }, content: "@sam can you look?" })),
+		).toEqual(nobody);
 	});
 });
 
@@ -103,28 +104,20 @@ describe("a person's message in an automation's feed", () => {
 
 	it("goes to the project's lead bot, not to the bots mentioned", () => {
 		// Another bot, a private one too, is reached by the lead collaborating.
-		expect(decideFloor(feed("@reviewer and @scout, thoughts?"))).toEqual(
+		expect(floorOf(feed("@reviewer and @scout, thoughts?"))).toEqual(
 			turns({ botId: lead, reason: "default" }),
 		);
-		expect(decideFloor(feed("@lead-bot can you check?"))).toEqual(
+		expect(floorOf(feed("@lead-bot can you check?"))).toEqual(
 			turns({ botId: lead, reason: "mention" }),
 		);
 	});
 
 	it("goes to nobody when it mentions only people", () => {
-		expect(decideFloor(feed("@sam can you look?"))).toEqual({ kind: "nobody" });
-		expect(decideFloor(feed("@channel the report is late"))).toEqual({ kind: "nobody" });
+		expect(floorOf(feed("@sam can you look?"))).toEqual(nobody);
+		expect(floorOf(feed("@channel the report is late"))).toEqual(nobody);
 	});
 
 	it("goes to nobody in a project with no lead yet", () => {
-		expect(decideFloor({ ...feed("Any news?"), lead: null })).toEqual({ kind: "nobody" });
-	});
-});
-
-describe("a direct message", () => {
-	it("goes to nobody", () => {
-		expect(
-			decideFloor(input({ conversationKind: "direct_message", lead: null, content: "Hi" })),
-		).toEqual({ kind: "nobody" });
+		expect(floorOf({ ...feed("Any news?"), lead: null })).toEqual(nobody);
 	});
 });

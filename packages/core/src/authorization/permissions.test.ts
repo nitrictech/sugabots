@@ -1,4 +1,4 @@
-import type { WorkspaceRole } from "@sugabots/contracts";
+import { WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
 import { describe, expect, it } from "vitest";
 import {
 	type Actor,
@@ -191,12 +191,28 @@ const MANAGING_A_BOT: BotPermission[] = [
 	"computer.request.decide",
 ];
 
-/** What a person may do with their Personal Assistant besides use it: change its look and connections, and decide its computer's requests. */
+/**
+ * What a person may do with their Personal Assistant besides use it: change its
+ * look and connections, manage and run its automations, and decide what it and
+ * its computer ask.
+ */
 const OWNING_AN_ASSISTANT: BotPermission[] = [
 	"bot.update",
 	"connection.manage",
+	"automation.manage",
+	"automation.run",
+	"approval.automation.decide",
 	"computer.request.decide",
 	"approval.decide",
+];
+
+/** Everything that concerns a bot's automations, which on a Personal Assistant are its person's alone. */
+const AUTOMATIONS: Array<BotPermission & ProjectPermission> = [
+	"automation.read",
+	"automation.manage",
+	"automation.run",
+	"automation.history.read",
+	"approval.automation.decide",
 ];
 
 describe("workspace actions", () => {
@@ -402,11 +418,31 @@ describe("bot actions", () => {
 	});
 
 	it.each(BOT_PERMISSIONS)(
-		"its person may %s on their Personal Assistant only to use it, change its look and connections, or decide what it asks",
+		"its person may %s on their Personal Assistant only to use it, change its look, connections and automations, or decide what it asks",
 		(permission) => {
 			expect(mayOnBot(actor("member"), permission, assistantOf(ALICE))).toBe(
 				USING_A_BOT.includes(permission) || OWNING_AN_ASSISTANT.includes(permission),
 			);
+		},
+	);
+
+	it.each(AUTOMATIONS)(
+		"lets its person %s for their Personal Assistant's automations, whatever their role",
+		(permission) => {
+			const assistants = { isMember: false, defaultOf: assistantOf(ALICE) };
+			for (const role of WORKSPACE_ROLES) {
+				expect(mayInProject(actor(role), permission, assistants)).toBe(true);
+			}
+		},
+	);
+
+	it.each(AUTOMATIONS)(
+		"lets no administrator %s for another person's Personal Assistant's automations",
+		(permission) => {
+			const assistants = { isMember: false, defaultOf: assistantOf(ALICE) };
+			for (const role of ["owner", "admin"] as const) {
+				expect(mayInProject(actor(role, BOB), permission, assistants)).toBe(false);
+			}
 		},
 	);
 

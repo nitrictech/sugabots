@@ -8,16 +8,22 @@ import {
 	useSearch,
 } from "@tanstack/react-router";
 import { useBotWithHandle } from "@/lib/bots.ts";
-import { prefetchConversation, useAnyConversationPlace, useBotThreadPlace } from "@/lib/chats.ts";
+import {
+	placeBot,
+	prefetchConversation,
+	useAnyConversationPlace,
+	useBotThreadPlace,
+} from "@/lib/chats.ts";
 import {
 	botAutomationsLink,
 	botConnectionsLink,
 	botSettingsLink,
 	conversationLink,
 } from "@/lib/links.ts";
-import { useSession } from "@/lib/session.ts";
+import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { FilesPage } from "@/screens/Files.tsx";
 import { BotsDirectory } from "@/shell/BotsDirectory.tsx";
+import { MobileOwner } from "@/shell/MobileHome.tsx";
 import { OwnerNotFound } from "@/shell/OwnerNotFound.tsx";
 import { Panes } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
@@ -29,6 +35,7 @@ import {
 	type SearchChange,
 } from "./conversation.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
+import { useBotRouteOwner } from "./owner.ts";
 import {
 	type ConversationSearch,
 	validateConversationSearch,
@@ -67,6 +74,10 @@ function BotRoute() {
 	const onConnections = Boolean(
 		matchRoute({ to: "/$workspace/bots/$bot/connections", fuzzy: true }),
 	);
+	const onSettings = Boolean(
+		matchRoute({ to: "/$workspace/bots/$bot/settings" }) ||
+			matchRoute({ to: "/$workspace/bots/$bot/computer" }),
+	);
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!bot) return <OwnerNotFound kind="bot" error={error} />;
 	// Someone else's private bot, which an administrator sees listed: it exists, and its settings,
@@ -74,7 +85,8 @@ function BotRoute() {
 	// automations posted are not.
 	const managing =
 		(bot.permissions.resources.manageAutomations && onAutomations) ||
-		(bot.permissions.resources.manageConnections && onConnections);
+		(bot.permissions.resources.manageConnections && onConnections) ||
+		(bot.permissions.resources.openSettings && onSettings);
 	if (!bot.permissions.talk && !managing) {
 		return (
 			<Panes>
@@ -109,21 +121,35 @@ function BotRoute() {
 }
 
 /**
- * A bot opened without a thread chosen: its own page, where a thread with it
- * starts from its first message, whether or not it has threads; they are in
- * its sidebar. A project's index opens its newest thread instead.
+ * A bot opened without a thread chosen: on a phone, its sidebar as a page, to
+ * pick from, as a project's is; on a wider screen, starting a thread with it
+ * from its first message, whether or not it has threads, which are in its
+ * sidebar. A project's index opens its newest thread instead.
  */
 export const botIndexRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/",
-	component: () => <BotPage handle={botIndexRoute.useParams().bot} />,
+	component: () => {
+		const { bot } = useBotWithHandle(botIndexRoute.useParams().bot);
+		const wide = useMediaQuery(SIDE_BY_SIDE);
+		if (!bot) return null;
+		return wide ? <BotNewThread bot={bot} /> : <MobileOwner owner={{ bot }} />;
+	},
 });
 
-/** The bot at `handle`'s own page, starting a thread with it from its first message. */
-function BotPage({ handle }: { handle: string }) {
-	const { bot } = useBotWithHandle(handle);
-	const { user } = useSession();
-	return bot && user ? <NewThreadPage key={bot.id} owner={{ bot }} userId={user.id} /> : null;
+/** Starting a thread with the bot, from its first message. */
+export const botNewThreadRoute = createRoute({
+	getParentRoute: () => botRoute,
+	path: "/new",
+	component: () => {
+		const { bot } = useBotWithHandle(botNewThreadRoute.useParams().bot);
+		return bot ? <BotNewThread bot={bot} /> : null;
+	},
+});
+
+/** Starting a thread with `bot` from its first message. */
+function BotNewThread({ bot }: { bot: Bot }) {
+	return <NewThreadPage key={bot.id} owner={{ bot }} />;
 }
 
 /** One of the bot's threads, or one of its automations' feeds. */
@@ -183,8 +209,8 @@ export const botFilesRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/files",
 	component: () => {
-		const { bot } = useBotWithHandle(botFilesRoute.useParams().bot);
-		return bot ? <FilesPage owner={{ bot }} /> : null;
+		const owner = useBotRouteOwner();
+		return owner ? <FilesPage owner={owner} /> : null;
 	},
 });
 
@@ -193,10 +219,10 @@ export const botFileRoute = createRoute({
 	path: "/files/$file",
 	validateSearch: (search: Record<string, unknown>) => validateFileSearch(search),
 	component: () => {
-		const { bot: handle, file } = botFileRoute.useParams();
+		const owner = useBotRouteOwner();
+		const { file } = botFileRoute.useParams();
 		const { version } = botFileRoute.useSearch();
-		const { bot } = useBotWithHandle(handle);
-		return bot ? <FilesPage owner={{ bot }} selectedId={file} version={version} /> : null;
+		return owner ? <FilesPage owner={owner} selectedId={file} version={version} /> : null;
 	},
 });
 
@@ -209,7 +235,7 @@ export const threadByIdRoute = createRoute({
 		const search = useSearch({ strict: false });
 		const { found, isPending, error } = useAnyConversationPlace(conversation);
 		if (isPending) return <Panes>{null}</Panes>;
-		const bot = found?.conversation.kind === "botThread" ? found.conversation.bot : undefined;
+		const bot = found && placeBot(found);
 		if (!bot) {
 			return (
 				<Panes>

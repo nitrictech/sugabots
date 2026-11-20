@@ -117,7 +117,7 @@ const LEVEL_OPTIONS = (["all", "mentions", "nothing"] as const).map((value) => (
 }));
 
 function NotifyAbout({ settings }: { settings: NotificationSettings }) {
-	const change = useChangeNotificationPreferences(settings);
+	const change = useChangeNotificationPreferences();
 	return (
 		<SettingsGroup label="Notify me about" note={NOTIFICATION_LEVEL_NOTES[settings.level]}>
 			<SettingsChoiceRow
@@ -131,7 +131,7 @@ function NotifyAbout({ settings }: { settings: NotificationSettings }) {
 }
 
 function Pause({ settings }: { settings: NotificationSettings }) {
-	const change = useChangeNotificationPreferences(settings);
+	const change = useChangeNotificationPreferences();
 	const pausedUntil = settings.pausedUntil ? new Date(settings.pausedUntil) : null;
 	const paused = pausedUntil !== null && pausedUntil > new Date();
 	const pauseUntil = (until: Date | null) => change({ pausedUntil: until?.toISOString() ?? null });
@@ -177,7 +177,7 @@ const AUTOMATION_RUN_OPTIONS: { value: AutomationRunNotifications; label: string
 
 /** What besides messages the person hears of, unless their level is Nothing. */
 function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
-	const change = useChangeNotificationPreferences(settings);
+	const change = useChangeNotificationPreferences();
 	return (
 		<SettingsGroup
 			label="Also notify me when"
@@ -204,7 +204,7 @@ function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
 }
 
 function QuietHoursSettings({ settings }: { settings: NotificationSettings }) {
-	const change = useChangeNotificationPreferences(settings);
+	const change = useChangeNotificationPreferences();
 	const fromId = useId();
 	const toId = useId();
 	const quietHours = settings.quietHours;

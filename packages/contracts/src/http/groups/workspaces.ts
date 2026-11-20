@@ -49,7 +49,7 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 		}),
 		HttpApiEndpoint.delete("delete", "/workspaces/:workspace", {
 			params: workspace,
-			error: refused,
+			error: [Conflict, ...refused],
 		}),
 		HttpApiEndpoint.get("members", "/workspaces/:workspace/members", {
 			params: workspace,

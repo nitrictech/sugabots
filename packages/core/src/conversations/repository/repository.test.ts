@@ -524,7 +524,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		});
 
 		const bots = await servedOnPostgres(BotRepository.Service, BotRepository.layer);
-		await bots.remove(workspaceId, botId);
+		await bots.remove(workspaceId, botId, memberId, Effect.void);
 		expect(
 			await onDatabase((db) =>
 				db.select().from(conversation).where(eq(conversation.id, details.conversation.id)),

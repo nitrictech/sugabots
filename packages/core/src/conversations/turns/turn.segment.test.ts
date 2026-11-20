@@ -537,7 +537,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's segment, against Postgres",
 					.innerJoin(workspace, eq(workspace.id, bot.workspaceId))
 					.where(eq(bot.id, hostId)),
 			);
-			const settingsUrl = `http://sugabots.test/${place?.workspace}/settings/bots/${place?.handle}`;
+			const settingsUrl = `http://sugabots.test/${place?.workspace}/bots/${place?.handle}/settings`;
 			expect(await storedReply()).toMatchObject({
 				content: `Saved: ${JSON.stringify({ saved: true, settingsUrl })}.`,
 			});

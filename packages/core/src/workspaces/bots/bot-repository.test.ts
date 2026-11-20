@@ -1,5 +1,5 @@
 import type { NewBot } from "@sugabots/contracts";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { noComputers } from "../../computers/testing.ts";
 import { bot, user, workspace, workspaceMember } from "../../database/schema.ts";
@@ -143,7 +143,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		});
 		const sorter = await create(adminId, { name: "Sorter", model: "model" });
 		await expect(
-			repository.update(workspaceId, sorter.id, { handle: "channel" }),
+			repository.update(workspaceId, sorter.id, { handle: "channel" }, adminId),
 		).rejects.toMatchObject({ _tag: "BotHandleReserved", handle: "channel" });
 	});
 
@@ -153,7 +153,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		).rejects.toMatchObject({ _tag: "BotHandleReserved", handle: "personal-assistant" });
 		const sorter = await create(adminId, { name: "Sorter", model: "model" });
 		await expect(
-			repository.update(workspaceId, sorter.id, { handle: "personal-assistant" }),
+			repository.update(workspaceId, sorter.id, { handle: "personal-assistant" }, adminId),
 		).rejects.toMatchObject({ _tag: "BotHandleReserved", handle: "personal-assistant" });
 	});
 
@@ -162,7 +162,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 		const other = await create(adminId, { name: "Sorter", model: "model" });
 
 		await expect(
-			repository.update(workspaceId, other.id, { name: "Triage" }),
+			repository.update(workspaceId, other.id, { name: "Triage" }, adminId),
 		).rejects.toMatchObject({
 			_tag: "BotNameTaken",
 			field: "name",
@@ -176,7 +176,7 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 			model: "model",
 		});
 
-		const cleared = await repository.update(workspaceId, made.id, { model: null });
+		const cleared = await repository.update(workspaceId, made.id, { model: null }, adminId);
 
 		expect(cleared.model).toBeNull();
 		// Still listed: it simply cannot take a turn.
@@ -194,15 +194,15 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 
 	it("does not individually delete a system bot", async () => {
 		const system = await placeSummariser();
-		await expect(repository.remove(workspaceId, system.id)).rejects.toBeInstanceOf(
-			BotRepository.SystemBotImmutable,
-		);
+		await expect(
+			repository.remove(workspaceId, system.id, adminId, Effect.void),
+		).rejects.toBeInstanceOf(BotRepository.SystemBotImmutable);
 	});
 
 	it("does not change a system bot as a bot people talk to", async () => {
 		const system = await placeSummariser();
 		await expect(
-			repository.update(workspaceId, system.id, { model: "another" }),
+			repository.update(workspaceId, system.id, { model: "another" }, adminId),
 		).rejects.toBeInstanceOf(BotRepository.SystemBotImmutable);
 	});
 

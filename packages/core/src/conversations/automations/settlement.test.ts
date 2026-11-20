@@ -18,6 +18,7 @@ import {
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	onPostgres,
 	type Promised,
@@ -642,31 +643,16 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		const [turnRun] = await runOnPostgres(runningTurns(accepted.conversationId));
 		if (!turnRun) throw new Error("The run asked for no turn");
 		const prepared = await prepareRunnable(execution, turnRun);
-		let letGo: () => void = () => {};
-		const heldUntil = new Promise<void>((resolve) => {
-			letGo = resolve;
-		});
-		let held: () => void = () => {};
-		const holding = new Promise<void>((resolve) => {
-			held = resolve;
-		});
-		const holder = runOnPostgres(
-			transaction(
-				Effect.gen(function* () {
-					yield* query((db) =>
-						db.select({ id: turn.id }).from(turn).where(eq(turn.id, prepared.turnId)).for("update"),
-					);
-					held();
-					yield* Effect.promise(() => heldUntil);
-				}),
+		const holder = holdTransaction(
+			query((db) =>
+				db.select({ id: turn.id }).from(turn).where(eq(turn.id, prepared.turnId)).for("update"),
 			),
 		);
-		await holding;
+		await holder.held;
 
 		// Settles while the holder still has the turn locked: a wait here would never end.
 		await announce(ended(accepted.conversationId, failed(userText`Model failed`)));
-		letGo();
-		await holder;
+		await holder.release();
 
 		const [skipped] = await onDatabase((db) =>
 			db.select().from(turn).where(eq(turn.id, prepared.turnId)),
@@ -693,35 +679,24 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		await onDatabase((db) =>
 			db.update(turn).set({ status: "waiting" }).where(eq(turn.id, fixture.askingTurn.id)),
 		);
-		let letGo: () => void = () => {};
-		const heldUntil = new Promise<void>((resolve) => {
-			letGo = resolve;
-		});
-		let held: (pid: number) => void = () => {};
-		const holderPid = new Promise<number>((resolve) => {
-			held = resolve;
-		});
-		const holder = runOnPostgres(
-			transaction(
-				Effect.gen(function* () {
-					yield* query((db) =>
-						db
-							.select({ id: turn.id })
-							.from(turn)
-							.where(eq(turn.id, fixture.askingTurn.id))
-							.for("update"),
-					);
-					const [backend] = yield* query((db) =>
-						db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`, "objects"),
-					);
-					held(backend?.pid ?? 0);
-					yield* Effect.promise(() => heldUntil);
-					// Ends a turn in the run, as a turn writer holding its turn does.
-					yield* emit([ended(fixture.childConversation.id, { state: "cancelled" })]);
-				}),
-			),
+		const holder = holdTransaction(
+			Effect.gen(function* () {
+				yield* query((db) =>
+					db
+						.select({ id: turn.id })
+						.from(turn)
+						.where(eq(turn.id, fixture.askingTurn.id))
+						.for("update"),
+				);
+				const [backend] = yield* query((db) =>
+					db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`, "objects"),
+				);
+				return backend?.pid ?? 0;
+			}),
+			// Ends a turn in the run, as a turn writer holding its turn does.
+			emit([ended(fixture.childConversation.id, { state: "cancelled" })]),
 		);
-		const pid = await holderPid;
+		const pid = await holder.held;
 
 		const failing = settlement.failRun(fixture.run);
 		await vi.waitFor(async () => {
@@ -733,8 +708,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 			);
 			expect(blocked.length).toBeGreaterThan(0);
 		});
-		letGo();
-		await Promise.all([holder, failing]);
+		await Promise.all([holder.release(), failing]);
 
 		expect(await executionOf(fixture.run.runId)).toMatchObject({ state: "failed" });
 		const [asking] = await onDatabase((db) =>

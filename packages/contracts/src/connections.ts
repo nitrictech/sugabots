@@ -98,9 +98,8 @@ export const CONNECTION_SIGN_IN_CALLBACK_PATH = "/connections/oauth/callback";
 
 /**
  * The web page a connection's OAuth sign-in returns to, with `workspace` and
- * `project` naming its project, `bot` the bot when that is the bot's default
- * project, and, when it did not finish, an `oauth_error` code from
- * {@link connectionSignInFailures}.
+ * `project` naming its project, and, when it did not finish, an `oauth_error`
+ * code from {@link connectionSignInFailures}.
  */
 export const CONNECTION_SIGN_IN_RETURN_PATH = "/connections/oauth/return";
 
@@ -110,7 +109,9 @@ export const CONNECTION_SIGN_IN_RETURN_PATH = "/connections/oauth/return";
  *
  * - `missing_state`: the callback carried no `state`.
  * - `unknown_state`: no connection is waiting on that `state`.
- * - `not_allowed`: the person may no longer manage the bot's connections.
+ * - `not_allowed`: somebody other than the person who started the sign-in
+ *   returned from it, or that person may no longer manage the project's
+ *   connections.
  * - `refused`: the authorization server refused, or sent no code.
  * - `not_completed`: exchanging the code for tokens failed.
  */

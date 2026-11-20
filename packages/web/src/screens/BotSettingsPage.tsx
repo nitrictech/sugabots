@@ -11,7 +11,7 @@ import {
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
-import { Link, linkOptions, useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { ArrowUpRight, ChevronDown, Pencil } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { useDeleteBot, useModels, useUpdateBot } from "@/lib/bots.ts";
@@ -19,16 +19,17 @@ import { characterCount } from "@/lib/character-count.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { botConnectionsLink, botSettingsPageLink } from "@/lib/links.ts";
+import { botComputerLink, botConnectionsLink, botsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { modelLogoOf } from "@/lib/model-logo.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useSession } from "@/lib/session.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
+import { BotCrumb } from "@/shell/BotCrumb.tsx";
 import { type Look, LookStep, type Part } from "@/shell/NewBot.tsx";
+import { Page } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
@@ -57,7 +58,8 @@ import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import { BotAutomations } from "./AutomationEditing.tsx";
 
 /*
- * One bot, as its contact card: its face and colour first, then what it is,
+ * One bot's settings, as a page of its own beside its threads, and as its
+ * contact card: its face and colour first, then what it is,
  * what it thinks with and what it is told, all open on the page, what it can
  * reach, and what it does unprompted.
  *
@@ -65,11 +67,24 @@ import { BotAutomations } from "./AutomationEditing.tsx";
  * nobody may use is not drawn. Each field saves on its own, as you leave it.
  */
 export function BotSettingsPage({ bot }: { bot: Bot }) {
+	return (
+		<Page
+			title="Settings"
+			parent={<BotCrumb bot={bot} />}
+			place={{ kind: "owner", owner: { bot } }}
+		>
+			<BotSettings bot={bot} />
+		</Page>
+	);
+}
+
+/** The bot's settings, beneath the page's header. */
+function BotSettings({ bot }: { bot: Bot }) {
 	const update = useUpdateBot(bot.id);
 	const save: Save = update.mutateAsync;
 	const savePending = update.isPending;
 	const may = bot.permissions;
-	// A Personal Assistant's prompt, model and tools are ours: its person changes its look (name, colour, face, shape) and connections.
+	// A Personal Assistant's prompt, model and tools are ours: its person changes its look (name, colour, face, shape), connections and automations.
 	const fixed = bot.assistant;
 	const workspaceName = useWorkspace().workspace?.name ?? "the workspace";
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -83,16 +98,8 @@ export function BotSettingsPage({ bot }: { bot: Bot }) {
 		} catch {
 			return;
 		}
-		// Back to Bots, or Bots in the deleted bot's place, so Back never returns to it.
-		leaveForPage(
-			router.buildLocation(
-				linkOptions({
-					from: "/$workspace",
-					to: "./settings/$section",
-					params: { section: "bots" },
-				}),
-			).href,
-		);
+		// Back to the bots, or the bots in the deleted bot's place, so Back never returns to it.
+		leaveForPage(router.buildLocation(botsLink()).href);
 	}
 
 	return (
@@ -148,7 +155,7 @@ export function BotSettingsPage({ bot }: { bot: Bot }) {
 				<BuiltInTools bot={bot} workspaceName={workspaceName} canChange={may.update} save={save} />
 			)}
 			<BotConnections bot={bot} />
-			{!fixed && <BotAutomations bot={bot} />}
+			<BotAutomations bot={bot} />
 			{may.delete && !fixed && (
 				<SettingsDanger
 					label="Delete bot"
@@ -601,7 +608,6 @@ function BuiltInTools({
 	canChange: boolean;
 	save: Save;
 }) {
-	const backToBot = useBackToHere(bot.name);
 	const webOff = useWebAccess().data?.enabled === false;
 	const computersOff = useComputerAccess().data?.enabled === false;
 	const isOn = (keys: readonly BuiltInToolKey[]) =>
@@ -619,9 +625,7 @@ function BuiltInTools({
 			action={
 				bot.usesComputer &&
 				!computersOff && (
-					<SettingsGroupLink
-						render={<Link {...botSettingsPageLink(bot, "computer")} state={backToBot} />}
-					>
+					<SettingsGroupLink render={<Link {...botComputerLink(bot)} />}>
 						Its computer
 					</SettingsGroupLink>
 				)

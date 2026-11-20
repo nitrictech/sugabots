@@ -41,9 +41,14 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 					.pipe(asSessionUser, asHttpError({ ...refusals, TimeZoneUnknown: BadRequest })),
 			)
 			.handle("delete", ({ params }) =>
-				membership
-					.delete({ workspace: params.workspace })
-					.pipe(asSessionUser, asHttpError(refusals)),
+				membership.delete({ workspace: params.workspace }).pipe(
+					asSessionUser,
+					asHttpError({
+						...refusals,
+						ComputerUnavailable: Conflict,
+						ComputerMadeMeanwhile: Conflict,
+					}),
+				),
 			)
 			.handle("members", ({ params }) =>
 				membership
@@ -60,20 +65,26 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 					.pipe(asSessionUser, asHttpError({ ...refusals, OwnerStays: BadRequest })),
 			)
 			.handle("removeMember", ({ params }) =>
-				membership
-					.remove({ workspace: params.workspace, memberId: params.memberId })
-					.pipe(
-						asSessionUser,
-						asHttpError({ ...refusals, OwnerStays: BadRequest, ComputerUnavailable: Conflict }),
-					),
+				membership.remove({ workspace: params.workspace, memberId: params.memberId }).pipe(
+					asSessionUser,
+					asHttpError({
+						...refusals,
+						OwnerStays: BadRequest,
+						ComputerUnavailable: Conflict,
+						ComputerMadeMeanwhile: Conflict,
+					}),
+				),
 			)
 			.handle("leave", ({ params }) =>
-				membership
-					.leave({ workspace: params.workspace })
-					.pipe(
-						asSessionUser,
-						asHttpError({ ...refusals, OwnerStays: BadRequest, ComputerUnavailable: Conflict }),
-					),
+				membership.leave({ workspace: params.workspace }).pipe(
+					asSessionUser,
+					asHttpError({
+						...refusals,
+						OwnerStays: BadRequest,
+						ComputerUnavailable: Conflict,
+						ComputerMadeMeanwhile: Conflict,
+					}),
+				),
 			)
 			.handle("transferOwnership", ({ params, payload }) =>
 				membership

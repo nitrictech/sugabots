@@ -251,6 +251,8 @@ export const ChooseDisabledProvider = meta.story({
 		const root = `${API}/workspaces/:workspace/model-providers`;
 		msw.use(
 			http.get(`${root}/models`, () => HttpResponse.json({ models: [], defaultModel: null })),
+			// Switching a provider on asks for the bots again, whose models it may set.
+			http.get(`${API}/workspaces/:workspace/bots`, () => HttpResponse.json([placeholder])),
 			http.patch(`${root}/:providerId`, async ({ request }) => {
 				switchedOn = ((await request.json()) as { active?: boolean }).active === true;
 				return HttpResponse.json({ ...anthropic, active: true });

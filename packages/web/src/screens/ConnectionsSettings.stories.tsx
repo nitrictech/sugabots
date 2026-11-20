@@ -35,7 +35,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000008${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		projectId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: revenue.id,
 		kind: "mcp",
 		auth: "header",
 		signedIn: true,
@@ -286,7 +286,7 @@ export const Empty = meta.story({
 	},
 });
 
-/** A member who may not manage the bot's connections: each one's access stated, nothing to change. */
+/** A member who may not manage the project's connections: each one's access stated, nothing to change. */
 export const Member = meta.story({
 	beforeEach({ msw }) {
 		msw.use(

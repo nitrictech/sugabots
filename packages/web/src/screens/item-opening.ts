@@ -23,8 +23,8 @@ export function useItemOpening({
 	/** Whether the chat has loaded, so what opened an item is on the page. */
 	loaded: boolean;
 	items: readonly ChatMessageItem[];
-	/** Whose the chat is, a bot or a project, whose automation a run opens; none for a direct message. */
-	owner: ResourceOwner | undefined;
+	/** Whose the chat is, a bot or a project, whose automation a run opens. */
+	owner: ResourceOwner;
 	/** The automation whose feed the chat is, when it is one. */
 	feedOfAutomationId: string | undefined;
 	onItemChange: (itemConversationId: string | undefined) => void;
@@ -47,7 +47,7 @@ export function useItemOpening({
 	return (nextItemConversationId) => {
 		if (runs.conversationIds.has(nextItemConversationId)) {
 			const run = runs.resulting.get(nextItemConversationId);
-			if (run && owner && run.automationId !== feedOfAutomationId) {
+			if (run && run.automationId !== feedOfAutomationId) {
 				void navigate(
 					ownerLinkOptions(owner, { page: "automation", automationId: run.automationId }),
 				);

@@ -23,6 +23,7 @@ import {
 	project,
 	projectBot,
 	projectMember,
+	type TurnStatus,
 	toolCall,
 	turn,
 	user,
@@ -300,6 +301,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				unreadMessages: 0,
 				needsApproval: false,
 				mentionsYou: false,
+				activity: null,
 			},
 		]);
 	});
@@ -975,6 +977,115 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				failedAutomations: 0,
 			});
 		});
+
+		describe("what the bot is doing in a thread", () => {
+			const startedAt = new Date("2026-11-20T09:00:00.000Z");
+			const askedAt = new Date("2026-11-20T09:05:00.000Z");
+			const finishedAt = new Date("2026-11-20T09:10:00.000Z");
+
+			/** The host's turn in `conversationId`, answering a message of the person's, with its reply. */
+			const aTurn = async (conversationId: string, status: TurnStatus) => {
+				const [asking] = await onDatabase((db) =>
+					db
+						.insert(message)
+						.values({
+							conversationId,
+							authorUserId: userId,
+							kind: "text",
+							status: "complete",
+							parts: [{ type: "text", text: "Deploy it" }],
+							content: "Deploy it",
+							createdAt: new Date(startedAt.getTime() - 1000),
+						})
+						.returning(),
+				);
+				if (!asking) throw new Error("fixture");
+				const ended = status !== "running" && status !== "waiting";
+				const [started] = await onDatabase((db) =>
+					db
+						.insert(turn)
+						.values({
+							conversationId,
+							botId,
+							triggerMessageId: asking.id,
+							status,
+							model: "test/model",
+							startedAt,
+							finishedAt: ended ? finishedAt : null,
+						})
+						.returning({ id: turn.id }),
+				);
+				if (!started) throw new Error("fixture");
+				const [reply] = await onDatabase((db) =>
+					db
+						.insert(message)
+						.values({
+							conversationId,
+							authorBotId: botId,
+							turnId: started.id,
+							kind: "text",
+							status: ended ? "complete" : "streaming",
+							parts: ended ? [{ type: "text", text: "Deployed." }] : [],
+							content: ended ? "Deployed." : "",
+							createdAt: startedAt,
+						})
+						.returning(),
+				);
+				if (!reply) throw new Error("fixture");
+				return { turnId: started.id, reply };
+			};
+
+			it("says a bot is working since its turn started", async () => {
+				const current = await aThread();
+				await aTurn(current.id, "running");
+
+				expect(await hostRow()).toMatchObject({
+					activity: { kind: "working", since: startedAt.toISOString() },
+				});
+			});
+
+			it("says a bot is waiting since its tool call asked for an approval", async () => {
+				const current = await aThread();
+				const { turnId, reply } = await aTurn(current.id, "waiting");
+				await onDatabase((db) =>
+					db.insert(toolCall).values({
+						conversationId: current.id,
+						messageId: reply.id,
+						turnId,
+						tool: "linear__create_issue",
+						approvalId: `approval-${crypto.randomUUID()}`,
+						approvalStatus: "pending",
+						status: "awaiting_approval",
+						input: {},
+						atOffset: 0,
+						startedAt: askedAt,
+					}),
+				);
+
+				expect(await hostRow()).toMatchObject({
+					activity: { kind: "waiting", since: askedAt.toISOString() },
+				});
+			});
+
+			it("says a bot finished its reply until the person reads it", async () => {
+				const current = await aThread();
+				await aTurn(current.id, "done");
+
+				expect(await hostRow()).toMatchObject({
+					activity: { kind: "finished", at: finishedAt.toISOString() },
+				});
+
+				await chats.markRead(current.id);
+				expect(await hostRow()).toMatchObject({ activity: null });
+			});
+
+			it("says nothing of a turn that failed", async () => {
+				const current = await aThread();
+				await aTurn(current.id, "failed");
+
+				expect(await hostRow()).toMatchObject({ activity: null });
+			});
+		});
 	});
 
 	it("lists a project the person is in, and hides one they are not", async () => {
@@ -1136,7 +1247,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 
 		// The member made the bot, but the computer is the project's.
 		expect(await deciders(userId)).toEqual([]);
-		expect(await deciders(administratorId)).toEqual([botId, recipientBotId]);
+		expect(new Set(await deciders(administratorId))).toEqual(new Set([botId, recipientBotId]));
 	});
 
 	it("asks the bot a message in a project's thread replies to, though it names nobody", async () => {
@@ -1189,6 +1300,50 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		});
 
 		expect(await runOnPostgres(runningTurns(another.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ botId, reason: "default" }) }),
+		]);
+	});
+
+	it("lets a public bot decline a message in its thread to a person who reaches it but has never taken part", async () => {
+		const thread = await aThread();
+
+		await chats.post({
+			conversationId: thread.id,
+			messageId: crypto.randomUUID(),
+			content: "@chat-admin can you look at this?",
+		});
+
+		expect(await runOnPostgres(runningTurns(thread.id))).toEqual([
+			expect.objectContaining({ request: expect.objectContaining({ botId, reason: "optional" }) }),
+		]);
+	});
+
+	it("offers for mention in a public bot's thread everyone who reaches the bot, as the floor reads them", async () => {
+		const thread = await aThread();
+
+		const details = await onPostgresAs(userId)(
+			Context.get(conversations, ConversationView.Service),
+		).get(thread.id);
+
+		// The bot's default project has no members; the admin reaches it through the bot.
+		expect(details.peopleReachingProject.map(({ id }) => id)).toEqual(
+			expect.arrayContaining([userId, administratorId]),
+		);
+	});
+
+	it("answers a mention in a private bot's thread of a person who does not reach the bot", async () => {
+		await onDatabase((db) =>
+			db.update(bot).set({ visibility: "private" }).where(eq(bot.id, botId)),
+		);
+		const thread = await aThread();
+
+		await chats.post({
+			conversationId: thread.id,
+			messageId: crypto.randomUUID(),
+			content: "@chat-admin can you look at this?",
+		});
+
+		expect(await runOnPostgres(runningTurns(thread.id))).toEqual([
 			expect.objectContaining({ request: expect.objectContaining({ botId, reason: "default" }) }),
 		]);
 	});
@@ -1291,6 +1446,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				unreadMessages: 1,
 				needsApproval: false,
 				mentionsYou: false,
+				activity: null,
 			},
 		]);
 		expect(await view.projectMarkers(workspaceId)).toEqual({

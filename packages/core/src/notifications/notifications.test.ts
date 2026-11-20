@@ -14,6 +14,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CurrentActor } from "../authorization/current-actor.ts";
 import { ConversationEvent } from "../conversations/events.ts";
 import { seedConversation } from "../conversations/seed.test-support.ts";
+import { REQUEST_NETWORK_ACCESS_TOOL } from "../conversations/tools/network-access/tool.ts";
 import { transaction } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
 import {
@@ -863,18 +864,14 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(people.bob.id)).toEqual([]);
 	});
 
-	it("asks the people who may decide a bot's tool call to approve it", async () => {
-		// Only Ada, who made it, reaches a private bot, so only she may decide its calls.
-		await onDatabase((db) =>
-			db.update(botTable).set({ visibility: "private" }).where(eq(botTable.id, botId)),
-		);
-		// An automation run elsewhere must not make this call one raised during a run.
-		await automationRunElsewhere();
-		const conversation = await conversationWithBot([people.ada.id]);
+	/**
+	 * A turn of the bot, asked by Ada in `conversation`, waiting for approval
+	 * of a call to each of `tools`, raised in that order.
+	 */
+	const turnWaitingOn = async (conversation: string, tools: readonly string[]) => {
 		const triggerId = crypto.randomUUID();
 		const replyId = crypto.randomUUID();
 		const turnId = crypto.randomUUID();
-		const callId = crypto.randomUUID();
 		await onDatabase((db) =>
 			db.insert(message).values({
 				id: triggerId,
@@ -909,18 +906,36 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				turnId,
 			}),
 		);
+		const callIds = tools.map(() => crypto.randomUUID());
+		const startedAt = Date.now();
 		await onDatabase((db) =>
-			db.insert(toolCall).values({
-				id: callId,
-				conversationId: conversation,
-				messageId: replyId,
-				turnId,
-				tool: "post_message",
-				approvalStatus: "pending",
-				input: {},
-				atOffset: 0,
-			}),
+			db.insert(toolCall).values(
+				tools.map((tool, index) => ({
+					id: callIds[index],
+					conversationId: conversation,
+					messageId: replyId,
+					turnId,
+					tool,
+					approvalStatus: "pending" as const,
+					input: {},
+					atOffset: index,
+					startedAt: new Date(startedAt + index),
+				})),
+			),
 		);
+		return { turnId, callIds };
+	};
+
+	it("asks the people who may decide a bot's tool call to approve it", async () => {
+		// Only Ada, who made it, reaches a private bot, so only she may decide its calls.
+		await onDatabase((db) =>
+			db.update(botTable).set({ visibility: "private" }).where(eq(botTable.id, botId)),
+		);
+		// An automation run elsewhere must not make this call one raised during a run.
+		await automationRunElsewhere();
+		const conversation = await conversationWithBot([people.ada.id]);
+		const { turnId, callIds } = await turnWaitingOn(conversation, ["post_message"]);
+		const [callId] = callIds;
 
 		await emit(
 			ConversationEvent.TurnSuspended({ conversationId: conversation, workspaceId, turnId }),
@@ -937,5 +952,42 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		]);
 		expect(sentTo(people.bob.id)).toEqual([]);
 		expect(sentTo(people.outsider.id)).toEqual([]);
+	});
+
+	it("links each person to an approval they may decide, leaving out computer requests they may not", async () => {
+		// Ada administers the workspace, so she manages the project's computer; Bob is only a member.
+		await onDatabase((db) =>
+			db
+				.update(workspaceMember)
+				.set({ role: "admin" })
+				.where(eq(workspaceMember.userId, people.ada.id)),
+		);
+		const thread = await projectThread();
+		const { turnId, callIds } = await turnWaitingOn(thread, [
+			REQUEST_NETWORK_ACCESS_TOOL,
+			"post_message",
+		]);
+		const [networkCallId, postCallId] = callIds;
+
+		await emit(ConversationEvent.TurnSuspended({ conversationId: thread, workspaceId, turnId }));
+
+		expect(await deliveredTo(people.ada.id)).toEqual([
+			{
+				title: "Scout needs your approval",
+				body: "To run 2 tools in Launch",
+				tag: `approval:${turnId}`,
+				path: `/${workspaceSlug}/approvals/${networkCallId}`,
+				conversationId: thread,
+			},
+		]);
+		expect(await deliveredTo(people.bob.id)).toEqual([
+			{
+				title: "Scout needs your approval",
+				body: "To run post_message in Launch",
+				tag: `approval:${turnId}`,
+				path: `/${workspaceSlug}/approvals/${postCallId}`,
+				conversationId: thread,
+			},
+		]);
 	});
 });

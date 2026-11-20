@@ -1,4 +1,4 @@
-import type { AutomationFeed, DirectMessage, ProjectThread } from "@sugabots/contracts";
+import type { AutomationFeed, ProjectThread } from "@sugabots/contracts";
 import type * as schema from "../../database/schema.ts";
 
 /**
@@ -30,14 +30,6 @@ export function toAutomationFeed(row: schema.PlacedConversationRow): AutomationF
 		botId: row.botId,
 		automationId: row.automationId,
 	};
-}
-
-/** A direct message between people as the API describes it. Throws on a conversation of another kind. */
-export function toDirectMessage(row: schema.PlacedConversationRow): DirectMessage {
-	if (row.kind !== "direct_message") {
-		throw new Error(`Conversation ${row.id} is not a direct message`);
-	}
-	return { kind: "direct_message", ...commonFields(row) };
 }
 
 function commonFields(row: schema.PlacedConversationRow) {

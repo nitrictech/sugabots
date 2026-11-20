@@ -53,7 +53,7 @@ const details: ConversationDetails = {
 	conversation: thread,
 	automationRun: null,
 	projectBots: [],
-	members: [],
+	peopleReachingProject: [],
 	participants: [
 		testPerson({ id: USER, name: "Sam" }),
 		{

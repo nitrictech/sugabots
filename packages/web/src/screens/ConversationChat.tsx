@@ -3,7 +3,8 @@ import { quotedPreview } from "@sugabots/contracts";
 import { cn } from "cn";
 import { type CSSProperties, type RefObject, useLayoutEffect, useRef, useState } from "react";
 import {
-	directPeopleTitle,
+	type ConversationPlace,
+	placeBot,
 	useConversationHistory,
 	useConversationMessages,
 	useMarkReadWhileSeen,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/conversation-events.ts";
 import { useConversation } from "@/lib/conversations.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
+import { useLeadBot } from "@/lib/resource-owner.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import type { AutomationsView } from "./AutomationsStage.tsx";
@@ -33,8 +35,8 @@ import { typersAfter } from "./ConversationMessages.tsx";
 import { ConversationNotices } from "./ConversationNotices.tsx";
 import { chatItemRevision, mergeChatItems, messagesIn, sendingIds } from "./chat-items.ts";
 import { useChatLogPosition } from "./chat-log-position.ts";
-import { draftAudience, useChatRecipients } from "./chat-recipients.ts";
-import { type AnyConversationPlace, conversationOwner } from "./conversation-place.ts";
+import { choosesBotsIn, draftAudience, useChatRecipients } from "./chat-recipients.ts";
+import { leadOf } from "./conversation-place.ts";
 import { FileDropTarget } from "./FileDropTarget.tsx";
 import { opensBeside, useItemOpening } from "./item-opening.ts";
 import { useListedProjectThread } from "./listed-project-thread.ts";
@@ -60,12 +62,9 @@ export function ConversationChat({
 	onItemChange,
 	staged,
 	onStagedChange,
-	headerless = false,
-	onSent,
-	covered = false,
 }: {
-	/** Where the conversation is: one of a project's threads, one of a bot's, or a direct message. */
-	conversationPlace: AnyConversationPlace;
+	/** Where the conversation is: one of a project's threads, or one of a bot's. */
+	conversationPlace: ConversationPlace;
 	/** The conversation shown. */
 	conversationId: string;
 	user: SessionUser;
@@ -77,18 +76,10 @@ export function ConversationChat({
 	/** Open large beside the chat, in place of any sidebar. */
 	staged?: Staged;
 	onStagedChange: StagedChange;
-	/** Without its header, as New message shows a conversation under its To field. */
-	headerless?: boolean;
-	/** Once a message written here has been sent. */
-	onSent?: () => void;
-	/**
-	 * Hidden under something else on the page, as New message's suggestions
-	 * cover the conversation under them: the viewer is not looking at it, so
-	 * it is neither read nor kept from notifying them.
-	 */
-	covered?: boolean;
 }) {
-	const { conversation, project } = conversationPlace;
+	const project = "project" in conversationPlace ? conversationPlace.project : null;
+	const bot = placeBot(conversationPlace) ?? null;
+	const leadHasModel = useLeadBot(conversationPlace)?.model != null;
 	const openFile = (fileId: string) => onStagedChange({ kind: "file", fileId });
 	const openDesktop = () => onStagedChange({ kind: "desktop" });
 	const openAutomations = (view: AutomationsView = { kind: "list" }) =>
@@ -97,7 +88,7 @@ export function ConversationChat({
 	const history = useConversationHistory(conversationId);
 	const opened = useConversation(conversationId);
 	const details = opened.data;
-	// A project's threads' drafts are kept by the project; a bot's thread's or a direct message's, by the conversation alone.
+	// A project's threads' drafts are kept by the project; a bot's thread's, by the conversation alone.
 	const projectId = project?.id ?? null;
 	useConversationEvents(conversationId);
 	const notices = useConversationNotices(conversationId);
@@ -108,15 +99,11 @@ export function ConversationChat({
 	useTypingSignal(conversationId, draft);
 	const peopleTyping = usePeopleTyping(conversationId, user.id);
 
-	const bot = conversation.kind === "botThread" ? conversation.bot : null;
 	const headerBox = useRef<HTMLDivElement>(null);
 	const messageColumn = useRef<HTMLDivElement>(null);
 	// Over the chat while there is room beside its column, else a bar above it.
 	// Measured again once the messages are in, as their column is drawn only then.
 	const headerCrowded = useHeaderCrowding(headerBox, messageColumn, messages.isSuccess);
-	// In a project, the bots people name reply; in a bot's thread its own bot does,
-	// asking any other bot named for its help.
-	const namedBotsReply = conversation.kind === "projectThread";
 	const host = bot
 		? details?.participants.find(
 				(participant): participant is BotParticipant =>
@@ -130,7 +117,7 @@ export function ConversationChat({
 		itemConversationId,
 		loaded: details !== undefined,
 		items,
-		owner: conversationOwner(conversationPlace),
+		owner: conversationPlace,
 		feedOfAutomationId: details?.automation?.id,
 		onItemChange,
 	});
@@ -140,12 +127,12 @@ export function ConversationChat({
 		shownMessageIds: shownMessages.map((message) => message.id),
 		focusMessageId,
 	});
-	useMarkReadWhileSeen(conversationId, items.at(-1), position.latestInView && !covered);
+	useMarkReadWhileSeen(conversationId, items.at(-1), position.latestInView);
 	const recipients = useChatRecipients({
 		userId: user.id,
 		projectId,
 		conversationId,
-		namedBotsReply,
+		choosesBots: choosesBotsIn(details),
 		projectBots: details?.projectBots,
 		shownMessages,
 		draft,
@@ -162,7 +149,6 @@ export function ConversationChat({
 		attachments,
 		recipients,
 		scrollToLatest: position.scrollToLatest,
-		onSent,
 	});
 	const threadDone = useThreadDone(conversationId, details);
 	const projectThread = useListedProjectThread(
@@ -173,7 +159,7 @@ export function ConversationChat({
 	// Beside a file or a computer, the chat is as wide as the viewer last dragged it.
 	const [chatWidth, setChatWidth] = usePaneWidth("staged-chat");
 	const chatColumn = useRef<HTMLDivElement>(null);
-	// An automation's feed keeps its bar; a thread's or a direct message's header sits over it while there is room.
+	// An automation's feed keeps its bar; a thread's header sits over it while there is room.
 	const headerOverChat = !details?.automation && !headerCrowded;
 
 	const header = (
@@ -181,7 +167,6 @@ export function ConversationChat({
 			conversationPlace={conversationPlace}
 			details={details}
 			conversationId={conversationId}
-			user={user}
 			place={place}
 			detailsAvailable={!staged}
 			projectThreadName={projectThread.name}
@@ -194,7 +179,7 @@ export function ConversationChat({
 	if (!details || (bot && !host))
 		return (
 			<div className="flex min-w-0 flex-1 flex-col">
-				{!headerless && header}
+				{header}
 				{!opened.isPending && (
 					<EmptyState title="Could not load this conversation">
 						The API did not answer. Reload this page to try again.
@@ -211,12 +196,7 @@ export function ConversationChat({
 	const itemOpen = opensBeside(itemConversationId, history.entries);
 	// A thread's Details float as cards under the header's button; from a tablet up the thread makes way for them.
 	const floatingDetails =
-		place.kind === "own" &&
-		place.detailsOpen &&
-		!staged &&
-		!itemOpen &&
-		conversation.kind !== "directMessage" &&
-		!details.automation;
+		place.kind === "own" && place.detailsOpen && !staged && !itemOpen && !details.automation;
 
 	return (
 		// Not positioned on a phone, so a sidebar there covers the chat's header as well as the chat.
@@ -247,21 +227,19 @@ export function ConversationChat({
 				 * tabs do at the foot, and they scroll on under them. Only the pieces
 				 * take a tap; anywhere else reaches the message beneath.
 				 */}
-				{!headerless && (
-					<div
-						ref={headerBox}
-						className={cn(
-							"max-md:pointer-events-none max-md:absolute max-md:inset-x-0 max-md:top-0 max-md:z-10 max-md:[&_a,&_button]:pointer-events-auto",
-							// The chat scrolls up under its header from a tablet up too, as a phone's does.
-							headerOverChat &&
-								"md:pointer-events-none md:absolute md:inset-x-0 md:top-0 md:z-10 md:[&_a,&_button]:pointer-events-auto",
-						)}
-					>
-						{header}
-					</div>
-				)}
+				<div
+					ref={headerBox}
+					className={cn(
+						"max-md:pointer-events-none max-md:absolute max-md:inset-x-0 max-md:top-0 max-md:z-10 max-md:[&_a,&_button]:pointer-events-auto",
+						// The chat scrolls up under its header from a tablet up too, as a phone's does.
+						headerOverChat &&
+							"md:pointer-events-none md:absolute md:inset-x-0 md:top-0 md:z-10 md:[&_a,&_button]:pointer-events-auto",
+					)}
+				>
+					{header}
+				</div>
 				<FileDropTarget
-					onDropFiles={bot?.model === null ? undefined : attachments.attach}
+					onDropFiles={attachments.attach}
 					className={cn(
 						"flex min-h-0 flex-1 flex-col transition-all duration-300 ease-out motion-reduce:transition-none",
 						floatingDetails && "md:pr-clear-details",
@@ -284,7 +262,6 @@ export function ConversationChat({
 							items={items}
 							details={details}
 							host={host}
-							bot={bot}
 							conversationId={conversationId}
 							user={user}
 							mentionable={mentionable}
@@ -307,18 +284,25 @@ export function ConversationChat({
 						<ConversationNotices notices={notices} />
 					</ChatLog>
 					<ConversationComposer
-						bot={bot}
-						host={host}
+						conversationPlace={conversationPlace}
 						details={details}
 						user={user}
-						namedBotsReply={namedBotsReply}
-						chatName={chatNameOf(conversation, projectThread.name)}
+						chatName={bot?.name ?? projectThread.name}
 						draft={draft}
 						onDraftChange={setDraft}
 						replyingTo={replyingTo}
 						onReplyingToChange={setReplyingTo}
 						attachments={attachments}
-						audience={draftAudience(draft, mentionable, host)}
+						audience={draftAudience({
+							draft,
+							conversationKind: details.conversation.kind,
+							mentionable,
+							projectBots: details.projectBots,
+							lead: leadOf(conversationPlace, details),
+							leadHasModel,
+							chosen: recipients.answering,
+							replyingTo,
+						})}
 						recipients={recipients}
 						sending={sending}
 						doneFailed={threadDone.failed}
@@ -346,19 +330,6 @@ export function ConversationChat({
 			/>
 		</div>
 	);
-}
-
-/**
- * Whom a message here goes to while the draft names nobody: the bot, in a bot's
- * thread; the people, in a direct message; or the project's thread, by its name.
- */
-function chatNameOf(
-	conversation: AnyConversationPlace["conversation"],
-	projectThreadName: string,
-): string {
-	if (conversation.kind === "botThread") return conversation.bot.name;
-	if (conversation.kind === "directMessage") return directPeopleTitle(conversation);
-	return projectThreadName;
 }
 
 /** How close a header's title or buttons may come to the thread's column before the header becomes a bar above it. */

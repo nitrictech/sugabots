@@ -216,12 +216,12 @@ export const ANetworkRequest = meta.story({
 	},
 });
 
-/** ANetworkRequestNotYours is that request seen by someone who doesn't decide the bot's network access. */
+/** ANetworkRequestNotYours is that request seen by someone who doesn't manage the computer it would change. */
 export const ANetworkRequestNotYours = meta.story({
 	args: { ...ANetworkRequest.input.args, canApprove: false },
 	play: async ({ canvas }) => {
 		await expect(
-			canvas.getByText("Waiting for someone who manages this bot to answer this."),
+			canvas.getByText("Waiting for someone who manages this computer to answer this."),
 		).toBeInTheDocument();
 	},
 });

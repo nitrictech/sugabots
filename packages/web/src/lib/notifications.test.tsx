@@ -1,7 +1,20 @@
-import { type NotificationContent, streamEvent } from "@sugabots/contracts";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import {
+	type NotificationContent,
+	type NotificationPreferences,
+	type NotificationSettings,
+	streamEvent,
+} from "@sugabots/contracts";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { Effect } from "effect";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useNotificationsInThisBrowser } from "@/lib/notifications.ts";
+import {
+	useChangeNotificationPreferences,
+	useNotificationsInThisBrowser,
+} from "@/lib/notifications.ts";
+import { createQueryClient } from "@/lib/query.ts";
+import { pendingAnswer } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -80,4 +93,38 @@ it("holds back a notification about a conversation another of their tabs is look
 	renderHook(useNotificationsInThisBrowser);
 
 	await waitFor(() => expect(shown).toEqual(["Elsewhere", "After looking away"]));
+});
+
+it("sends a second quick preference change over the first, not over what both started from", async () => {
+	const before: NotificationSettings = {
+		level: "mentions",
+		pausedUntil: null,
+		quietHours: null,
+		turnFailures: true,
+		automationRuns: "failures",
+		projects: {},
+		bots: {},
+		mutedUntil: { projects: {}, bots: {} },
+	};
+	const first = pendingAnswer();
+	client.api.notifications.updatePreferences
+		.mockReturnValueOnce(first.effect)
+		.mockImplementationOnce(({ payload }: { payload: NotificationPreferences }) =>
+			Effect.succeed({ ...before, ...payload }),
+		);
+	const queries = createQueryClient();
+	queries.setQueryData(["notification-settings"], before);
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={queries}>{children}</QueryClientProvider>
+	);
+	const { result } = renderHook(() => useChangeNotificationPreferences(), { wrapper });
+
+	act(() => result.current({ turnFailures: false }));
+	act(() => result.current({ automationRuns: "all" }));
+	first.answer(Effect.succeed({ ...before, turnFailures: false }));
+
+	await waitFor(() => expect(client.api.notifications.updatePreferences).toHaveBeenCalledTimes(2));
+	expect(client.api.notifications.updatePreferences).toHaveBeenLastCalledWith({
+		payload: expect.objectContaining({ turnFailures: false, automationRuns: "all" }),
+	});
 });

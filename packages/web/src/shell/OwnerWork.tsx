@@ -1,8 +1,16 @@
-import type { ListedThread, Run } from "@sugabots/contracts";
+import type { ListedThread, Run, ThreadActivity } from "@sugabots/contracts";
 import { useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Check, ChevronDown, MessageSquare, RotateCcw } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import {
+	Check,
+	ChevronDown,
+	CircleCheck,
+	Clock,
+	LoaderCircle,
+	MessageSquare,
+	RotateCcw,
+} from "lucide-react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { useProjectRuns } from "@/lib/automations.ts";
 import { lastMovedAt, useProjectThreads, useSetDone } from "@/lib/chats.ts";
 import { formatListTime } from "@/lib/list-time.ts";
@@ -61,9 +69,8 @@ export function OwnerWork({
 				row.conversation.doneAt === null && !needsYou.includes(row) && threadMatches(row, search),
 		)
 		.toSorted((a, b) => lastMovedAt(b) - lastMovedAt(a));
-	const shownRuns = runs
-		.filter((run) => matchesSearch([run.automationName], search))
-		.toSorted((a, b) => Date.parse(b.acceptedAt) - Date.parse(a.acceptedAt));
+	// Newest first, as the API lists them.
+	const shownRuns = runs.filter((run) => matchesSearch([run.automationName], search));
 	const done = threads
 		.filter((row) => row.conversation.doneAt !== null && threadMatches(row, search))
 		.toSorted((a, b) => lastMovedAt(b) - lastMovedAt(a));
@@ -77,7 +84,7 @@ export function OwnerWork({
 		<div className={cn("flex flex-col gap-3", className)}>
 			{needsYou.length > 0 && (
 				<section className="flex flex-col gap-1">
-					<h3 className="m-0 px-2 pb-1 font-normal text-subtle-foreground text-xs">Needs you</h3>
+					<h2 className="m-0 px-2 pb-1 font-normal text-subtle-foreground text-xs">Needs you</h2>
 					<ul className="m-0 flex list-none flex-col gap-px p-0">
 						{needsYou.map((row) => (
 							<li key={row.conversation.id}>
@@ -91,9 +98,11 @@ export function OwnerWork({
 					</ul>
 				</section>
 			)}
+			{/* Sized as a row of the sidebar, as the pages above it are. */}
 			{nothing && (
-				<p className="m-0 px-2 py-1 text-subtle-foreground text-xs">
-					{searching ? "Nothing matches." : "No threads yet."}
+				<p className="m-0 flex h-8 items-center gap-2.5 pr-1.5 pl-2 text-sm text-subtle-foreground">
+					<MessageSquare aria-hidden size={15} strokeWidth={1.75} className="shrink-0" />
+					{searching ? "Nothing matches" : "No threads yet"}
 				</p>
 			)}
 			{(open.length > 0 || work.threadsFailed) && (
@@ -168,26 +177,38 @@ function WorkSection<Entry>({
 	const labelId = useId();
 	return (
 		<section aria-labelledby={labelId} className="flex flex-col gap-1">
-			<button
-				type="button"
-				aria-expanded={unfolded}
-				onClick={() => setOpen(!open)}
-				className="focus-ring flex h-7 items-center gap-2 rounded-sm px-2 text-subtle-foreground text-xs transition-colors hover:text-foreground"
-			>
-				<span id={labelId} className="flex-1 text-left">
-					{title}
-				</span>
-				<span className="tabular-nums">{entries.length}</span>
-				<ChevronDown
-					aria-hidden
-					size={13}
-					strokeWidth={2}
-					className={cn(
-						"transition-transform motion-reduce:transition-none",
-						!unfolded && "-rotate-90",
-					)}
-				/>
-			</button>
+			<h2 className="m-0 font-normal text-xs">
+				{searching ? (
+					// A search shows everything it found, so there is nothing to fold.
+					<span className="flex h-7 items-center gap-2 px-2 text-subtle-foreground">
+						<span id={labelId} className="flex-1">
+							{title}
+						</span>
+						<span className="tabular-nums">{entries.length}</span>
+					</span>
+				) : (
+					<Button
+						variant="quiet"
+						size="text"
+						aria-expanded={open}
+						onClick={() => setOpen(!open)}
+						className="h-7 w-full gap-2 rounded-sm px-2"
+					>
+						<span id={labelId} className="flex-1 text-left">
+							{title}
+						</span>
+						<span className="tabular-nums">{entries.length}</span>
+						<ChevronDown
+							aria-hidden
+							strokeWidth={2}
+							className={cn(
+								"size-3.25 transition-transform motion-reduce:transition-none",
+								!open && "-rotate-90",
+							)}
+						/>
+					</Button>
+				)}
+			</h2>
 			{unfolded && (
 				<ul className="m-0 flex list-none flex-col gap-px p-0">
 					{shown.map(children)}
@@ -270,9 +291,10 @@ function NeedsYouRow({
 }
 
 /**
- * One of the open threads: its whole title with when it last moved beside it,
- * and under it how many messages it holds and the faces of who is talking in
- * it. Pointed at, Done takes the time's place.
+ * One of the open threads, on three lines: how many messages it holds, with
+ * when it last moved at the end; its title; then what its bots are doing, with
+ * the faces of who is talking in it at the end, left out when there is
+ * neither. Pointed at, Done takes the time's place.
  */
 function ThreadEntry({
 	row,
@@ -308,33 +330,37 @@ function ThreadEntry({
 					selected ? "bg-row-selected" : "group-hover/thread:bg-row-hover",
 				)}
 			>
-				<span className="flex min-w-0 items-start gap-2">
-					<span
-						className={cn(
-							"min-w-0 flex-1 break-words text-sm leading-snug",
-							unread ? "font-semibold text-foreground" : "text-soft-foreground",
-						)}
-					>
-						{conversation.title}
-					</span>
-					{/* Its place goes to Done while the row is pointed at. */}
+				{/* First to be read, so the link is named by it; shown under the count and time. */}
+				<span
+					className={cn(
+						"order-2 min-w-0 truncate text-sm leading-snug",
+						unread ? "font-semibold text-foreground" : "text-soft-foreground",
+					)}
+				>
+					{conversation.title}
+				</span>
+				<span className="order-1 flex h-5 min-w-0 items-center justify-between gap-2">
+					<MessageCount count={row.messageCount} />
+					{/* Its place goes to Done while the row is pointed at, so it is held as wide as Done. */}
 					<time
 						dateTime={movedAt.toISOString()}
-						className="flex h-5 shrink-0 items-center text-subtle-foreground text-xs tabular-nums group-focus-within/thread:invisible group-hover/thread:invisible"
+						className="flex h-5 min-w-14 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums group-has-focus-visible/thread:invisible group-hover/thread:invisible [@media(hover:none)]:invisible"
 					>
 						{formatListTime(movedAt, new Date())}
 					</time>
 				</span>
 				{/* Who is talking, by their names, for whoever can't see the faces. */}
 				<span className="sr-only">{talking}</span>
-				<span className="flex min-w-0 items-center justify-between gap-1.5 text-subtle-foreground text-xs">
-					<MessageCount count={row.messageCount} />
-					{people.length > 0 && (
-						<span aria-hidden className="flex shrink-0">
-							<ParticipantFaces participants={people} shown={4} size={16} surface="var(--rail)" />
-						</span>
-					)}
-				</span>
+				{(row.activity || people.length > 0) && (
+					<span className="order-3 flex h-4 min-w-0 items-center justify-between gap-1.5">
+						{row.activity && <ThreadActivityLabel activity={row.activity} />}
+						{people.length > 0 && (
+							<span aria-hidden className="ml-auto flex shrink-0">
+								<ParticipantFaces participants={people} shown={4} size={16} surface="var(--rail)" />
+							</span>
+						)}
+					</span>
+				)}
 			</OwnerLink>
 			<Button
 				variant="ghost"
@@ -342,7 +368,7 @@ function ThreadEntry({
 				disabled={setDone.isPending}
 				onClick={() => setDone.mutate(true)}
 				aria-label={`Done: ${conversation.title}`}
-				className="absolute top-1 right-1 h-6 gap-1 px-1.5 font-normal text-subtle-foreground opacity-0 transition-opacity group-focus-within/thread:opacity-100 group-hover/thread:opacity-100"
+				className="absolute top-1.5 right-0.5 h-6 gap-1 px-1.5 font-normal text-subtle-foreground text-xs tabular-nums opacity-0 transition-opacity group-has-focus-visible/thread:opacity-100 group-hover/thread:opacity-100 [@media(hover:none)]:opacity-100"
 			>
 				Done
 				<Check aria-hidden strokeWidth={2.25} className="size-3" />
@@ -401,7 +427,7 @@ function DoneEntry({
 					{/* Its place goes to Reopen while the row is pointed at. */}
 					<time
 						dateTime={movedAt.toISOString()}
-						className="shrink-0 text-xs tabular-nums group-focus-within/thread:invisible group-hover/thread:invisible"
+						className="shrink-0 text-xs tabular-nums group-has-focus-visible/thread:invisible group-hover/thread:invisible [@media(hover:none)]:invisible"
 					>
 						{formatListTime(movedAt, new Date())}
 					</time>
@@ -411,7 +437,7 @@ function DoneEntry({
 				label={`Reopen: ${row.conversation.title}`}
 				disabled={setDone.isPending}
 				onClick={() => setDone.mutate(false)}
-				className="absolute top-1 right-1 rounded-md text-subtle-foreground opacity-0 transition-opacity group-focus-within/thread:opacity-100 group-hover/thread:opacity-100"
+				className="absolute top-1 right-1 rounded-md text-subtle-foreground opacity-0 transition-opacity group-has-focus-visible/thread:opacity-100 group-hover/thread:opacity-100 [@media(hover:none)]:opacity-100"
 			>
 				<RotateCcw aria-hidden strokeWidth={2} />
 			</IconButton>
@@ -468,14 +494,77 @@ function threadMatches(row: ListedThread, search: string): boolean {
 }
 
 /** How many messages a thread holds, as a quiet count with a speech mark. */
-function MessageCount({ count, className }: { count: number; className?: string }) {
+/**
+ * What a thread's bots are doing, as its row says it: "Working 20m" with a
+ * spinner while a turn works on a reply, "Waiting 2m" with a clock while one
+ * waits on an approval, each counting up a minute at a time; or a green Done
+ * once a bot finished a reply the viewer has not read.
+ */
+function ThreadActivityLabel({ activity }: { activity: ThreadActivity }) {
+	const label = "flex min-w-0 items-center gap-1 text-xs tabular-nums";
+	switch (activity.kind) {
+		case "working":
+			return (
+				<span className={cn(label, "text-working")}>
+					<LoaderCircle aria-hidden className="size-3 shrink-0 motion-safe:animate-spin" />
+					<span className="truncate">
+						Working <Elapsed since={activity.since} />
+					</span>
+				</span>
+			);
+		case "waiting":
+			return (
+				<span className={cn(label, "text-subtle-foreground")}>
+					<Clock aria-hidden className="size-3 shrink-0" />
+					<span className="truncate">
+						Waiting <Elapsed since={activity.since} />
+					</span>
+				</span>
+			);
+		case "finished":
+			return (
+				<span className={cn(label, "text-success-text")}>
+					<CircleCheck aria-hidden className="size-3 shrink-0" />
+					Done
+				</span>
+			);
+	}
+}
+
+/** How long since `since`, an ISO time, as "20m", counting up while shown. */
+function Elapsed({ since }: { since: string }) {
+	const now = useMinuteClock();
+	return <>{formatElapsedMinutes(now - Date.parse(since))}</>;
+}
+
+const MINUTE_MS = 60_000;
+
+/** The time now, in epoch milliseconds, again each minute. */
+function useMinuteClock(): number {
+	const [now, setNow] = useState(Date.now);
+	useEffect(() => {
+		const timer = setInterval(() => setNow(Date.now()), MINUTE_MS);
+		return () => clearInterval(timer);
+	}, []);
+	return now;
+}
+
+const MINUTES_IN_HOUR = 60;
+const HOURS_IN_DAY = 24;
+
+/** `ms` as a status line counts it: "<1m", "20m", "3h", then "2d", each rounded down. */
+function formatElapsedMinutes(ms: number): string {
+	const minutes = Math.floor(ms / MINUTE_MS);
+	if (minutes < 1) return "<1m";
+	if (minutes < MINUTES_IN_HOUR) return `${minutes}m`;
+	const hours = Math.floor(minutes / MINUTES_IN_HOUR);
+	if (hours < HOURS_IN_DAY) return `${hours}h`;
+	return `${Math.floor(hours / HOURS_IN_DAY)}d`;
+}
+
+function MessageCount({ count }: { count: number }) {
 	return (
-		<span
-			className={cn(
-				"flex shrink-0 items-center gap-1 text-subtle-foreground text-xs tabular-nums",
-				className,
-			)}
-		>
+		<span className="flex shrink-0 items-center gap-1 text-subtle-foreground text-xs tabular-nums">
 			<MessageSquare aria-hidden size={12} strokeWidth={1.75} />
 			<span aria-hidden>{count}</span>
 			<span className="sr-only">{countOf(count, "message", "messages")}</span>

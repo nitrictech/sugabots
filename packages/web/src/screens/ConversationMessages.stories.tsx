@@ -86,7 +86,7 @@ const meta = preview.meta({
 		host,
 		isRunning: false,
 		participants: [host, person],
-		members: [person, jay],
+		peopleReachingProject: [person, jay],
 		conversationKind: "project_thread",
 		onOpenItem: fn(),
 		fileUrlOf,
@@ -1170,7 +1170,7 @@ export const PeoplesLinks = meta.story({
 });
 
 /** The rest of the project, so `@here` has more people to notify than its card lists. */
-const podmates = ["Ana Lopez", "Ben Ito", "Cleo Hart", "Dev Rao", "Eli Moss", "Fay Chen"].map(
+const projectMembers = ["Ana Lopez", "Ben Ito", "Cleo Hart", "Dev Rao", "Eli Moss", "Fay Chen"].map(
 	(name, index) => testPerson({ id: `0199a3a0-0000-7000-8000-0000000004${10 + index}`, name }),
 );
 
@@ -1195,8 +1195,8 @@ const closePanel = fn();
  */
 export const MentionCards = meta.story({
 	args: {
-		participants: [host, person, jay, ...podmates],
-		members: [person, jay, ...podmates],
+		participants: [host, person, jay, ...projectMembers],
+		peopleReachingProject: [person, jay, ...projectMembers],
 		messages: [
 			message(
 				"0199a3a0-0000-7000-8000-000000000420",

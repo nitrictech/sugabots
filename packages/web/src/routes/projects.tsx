@@ -1,14 +1,13 @@
 import type { Project } from "@sugabots/contracts";
-import { createRoute, Navigate, Outlet } from "@tanstack/react-router";
+import { createRoute, Navigate, Outlet, useMatchRoute } from "@tanstack/react-router";
 import { prefetchConversation, useProjectThreadPlace, useProjectThreads } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { conversationLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { findProject, useJoinProject, useProjects, useUpdateProject } from "@/lib/projects.ts";
-import { useSession } from "@/lib/session.ts";
 import { FilesPage } from "@/screens/Files.tsx";
 import { LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
-import { MobileProject } from "@/shell/MobileHome.tsx";
+import { MobileOwner } from "@/shell/MobileHome.tsx";
 import { OwnerNotFound } from "@/shell/OwnerNotFound.tsx";
 import { ProjectsDirectory } from "@/shell/ProjectsDirectory.tsx";
 import { Panes } from "@/shell/Shell.tsx";
@@ -23,6 +22,7 @@ import {
 	type SearchChange,
 } from "./conversation.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
+import { useProjectRouteOwner } from "./owner.ts";
 import {
 	type ConversationSearch,
 	validateConversationSearch,
@@ -55,6 +55,10 @@ function ProjectRoute() {
 	const { project: slug } = projectRoute.useParams();
 	const { data: projects, isPending, error } = useProjects();
 	const project = findProject(projects, slug);
+	const matchRoute = useMatchRoute();
+	const onSettings = Boolean(
+		matchRoute({ to: "/$workspace/projects/$project/settings", fuzzy: true }),
+	);
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!project) return <OwnerNotFound kind="project" error={error} />;
 	// A public project the person isn't in, opened by its address: what it is, and Join.
@@ -65,8 +69,8 @@ function ProjectRoute() {
 			</Panes>
 		);
 	}
-	// A project with no lead bot waits on somebody choosing one.
-	if (project.leadBotId === null && project.permissions.rename) {
+	// A project with no lead bot waits on somebody choosing one, unless its settings, which choose one too, are open.
+	if (project.leadBotId === null && project.permissions.rename && !onSettings) {
 		return (
 			<Panes>
 				<ChooseLeadBot project={project} />
@@ -123,8 +127,8 @@ function JoinProject({ project }: { project: Project }) {
 
 /**
  * A project opened without a thread chosen: on a phone, its sidebar as a
- * page, to pick from; on a wider screen, its newest thread, or, while it has
- * none, starting one, as a bot's index always does.
+ * page, to pick from, as a bot's is; on a wider screen, its newest thread, or,
+ * while it has none, starting one, as a bot's index always does.
  */
 export const projectIndexRoute = createRoute({
 	getParentRoute: () => projectRoute,
@@ -134,7 +138,7 @@ export const projectIndexRoute = createRoute({
 		const project = findProject(useProjects().data, projectIndexRoute.useParams().project);
 		const wide = useMediaQuery(SIDE_BY_SIDE);
 		if (!project) return null;
-		return wide ? <OpenNewestThread project={project} /> : <MobileProject project={project} />;
+		return wide ? <OpenNewestThread project={project} /> : <MobileOwner owner={{ project }} />;
 	},
 });
 
@@ -151,10 +155,9 @@ function OpenNewestThread({ project }: { project: Project }) {
 	);
 }
 
-/** Starting a thread in `project` from its first message, which its lead bot answers. */
+/** Starting a thread in `project` from its first message. */
 function ProjectNewThread({ project }: { project: Project }) {
-	const { user } = useSession();
-	return user ? <NewThreadPage key={project.id} owner={{ project }} userId={user.id} /> : null;
+	return <NewThreadPage key={project.id} owner={{ project }} />;
 }
 
 /** Starting a thread in the project, from its first message. */
@@ -171,8 +174,8 @@ export const projectFilesRoute = createRoute({
 	getParentRoute: () => projectRoute,
 	path: "/files",
 	component: () => {
-		const project = findProject(useProjects().data, projectFilesRoute.useParams().project);
-		return project ? <FilesPage owner={{ project }} /> : null;
+		const owner = useProjectRouteOwner();
+		return owner ? <FilesPage owner={owner} /> : null;
 	},
 });
 
@@ -181,10 +184,10 @@ export const projectFileRoute = createRoute({
 	path: "/files/$file",
 	validateSearch: (search: Record<string, unknown>) => validateFileSearch(search),
 	component: () => {
-		const { project: slug, file } = projectFileRoute.useParams();
+		const owner = useProjectRouteOwner();
+		const { file } = projectFileRoute.useParams();
 		const { version } = projectFileRoute.useSearch();
-		const project = findProject(useProjects().data, slug);
-		return project ? <FilesPage owner={{ project }} selectedId={file} version={version} /> : null;
+		return owner ? <FilesPage owner={owner} selectedId={file} version={version} /> : null;
 	},
 });
 

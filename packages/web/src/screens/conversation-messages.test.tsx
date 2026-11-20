@@ -98,7 +98,7 @@ function connection(handle: string, name: string, url: string): Connection {
 }
 
 /** Someone else in the project, whom a person's `@here` or `@channel` would notify. */
-const podmate = testPerson({ id: "0199a3a0-0000-7000-8000-0000000000d1", name: "Jay Park" });
+const jay = testPerson({ id: "0199a3a0-0000-7000-8000-0000000000d1", name: "Jay Park" });
 
 /** Renders the conversation, and returns `update` to redraw it as a live one would. */
 function show(
@@ -123,7 +123,7 @@ function show(
 				host={host}
 				isRunning={false}
 				participants={participants}
-				members={[podmate]}
+				peopleReachingProject={[jay]}
 				conversationKind="project_thread"
 				onOpenItem={over.onOpenItem ?? (() => undefined)}
 				dividers={false}

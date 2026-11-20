@@ -8,7 +8,6 @@ import {
 	automationRun,
 	collaboration,
 	conversation,
-	directMessage,
 	projectThread,
 	systemConversation,
 } from "../database/schema.ts";
@@ -39,7 +38,6 @@ type KindSeed =
 			/** One of the bot's threads: in its default project. */
 			| { botId: string }
 	  ))
-	| { kind: "direct_message"; directKey: string; startedById?: string | null }
 	| { kind: "automation_feed"; automationId: string }
 	| {
 			kind: "system";
@@ -84,13 +82,6 @@ function kindRowOf(db: Executor, conversationId: string, seed: ConversationSeed)
 					"projectId" in seed ? seed.projectId : defaultProjectIdOf(sql`${seed.botId}::uuid`),
 				archivedAt: seed.archivedAt,
 				doneAt: seed.doneAt,
-				startedById: seed.startedById,
-			});
-		case "direct_message":
-			return db.insert(directMessage).values({
-				conversationId,
-				workspaceId,
-				directKey: seed.directKey,
 				startedById: seed.startedById,
 			});
 		case "automation_feed":

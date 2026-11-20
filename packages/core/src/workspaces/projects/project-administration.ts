@@ -3,6 +3,7 @@ export * as ProjectAdministration from "./project-administration.ts";
 import {
 	type Bot,
 	newProjectSchema,
+	type PersonParticipant,
 	PROJECT_DESCRIPTION_MAX_LENGTH,
 	PROJECT_NAME_MAX_LENGTH,
 	type Project,
@@ -26,13 +27,13 @@ import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { projectPermissions } from "../../authorization/permissions.ts";
 import type { Computers } from "../../computers/computers.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
-import { query, serviceOperations } from "../../database/database.ts";
+import { query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { personFacingBotRow, toBot } from "../bots/bot.ts";
 import { projectSeenBy } from "./project.ts";
 import type { LeadsProjects } from "./project-leads.ts";
-import { projectHeadcounts, projectMembers } from "./project-reads.ts";
+import { peopleReachingProjectNamed, projectHeadcounts, projectMembers } from "./project-reads.ts";
 import { ProjectRepository } from "./project-repository.ts";
 
 /**
@@ -83,14 +84,27 @@ export interface Interface {
 	/**
 	 * Deletes the project, with everything in it. Its computer is destroyed at
 	 * its provider first, since its record is the only way to find the machine:
-	 * when the provider can't be reached the project is kept, to try again.
+	 * when the provider can't be reached, or a computer is made meanwhile, the
+	 * project is kept, to try again.
 	 */
 	readonly remove: (input: {
 		projectId: string;
-	}) => Effect.Effect<void, AuthorizationDenied | Computers.Unavailable, CurrentActor.Service>;
+	}) => Effect.Effect<
+		void,
+		AuthorizationDenied | Computers.Unavailable | ProjectComputers.ComputerMadeMeanwhile,
+		CurrentActor.Service
+	>;
 	readonly members: (input: {
 		projectId: string;
 	}) => Effect.Effect<ProjectMember[], AuthorizationDenied, CurrentActor.Service>;
+	/**
+	 * The people who reach the project, by name, as a mention in its threads can
+	 * name them: in a project people made, its members; in a bot's default
+	 * project, which has none, whoever reaches the bot.
+	 */
+	readonly peopleReaching: (input: {
+		projectId: string;
+	}) => Effect.Effect<PersonParticipant[], AuthorizationDenied, CurrentActor.Service>;
 	/** Adds `userId` to the project. Adding somebody already in it changes nothing. */
 	readonly addMember: (input: {
 		projectId: string;
@@ -240,11 +254,14 @@ export const make = Effect.gen(function* () {
 				"remove",
 				Effect.gen(function* () {
 					const { project } = yield* authorization.project(projectId, "project.delete");
-					yield* projectComputers.destroy({
-						workspaceId: project.workspaceId,
-						projectId: project.id,
-					});
-					yield* projects.remove(project.workspaceId, project.id);
+					const removed = { workspaceId: project.workspaceId, projectId: project.id };
+					yield* projectComputers.destroy(removed);
+					yield* transaction(
+						Effect.andThen(
+							ProjectComputers.lockWithoutComputer(removed),
+							projects.remove(project.workspaceId, project.id),
+						),
+					);
 				}),
 			),
 
@@ -256,13 +273,22 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
+		peopleReaching: ({ projectId }) =>
+			operation(
+				"peopleReaching",
+				Effect.flatMap(authorization.project(projectId, "project.read"), ({ project }) =>
+					peopleReachingProjectNamed(project.id),
+				),
+			),
+
 		addMember: ({ projectId, userId }) =>
 			operation(
 				"addMember",
 				Effect.gen(function* () {
 					const { project } = yield* authorization.project(projectId, "project.members.manage");
-					const outcome = yield* projects.addMember(project.workspaceId, project.id, userId);
-					if (outcome === "not_workspace_member") return yield* new NotInWorkspace();
+					if (!(yield* projects.addMember(project.workspaceId, project.id, userId))) {
+						return yield* new NotInWorkspace();
+					}
 				}),
 			),
 
@@ -288,18 +314,18 @@ export const make = Effect.gen(function* () {
 			operation(
 				"join",
 				Effect.gen(function* () {
-					const standing = yield* authorization.projectFound(projectId);
-					const project = standing.project;
-					if (!standing.facts.isMember) {
-						// A project the actor may not join, a private one or a bot's default
-						// project, is answered as if it weren't there.
-						const isPublic = project.visibility === "public";
-						if (!projectPermissions(standing.actor, { ...standing.facts, isPublic }).join) {
-							return yield* new ResourceHidden({ resource: "project" });
-						}
-						yield* projects.addMember(project.workspaceId, project.id, standing.actor.userId);
+					const { project, facts, actor } = yield* authorization.projectFound(projectId);
+					if (facts.isMember) return projectSeenBy(joinedStanding(project, actor));
+					// A project the actor may not join, a private one or a bot's default
+					// project, is answered as if it weren't there; checked again as they
+					// join, in case it is made private or they leave the workspace meanwhile.
+					const isPublic = project.visibility === "public";
+					if (!projectPermissions(actor, { ...facts, isPublic }).join) {
+						return yield* new ResourceHidden({ resource: "project" });
 					}
-					return projectSeenBy(joinedStanding(project, standing.actor));
+					const joined = yield* projects.join(project.workspaceId, project.id, actor.userId);
+					if (!joined) return yield* new ResourceHidden({ resource: "project" });
+					return projectSeenBy(joinedStanding(joined, actor));
 				}),
 			),
 
@@ -336,8 +362,10 @@ export const make = Effect.gen(function* () {
 		removeBot: ({ projectId, botId }) =>
 			operation(
 				"removeBot",
-				Effect.flatMap(authorization.project(projectId, "project.bots.manage"), ({ project }) =>
-					projects.removeBot(project.workspaceId, project.id, botId),
+				Effect.flatMap(
+					authorization.project(projectId, "project.bots.manage"),
+					({ project, actor }) =>
+						projects.removeBot(project.workspaceId, project.id, botId, actor.userId),
 				),
 			),
 	});
@@ -359,7 +387,7 @@ export class EmptyProjectUpdate
 	}
 }
 
-/** Administrators belong to every project, so nobody takes one out of it. */
+/** Administrators belong to every project people made, so nobody takes one out of it. */
 export class AdministratorInEveryProject
 	extends Data.TaggedError("AdministratorInEveryProject")
 	implements UserFacing

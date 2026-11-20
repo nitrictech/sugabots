@@ -7,7 +7,16 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { today } from "@/lib/routine-schedule.ts";
-import { apiAnswers, bots, linear, mount, open, threadDetails, triager } from "@/test-api.tsx";
+import {
+	apiAnswers,
+	bots,
+	linear,
+	mount,
+	open,
+	personalAssistant,
+	threadDetails,
+	triager,
+} from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -144,7 +153,7 @@ function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []
 /** Opens `one`'s own page, where it is set up. */
 async function openPanel(one: BotsAutomation, others: readonly Automation[] = []) {
 	serveAutomation(one, others);
-	const router = mount(itemPage(one));
+	const { router } = mount(itemPage(one));
 	const panel = await showPanel();
 	await within(panel).findByRole("heading", { name: one.automation.name });
 	return { router, panel };
@@ -207,7 +216,7 @@ describe("a bot's automations", () => {
 		client.api.automations.create.mockReturnValue(
 			Effect.succeed({ automation: morningBrief.automation, secrets: [] }),
 		);
-		const router = mount(newPage);
+		const { router } = mount(newPage);
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Triage sweep" } });
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {
@@ -307,8 +316,24 @@ describe("a bot's automations", () => {
 		);
 	});
 
+	it("starts afresh when the address moves to making another bot's automation", async () => {
+		const { router } = mount(`/suga/bots/${linear.handle}/automations/new`);
+		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Sentry issues" } });
+
+		await router.navigate({ href: `/suga/bots/${researcher.handle}/automations/new` });
+
+		await waitFor(() => expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""));
+	});
+
+	it("lets a person make an automation for their Personal Assistant", async () => {
+		mount(`/suga/bots/${personalAssistant.handle}/automations/new`);
+
+		expect(await screen.findByLabelText("Name")).toBeDefined();
+		expect(screen.queryByText("Automations not found")).toBeNull();
+	});
+
 	it("goes to the bot's page when an automation being made, with nothing before it, is cancelled", async () => {
-		const router = mount(`/suga/bots/${researcher.handle}/automations/new`);
+		const { router } = mount(`/suga/bots/${researcher.handle}/automations/new`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
@@ -328,7 +353,7 @@ describe("a bot's automations", () => {
 			Effect.succeed({ automation: webhook.automation, secrets: [] }),
 		);
 		serveAutomation(webhook);
-		const router = mount(`/suga/bots/${linear.handle}/automations/new`);
+		const { router } = mount(`/suga/bots/${linear.handle}/automations/new`);
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Sentry issues" } });
 		fireEvent.click(screen.getByRole("button", { name: /^Instructions/ }));
 		fireEvent.change(await screen.findByLabelText("Instructions"), {

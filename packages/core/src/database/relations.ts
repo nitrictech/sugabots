@@ -14,11 +14,6 @@ export const relations = defineRelations(schema, (r) => ({
 		}),
 		// On a project's thread, and an automation's feed and runs.
 		project: r.one.project({ from: r.placedConversation.projectId, to: r.project.id }),
-		// On a direct message between people: everybody in it.
-		directMessageMembers: r.many.user({
-			from: r.placedConversation.id.through(r.directMessageMember.conversationId),
-			to: r.user.id.through(r.directMessageMember.userId),
-		}),
 		messages: r.many.message({ from: r.placedConversation.id, to: r.message.conversationId }),
 		participants: r.many.conversationParticipant({
 			from: r.placedConversation.id,

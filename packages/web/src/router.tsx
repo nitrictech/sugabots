@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { followTrail, historyIndex } from "@/lib/history-trail.ts";
-import { matchesMedia, SIDE_BY_SIDE } from "@/lib/media.ts";
+import { matchesMedia, REDUCED_MOTION, SIDE_BY_SIDE } from "@/lib/media.ts";
 import { type Session, SessionContext } from "@/lib/session.ts";
 import { PageFailure } from "@/shell/PageFailure.tsx";
 import { approvalRoute, approvalsIndexRoute, approvalsRoute } from "./routes/approvals.tsx";
@@ -20,6 +20,7 @@ import {
 	botFileRoute,
 	botFilesRoute,
 	botIndexRoute,
+	botNewThreadRoute,
 	botRoute,
 	botsRoute,
 	threadByIdRoute,
@@ -32,14 +33,16 @@ import {
 	projectConnectionRoute,
 	projectConnectionsRoute,
 } from "./routes/connections.tsx";
-import {
-	directMessageRoute,
-	directMessagesIndexRoute,
-	directMessagesRoute,
-	newDirectMessageRoute,
-} from "./routes/direct-messages.tsx";
 import { inboxConversationRoute, inboxIndexRoute, inboxRoute } from "./routes/inbox.tsx";
 import { onboardingRoute } from "./routes/onboarding.tsx";
+import {
+	botComputerRoute,
+	botSettingsRoute,
+	projectBotsRoute,
+	projectComputerRoute,
+	projectPeopleRoute,
+	projectSettingsRoute,
+} from "./routes/owner-settings.tsx";
 import {
 	projectFileRoute,
 	projectFilesRoute,
@@ -54,11 +57,13 @@ import {
 	settingsBotConnectionRoute,
 	settingsBotPageRoute,
 	settingsBotRoute,
+	settingsBotsRoute,
 	settingsDefaultModelRoute,
 	settingsMemberRoute,
 	settingsProjectConnectionRoute,
 	settingsProjectPageRoute,
 	settingsProjectRoute,
+	settingsProjectsRoute,
 	settingsProviderRoute,
 	settingsRoute,
 	settingsSectionRoute,
@@ -95,9 +100,6 @@ import {
  *   /$workspace/settings     workspace settings
  *   /$workspace/inbox     what is new across the workspace: mentions, unread messages, automation runs and collaborations
  *   /$workspace/inbox/$conversation   the conversation, run or collaboration of the one chosen, beside them
- *   /$workspace/dm           your direct messages with other people
- *   /$workspace/dm/new       starting one, with one person or a group
- *   /$workspace/dm/$conversation   one of them, by its id, `?message=` jumped to
  *   /$workspace/approvals    every approval across the workspace
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
  *   /$workspace/projects     every project the person is in or could join
@@ -106,18 +108,20 @@ import {
  *   /$workspace/projects/$project/$conversation   one of its threads
  *   /$workspace/projects/$project/files[/$file]   the files made in it
  *   /$workspace/projects/$project/connections[/$connection]   the services it is connected to
+ *   /$workspace/projects/$project/settings[/people|/bots]   its settings, and its people and bots
+ *   /$workspace/projects/$project/computer   its computer
  *   /$workspace/projects/$project/automations[/new|/$automation]   its automations
  *   /$workspace/bots         every bot the person reaches
  *   /$workspace/bots/$bot    a bot, starting a thread with it from its first message
  *   /$workspace/bots/$bot/threads/$conversation   one of its threads, or an automation's feed
  *   /$workspace/bots/$bot/files[/$file]   the files it made
  *   /$workspace/bots/$bot/connections[/$connection]   the services it is connected to
+ *   /$workspace/bots/$bot/settings   its settings
+ *   /$workspace/bots/$bot/computer   its computer
  *   /$workspace/bots/$bot/automations[/new|/$automation]   its automations
  *   /$workspace/threads/$conversation   a thread by its id alone, which goes on to its bot's address
  *   /$workspace/settings/members/$member   one person, by membership id
- *   /$workspace/settings/projects/$project[/$page]   a project's settings: General, People, Bots or Computer
- *   /$workspace/settings/bots/$bot[/$page]   a bot's settings: General or Computer
- *   /$workspace/settings/{projects/$project,bots/$bot}/connections[/$connection]   from before, on to the owner's own Connections
+ *   /$workspace/settings/{projects,bots}[/…]   from before, on to the owner's own pages
  *   /$workspace/settings/providers/$provider   one model provider
  *   /$workspace/settings/providers/default  the model new bots start on
  *   /$workspace/settings/providers/system   the model the system bots use
@@ -144,9 +148,11 @@ const routeTree = rootRoute.addChildren([
 		settingsRoute,
 		settingsSectionRoute,
 		settingsMemberRoute,
+		settingsProjectsRoute,
 		settingsProjectRoute,
 		settingsProjectPageRoute,
 		settingsProjectConnectionRoute,
+		settingsBotsRoute,
 		settingsBotRoute,
 		settingsBotPageRoute,
 		settingsBotConnectionRoute,
@@ -155,11 +161,6 @@ const routeTree = rootRoute.addChildren([
 		settingsProviderRoute,
 		inboxRoute.addChildren([inboxIndexRoute, inboxConversationRoute]),
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
-		directMessagesRoute.addChildren([
-			directMessagesIndexRoute,
-			newDirectMessageRoute,
-			directMessageRoute,
-		]),
 		youRoute,
 		homeRoute,
 		projectsRoute,
@@ -172,6 +173,10 @@ const routeTree = rootRoute.addChildren([
 			projectFileRoute,
 			projectConnectionsRoute,
 			projectConnectionRoute,
+			projectSettingsRoute,
+			projectPeopleRoute,
+			projectBotsRoute,
+			projectComputerRoute,
 			projectAutomationsRoute.addChildren([
 				projectAutomationsIndexRoute,
 				projectNewAutomationRoute,
@@ -181,11 +186,14 @@ const routeTree = rootRoute.addChildren([
 		]),
 		botRoute.addChildren([
 			botIndexRoute,
+			botNewThreadRoute,
 			threadRoute,
 			botFilesRoute,
 			botFileRoute,
 			botConnectionsRoute,
 			botConnectionRoute,
+			botSettingsRoute,
+			botComputerRoute,
 			automationsRoute.addChildren([
 				automationsIndexRoute,
 				newAutomationRoute,
@@ -204,12 +212,14 @@ function isOwnerPath(pathname: string): boolean {
  * The view transition between two pages, by its types: a phone's slide, or,
  * from a tablet up, `rail` between the sidebar and a bot's or a project's own
  * pages, on which its marks move between the sidebar's rows and the icon rail.
+ * None under reduced motion, as the browser would otherwise cross-fade the pages.
  */
 function pageTransition(locations: {
 	fromLocation?: ParsedLocation;
 	toLocation: ParsedLocation;
 	hrefChanged: boolean;
 }): string[] | false {
+	if (matchesMedia(REDUCED_MOTION)) return false;
 	if (!matchesMedia(SIDE_BY_SIDE)) return phoneSlide(locations);
 	const { fromLocation, toLocation } = locations;
 	if (!fromLocation) return false;
@@ -231,7 +241,7 @@ function phoneSlide({
 	toLocation: ParsedLocation;
 	hrefChanged: boolean;
 }): string[] | false {
-	if (!fromLocation || !hrefChanged || matchesMedia(SIDE_BY_SIDE)) return false;
+	if (!fromLocation || !hrefChanged) return false;
 	const fromIndex = historyIndex(fromLocation);
 	const toIndex = historyIndex(toLocation);
 	const from = locationDepth(fromLocation);
@@ -285,7 +295,6 @@ function pageDepth(pathname: string): number {
 			return 2;
 		case "inbox":
 		case "approvals":
-		case "dm":
 			return rest.length === 0 ? 0 : 1;
 		case "you":
 		case "home":
@@ -308,7 +317,6 @@ export function createAppRouter(options?: {
 		// Supplied by `RouterProvider` once the session is known.
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
-		// On a phone, a page further in slides over the one it was opened from, and back slides it away.
 		defaultViewTransition: { types: pageTransition },
 		// Back to a list of settings returns to where it was left, not its top. Only settings:
 		// a chat opens at its latest instead. What scrolls is named by `data-scroll-restoration-id`.

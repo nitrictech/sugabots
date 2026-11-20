@@ -1,12 +1,12 @@
 export * as ConversationView from "./conversation-view.ts";
 
 import type {
+	BotParticipant,
 	ConversationActivity,
 	ConversationContext,
 	ConversationDetails,
 	ConversationHistoryQuery,
 	ConversationSummary,
-	Participant,
 	PlacedConversation,
 } from "@sugabots/contracts";
 import { DEFAULT_CONVERSATION_HISTORY_LIMIT } from "@sugabots/contracts";
@@ -18,6 +18,7 @@ import {
 	type ConversationStanding,
 	computerProjectStandingFor,
 	mayDecideToolCall,
+	peopleReachingProject,
 	ResourceHidden,
 } from "../authorization/access.ts";
 import { Authorization } from "../authorization/authorization.ts";
@@ -31,7 +32,7 @@ import {
 	conversationSummary,
 	placedConversation,
 	turn,
-	workspaceMember,
+	user,
 } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { UserFacing } from "../user-message.ts";
@@ -43,7 +44,9 @@ import {
 	botColumns,
 	messageFromRelations,
 	messageRelations,
+	type PersonIdentity,
 	personColumns,
+	personJson,
 	toParticipant,
 	toPerson,
 } from "./repository/participants.ts";
@@ -125,7 +128,7 @@ export const make = Effect.gen(function* () {
 					const before = history.cursor ? yield* historyCursor(history.cursor) : undefined;
 					const standing = yield* visibility.conversationStanding(conversationId);
 					const row = yield* query((db) =>
-						loadConversation(db, standing.conversation, history.limit, before),
+						loadConversation(db, standing.conversation.id, history.limit, before),
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
 					const computerDeciders = yield* computerRequestDecidersIn(row, standing);
@@ -209,27 +212,29 @@ export class InvalidConversationHistoryCursor
 }
 
 /**
- * The conversation `place`, a page of its messages with their authors and the parts
- * placed in them, its participants and its project's bots and people, or a direct
- * message's people: one statement. In a direct message, who has left the
- * workspace keeps their rows, to have the conversation back should they rejoin,
- * but is left out of who is in it, who joined in and who read it.
+ * The conversation `conversationId`, a page of its messages with their authors and the parts
+ * placed in them, its participants, its project's bots and the people who reach
+ * its project: one statement.
  */
 const loadConversation = Effect.fn("ConversationView.loadConversation")(function* (
 	db: Executor,
-	place: Pick<schema.PlacedConversationRow, "id" | "kind" | "workspaceId">,
+	conversationId: string,
 	limit: number,
 	before: CursorPoint | undefined,
 ) {
-	const direct = place.kind === "direct_message";
-	/** In a direct message, whether the person `userId` is still in the workspace, and so in it. */
-	const stillHere = (userId: SQLWrapper) => inWorkspace(userId, place.workspaceId);
 	return yield* db.query.placedConversation.findFirst({
-		where: { id: place.id },
+		where: { id: conversationId },
 		extras: {
 			running: (row) => Turns.busyIn(sql`${row.id}`),
 			queuedSince: (row) => Turns.queuedSince(sql`${row.id}`),
 			runId: (row) => runIdOf(row.id),
+			// Not the project's members: a bot's default project has none, and the
+			// floor reads mentions of everyone who reaches the project.
+			peopleReachingProject: (row) => sql<PersonIdentity[]>`(
+				select coalesce(json_agg(${personJson} order by ${user.name}), '[]'::json)
+				from ${user}
+				where ${user.id} in (${peopleReachingProject(sql`${row.projectId}`)})
+			)`,
 		},
 		with: {
 			project: {
@@ -240,29 +245,15 @@ const loadConversation = Effect.fn("ConversationView.loadConversation")(function
 						where: { systemBotKey: { isNull: true } },
 						orderBy: { name: "asc" },
 					},
-					members: { ...personColumns, orderBy: { name: "asc" } },
 				},
 			},
-			// Only a direct message has any, so no other conversation looks.
-			...(direct && {
-				directMessageMembers: {
-					...personColumns,
-					where: { RAW: (person: { id: SQLWrapper }) => stillHere(person.id) },
-					orderBy: { name: "asc" as const },
-				},
-			}),
 			participants: {
 				columns: {},
-				// A bot joins in with no person.
-				...(direct && {
-					where: { RAW: (row) => sql`(${row.userId} is null or ${stillHere(row.userId)})` },
-				}),
 				orderBy: { createdAt: "asc", id: "asc" },
 				with: { user: personColumns, bot: botColumns },
 			},
 			reads: {
 				columns: { readThrough: true, updatedAt: true },
-				...(direct && { where: { RAW: (row) => stillHere(row.userId) } }),
 				with: { user: personColumns },
 			},
 			automationRun: { extras: { posted: (row) => resultPosted(sql`${row.id}`) } },
@@ -303,8 +294,7 @@ const computerRequestDecidersIn = Effect.fn("ConversationView.computerRequestDec
 			),
 		);
 		if (row.kind !== "collaboration") {
-			const managesComputer =
-				standing.kind === "project" && standing.standing.may("computer.request.decide");
+			const managesComputer = standing.standing.may("computer.request.decide");
 			return managesComputer ? [...speakers] : [];
 		}
 		const { userId } = yield* CurrentActor.Service;
@@ -331,7 +321,12 @@ function toConversationDetails(
 		// What this person may do with the approvals this conversation raises, decided
 		// once here so the conversation does not have to work it out from a role.
 		capabilities: {
-			approveToolCalls: mayDecideToolCall(standing, undefined, inAutomation, "conversation"),
+			approveToolCalls: mayDecideToolCall(
+				standing.standing,
+				undefined,
+				inAutomation,
+				"conversation",
+			),
 			approveComputerRequestsOf: computerDeciders,
 		},
 		// A run is always listed in its automation's feed.
@@ -342,9 +337,8 @@ function toConversationDetails(
 		participants: row.participants.map(({ user: person, bot: participant }) =>
 			toParticipant(authorRow(person, participant)),
 		),
-		projectBots: (row.project?.bots ?? []).map((bot): Participant => ({ kind: "bot", ...bot })),
-		// A direct message's people are its members, as a project's are the project's.
-		members: (row.project?.members ?? row.directMessageMembers ?? []).map(toPerson),
+		projectBots: (row.project?.bots ?? []).map((bot): BotParticipant => ({ kind: "bot", ...bot })),
+		peopleReachingProject: row.peopleReachingProject.map(toPerson),
 		messages: page.map((stored) => messageFromRelations(stored, stored.turn)),
 		olderMessagesCursor:
 			row.messages.length > limit && oldest
@@ -359,14 +353,6 @@ function toConversationDetails(
 		})),
 	};
 }
-
-/** SQL for "`userId` is a member of the workspace `workspaceId`". */
-const inWorkspace = (userId: SQLWrapper, workspaceId: string) => sql<boolean>`exists (
-	select 1
-	from ${workspaceMember}
-	where ${workspaceMember.userId} = ${userId}
-		and ${workspaceMember.workspaceId} = ${workspaceId}
-)`;
 
 /**
  * How many tokens the prompt of the conversation's latest measured turn took,

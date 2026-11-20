@@ -16,8 +16,9 @@ const EVERYONE: readonly WorkspaceRole[] = ["owner", "admin", "member", "viewer"
 const ALL_BUT_VIEWERS: readonly WorkspaceRole[] = ["owner", "admin", "member"];
 const ADMINISTRATORS: readonly WorkspaceRole[] = ["owner", "admin"];
 
-/** Members change only the bots they made; administrators change every bot. */
-const BOTS_THEY_MADE = "Members, for bots they made; the owner and admins, for every bot";
+/** Members change only the bots they made; administrators change every bot people made, but nobody's Personal Assistant. */
+const BOTS_THEY_MADE =
+	"Members, for bots they made; the owner and admins, for every bot people made, but not another person's Personal Assistant";
 
 /** What each role may do, as packages/core/src/authorization/permissions.ts grants it. */
 export const roleAbilities: readonly RoleAbility[] = [
@@ -29,10 +30,11 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Join public projects and take part",
 		roles: EVERYONE,
-		note: "The owner and admins are in every project",
+		note: "The owner and admins are in every project people made",
 	},
 	{
-		label: "Change their Personal Assistant's name, look and connections",
+		label:
+			"Change their Personal Assistant's name, look, connections and automations, run its automations and answer their approvals",
 		roles: EVERYONE,
 	},
 	{ label: "Create bots", roles: ALL_BUT_VIEWERS },
@@ -44,7 +46,7 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Answer approvals from automation runs",
 		roles: ALL_BUT_VIEWERS,
-		note: "Members, for bots they made; the owner and admins, for every bot and project",
+		note: "In threads they can see: members, for bots they made; the owner and admins, for every project people made and every bot whose threads they can see",
 	},
 	{
 		label: "Run automations now",
@@ -53,8 +55,8 @@ export const roleAbilities: readonly RoleAbility[] = [
 	},
 	{
 		label: "Answer a bot's approval in a conversation",
-		roles: ALL_BUT_VIEWERS,
-		note: "Threads of bots they can talk to, and projects they're in",
+		roles: EVERYONE,
+		note: "Threads of bots they can talk to, and projects they're in; viewers, only their Personal Assistant's threads",
 	},
 	{
 		label: "Use a project's desktop",
@@ -70,7 +72,7 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Leave a project",
 		roles: ["member", "viewer"],
-		note: "The owner and admins stay in every project",
+		note: "The owner and admins stay in every project people made",
 	},
 	{
 		label:

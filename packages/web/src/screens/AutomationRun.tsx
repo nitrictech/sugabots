@@ -7,12 +7,15 @@ import type {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
+import { useState } from "react";
 import { nextRunWords, useAutomations } from "@/lib/automations.ts";
 import { useAutomationControls } from "@/lib/chats.ts";
+import { failureMessage } from "@/lib/failure.ts";
 import { formatClockTime } from "@/lib/list-time.ts";
 import { useOwnerOfProject } from "@/lib/owner-of-project.ts";
-import { ownerLinkOptions } from "@/lib/resource-owner.tsx";
+import { ownerLinkOptions, resourcePermissions } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
+import { Alert } from "@/ui/alert.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { LabelledRule } from "@/ui/labelled-rule.tsx";
 import { TitleTag } from "@/ui/title-tag.tsx";
@@ -133,7 +136,17 @@ export function RunMessage({
 }) {
 	const controls = useAutomationControls(conversationId, automation);
 	const owner = useOwnerOfProject(automation.projectId);
+	const mayRun = owner !== undefined && resourcePermissions(owner).runAutomations;
+	const [retryFailure, setRetryFailure] = useState<unknown>();
 	const outcome = outcomeOf(item.state, false);
+	async function retry() {
+		setRetryFailure(undefined);
+		try {
+			await controls.runAgain();
+		} catch (failure) {
+			setRetryFailure(failure);
+		}
+	}
 	const report = item.state === "completed" ? item.report : null;
 	return (
 		<article
@@ -164,11 +177,16 @@ export function RunMessage({
 							(outcome === "cancelled" ? "The run was stopped." : "It posted nothing.")}
 					</p>
 				)}
+				{latest && outcome === "failed" && retryFailure !== undefined && (
+					<Alert className="mt-2">{failureMessage(retryFailure)}</Alert>
+				)}
 				{latest && outcome === "failed" && (
 					<div className="mt-2 flex gap-2">
-						<Button size="sm" disabled={controls.pending} onClick={() => void controls.runAgain()}>
-							Retry
-						</Button>
+						{mayRun && (
+							<Button size="sm" disabled={controls.pending} onClick={() => void retry()}>
+								Retry
+							</Button>
+						)}
 						{owner && (
 							<Link
 								{...ownerLinkOptions(owner, { page: "connections" })}

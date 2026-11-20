@@ -19,6 +19,7 @@ import {
 	AUTOMATION_TOOLS,
 	AUTOMATIONS_KEY,
 	automationTools,
+	hasAutomationTools,
 } from "../tools/automations/tool.ts";
 import type { BuiltInTools } from "../tools/built-in.ts";
 import type { Collaborations } from "../tools/collaborate/collaborations.ts";
@@ -269,9 +270,8 @@ export function toolsForTurn(prepared: PreparedTurn, deps: ToolDependencies): Tu
 		}),
 		recording,
 	);
-	// Sugabots manages a Personal Assistant, which has no automations of its own.
-	const { projectId } = prepared.context;
-	if (prepared.context.bot.assistantOf === null && projectId !== null) {
+	if (hasAutomationTools(prepared.context)) {
+		const { projectId } = prepared.context;
 		const automationsOff = prepared.context.bot.disabledTools.includes(AUTOMATIONS_KEY);
 		const ownAutomations = automationTools({
 			bot: { botId: prepared.context.bot.id, projectId, askedBy: prepared.context.askedBy },

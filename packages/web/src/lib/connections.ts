@@ -22,7 +22,6 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { Effect } from "effect";
-import { useMemo } from "react";
 import { client } from "@/api.ts";
 
 /** How many of the connection's tools bots can use: every one not set to off. */
@@ -75,51 +74,63 @@ export interface ConnectionLook {
 }
 
 /**
- * The connections of the project `projectId`, a conversation's, and the own
- * connections of the bots `botIds`, their default projects', by the handle
- * that prefixes their tool keys, so a `sentry__search_issues` in a transcript
- * can be shown as Sentry's. A handle missing from the map belongs to a
- * connection that has since been removed; callers write the handle out rather
- * than dropping the step. Where two use the same handle, either one's look serves.
+ * The connections a bot of `botIds` used in a conversation of the project
+ * `projectId`, by the handle that prefixes their tool keys, so its
+ * `sentry__search_issues` can be shown as Sentry's: given a bot, the
+ * project's connections and the bot's own, its default project's. Where both
+ * have a handle the project's is the one, as the server uses it; another
+ * bot's own connections never name this one's calls. A handle missing from
+ * the map belongs to a connection that has since been removed; callers write
+ * the handle out rather than dropping the step.
  */
 export function useConnectionLooks(
 	botIds: readonly string[],
 	projectId?: string | null,
-): ReadonlyMap<string, ConnectionLook> {
-	const defaultProjectIds = useDefaultProjectsOf(botIds);
-	const projectIds = [...new Set([...(projectId ? [projectId] : []), ...defaultProjectIds])];
+): (botId: string) => ReadonlyMap<string, ConnectionLook> {
+	const defaultProjectOf = useDefaultProjectsOf(botIds);
+	const projectIds = [
+		...new Set([...(projectId ? [projectId] : []), ...defaultProjectOf.values()]),
+	];
 	const lists = useQueries({
 		queries: projectIds.map((one) => connectionsQuery(one)),
 	});
-	const found = lists.flatMap((list) => list.data ?? []);
-	const key = found.map((connection) => connection.id).join(" ");
-	// biome-ignore lint/correctness/useExhaustiveDependencies: `key` names what `found` holds, which is a new array on every render.
-	return useMemo(() => {
-		const looks = new Map<string, ConnectionLook>();
-		for (const connection of found) {
-			looks.set(connection.handle, {
-				name: connection.name,
-				presetId: connectionMarkFor(connection),
-			});
-		}
-		return looks;
-	}, [key]);
+	const looksIn = new Map(
+		projectIds.map((one, index) => [one, looksByHandle(lists[index]?.data ?? [])]),
+	);
+	const projectLooks = projectId ? looksIn.get(projectId) : undefined;
+	return (botId) => {
+		const defaultProjectId = defaultProjectOf.get(botId);
+		const ownLooks = defaultProjectId ? looksIn.get(defaultProjectId) : undefined;
+		// The project's entries come last, so they win a handle both have.
+		return new Map([...(ownLooks ?? []), ...(projectLooks ?? [])]);
+	};
+}
+
+function looksByHandle(connections: readonly Connection[]): Map<string, ConnectionLook> {
+	return new Map(
+		connections.map((connection) => [
+			connection.handle,
+			{ name: connection.name, presetId: connectionMarkFor(connection) },
+		]),
+	);
 }
 
 /**
- * The default projects of the bots `botIds`, as the bot rosters already
- * loaded say: a transcript is shown inside a workspace whose roster the
- * sidebar has loaded. A bot no roster has yet is left out.
+ * The default projects of the bots `botIds`, by bot, as the bot rosters
+ * already loaded say: a transcript is shown inside a workspace whose roster
+ * the sidebar has loaded. A bot no roster has yet is left out.
  */
-function useDefaultProjectsOf(botIds: readonly string[]): string[] {
+function useDefaultProjectsOf(botIds: readonly string[]): ReadonlyMap<string, string> {
 	const rosters = useQueryClient().getQueriesData<readonly Bot[]>({ queryKey: ["bots"] });
-	return botIds.flatMap((botId) => {
-		for (const [, roster] of rosters) {
-			const found = roster?.find((one) => one.id === botId);
-			if (found) return [found.defaultProjectId];
-		}
-		return [];
-	});
+	return new Map(
+		botIds.flatMap((botId): [string, string][] => {
+			for (const [, roster] of rosters) {
+				const found = roster?.find((one) => one.id === botId);
+				if (found) return [[botId, found.defaultProjectId]];
+			}
+			return [];
+		}),
+	);
 }
 
 export function useConnectionActions(projectId: string) {
@@ -142,13 +153,16 @@ export function useConnectionActions(projectId: string) {
 			onSuccess: refresh,
 		}),
 		/**
-		 * A change to what bots may do with the tools shows at once, and is put
-		 * back if it fails. The list is fetched again once the last of several
-		 * quick changes is done, so an earlier one's answer does not show the
-		 * later ones undone.
+		 * A change to what bots may do with the tools shows at once. Changes are
+		 * sent one at a time, in the order made, so the last one made is the one
+		 * kept. The list is fetched again once the last of several quick changes
+		 * is done, so an earlier one's answer does not show the later ones
+		 * undone; that also takes back any that failed. While none are left, a
+		 * failed one is put back at once.
 		 */
 		update: useMutation({
 			mutationKey: updateKey,
+			scope: { id: `connection-update:${projectId}` },
 			mutationFn: ({ connectionId, json }: { connectionId: string; json: ConnectionUpdate }) =>
 				Effect.runPromise(
 					connections.update({ params: { projectId, connectionId }, payload: json }),
@@ -180,7 +194,8 @@ export function useConnectionActions(projectId: string) {
 				return { before, detailKey };
 			},
 			onError: (_failure, _change, context) => {
-				if (!context) return;
+				// Changes still on their way are shown over it; the refetch after the last sorts it out.
+				if (!context || queryClient.isMutating({ mutationKey: updateKey }) > 1) return;
 				queryClient.setQueryData(listKey, context.before.list);
 				queryClient.setQueryData(context.detailKey, context.before.detail);
 			},

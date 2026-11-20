@@ -5,12 +5,12 @@ import {
 	type ProjectMember,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
-import { Link, linkOptions, useNavigate, useRouter } from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { Minus } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useBots } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { botSettingsLink } from "@/lib/links.ts";
+import { botSettingsLink, projectBotsLink, projectPeopleLink, projectsLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import {
@@ -20,16 +20,15 @@ import {
 	usePlaceProjectMember,
 	useProjectBots,
 	useProjectMembers,
-	useProjects,
 	useUpdateProject,
 } from "@/lib/projects.ts";
 import { useSession } from "@/lib/session.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspaceMembers } from "@/lib/workspace.ts";
-import type { ProjectSettingsPage } from "@/lib/workspace-settings.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
+import { OwnerCrumb, OwnerPageCrumb } from "@/shell/BotCrumb.tsx";
 import { LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
 import { ProjectColourPicker } from "@/shell/LookPicker.tsx";
+import { Page } from "@/shell/Page.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
@@ -41,7 +40,6 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
-import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import {
 	SettingsAddButton,
@@ -54,69 +52,76 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
-import { ComputerSettingsPage } from "./ResourceSettings.tsx";
+
+/** Which of a project's settings pages is open: its own, its people, or its bots. */
+export type ProjectSettingsSection = "general" | "people" | "bots";
+
+/** The title of each of a project's settings pages. */
+const SECTION_TITLES = {
+	general: "Settings",
+	people: "People",
+	bots: "Bots",
+} as const satisfies Record<ProjectSettingsSection, string>;
 
 /**
- * One project's settings, a page at a time as the navigation lists them:
- * General, its lead bot among them, its people, its bots, and its computer.
- * Its connections are a page of the project's own. Only public bots can be
- * added, and a bot made private leaves its projects, unless it leads one.
+ * One project's settings, as pages of its own beside its threads: its own,
+ * its lead bot among them, with its people and its bots each a page under
+ * it. Its computer and connections are pages of the project's own. Only
+ * public bots can be added, and a bot made private leaves its projects,
+ * unless it leads one.
  */
-export function WorkspaceProjectsSettings({
-	selectedProjectId,
-	projectPage = "general",
-	canCreateProjects,
+export function ProjectSettingsPage({
+	project,
+	section,
 }: {
-	selectedProjectId?: string;
-	projectPage?: ProjectSettingsPage;
-	canCreateProjects: boolean;
+	project: Project;
+	section: ProjectSettingsSection;
 }) {
-	const { data: projects, isPending, error } = useProjects();
-	// With none chosen, the first the person is in is open, as the navigation lists them.
-	// Only a project the person is in has settings for them.
-	const selected = selectedProjectId
-		? projects?.find((project) => project.id === selectedProjectId && project.isMember)
-		: projects?.find((project) => project.isMember);
+	const owner = { project };
+	const title = SECTION_TITLES[section];
+	return (
+		<Page
+			title={title}
+			label={section === "general" ? title : `${project.name}'s ${title.toLowerCase()}`}
+			parent={
+				section === "general" ? (
+					<OwnerCrumb owner={owner} />
+				) : (
+					<OwnerPageCrumb owner={owner} page="settings" />
+				)
+			}
+			place={
+				section === "general"
+					? { kind: "owner", owner }
+					: { kind: "owner", owner, under: "settings" }
+			}
+		>
+			<ProjectSettingsSectionContent key={project.id} project={project} section={section} />
+		</Page>
+	);
+}
 
-	if (isPending) return null;
-	if (error) {
-		return (
-			<SettingsPage title="Projects">
-				<Alert>{failureMessage(error)}</Alert>
-			</SettingsPage>
-		);
-	}
-	if (!selected) {
-		return (
-			<EmptyState page="min" title={selectedProjectId ? "No such project here" : "No projects yet"}>
-				{selectedProjectId
-					? "It may have been removed, or you may no longer have access to it."
-					: canCreateProjects
-						? "Make the first project for this workspace."
-						: "You are not in a project yet."}
-			</EmptyState>
-		);
-	}
-	switch (projectPage) {
+function ProjectSettingsSectionContent({
+	project,
+	section,
+}: {
+	project: Project;
+	section: ProjectSettingsSection;
+}) {
+	switch (section) {
 		case "people":
 			return (
 				<SettingsPage
-					key={selected.id}
-					title="People"
-					description={`Who is in ${selected.name}.`}
-					headerAction={
-						selected.permissions.manageMembers && <AddPeopleButton project={selected} />
-					}
+					description={`Who is in ${project.name}.`}
+					headerAction={project.permissions.manageMembers && <AddPeopleButton project={project} />}
 				>
-					<Members project={selected} canManageMembers={selected.permissions.manageMembers} />
+					<Members project={project} canManageMembers={project.permissions.manageMembers} />
 				</SettingsPage>
 			);
 		case "bots":
-			return <ProjectBots key={selected.id} project={selected} />;
-		case "computer":
-			return <ComputerSettingsPage key={selected.id} owner={{ project: selected }} />;
+			return <ProjectBots project={project} />;
 		case "general":
-			return <ProjectDetails key={selected.id} project={selected} />;
+			return <ProjectDetails project={project} />;
 	}
 }
 
@@ -139,15 +144,7 @@ function ProjectDetails({ project }: { project: Project }) {
 			return;
 		}
 		// Back to the projects, or the projects in the deleted one's place, so Back never returns to it.
-		leaveForPage(
-			router.buildLocation(
-				linkOptions({
-					from: "/$workspace",
-					to: "./settings/$section",
-					params: { section: "projects" },
-				}),
-			).href,
-		);
+		leaveForPage(router.buildLocation(projectsLink()).href);
 	}
 
 	const headcount = projectHeadcount({ people: project.memberCount, bots: project.botCount });
@@ -181,6 +178,20 @@ function ProjectDetails({ project }: { project: Project }) {
 					</SettingsControlRow>
 				</SettingsGroup>
 			)}
+			<SettingsGroup>
+				<SettingsRow
+					label="People"
+					trailing={<SettingsValue>{project.memberCount}</SettingsValue>}
+					chevron
+					render={<Link {...projectPeopleLink(project)} />}
+				/>
+				<SettingsRow
+					label="Bots"
+					trailing={<SettingsValue>{project.botCount}</SettingsValue>}
+					chevron
+					render={<Link {...projectBotsLink(project)} />}
+				/>
+			</SettingsGroup>
 			{may.rename && (
 				<SettingsGroup label="Project">
 					<SettingsNameRow
@@ -262,7 +273,6 @@ function ProjectBots({ project }: { project: Project }) {
 	const bots = useProjectBots(project.id);
 	const { bots: workspaceBots } = useBots();
 	const place = usePlaceProjectBot(project.id);
-	const backToProject = useBackToHere(project.name);
 	const may = project.permissions.manageBots;
 	const inProject = new Set(bots.data?.map((bot) => bot.id));
 	const addable =
@@ -272,7 +282,6 @@ function ProjectBots({ project }: { project: Project }) {
 	const count = bots.data?.length ?? 0;
 	return (
 		<SettingsPage
-			title="Bots"
 			description={`${countOf(count, "bot", "bots")} in ${project.name}`}
 			headerAction={
 				may && (
@@ -314,11 +323,7 @@ function ProjectBots({ project }: { project: Project }) {
 						icon={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={24} />}
 						// The name opens the bot's settings and Remove sits beside it, so no button is inside a link.
 						label={
-							<Link
-								{...botSettingsLink(bot)}
-								state={backToProject}
-								className="focus-ring rounded-sm hover:underline"
-							>
+							<Link {...botSettingsLink(bot)} className="focus-ring rounded-sm hover:underline">
 								{bot.name}
 							</Link>
 						}
@@ -377,13 +382,7 @@ function Members({ project, canManageMembers }: { project: Project; canManageMem
 			return;
 		}
 		setRemoving(undefined);
-		if (isLeaving) {
-			await navigate({
-				from: "/$workspace",
-				to: "./settings/$section",
-				params: { section: "projects" },
-			});
-		}
+		if (isLeaving) await navigate(projectsLink());
 	}
 
 	let rows: ReactNode;

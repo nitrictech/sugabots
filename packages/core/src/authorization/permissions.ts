@@ -86,7 +86,7 @@ export type ProjectPermission =
 	| "project.members.manage"
 	/** Add and remove bots. */
 	| "project.bots.manage"
-	/** Take yourself out. Administrators stay in every project. */
+	/** Take yourself out. Administrators stay in every project people made. */
 	| "project.leave"
 	/** Decide a tool call a bot raised in the project. */
 	| "approval.decide";
@@ -332,14 +332,18 @@ const BOT_MANAGER_GRANTS = new Set<BotPermission>([
 
 /**
  * What a person may do with their own Personal Assistant besides use it,
- * whatever their role: change its look and its connections, decide what it
- * asks to reach from its computer, and decide what it asks to do for them. An
- * action they allow still runs with their own permissions, so a viewer's
- * assistant can't make a project for them. Sugabots manages the rest of it.
+ * whatever their role: change its look and its connections, manage and run its
+ * automations and decide what their runs ask, decide what it asks to reach from
+ * its computer, and decide what it asks to do for them. An action they allow
+ * still runs with their own permissions, so a viewer's assistant can't make a
+ * project for them. Sugabots manages the rest of it.
  */
 const ASSISTANT_OWNER_GRANTS = new Set<BotPermission>([
 	"bot.update",
 	"connection.manage",
+	"automation.manage",
+	"automation.run",
+	"approval.automation.decide",
 	"computer.request.decide",
 	"approval.decide",
 ]);
@@ -406,7 +410,7 @@ export function reachesBot(actor: Actor, bot: BotFacts): boolean {
  * Whether the caller may take a bot-addressed action. Using a bot takes
  * reach; changing it takes being its creator or an administrator, who may
  * change a private bot they don't reach. Nobody but its person changes a
- * Personal Assistant, and nobody deletes one.
+ * Personal Assistant or its automations, and nobody deletes one.
  */
 export function mayOnBot(actor: Actor, permission: BotPermission, bot: BotFacts): boolean {
 	const role = actor.workspaceRole;
@@ -486,7 +490,7 @@ export function botPermissions(actor: Actor, bot: BotFacts): BotPermissionsView 
 	return {
 		update: may("bot.update"),
 		delete: may("bot.delete"),
-		talk: reachesBot(actor, bot) && actor.workspaceRole !== undefined,
+		talk: reachesBot(actor, bot),
 		// Its default project is nobody's to be in; it follows the bot.
 		resources: resourcePermissions(actor, { isMember: false, defaultOf: bot }),
 	};

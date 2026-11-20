@@ -4,9 +4,9 @@ import {
 	handleFromName,
 	mentionedHandles,
 	mentionsEveryone,
-	NOTIFYING_CONVERSATION_KINDS,
 	type NotificationContent,
 	type NotificationLevel,
+	notifiesPeople,
 	type QuietHours,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
@@ -20,7 +20,6 @@ import {
 	reachesConversationFor,
 } from "../authorization/access.ts";
 import { findRunId } from "../conversations/automations/execution.ts";
-import { membersOfDirectKey } from "../conversations/repository/repository.ts";
 import { decidersOf } from "../conversations/tools/approval-deciders.ts";
 import type { Executor } from "../database/database.ts";
 import {
@@ -39,7 +38,7 @@ import {
 	workspace,
 	workspaceMember,
 } from "../database/schema.ts";
-import { conversationPath } from "../installation/web-app-paths.ts";
+import { approvalPath, conversationPath } from "../installation/web-app-paths.ts";
 
 /**
  * Who is notified of what, decided as Slack decides it: by why the person
@@ -59,8 +58,6 @@ export interface Addressed {
 /** Why a person would want to hear of something. */
 export type Reason =
 	| "mention"
-	/** It is a direct message to them, which Slack's "mentions" level lets through. */
-	| "direct"
 	| "reply"
 	| "failure"
 	| "participant"
@@ -68,7 +65,7 @@ export type Reason =
 	| "automation"
 	| "activity";
 
-/** The level a person has before choosing one: Slack's "mentions and direct messages". */
+/** The level a person has before choosing one: mentions, and what else concerns them. */
 export const DEFAULT_LEVEL: NotificationLevel = "mentions";
 
 /** Whether a person hears of a bot's reply to them failing, before they choose. */
@@ -111,7 +108,10 @@ function minutesOfDay(time: string): number {
 	return hour * 60 + minute;
 }
 
-/** A finished message somebody wrote in a project's thread, a bot's included, or a direct message. */
+/**
+ * A finished message somebody wrote in a project's thread, a bot's included,
+ * or an automation's result posted in its automation's feed.
+ */
 interface WrittenMessage {
 	conversationId: string;
 	messageId: string;
@@ -132,11 +132,10 @@ interface WrittenMessage {
 }
 
 /**
- * The notifications a finished message sends. Only threads, a bot's or a project's, and
- * direct messages notify: automation runs, collaborations and system bots'
+ * The notifications a finished message sends. Only threads, a bot's or a
+ * project's, notify: automation runs, collaborations and system bots'
  * conversations are bots' work, which reaches people through what they post in
- * those. A direct message notifies the person it is to as a mention would. An
- * automation's result in its automation's feed notifies those it mentions,
+ * those. An automation's result in its automation's feed notifies those it mentions,
  * which is how its bot asks for somebody.
  */
 export const forMessage = Effect.fn("Notifications.forMessage")(function* (
@@ -152,7 +151,7 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	const place = yield* placeOf(db, written.conversationId);
 	if (!place) return [];
 	const automationResult = place.kind === "automation_feed" ? written.resultOf : null;
-	if (!automationResult && !NOTIFYING_CONVERSATION_KINDS.has(place.kind)) return [];
+	if (!automationResult && !notifiesPeople(place.kind)) return [];
 	if (
 		automationResult &&
 		(yield* postedElsewhere(db, automationResult.runId, written.conversationId))
@@ -169,24 +168,23 @@ export const forMessage = Effect.fn("Notifications.forMessage")(function* (
 	return audience.flatMap((person): Addressed[] => {
 		if (author.kind === "person" && person.id === author.userId) return [];
 		const reason: Reason =
-			place.kind === "direct_message"
-				? "direct"
-				: addressesEveryone || mentioned.has(handleFromName(person.name))
-					? "mention"
-					: person.id === written.repliesTo
-						? "reply"
-						: person.participant && place.kind === "project_thread"
-							? "participant"
-							: "activity";
+			addressesEveryone || mentioned.has(handleFromName(person.name))
+				? "mention"
+				: person.id === written.repliesTo
+					? "reply"
+					: person.participant
+						? "participant"
+						: "activity";
 		if (automationResult && reason !== "mention") return [];
 		if (!wants(person, reason, now)) return [];
-		const where = whereFrom(place);
 		return [
 			{
 				userId: person.id,
 				notification: {
 					title:
-						reason === "mention" ? `${authorName} mentioned you${where}` : `${authorName}${where}`,
+						reason === "mention"
+							? `${authorName} mentioned you in ${place.title}`
+							: `${authorName} in ${place.title}`,
 					body: preview,
 					tag: conversationNotificationTag(place.rootConversationId),
 					path: conversationPath(
@@ -253,7 +251,10 @@ const answeredBy = Effect.fn("Notifications.answeredBy")(function* (db: Executor
 	return answering;
 });
 
-/** The notifications a turn waiting for approvals sends: to each person who may decide one. */
+/**
+ * The notifications a turn waiting for approvals sends: to each person who
+ * may decide one, naming and linking to only the calls they may decide.
+ */
 export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 	db: Executor,
 	waiting: { conversationId: string; turnId: string },
@@ -275,18 +276,22 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 	const addressed: Addressed[] = [];
 	for (const person of audience) {
 		if (!wants(person, "approval", now)) continue;
-		const decides = yield* mayDecideAny(db, waiting.conversationId, person.id, calls, inAutomation);
-		if (!decides) continue;
+		const decidable = yield* callsDecidableBy(db, waiting.conversationId, person.id, calls, {
+			turnBotId: first.botId,
+			inAutomation,
+		});
+		const [firstDecidable] = decidable;
+		if (!firstDecidable) continue;
 		addressed.push({
 			userId: person.id,
 			notification: {
 				title: `${first.botName} needs your approval`,
 				body:
-					calls.length === 1
-						? `To run ${first.tool} in ${place.title}`
-						: `To run ${calls.length} tools in ${place.title}`,
+					decidable.length === 1
+						? `To run ${firstDecidable.tool} in ${place.title}`
+						: `To run ${decidable.length} tools in ${place.title}`,
 				tag: `approval:${waiting.turnId}`,
-				path: `/${place.workspaceSlug}/approvals/${first.id}`,
+				path: approvalPath(place.workspaceSlug, firstDecidable.id),
 				conversationId: place.rootConversationId,
 			},
 		});
@@ -304,7 +309,7 @@ export const forFailedReply = Effect.fn("Notifications.forFailedReply")(function
 	now: Date,
 ) {
 	const place = yield* placeOf(db, failed.conversationId);
-	if (!place || !NOTIFYING_CONVERSATION_KINDS.has(place.kind)) return [];
+	if (!place || !notifiesPeople(place.kind)) return [];
 	const answering = yield* answeredBy(db, failed.turnId);
 	if (!answering?.userId) return [];
 	const audience = yield* audienceOf(db, place, place.botId ?? answering.botId, now);
@@ -387,19 +392,6 @@ export const forAutomationRun = Effect.fn("Notifications.forAutomationRun")(func
 		);
 });
 
-/**
- * Where a message was written, after its author's name in a notification's
- * title: nothing in a direct message with one person, which is named for who
- * wrote it; else the place.
- */
-function whereFrom(place: Place): string {
-	if (place.kind === "direct_message") {
-		const group = place.directKey && membersOfDirectKey(place.directKey).length > 2;
-		return group ? " in a group message" : "";
-	}
-	return ` in ${place.title}`;
-}
-
 /** The most of a message a notification shows. */
 const PREVIEW_CHARACTERS = 180;
 
@@ -439,8 +431,6 @@ const placeOf = Effect.fn("Notifications.placeOf")(function* (
 			/** Null outside a project people made: a bot's thread is reached through the bot. */
 			projectSlug: project.slug,
 			workspaceSlug: workspace.slug,
-			/** On a direct message between people: the key naming everybody in it. */
-			directKey: placedConversation.directKey,
 		})
 		.from(placedConversation)
 		.leftJoin(conversation, eq(conversation.id, placedConversation.rootConversationId))
@@ -505,8 +495,6 @@ const audienceOf = Effect.fn("Notifications.audienceOf")(function* (
 				eq(workspaceMember.workspaceId, place.workspaceId),
 				reachesConversationFor(
 					{
-						id: sql`${place.rootConversationId}::uuid`,
-						workspaceId: sql`${place.workspaceId}::uuid`,
 						kind: sql`${place.kind}`,
 						rootConversationId: sql`${place.rootConversationId}::uuid`,
 						projectId: sql`${place.projectId}::uuid`,
@@ -534,28 +522,32 @@ function wants(person: Person, reason: Reason, now: Date): boolean {
 }
 
 /**
- * Whether `userId` may decide any of `calls`: they reach the conversation, and
- * `mayDecideToolCall` lets them decide it.
+ * The calls among `calls`, all raised by one turn of `turnBotId`, that
+ * `userId` may decide, in their order: none unless they reach the
+ * conversation, then each that `mayDecideToolCall` lets them decide. Their
+ * standing in the computer's project is loaded only when a call asks to
+ * change the computer.
  */
-const mayDecideAny = Effect.fn("Notifications.mayDecideAny")(function* (
+const callsDecidableBy = Effect.fn("Notifications.callsDecidableBy")(function* (
 	db: Executor,
 	conversationId: string,
 	userId: string,
-	calls: ReadonlyArray<{ tool: string; botId: string }>,
-	inAutomation: boolean,
+	calls: ReadonlyArray<PendingCall>,
+	turn: { turnBotId: string; inAutomation: boolean },
 ) {
 	const reached = yield* conversationStandingFor(db, conversationId, userId);
-	if (!reached) return false;
-	for (const call of calls) {
-		const computerProject = yield* computerProjectStandingFor(
-			db,
-			conversationId,
-			call.botId,
-			userId,
-		);
-		if (mayDecideToolCall(reached, computerProject, inAutomation, decidersOf(call.tool))) {
-			return true;
-		}
-	}
-	return false;
+	if (!reached) return [];
+	const asksForComputer = calls.some((call) => decidersOf(call.tool) === "computer-managers");
+	const computerProject = asksForComputer
+		? yield* computerProjectStandingFor(db, conversationId, turn.turnBotId, userId)
+		: undefined;
+	return calls.filter((call) =>
+		mayDecideToolCall(reached.standing, computerProject, turn.inAutomation, decidersOf(call.tool)),
+	);
 });
+
+/** A tool call waiting for approval, as an approval notification names it. */
+interface PendingCall {
+	id: string;
+	tool: string;
+}

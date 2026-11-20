@@ -103,6 +103,7 @@ const computerProviderErrors = {
 	ComputerProviderIncomplete: BadRequest,
 	ComputerProviderPresetFixed: BadRequest,
 	ComputersNotDestroyed: Conflict,
+	ComputerMadeMeanwhile: Conflict,
 	NoTemplates: BadRequest,
 	ComputerUnavailable: Conflict,
 };

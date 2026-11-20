@@ -105,7 +105,7 @@ export function ToolApprovalCard({
 			aria-label={`Approval request: ${where ? `${action} in ${where}` : action}`}
 			className="flex animate-rise motion-reduce:animate-none"
 		>
-			<div className="flex min-w-0 max-w-115 flex-1 flex-col gap-2.5 rounded-bubble rounded-tl-tail bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
+			<div className="flex min-w-0 max-w-115 flex-1 flex-col gap-2.5 rounded-bubble bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
 				<StepHeading step={step} />
 				<div className="min-w-0 md:ml-8.5">
 					<FoldedRequest input={call.input} />

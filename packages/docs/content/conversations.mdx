@@ -1,19 +1,20 @@
 ---
 title: Conversations
-description: Threads, projects and direct messages, who answers, and how bots ask each other for help.
+description: Threads in projects and with bots, who answers, and how bots ask each other for help.
 ---
 
-Conversations happen in threads and direct messages:
+Conversations happen in threads:
 
 - A [project](/docs/projects)'s **threads** are shared by all its people and
   bots. Each is about one piece of work.
 - A **bot's threads** are conversations with that one bot. Open a bot and write
   in the box that says "Message Trip Planner" to start one. Every bot has its
   own hidden project for them, which it leads alone, so they work just as a
-  project's threads do. Everyone who can see the bot can see its threads and
-  join in.
-- A **direct message** is between two or more people, with no bots. Only its
-  people see it.
+  project's threads do. Whoever can talk to the bot can read and join its
+  threads.
+
+People talk to each other in a project's threads: there are no conversations
+between people alone.
 
 Anyone in a thread can mark it done once its work is finished, and it opens
 again when someone posts in it.
@@ -25,18 +26,17 @@ thread:
 
 - **Mention bots** in the project, and every bot you mention answers, all at once.
 - **Reply to a bot's message**, and that bot answers.
-- **Mention only people**, and the lead bot reads it. The message is most
-  likely for them, so it answers only if it can help, and otherwise reacts 👀
-  to show it read it.
+- **Mention only people**, and the lead bot reads it if it has a model. The
+  message is most likely for them, so it answers only if it can help, and
+  otherwise reacts 👀 to show it read it. If the lead bot has no model, the
+  message is posted without a bot reply.
 - **Otherwise** the lead bot answers.
 
 Mentions of bots outside the project are ignored, so in a bot's own threads,
-where it's the only bot, that bot answers. Mentioning someone with `@` changes
+where it's the only bot, only that bot can answer, by the same rule. Mentioning someone with `@` changes
 who the message is for, not who's in charge. Try it:
 
 <WhoReplies />
-
-In a direct message, no bot answers.
 
 Mentions use a person's or bot's handle at the start of a word, like
 `@budget-keeper`. Email addresses don't count as mentions.
@@ -102,7 +102,7 @@ After a bot replies in one of a bot's own threads or an automation feed,
 Sugabots updates a short summary of the conversation, and gives it a title the
 first time. You'll find the summary in the details panel, along with who's been
 talking and which tools and automations are in play. A project's threads keep the name you
-gave them and aren't summarised, and nor are direct messages.
+gave them and aren't summarised.
 
 <Tip>
 

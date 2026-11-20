@@ -139,21 +139,19 @@ export const automationTrigger = pgTable(
 
 /**
  * The kinds of conversation people open and post in: a project's thread (a
- * bot's threads being its default project's), an automation's feed, and a
- * direct message between people. The others are opened from one of these.
+ * bot's threads being its default project's) and an automation's feed. The
+ * others are opened from one of these.
  */
 export const OPENABLE_CONVERSATION_KINDS = [
 	"project_thread",
 	"automation_feed",
-	"direct_message",
 ] as const satisfies readonly ConversationKind[];
 
 /**
- * A project's thread, a direct message, a collaboration, an automation run or
- * feed, or a system bot's conversation: what every kind has. What
- * makes each kind what it is lives in the kind's own table, keyed by the same
- * id (`project_thread`, `direct_message`, `collaboration`,
- * `run`, `automation_feed`, `system_conversation`), and `placedConversation`
+ * A project's thread, a collaboration, an automation run or feed, or a system
+ * bot's conversation: what every kind has. What makes each kind what it is
+ * lives in the kind's own table, keyed by the same id (`project_thread`,
+ * `collaboration`, `run`, `automation_feed`, `system_conversation`), and `placedConversation`
  * reads them back together.
  *
  * Every conversation has exactly the kind row its kind says. A kind row can
@@ -179,7 +177,7 @@ export const conversation = pgTable(
 	(table) => [
 		check(
 			"conversation_kind_valid",
-			sql`${table.kind} in ('project_thread', 'direct_message', 'collaboration', 'run', 'automation_feed', 'system')`,
+			sql`${table.kind} in ('project_thread', 'collaboration', 'run', 'automation_feed', 'system')`,
 		),
 		// What each kind table points at, so a kind row only names a conversation of its kind.
 		uniqueIndex("conversation_id_kind_idx").on(table.id, table.kind),
@@ -233,31 +231,6 @@ export const projectThread = pgTable(
 			name: "project_thread_project_workspace_fkey",
 		}).onDelete("cascade"),
 		index("project_thread_project_idx").on(table.projectId),
-	],
-);
-
-/**
- * A conversation between two or more people, in no project and with no bots:
- * its members alone reach it (see `directMessageMember`).
- */
-export const directMessage = pgTable(
-	"direct_message",
-	{
-		conversationId: uuid("conversation_id").primaryKey(),
-		kind: kindOf("direct_message"),
-		workspaceId: uuid("workspace_id").notNull(),
-		/**
-		 * The ids of everybody in it, sorted and joined by `:`, so each set of
-		 * people has one. It still names somebody after they have left, which
-		 * `directMessageMember` does not once their account is gone.
-		 */
-		directKey: text("direct_key").notNull(),
-		startedById: uuid("started_by_id").references(() => user.id, { onDelete: "restrict" }),
-	},
-	(table) => [
-		conversationOfKind(table, "direct_message_conversation_fkey"),
-		// One direct message per set of people in a workspace.
-		uniqueIndex("direct_message_key_idx").on(table.workspaceId, table.directKey),
 	],
 );
 
@@ -404,36 +377,6 @@ export const automationRun = pgTable(
 			.where(sql`${table.triggerKind} = 'manual'`),
 		uniqueIndex("run_running_idx").on(table.automationId).where(sql`${table.state} = 'running'`),
 		index("run_list_idx").on(table.automationId, table.acceptedAt, table.id),
-	],
-);
-
-/**
- * Who is in a direct message, and so alone reaches it while they are in its
- * workspace. Unlike `conversationParticipant`, which records who has taken
- * part, this is the whole set from the start, and it never changes: a
- * different set of people is a different direct message. A row outlives its
- * person leaving the workspace, so rejoining gives the conversation back.
- */
-export const directMessageMember = pgTable(
-	"direct_message_member",
-	{
-		conversationId: uuid("conversation_id").notNull(),
-		userId: uuid("user_id")
-			.notNull()
-			.references(() => user.id, { onDelete: "cascade" }),
-		createdAt: stamp("created_at"),
-	},
-	(table) => [
-		foreignKey({
-			columns: [table.conversationId],
-			foreignColumns: [directMessage.conversationId],
-			name: "direct_message_member_direct_message_fkey",
-		}).onDelete("cascade"),
-		uniqueIndex("direct_message_member_conversation_user_idx").on(
-			table.conversationId,
-			table.userId,
-		),
-		index("direct_message_member_user_idx").on(table.userId),
 	],
 );
 
@@ -854,29 +797,27 @@ export const placedConversation = pgView("placed_conversation", {
 	/**
 	 * The bot it is with: the bot whose default project a thread, an
 	 * automation's feed or a run is in, the collaborator, or the system bot.
-	 * Null in a project people made and on a direct message.
+	 * Null in a project people made.
 	 */
 	botId: uuid("bot_id"),
 	/** The project a thread, an automation's feed or a run is in: the automation's. */
 	projectId: uuid("project_id"),
 	/**
 	 * The conversation people open that it is in: its own id on a project's
-	 * thread, a direct message and an automation's feed; the
-	 * one it hangs under on a collaboration; the automation's feed on a run.
+	 * thread and an automation's feed; the one it hangs under on a collaboration; the automation's feed on a run.
 	 * Null on a system bot's conversation, which serves one rather than
 	 * belonging to one.
 	 */
 	rootConversationId: uuid("root_conversation_id"),
 	/** What it was opened under: the asking conversation of a collaboration, the served one of a system bot's. */
 	parentConversationId: uuid("parent_conversation_id"),
-	/** Who started a project's thread or a direct message. */
+	/** Who started a project's thread. */
 	startedById: uuid("started_by_id"),
 	systemBotKey: text("system_bot_key").$type<SystemBotKey>(),
 	doneAt: timestamp("done_at", { withTimezone: true }),
 	/** On an automation's feed: the automation. */
 	automationId: uuid("automation_id"),
 	archivedAt: timestamp("archived_at", { withTimezone: true }),
-	directKey: text("direct_key"),
 }).as(sql`select
 	c.id, c.workspace_id, c.kind, c.title, c.created_at, c.updated_at,
 	coalesce(p.default_of_bot_id, co.collaborator_bot_id, sc.bot_id) as bot_id,
@@ -888,15 +829,13 @@ export const placedConversation = pgView("placed_conversation", {
 		else c.id
 	end as root_conversation_id,
 	coalesce(co.parent_conversation_id, sc.served_conversation_id) as parent_conversation_id,
-	coalesce(cc.started_by_id, dm.started_by_id) as started_by_id,
+	cc.started_by_id,
 	sc.system_bot_key,
 	cc.done_at,
 	f.automation_id,
-	cc.archived_at,
-	dm.direct_key
+	cc.archived_at
 from ${conversation} c
 left join ${projectThread} cc on cc.conversation_id = c.id
-left join ${directMessage} dm on dm.conversation_id = c.id
 left join ${collaboration} co on co.conversation_id = c.id
 left join ${automationRun} r on r.conversation_id = c.id
 left join ${automationFeed} rf on rf.automation_id = r.automation_id

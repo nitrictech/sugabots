@@ -22,7 +22,6 @@ type MobileTab = (typeof TABS)[number];
 export function MobileTabBar({ className }: { className?: string }) {
 	const tab = useMobileTab();
 	const typing = useTyping();
-	const home = useHomePlace();
 	const { unreadForYou, unreadInInbox, waitingApprovals } = useAttentionCounts();
 	const { user } = useSession();
 	if (typing) return null;
@@ -50,13 +49,7 @@ export function MobileTabBar({ className }: { className?: string }) {
 					style={{ transform: `translateX(calc(${TABS.indexOf(tab)} * (100% + 2px)))` }}
 				/>
 				<TabLink
-					render={
-						home === "directMessages" ? (
-							<Link from="/$workspace" to="./dm" />
-						) : (
-							<Link from="/$workspace" to="./home" />
-						)
-					}
+					render={<Link from="/$workspace" to="./home" />}
 					current={tab === "home"}
 					icon={<House />}
 					label="Home"
@@ -180,20 +173,4 @@ function isTextEntry(element: Element | null): boolean {
 	if (element instanceof HTMLTextAreaElement) return true;
 	if (element instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has(element.type);
 	return element instanceof HTMLElement && element.isContentEditable;
-}
-
-/** Where Home goes back to: Home itself, or the direct messages. */
-type HomePlace = "home" | "directMessages";
-
-/** Whether Home last showed the direct messages, so coming back to Home from another tab returns there. */
-function useHomePlace(): HomePlace {
-	const matchRoute = useMatchRoute();
-	const [last, setLast] = useState<HomePlace>("home");
-	const showing: HomePlace | undefined = matchRoute({ to: "/$workspace/dm", fuzzy: true })
-		? "directMessages"
-		: matchRoute({ to: "/$workspace/home" })
-			? "home"
-			: undefined;
-	if (showing && showing !== last) setLast(showing);
-	return showing ?? last;
 }

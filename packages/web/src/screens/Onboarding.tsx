@@ -792,7 +792,7 @@ function ReadyStep({ workspace, bot }: { workspace: { id: string; slug: string }
 						].map((line) => (
 							<p
 								key={line}
-								className="m-0 rounded-bubble rounded-bl-tail bg-bot-tint px-3.5 py-2.5 text-sm text-bot-text leading-normal"
+								className="m-0 rounded-bubble bg-bot-tint px-3.5 py-2.5 text-sm text-bot-text leading-normal"
 							>
 								{line}
 							</p>

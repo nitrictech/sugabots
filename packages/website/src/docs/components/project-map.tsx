@@ -13,7 +13,7 @@ const parts = {
 	people: {
 		label: "People",
 		explanation:
-			"Everyone in the project sees its threads and files, and can invite more people. Anyone can find a public project and join it; a private one is invitation only.",
+			"Everyone in the project sees its threads and files, and anyone in it but a viewer can invite more people. Anyone can find a public project and join it; a private one is invitation only.",
 	},
 	bots: {
 		label: "Bots",

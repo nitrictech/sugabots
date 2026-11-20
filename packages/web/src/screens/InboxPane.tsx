@@ -1,13 +1,17 @@
 import type { SessionUser } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { ReactNode } from "react";
-import { placeBot, useConversationHistory, useMarkItemReadWhileSeen } from "@/lib/chats.ts";
+import {
+	type ConversationPlace,
+	placeBot,
+	useConversationHistory,
+	useMarkItemReadWhileSeen,
+} from "@/lib/chats.ts";
 import { useConversation } from "@/lib/conversations.ts";
 import { OwnerLink } from "@/lib/resource-owner.tsx";
 import { buttonStyles } from "@/ui/button.tsx";
 import type { BackTo } from "./ChatHeader.tsx";
 import { ConversationPage } from "./ConversationPage.tsx";
-import { type AnyConversationPlace, conversationOwner } from "./conversation-place.ts";
 import { ItemPanel } from "./ItemPanel.tsx";
 import type { Staged, StagedChange } from "./staged.ts";
 
@@ -33,7 +37,7 @@ export function InboxPane({
 	onStagedChange,
 }: {
 	/** Where the conversation the item is in is. */
-	conversationPlace: AnyConversationPlace;
+	conversationPlace: ConversationPlace;
 	/** The conversation the item is in. */
 	conversationId: string;
 	user: SessionUser;
@@ -49,25 +53,29 @@ export function InboxPane({
 	onStagedChange: StagedChange;
 }) {
 	const automationId = useConversation(conversationId).data?.automation?.id;
-	const owner = conversationOwner(conversationPlace);
 	const openClassName = cn(
 		buttonStyles({ variant: "secondary", size: "sm" }),
 		"shrink-0 max-md:hidden",
 	);
 	// A phone shows the conversation itself, whole, with Back to Inbox; it needs no way to another copy of it.
-	const openThread =
-		owner &&
-		(automationId ? (
-			<OwnerLink owner={owner} to={{ page: "automation", automationId }} className={openClassName}>
-				Open feed
-			</OwnerLink>
-		) : (
-			<OwnerLink owner={owner} to={{ page: "thread", conversationId }} className={openClassName}>
-				Open thread
-			</OwnerLink>
-		));
-	// Runs and collaborations happen in a project's threads and a bot's, not in direct messages.
-	if (itemPageId && conversationPlace.conversation.kind !== "directMessage") {
+	const openThread = automationId ? (
+		<OwnerLink
+			owner={conversationPlace}
+			to={{ page: "automation", automationId }}
+			className={openClassName}
+		>
+			Open feed
+		</OwnerLink>
+	) : (
+		<OwnerLink
+			owner={conversationPlace}
+			to={{ page: "thread", conversationId }}
+			className={openClassName}
+		>
+			Open thread
+		</OwnerLink>
+	);
+	if (itemPageId) {
 		return (
 			<ItemConversationPage
 				conversationPlace={conversationPlace}
@@ -107,7 +115,7 @@ export function ItemConversationPage({
 	onOpenItem,
 }: {
 	/** Where the thread the item is in is. */
-	conversationPlace: AnyConversationPlace;
+	conversationPlace: ConversationPlace;
 	conversationId: string;
 	itemConversationId: string;
 	back: BackTo;
@@ -121,7 +129,7 @@ export function ItemConversationPage({
 			frame={{ kind: "page", back, trailing }}
 			conversationId={conversationId}
 			chatBotId={placeBot(conversationPlace)?.id}
-			owner={conversationOwner(conversationPlace)}
+			owner={conversationPlace}
 			itemConversationId={itemConversationId}
 			entry={history.entries.find((entry) => entry.conversationId === itemConversationId)}
 			history={history.entries}

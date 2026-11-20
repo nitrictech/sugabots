@@ -20,7 +20,7 @@ export interface ChatBot {
 	look: BotLook;
 }
 
-export interface ChatPerson {
+interface ChatPerson {
 	kind: "person";
 	name: string;
 	initials: string;
@@ -167,7 +167,7 @@ export function ChatApproval({
 	return (
 		<section
 			aria-label={`Approval request: ${action}`}
-			className="mt-1.5 mb-1 flex w-full max-w-115 flex-col gap-2.5 rounded-3xl rounded-tl-sm border bg-background py-2.5 pr-3 pl-2.5"
+			className="mt-1.5 mb-1 flex w-full max-w-115 flex-col gap-2.5 rounded-3xl border bg-background py-2.5 pr-3 pl-2.5"
 		>
 			<div className="flex items-start gap-2.5">
 				<span className="mt-px flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-bold text-secondary-foreground">

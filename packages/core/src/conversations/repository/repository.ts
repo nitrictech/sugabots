@@ -23,8 +23,6 @@ import {
 	conversation,
 	conversationParticipant,
 	conversationRead,
-	directMessage,
-	directMessageMember,
 	message,
 	messageReaction,
 	placedConversation,
@@ -64,16 +62,6 @@ import type { BotConversationId } from "./rooms.ts";
  * somebody may ask for any of this is decided by the caller.
  */
 export interface Interface {
-	/**
-	 * The direct message between `memberIds` in the workspace, in no project,
-	 * created on first use with them as its members: one for each set of
-	 * people, whichever of them opens it, however their ids are written.
-	 */
-	readonly openDirectMessage: (placement: {
-		workspaceId: string;
-		memberIds: readonly string[];
-		startedById: string;
-	}) => Effect.Effect<schema.PlacedConversationRow>;
 	/**
 	 * Starts a thread in the project, called `title`, with `startedById` in it,
 	 * and in a bot's default project the bot too, and announces it.
@@ -253,26 +241,6 @@ function resultOf(run: RunPosting): NonNullable<Message["automationResultOf"]> {
 		automationId: run.automationId,
 		automationName: run.automationName,
 	};
-}
-
-/**
- * What a direct message between people is called where a title is needed:
- * lists name it for the others in it, who differ for each of them.
- */
-const DIRECT_MESSAGE_TITLE = "Direct message";
-
-/** What names the direct message between these people, whichever of them opens it. */
-function directKeyOf(memberIds: readonly string[]): string {
-	// Lower-cased as Postgres writes a uuid, so the same people are named the same way.
-	const ids = new Set(memberIds.map((id) => id.toLowerCase()));
-	return [...ids].sort().join(DIRECT_KEY_SEPARATOR);
-}
-
-const DIRECT_KEY_SEPARATOR = ":";
-
-/** The people a direct message's key names, by id. */
-export function membersOfDirectKey(directKey: string): string[] {
-	return directKey.split(DIRECT_KEY_SEPARATOR);
 }
 
 /** One person's emoji on a message in a conversation. */
@@ -508,64 +476,7 @@ export const make = Effect.gen(function* () {
 				.limit(1),
 		).pipe(Effect.map(([found]) => found?.conversationId));
 
-	/** The direct message named by `directKey` in the workspace, if it has been opened. */
-	const directMessageOf = (workspaceId: string, directKey: string) =>
-		query((db) =>
-			db
-				.select({ conversationId: directMessage.conversationId })
-				.from(directMessage)
-				.where(
-					and(eq(directMessage.workspaceId, workspaceId), eq(directMessage.directKey, directKey)),
-				)
-				.limit(1),
-		).pipe(Effect.map(([found]) => found?.conversationId));
-
 	return Service.of({
-		openDirectMessage: (placement) =>
-			operation(
-				"openDirectMessage",
-				transaction(
-					Effect.gen(function* () {
-						const directKey = directKeyOf(placement.memberIds);
-						const existing = yield* directMessageOf(placement.workspaceId, directKey);
-						if (existing) return yield* placedById(existing);
-						// Each person once, as the key names them.
-						const memberIds = membersOfDirectKey(directKey);
-						const created = yield* insertConversation({
-							workspaceId: placement.workspaceId,
-							kind: "direct_message",
-							title: DIRECT_MESSAGE_TITLE,
-						});
-						const [opened] = yield* query((db) =>
-							db
-								.insert(directMessage)
-								.values({
-									conversationId: created.id,
-									workspaceId: placement.workspaceId,
-									directKey,
-									startedById: placement.startedById,
-								})
-								.onConflictDoNothing({
-									target: [directMessage.workspaceId, directMessage.directKey],
-								})
-								.returning({ conversationId: directMessage.conversationId }),
-						);
-						if (opened) {
-							yield* query((db) =>
-								db
-									.insert(directMessageMember)
-									.values(memberIds.map((userId) => ({ conversationId: created.id, userId }))),
-							);
-							return yield* placedById(created.id);
-						}
-						yield* discardConversation(created.id);
-						const raced = yield* directMessageOf(placement.workspaceId, directKey);
-						if (!raced) return yield* Effect.die(new Error("The direct message was not opened"));
-						return yield* placedById(raced);
-					}),
-				),
-			),
-
 		startThread: (input) =>
 			operation(
 				"startThread",

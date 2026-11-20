@@ -346,14 +346,25 @@ export const make = Effect.gen(function* () {
 		});
 
 	const announceStart = (request: ReplyTurnRequest, turnId: string, reply: Message) =>
-		emit([
-			ConversationEvent.TurnStarted({
-				conversationId: request.conversationId,
-				turnId,
-				botId: request.botId,
-				reply,
-			}),
-		]);
+		Effect.gen(function* () {
+			const [started] = yield* query((db) =>
+				db
+					.select({ workspaceId: conversation.workspaceId })
+					.from(conversation)
+					.where(eq(conversation.id, request.conversationId))
+					.limit(1),
+			);
+			if (!started) return yield* Effect.die(new Error("A turn's conversation is gone"));
+			yield* emit([
+				ConversationEvent.TurnStarted({
+					conversationId: request.conversationId,
+					workspaceId: started.workspaceId,
+					turnId,
+					botId: request.botId,
+					reply,
+				}),
+			]);
+		});
 
 	return Service.of({
 		openReplyTurn: (request) =>

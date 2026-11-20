@@ -15,6 +15,7 @@ export * from "./connections.ts";
 export * from "./conversations.ts";
 export * from "./events.ts";
 export * from "./files.ts";
+export * from "./floor.ts";
 export * from "./github.ts";
 export * from "./me.ts";
 export * from "./membership.ts";

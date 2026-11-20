@@ -9,7 +9,16 @@ interface OwnerPageEntry {
 	icon: LucideIcon;
 }
 
-type OwnerPageName = "files" | "automations" | "computer" | "connections" | "settings";
+/** A bot's and a project's own pages, each named by the segment of its address after the owner's. */
+export const OWNER_PAGE_NAMES = [
+	"files",
+	"automations",
+	"computer",
+	"connections",
+	"settings",
+] as const;
+
+export type OwnerPageName = (typeof OWNER_PAGE_NAMES)[number];
 
 /**
  * The owner's own pages the viewer may open, in the order they are listed:
@@ -45,7 +54,7 @@ export function ownerPages(
 type OwnerProblems = Partial<Record<OwnerPageName, string>>;
 
 /** The problem an owner's automations page sets right: one of them is failing. */
-export const AUTOMATION_FAILED = "An automation's last run failed";
+const AUTOMATION_FAILED = "An automation's last run failed";
 
 /**
  * What stops the owner working that its own pages set right. `lead` is the

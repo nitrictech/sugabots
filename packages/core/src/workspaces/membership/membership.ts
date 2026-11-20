@@ -71,10 +71,17 @@ export interface Interface {
 	/**
 	 * Its projects, bots, conversations and providers go with it, and its members
 	 * lose it. What its models cost stays on the ledger. The owner's alone.
+	 * Its projects' computers are destroyed first, since their records go with
+	 * it: when a provider can't be reached, or a computer is made meanwhile,
+	 * the workspace is kept, to try again.
 	 */
 	readonly delete: (
 		input: InWorkspace,
-	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
+	) => Effect.Effect<
+		void,
+		AuthorizationDenied | Computers.Unavailable | ProjectComputers.ComputerMadeMeanwhile,
+		CurrentActor.Service
+	>;
 	readonly update: (
 		input: InWorkspace & { details: WorkspaceDetails },
 	) => Effect.Effect<
@@ -105,7 +112,10 @@ export interface Interface {
 		input: InWorkspace & { memberId: string },
 	) => Effect.Effect<
 		void,
-		AuthorizationDenied | OwnerStays | Computers.Unavailable,
+		| AuthorizationDenied
+		| OwnerStays
+		| Computers.Unavailable
+		| ProjectComputers.ComputerMadeMeanwhile,
 		CurrentActor.Service
 	>;
 	/** The owner stays until they have transferred ownership. */
@@ -113,7 +123,10 @@ export interface Interface {
 		input: InWorkspace,
 	) => Effect.Effect<
 		void,
-		AuthorizationDenied | OwnerStays | Computers.Unavailable,
+		| AuthorizationDenied
+		| OwnerStays
+		| Computers.Unavailable
+		| ProjectComputers.ComputerMadeMeanwhile,
 		CurrentActor.Service
 	>;
 	/**
@@ -184,7 +197,8 @@ export const make = Effect.gen(function* () {
 	 * Takes the member out, which cascades to their Personal Assistant, pins
 	 * and project memberships. Their assistant's computer is destroyed first:
 	 * its record is the only way to find the machine, so when the provider
-	 * can't be reached the member stays, to try again.
+	 * can't be reached, or a computer is made meanwhile, the member stays, to
+	 * try again.
 	 */
 	const deleteMember = (member: { id: string; workspaceId: string; userId: string }) =>
 		Effect.gen(function* () {
@@ -196,16 +210,38 @@ export const make = Effect.gen(function* () {
 					.limit(1),
 			);
 			if (assistant) {
-				yield* projectComputers.destroy({
+				const assistantProject = {
 					workspaceId: member.workspaceId,
 					projectId: yield* defaultProjectOf(assistant.id),
-				});
+				};
+				yield* projectComputers.destroy(assistantProject);
+				yield* ProjectComputers.lockWithoutComputer(assistantProject);
 			}
 			yield* query((db) => db.delete(workspaceMember).where(eq(workspaceMember.id, member.id)));
 		});
 	const searchProviders = yield* SearchProviderRepository.Service;
 	const modelProviders = yield* ModelProviderRepository.Service;
 	const ids = yield* Ids.Service;
+
+	/**
+	 * Runs `use` in a transaction holding the workspace's membership lock (see
+	 * `lockWorkspace`), with the caller's standing read once the lock is
+	 * held. A change that held the lock first has committed by then, so an
+	 * owner who has just handed ownership on is decided as the administrator
+	 * they now are, and somebody just removed is hidden.
+	 */
+	const underMembershipLock = <A, E, R>(
+		workspaceRef: string,
+		permission: WorkspacePermission,
+		use: (standing: WorkspaceStanding) => Effect.Effect<A, E, R>,
+	) =>
+		transaction(
+			Effect.gen(function* () {
+				const { workspaceId } = yield* authorization.workspace(workspaceRef, permission);
+				yield* lockWorkspace(workspaceId);
+				return yield* use(yield* authorization.workspace(workspaceId, permission));
+			}),
+		);
 
 	/**
 	 * The Personal Assistant of somebody joining, on the workspace's
@@ -311,8 +347,24 @@ export const make = Effect.gen(function* () {
 			operation(
 				"delete",
 				Effect.gen(function* () {
-					const standing = yield* authorization.workspace(input.workspace, "workspace.delete");
-					yield* query((db) => db.delete(workspace).where(eq(workspace.id, standing.workspaceId)));
+					const { workspaceId } = yield* authorization.workspace(
+						input.workspace,
+						"workspace.delete",
+					);
+					// Computers are destroyed outside any transaction, so no lock waits
+					// on a provider and each destroyed computer's record is forgotten for
+					// good, letting a retry resume. The caller is authorized again under
+					// the membership lock before the delete, so an owner who hands
+					// ownership on meanwhile no longer deletes the workspace. The new
+					// owner keeps it, with its computers destroyed; projects remake
+					// theirs when next used.
+					yield* projectComputers.destroyAllIn(workspaceId);
+					yield* underMembershipLock(workspaceId, "workspace.delete", () =>
+						Effect.gen(function* () {
+							yield* ProjectComputers.lockWorkspaceWithoutComputers(workspaceId);
+							yield* query((db) => db.delete(workspace).where(eq(workspace.id, workspaceId)));
+						}),
+					);
 				}),
 			),
 
@@ -370,19 +422,14 @@ export const make = Effect.gen(function* () {
 		changeRole: (input) =>
 			operation(
 				"changeRole",
-				transaction(
+				underMembershipLock(input.workspace, "workspace.members.manage", (standing) =>
 					Effect.gen(function* () {
-						const standing = yield* authorization.workspace(
-							input.workspace,
-							"workspace.members.manage",
-						);
-						yield* lockWorkspace(standing.workspaceId);
 						const target = yield* memberIn(standing.workspaceId, input.memberId);
 						if (target.role === "owner") return yield* new OwnerStays();
 						if (target.role === "admin" || input.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
-						// Promoting puts them in every project, by the
+						// Promoting puts them in every project people made, by the
 						// `administrator_projects` trigger; demoting leaves their projects as they are.
 						yield* query((db) =>
 							db
@@ -397,13 +444,8 @@ export const make = Effect.gen(function* () {
 		remove: (input) =>
 			operation(
 				"remove",
-				transaction(
+				underMembershipLock(input.workspace, "workspace.members.manage", (standing) =>
 					Effect.gen(function* () {
-						const standing = yield* authorization.workspace(
-							input.workspace,
-							"workspace.members.manage",
-						);
-						yield* lockWorkspace(standing.workspaceId);
 						const target = yield* memberIn(standing.workspaceId, input.memberId);
 						if (target.role === "owner") return yield* new OwnerStays();
 						if (target.role === "admin") {
@@ -417,10 +459,8 @@ export const make = Effect.gen(function* () {
 		leave: (input) =>
 			operation(
 				"leave",
-				transaction(
+				underMembershipLock(input.workspace, "workspace.read", (standing) =>
 					Effect.gen(function* () {
-						const standing = yield* authorization.workspace(input.workspace, "workspace.read");
-						yield* lockWorkspace(standing.workspaceId);
 						const { userId } = standing.actor;
 						const [own] = yield* query((db) =>
 							db
@@ -443,18 +483,13 @@ export const make = Effect.gen(function* () {
 		transferOwnership: (input) =>
 			operation(
 				"transferOwnership",
-				transaction(
+				underMembershipLock(input.workspace, "workspace.ownership.transfer", (standing) =>
 					Effect.gen(function* () {
-						const standing = yield* authorization.workspace(
-							input.workspace,
-							"workspace.ownership.transfer",
-						);
-						yield* lockWorkspace(standing.workspaceId);
 						const target = yield* memberIn(standing.workspaceId, input.memberId);
 						if (target.role === "owner") return;
 						// The owner steps down first: `workspace_member_owner_idx` allows
 						// one owner, and would refuse the new one while the old one stands.
-						// The new owner joins every project by the
+						// The new owner joins every project people made by the
 						// `administrator_projects` trigger, as an admin would.
 						yield* query((db) =>
 							db
@@ -506,19 +541,14 @@ export const make = Effect.gen(function* () {
 		invite: (input) =>
 			operation(
 				"invite",
-				transaction(
+				underMembershipLock(input.workspace, "workspace.members.manage", (standing) =>
 					Effect.gen(function* () {
-						const standing = yield* authorization.workspace(
-							input.workspace,
-							"workspace.members.manage",
-						);
 						if (input.invitation.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
 						const workspaceId = standing.workspaceId;
 						const inviterId = standing.actor.userId;
 						const address = input.invitation.email.toLowerCase();
-						yield* lockWorkspace(workspaceId);
 						const [member] = yield* query((db) =>
 							db
 								.select({ id: workspaceMember.id })
@@ -774,14 +804,20 @@ export function requireTimeZoneKnownToPostgres(timeZone: string) {
 	);
 }
 
-/** Serialises membership changes, so a transfer of ownership cannot cross another change to the same people. */
+/**
+ * Serialises membership changes with each other and with deleting the
+ * workspace, so a transfer of ownership cannot cross another change to the
+ * same people. The lock lets rows that refer to the workspace still be added,
+ * so its threads, runs, projects and bots aren't held up while a member's
+ * removal waits on their Personal Assistant's computer at its provider.
+ */
 function lockWorkspace(workspaceId: string) {
 	return query((db) =>
 		db
 			.select({ id: workspace.id })
 			.from(workspace)
 			.where(eq(workspace.id, workspaceId))
-			.for("update"),
+			.for("no key update"),
 	);
 }
 

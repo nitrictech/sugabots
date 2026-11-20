@@ -1,4 +1,8 @@
+import { PgClient } from "@effect/sql-pg";
+import { sql } from "drizzle-orm";
 import { type Context, Effect, Layer, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/unstable/sql";
+import { onTestFinished } from "vitest";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { Credentials } from "../credentials/credentials.ts";
 import { Ids } from "../ids/ids.ts";
@@ -11,6 +15,8 @@ import {
 	type QueryFailure,
 	query,
 	type RunEffect,
+	type Transaction,
+	transaction,
 	transactional,
 } from "./database.ts";
 
@@ -23,7 +29,8 @@ import {
  * rejects with the service's own error so `rejects.toThrow(NameTaken)` still
  * means what it says.
  *
- * One runtime for the process, so every test file shares one pool.
+ * One runtime per test file: its cases share the runtime's pool, and the file
+ * disposes of it in its `afterAll` with `closeDatabase`.
  */
 
 /**
@@ -53,6 +60,69 @@ export const runOnPostgres = effectRunner<TestInfrastructure>(databaseForTests);
 /** Runs one query against the test database, for a case's fixtures and checks. */
 export const onDatabase = <A>(run: (db: Executor) => Effect.Effect<A, QueryFailure>): Promise<A> =>
 	runOnPostgres(query(run));
+
+/** How often, and how many times, `waitUntilWaitingOnLocks` looks. */
+const LOCK_WAIT_POLL_INTERVAL_MS = 20;
+const LOCK_WAIT_POLL_ATTEMPTS = 100;
+
+/**
+ * Waits until at least `count` connections to the test database are waiting
+ * on a lock, so a case can order concurrent writes by where they block rather
+ * than by sleeping. Each Vitest worker has a database of its own, so only this
+ * case's connections are counted. Throws if they never get there.
+ */
+export async function waitUntilWaitingOnLocks(count: number): Promise<void> {
+	for (let attempt = 0; attempt < LOCK_WAIT_POLL_ATTEMPTS; attempt++) {
+		const [waiting] = await onDatabase((db) =>
+			db.execute<{ count: number }>(
+				sql`select count(*)::int as count from pg_stat_activity
+					where datname = current_database() and wait_event_type = 'Lock'`,
+				"objects",
+			),
+		);
+		if ((waiting?.count ?? 0) >= count) return;
+		await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_INTERVAL_MS));
+	}
+	throw new Error(`Fewer than ${count} connections ever waited on a lock`);
+}
+
+/**
+ * Runs `work` in a transaction and holds it open, with the locks `work` took,
+ * until `release` is called, so a case can start another write against them.
+ * `afterRelease` runs in the same transaction once released, before it commits.
+ *
+ * `held` resolves with `work`'s value once `work` is done, or rejects if the
+ * transaction fails first. `release` lets the transaction finish and resolves
+ * once it has committed. Call it to choose when the transaction commits; a case
+ * that ends without calling it, by failing or timing out, has the transaction
+ * released when it finishes, so its locks never stall the cases after it.
+ *
+ * Call it from inside a case, not from a `beforeAll` or `beforeEach`.
+ */
+export function holdTransaction<A>(
+	work: Effect.Effect<A, unknown, TestInfrastructure | Transaction>,
+	afterRelease: Effect.Effect<unknown, unknown, TestInfrastructure | Transaction> = Effect.void,
+): { held: Promise<A>; release: () => Promise<void> } {
+	const released = Promise.withResolvers<void>();
+	const held = Promise.withResolvers<A>();
+	const finished = runOnPostgres(
+		transaction(
+			work.pipe(
+				Effect.tap((value) => Effect.sync(() => held.resolve(value))),
+				Effect.tap(() => Effect.promise(() => released.promise)),
+				Effect.tap(() => afterRelease),
+			),
+		),
+	).then(() => {});
+	finished.catch(held.reject);
+	const release = () => {
+		released.resolve();
+		return finished;
+	};
+	// A failure has already reached the case through `held` or `release`.
+	onTestFinished(() => release().catch(() => {}));
+	return { held: held.promise, release };
+}
 
 /** The same service with its methods returning promises. */
 export type Promised<Service> = {
@@ -110,3 +180,22 @@ export const noDatabase: Layer.Layer<Database> = Layer.succeed(Database, {
 	execute: () => Effect.die(new Error("This test has no database")),
 	transaction: transactional((use) => use),
 });
+
+/**
+ * A connection pool nothing is expected to reach, for a layer that asks for
+ * one but should not use it. Any query, or any other use, throws.
+ */
+export const noDatabaseClient: Layer.Layer<PgClient.PgClient | SqlClient.SqlClient> = (() => {
+	const unusable = (): never => {
+		throw new Error("This test has no database client");
+	};
+	// Symbol-keyed reads are how Effect inspects a value it is handed, not use.
+	const client = new Proxy(unusable, {
+		get: (target, property) =>
+			typeof property === "symbol" ? Reflect.get(target, property) : unusable(),
+	});
+	return Layer.mergeAll(
+		Layer.succeed(PgClient.PgClient, client as unknown as PgClient.PgClient),
+		Layer.succeed(SqlClient.SqlClient, client as unknown as SqlClient.SqlClient),
+	);
+})();

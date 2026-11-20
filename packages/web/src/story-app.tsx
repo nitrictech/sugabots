@@ -3,7 +3,6 @@ import type {
 	ChatMessageItem,
 	ConversationActivity,
 	ConversationDetails,
-	DirectMessageListItem,
 	ListedThread,
 	Message,
 	ModelProvider,
@@ -66,11 +65,6 @@ export const storyBots: Bot[] = [...fixtureBots];
 /** The bots added to each project, by the project's id. */
 const botsInProject = new Map(projectsWithBots.map(({ project, bots }) => [project.id, bots]));
 
-/** The id of a bot's default project in the stories, where its threads are. */
-function storyDefaultProjectOf(bot: Bot): string {
-	return `0199a3a0-0000-7000-8000-00000000d${bot.id.slice(-3)}`;
-}
-
 /** One thread per bot, by the bot's id. */
 export function storyThreadFor(bot: Bot): ProjectThread {
 	const suffix = bot.id.slice(-4);
@@ -78,7 +72,7 @@ export function storyThreadFor(bot: Bot): ProjectThread {
 		kind: "project_thread",
 		id: `0199a3a0-0000-7000-8000-00000000c${suffix.slice(1)}`,
 		workspaceId: bot.workspaceId,
-		projectId: storyDefaultProjectOf(bot),
+		projectId: bot.defaultProjectId,
 		botId: bot.id,
 		title: `Working with ${bot.name}`,
 		archivedAt: null,
@@ -108,6 +102,7 @@ export function storyListedThread(thread: ProjectThread): ListedThread {
 		unreadMessages: 0,
 		needsApproval: false,
 		mentionsYou: false,
+		activity: null,
 	};
 }
 
@@ -190,7 +185,7 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): Conversati
 		conversation: {
 			id: chat.id,
 			workspaceId: bot.workspaceId,
-			projectId: storyDefaultProjectOf(bot),
+			projectId: chat.projectId,
 			botId: bot.id,
 			rootConversationId: chat.id,
 			kind: "project_thread",
@@ -206,7 +201,8 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): Conversati
 		automationRun: null,
 		participants: [person, participant],
 		projectBots: [participant],
-		members: [],
+		// The bot is public, so everyone reaches its default project; the viewer stands for them.
+		peopleReachingProject: [person],
 		olderMessagesCursor: null,
 		queuedSince: null,
 		reads: [],
@@ -268,7 +264,7 @@ export function storyProjectThreadDetails(
 				face: bot.face,
 				shape: bot.shape,
 			})),
-		members: [person],
+		peopleReachingProject: [person],
 		olderMessagesCursor: null,
 		queuedSince: null,
 		reads: [],
@@ -309,12 +305,6 @@ interface StoryAppData {
 	referralLink?: string;
 	/** What the person chose to be notified about; nothing chosen when absent. */
 	notifications?: NotificationSettings;
-	/** The viewer's direct messages, most recent first; none when absent. */
-	directMessages?: DirectMessageListItem[];
-	/** Messages in each direct message, by its conversation's id. */
-	directMessageMessages?: Record<string, Message[]>;
-	/** Everybody in the workspace besides the viewer. */
-	otherMembers?: SessionUser[];
 }
 
 const noNotificationChoices: NotificationSettings = {
@@ -341,21 +331,8 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		bots.find((bot) => storyThreadFor(bot).id === conversationId);
 	const projectForChat = (conversationId: string) =>
 		projects.find((project) => storyProjectThreadFor(project).id === conversationId);
-	const directMessages = data.directMessages ?? [];
-	// A copy, so what a story sends stays in that story.
-	const directMessageMessages = { ...data.directMessageMessages };
-	const directMessageOf = (conversationId: string) =>
-		directMessages.find((item) => item.conversation.id === conversationId);
 
 	return [
-		...directMessageHandlers(directMessages, directMessageMessages),
-		http.get(api("/conversations/:conversationId"), ({ params }) => {
-			const item = directMessageOf(String(params.conversationId));
-			if (!item) return undefined;
-			return HttpResponse.json(
-				storyDirectMessageDetails(item, directMessageMessages[item.conversation.id]),
-			);
-		}),
 		http.get(api("/workspaces"), () => HttpResponse.json([storyWorkspace])),
 		http.get(api("/workspaces/:workspace/members"), () =>
 			HttpResponse.json([
@@ -365,12 +342,6 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 					user: storyUser,
 					joinedAt: "2026-09-01T00:00:00.000Z",
 				},
-				...(data.otherMembers ?? []).map((user, index) => ({
-					id: `0199a3a0-0000-7000-8000-0000000000e${index}`,
-					role: "member",
-					user,
-					joinedAt: "2026-09-02T00:00:00.000Z",
-				})),
 			]),
 		),
 		http.get(api("/workspaces/:workspace/invitations"), () => HttpResponse.json([])),
@@ -415,9 +386,6 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				waitingApprovals: 0,
 				unreadForYou: 0,
 			}),
-		),
-		http.get(api("/workspaces/:workspace/chats/recent-threads"), () =>
-			HttpResponse.json({ threads: [] }),
 		),
 		http.post(
 			api("/conversations/:conversationId/read"),
@@ -483,9 +451,13 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			return HttpResponse.json(bots.filter((bot) => inProject.some((one) => one.id === bot.id)));
 		}),
 		http.get(api("/projects/:projectId/connections"), () => HttpResponse.json([])),
-		// No computers in the example workspace, so the bot's Computer section stays hidden.
+		// No computers in the example workspace.
 		http.get(api("/projects/:projectId/computer"), () =>
 			HttpResponse.json({ computer: { kind: "none" }, providerEnabled: false, canManage: false }),
+		),
+		// The viewer alone reaches each project, as its members list answers.
+		http.get(api("/projects/:projectId/people"), () =>
+			HttpResponse.json([testPerson({ id: storyUser.id, name: storyUser.name })]),
 		),
 		http.get(api("/projects/:projectId/members"), () =>
 			HttpResponse.json([
@@ -516,116 +488,21 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 }
 
 /**
- * The API's answers about the viewer's direct messages: the list of them,
- * each one, sending to people they have one with, and the messages in each.
- */
-function directMessageHandlers(
-	items: readonly DirectMessageListItem[],
-	messages: Record<string, Message[]>,
-): RequestHandler[] {
-	/** Keeps `content`, the viewer's, as the newest message in the direct message `id`. */
-	const post = (id: string, messageId: string, content: string): Message => {
-		const sent: Message = {
-			id: messageId,
-			conversationId: id,
-			author: testPerson({ id: storyUser.id, name: storyUser.name, email: storyUser.email }),
-			kind: "text",
-			status: "complete",
-			parts: [{ type: "text", text: content }],
-			content,
-			createdAt: new Date().toISOString(),
-		};
-		messages[id] = [...(messages[id] ?? []), sent];
-		return sent;
-	};
-	return [
-		http.get(api("/workspaces/:workspace/direct-messages"), () => HttpResponse.json({ items })),
-		http.get(api("/direct-messages/:conversationId"), ({ params }) => {
-			const found = items.find((item) => item.conversation.id === params.conversationId);
-			return found ? HttpResponse.json(found) : new HttpResponse(null, { status: 404 });
-		}),
-		// Only to people the viewer already has one with: the stories make no new ones.
-		http.post(api("/workspaces/:workspace/direct-messages"), async ({ request }) => {
-			const body = (await request.json()) as { userIds: string[]; id: string; message: string };
-			const wanted = new Set(body.userIds);
-			const found = items.find(
-				(item) =>
-					item.formerMembers === 0 &&
-					item.people.length === wanted.size &&
-					item.people.every((person) => wanted.has(person.id)),
-			);
-			if (!found) return new HttpResponse(null, { status: 404 });
-			const message = post(found.conversation.id, body.id, body.message);
-			return HttpResponse.json({ conversation: found.conversation, message }, { status: 201 });
-		}),
-		http.post(api("/conversations/:conversationId/messages"), async ({ params, request }) => {
-			const id = String(params.conversationId);
-			if (!items.some((item) => item.conversation.id === id)) return undefined;
-			const body = (await request.json()) as { id: string; message: string };
-			return HttpResponse.json(post(id, body.id, body.message), { status: 201 });
-		}),
-		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
-			const id = String(params.conversationId);
-			if (!items.some((item) => item.conversation.id === id)) return undefined;
-			return HttpResponse.json({
-				items: (messages[id] ?? []).map(
-					(message): ChatMessageItem => ({ kind: "message", message }),
-				),
-				nextCursor: null,
-			});
-		}),
-	];
-}
-
-/** What a direct message holds: its messages, and the viewer and whom it is with. */
-function storyDirectMessageDetails(
-	item: DirectMessageListItem,
-	messages: Message[] = [],
-): ConversationDetails {
-	const viewer = testPerson({ id: storyUser.id, name: storyUser.name });
-	const people = [viewer, ...item.people];
-	const { conversation } = item;
-	return {
-		conversation: {
-			id: conversation.id,
-			workspaceId: conversation.workspaceId,
-			projectId: null,
-			botId: null,
-			rootConversationId: conversation.id,
-			kind: conversation.kind,
-			title: conversation.title,
-			status: "done",
-			parentConversationId: null,
-			startedById: storyUser.id,
-			doneAt: null,
-			createdAt: conversation.createdAt,
-			updatedAt: conversation.updatedAt,
-		},
-		capabilities: { approveToolCalls: true },
-		automationRun: null,
-		participants: people,
-		projectBots: [],
-		members: people,
-		olderMessagesCursor: null,
-		queuedSince: null,
-		reads: [],
-		messages,
-	};
-}
-
-/**
  * Answers a bot's connection reads from `connections` in full: the list with
  * counts, and one connection with its tools. Put them before `appHandlers`,
  * whose own answer is no connections.
  */
 export function connectionHandlers(connections: readonly TestConnection[]): RequestHandler[] {
-	const byId = (connectionId: unknown) => connections.find((one) => one.id === connectionId);
 	return [
-		http.get(api("/projects/:projectId/connections"), () =>
-			HttpResponse.json(connections.map(listedConnection)),
+		http.get(api("/projects/:projectId/connections"), ({ params }) =>
+			HttpResponse.json(
+				connections.filter((one) => one.projectId === params.projectId).map(listedConnection),
+			),
 		),
 		http.get(api("/projects/:projectId/connections/:connectionId"), ({ params }) => {
-			const found = byId(params.connectionId);
+			const found = connections.find(
+				(one) => one.projectId === params.projectId && one.id === params.connectionId,
+			);
 			return found
 				? HttpResponse.json(connectionWithTools(found))
 				: new HttpResponse(null, { status: 404 });

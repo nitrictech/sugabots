@@ -7,8 +7,8 @@ import { revenue } from "@/shell/story-fixtures.ts";
 import { appHandlers, connectionHandlers, StoryApp, storyProjects } from "../story-app.tsx";
 
 /*
- * One connection on its own page under its bot: who connected it and what keeps
- * it working, a setting for each kind of tool, any tool set apart, and Disconnect.
+ * One connection on its own page under its project: who connected it and what
+ * keeps it working, a setting for each kind of tool, any tool set apart, and Disconnect.
  */
 
 const API = import.meta.env.VITE_API_URL as string;
@@ -32,7 +32,7 @@ function connection(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000009${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		projectId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: revenue.id,
 		kind: "mcp",
 		auth: "header",
 		signedIn: true,
@@ -155,7 +155,7 @@ const posthog = connection(5, {
 	})),
 });
 
-/** The bot's own GitHub App's connection: installed on acme, then waiting on its install. */
+/** The project's own GitHub app's connection: installed on acme, then waiting on its install. */
 const gitHubApp = connection(6, {
 	name: "GitHub",
 	handle: "github-app",
@@ -484,7 +484,7 @@ export const LoadingTools = meta.story({
 	},
 });
 
-/** A member who may not manage the bot's connections: everything shown, nothing to change. */
+/** A member who may not manage the project's connections: everything shown, nothing to change. */
 export const Member = meta.story({
 	beforeEach({ msw }) {
 		msw.use(

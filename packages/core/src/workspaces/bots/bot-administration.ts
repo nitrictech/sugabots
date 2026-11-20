@@ -14,7 +14,7 @@ import type * as schema from "../../database/schema.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { type LeadsProjects, refuseWhileLeading } from "../projects/project-leads.ts";
+import type { LeadsProjects } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
 import { personFacingBot, systemBots, visiblePersonFacingBots } from "./bot-reads.ts";
 import { BotRepository } from "./bot-repository.ts";
@@ -86,7 +86,11 @@ export interface Interface {
 		botId: string;
 	}) => Effect.Effect<
 		void,
-		AuthorizationDenied | BotRepository.SystemBotImmutable | LeadsProjects | Computers.Unavailable,
+		| AuthorizationDenied
+		| BotRepository.SystemBotImmutable
+		| LeadsProjects
+		| Computers.Unavailable
+		| ProjectComputers.ComputerMadeMeanwhile,
 		CurrentActor.Service
 	>;
 	readonly systemBots: (input: {
@@ -203,7 +207,10 @@ export const make = Effect.gen(function* () {
 					if (changes.model != null) {
 						yield* modelProviders.requireEnabled(bot.workspaceId, changes.model);
 					}
-					return yield* shown(yield* bots.update(bot.workspaceId, bot.id, changes), actor);
+					return yield* shown(
+						yield* bots.update(bot.workspaceId, bot.id, changes, actor.userId),
+						actor,
+					);
 				}),
 			),
 
@@ -211,16 +218,18 @@ export const make = Effect.gen(function* () {
 			operation(
 				"remove",
 				Effect.gen(function* () {
-					const { bot } = yield* authorization.bot(botId, "bot.delete");
-					// Checked again as it is deleted; here so its computer is kept when it is refused.
-					yield* refuseWhileLeading(bot.id);
+					const { bot, actor } = yield* authorization.bot(botId, "bot.delete");
 					// Deleting the bot deletes its default project and so its computer's
-					// record, so its machine goes first.
-					yield* projectComputers.destroy({
-						workspaceId: bot.workspaceId,
-						projectId: yield* defaultProjectOf(bot.id),
+					// record, so its machine goes first, once the bot is free to delete; a
+					// computer recorded meanwhile still keeps the bot, to try again.
+					const destroyComputer = Effect.flatMap(defaultProjectOf(bot.id), (projectId) => {
+						const defaultProject = { workspaceId: bot.workspaceId, projectId };
+						return Effect.andThen(
+							projectComputers.destroy(defaultProject),
+							ProjectComputers.lockWithoutComputer(defaultProject),
+						);
 					});
-					yield* bots.remove(bot.workspaceId, bot.id);
+					yield* bots.remove(bot.workspaceId, bot.id, actor.userId, destroyComputer);
 				}),
 			),
 

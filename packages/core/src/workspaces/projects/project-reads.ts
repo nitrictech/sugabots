@@ -1,6 +1,12 @@
-import { ADMINISTERING_WORKSPACE_ROLES, type ProjectMember } from "@sugabots/contracts";
+import {
+	ADMINISTERING_WORKSPACE_ROLES,
+	type PersonParticipant,
+	type ProjectMember,
+} from "@sugabots/contracts";
 import { and, asc, count, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { Effect } from "effect";
+import { peopleReachingProject } from "../../authorization/access.ts";
+import { personColumns, toPerson } from "../../conversations/repository/participants.ts";
 import { query } from "../../database/database.ts";
 import {
 	bot,
@@ -34,6 +40,18 @@ export const projectMembers = (projectId: string) =>
 			.where(eq(projectMember.projectId, projectId))
 			.orderBy(asc(user.name)),
 	).pipe(Effect.map((rows): ProjectMember[] => rows));
+
+/** The people who reach the project (see `peopleReachingProject`), by name. */
+export const peopleReachingProjectNamed = (projectId: string) =>
+	query((db) =>
+		db.query.user.findMany({
+			...personColumns,
+			where: {
+				RAW: (person) => sql`${person.id} in (${peopleReachingProject(sql`${projectId}`)})`,
+			},
+			orderBy: { name: "asc" },
+		}),
+	).pipe(Effect.map((people): PersonParticipant[] => people.map(toPerson)));
 
 /**
  * How many people and bots are in each of the projects `projectIds`, counted

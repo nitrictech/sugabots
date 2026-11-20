@@ -6,15 +6,13 @@ import type {
 	SessionUser,
 } from "@sugabots/contracts";
 import { useLocation } from "@tanstack/react-router";
-import { useBot } from "@/lib/bots.ts";
-import { placeBot } from "@/lib/chats.ts";
+import { type ConversationPlace, placeBot } from "@/lib/chats.ts";
 import { conversationFileUrl } from "@/lib/conversation-files.ts";
-import { resourcePermissions } from "@/lib/resource-owner.tsx";
+import { resourcePermissions, useLeadBot } from "@/lib/resource-owner.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { AutomationPanel } from "./AutomationPanel.tsx";
 import { AutomationsStage, type AutomationsView } from "./AutomationsStage.tsx";
 import type { ChatPlace } from "./ChatHeader.tsx";
-import { type AnyConversationPlace, conversationOwner } from "./conversation-place.ts";
 import { DesktopStage } from "./DesktopViewer.tsx";
 import { type ConversationContents, DetailsSidebar, ProjectDetails } from "./DetailsSidebar.tsx";
 import { FileStage } from "./Files.tsx";
@@ -26,10 +24,10 @@ import type { Staged, StagedChange } from "./staged.ts";
 /**
  * What is open beside a chat, one at a time: what is staged large, else the
  * collaboration open, else, on the chat's own page, its Details while they
- * are open. Nothing opens beside a direct message.
+ * are open.
  */
 export function ChatBeside({
-	conversationPlace,
+	conversationPlace: owner,
 	details,
 	conversationId,
 	user,
@@ -46,7 +44,7 @@ export function ChatBeside({
 	projectThreadName,
 	projectThreadToChange,
 }: {
-	conversationPlace: AnyConversationPlace;
+	conversationPlace: ConversationPlace;
 	details: ConversationDetails;
 	conversationId: string;
 	user: SessionUser;
@@ -70,13 +68,10 @@ export function ChatBeside({
 }) {
 	const { leaveFor } = useLeave();
 	const { pathname } = useLocation();
-	const owner = conversationOwner(conversationPlace);
-	const bot = placeBot(conversationPlace);
-	// A project's lead bot, which works on the project's computer in its threads.
-	const lead = useBot(conversationPlace.project?.leadBotId);
+	const bot = placeBot(owner);
+	const lead = useLeadBot(owner);
 	const closeStage = () => onStagedChange(undefined);
 
-	if (!owner) return null;
 	if (staged?.kind === "file") {
 		return (
 			<FileStage
@@ -96,13 +91,12 @@ export function ChatBeside({
 			/>
 		);
 	}
-	const worker = bot ?? lead;
-	if (staged?.kind === "desktop" && worker) {
+	if (staged?.kind === "desktop" && lead) {
 		return (
 			<DesktopStage
 				conversationId={details.conversation.id}
 				owner={owner}
-				bot={worker}
+				bot={lead}
 				mayUse={resourcePermissions(owner).useDesktop}
 				onClose={closeStage}
 			/>
@@ -159,8 +153,8 @@ export function ChatBeside({
 			<ProjectDetails
 				project={owner.project}
 				name={projectThreadName}
-				people={details.members.length}
-				bots={details.projectBots.filter((member) => member.kind === "bot").length}
+				people={details.peopleReachingProject.length}
+				bots={details.projectBots.length}
 				toChange={projectThreadToChange}
 				user={user}
 				contents={contents}

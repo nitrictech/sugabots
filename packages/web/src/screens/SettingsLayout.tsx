@@ -1,15 +1,7 @@
 import { useRender } from "@base-ui/react/use-render";
-import type { Bot, Project } from "@sugabots/contracts";
-import {
-	type HistoryState,
-	Link,
-	Navigate,
-	useLocation,
-	useMatch,
-	useNavigate,
-} from "@tanstack/react-router";
+import { type HistoryState, Link, Navigate, useLocation, useMatch } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, Plus, X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import {
 	cloneElement,
 	Fragment,
@@ -19,32 +11,25 @@ import {
 	useEffect,
 	useId,
 	useRef,
-	useState,
 } from "react";
-import { findBot, useBots } from "@/lib/bots.ts";
-import { botSettingsLink, projectSettingsLink, projectSettingsPageLink } from "@/lib/links.ts";
+import { useBots } from "@/lib/bots.ts";
+import { botSettingsLink, projectSettingsLink } from "@/lib/links.ts";
 import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { useModelProviders } from "@/lib/model-providers.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
-import { findProject, useProjectBots, useProjectMembers, useProjects } from "@/lib/projects.ts";
+import { useProjects } from "@/lib/projects.ts";
 import { useSession } from "@/lib/session.ts";
 import { useBackTarget, useSettingsBack } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
 import {
-	botSettingsPage,
-	botSettingsPages,
-	projectSettingsPage,
-	projectSettingsPages,
 	type SettingSection,
 	workspaceSettingSection,
 	workspaceSettingSections,
 	yourSettingSections,
 } from "@/lib/workspace-settings.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { NewProjectDialog } from "@/shell/NewProject.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
-import { Dialog } from "@/ui/dialog.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import {
@@ -57,9 +42,10 @@ import {
 } from "@/ui/settings-page.tsx";
 
 /**
- * Settings, from a tablet up as a dialog over the dimmed app: the workspace's
- * sections, each project's pages and each bot down the left, the open page
- * beside them under a trail of where it sits. Below a laptop's width there is no room for both, so
+ * Settings, from a tablet up as a dialog over the dimmed app: your own and the
+ * workspace's sections down the left, the open page beside them under a trail
+ * of where it sits. A bot's and a project's settings are its own pages, beside
+ * its threads. Below a laptop's width there is no room for both, so
  * settings drill down as a phone's do: the sections as one list, and each
  * opening with a way back to it.
  *
@@ -187,22 +173,8 @@ const settingsList: BackTarget = {
 
 /** The page `pathname` sits under, for its Back when nothing says where you came from. */
 function parentPage(pathname: string): BackTarget {
-	const [, sectionId, item, page] = pathname.split("/").filter(Boolean);
-	// One of a bot's own pages goes back to the bot.
-	if (sectionId === "bots" && item !== undefined && page !== undefined) {
-		return {
-			label: "Bot",
-			render: <Link {...botSettingsLink({ handle: item })} />,
-		};
-	}
-	if (sectionId === "projects" && item !== undefined && page !== undefined) {
-		return {
-			label: "Project",
-			render: <Link {...projectSettingsLink({ slug: item })} />,
-		};
-	}
-	// A project's own page is one of the navigation's, so it sits under the list itself.
-	if (sectionId !== undefined && sectionId !== "projects" && item !== undefined) {
+	const [, sectionId, item] = pathname.split("/").filter(Boolean);
+	if (sectionId !== undefined && item !== undefined) {
 		const section = workspaceSettingSection(sectionId);
 		if (section) {
 			return {
@@ -251,7 +223,7 @@ function useWorkspaceSections() {
 	return { sections, counts };
 }
 
-/** The projects you are in and the bots you reach, as the navigation lists them. */
+/** The projects you are in and the bots you reach, as a phone's list of settings has them. */
 function useListed() {
 	const { data: projects } = useProjects();
 	const { bots } = useBots();
@@ -266,8 +238,6 @@ const NAVIGATION_MAX_WIDTH = "33vw";
 
 function SettingsNavigation() {
 	const { sections, counts } = useWorkspaceSections();
-	const { projects, bots } = useListed();
-	const may = useWorkspacePermissions();
 	const session = useSession();
 	const pathname = useSettingsPath();
 	const navigation = useRef<HTMLElement>(null);
@@ -314,34 +284,12 @@ function SettingsNavigation() {
 						/>
 					))}
 				</NavigationGroup>
-				{(projects.length > 0 || may.createProjects) && (
-					<NavigationGroup label="Projects" action={may.createProjects && <NewProjectButton />}>
-						{projects.map((project) => (
-							<ProjectNavigation key={project.id} project={project} pathname={pathname} />
-						))}
-					</NavigationGroup>
-				)}
-				{bots.length > 0 && (
-					<NavigationGroup label="Bots">
-						{bots.map((bot) => (
-							<BotNavigation key={bot.id} bot={bot} pathname={pathname} />
-						))}
-					</NavigationGroup>
-				)}
 			</div>
 		</nav>
 	);
 }
 
-function NavigationGroup({
-	label,
-	action,
-	children,
-}: {
-	label: string;
-	action?: ReactNode;
-	children: ReactNode;
-}) {
+function NavigationGroup({ label, children }: { label: string; children: ReactNode }) {
 	const headingId = useId();
 	return (
 		// Named by its heading, so the General under You is told apart from the workspace's.
@@ -352,17 +300,13 @@ function NavigationGroup({
 				<h2 id={headingId} className="m-0 flex-1 font-medium text-subtle-foreground text-xs">
 					{label}
 				</h2>
-				{action}
 			</div>
 			{children}
 		</div>
 	);
 }
 
-/**
- * What sits at a line's right: a count, a project's chevron, the + beside Projects.
- * One width for all, centred in it, so they line up down the navigation.
- */
+/** What sits at a line's right: a count. One width for all, centred in it, so they line up down the navigation. */
 const TRAILING_SLOT = "grid w-5.5 shrink-0 place-items-center";
 
 /** One line of the navigation, picked out when it is the open page. */
@@ -391,160 +335,6 @@ function NavigationItemContent({ label, count }: { label: string; count?: number
 	);
 }
 
-/** A bot in the navigation, picked out while one of its pages is open. */
-function BotNavigation({ bot, pathname }: { bot: Bot; pathname: string }) {
-	const [, section, handle] = pathname.split("/").filter(Boolean);
-	const selected = section === "bots" && handle === bot.handle;
-	return (
-		<Link
-			{...botSettingsLink(bot)}
-			aria-current={selected ? "page" : undefined}
-			className={cn(NAVIGATION_ITEM, "gap-2.5", navigationItemState(selected))}
-		>
-			<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
-			<NavigationItemContent label={bot.name} />
-		</Link>
-	);
-}
-
-/**
- * A project in the navigation, opening onto its pages. The project you are
- * on stays open; the others open and close as you choose.
- */
-function ProjectNavigation({ project, pathname }: { project: Project; pathname: string }) {
-	const openPage = projectPageAt(pathname, project);
-	const [chosenOpen, setChosenOpen] = useRememberedOpen(project.id);
-	// Opened or closed as last chosen on this device; until then, open while you are on one of its pages.
-	const open = chosenOpen ?? openPage !== undefined;
-	const counts = useProjectCounts(project, open);
-	const listId = `settings-project-${project.id}`;
-	return (
-		<div className="flex flex-col gap-px">
-			<button
-				type="button"
-				aria-expanded={open}
-				aria-controls={listId}
-				onClick={() => setChosenOpen(!open)}
-				className={cn(
-					"focus-ring flex h-8 items-center gap-2.5 rounded-sm pr-1.5 pl-2 text-left text-sm transition-colors hover:bg-row-hover hover:text-foreground",
-					openPage ? "text-foreground" : "text-muted-foreground",
-				)}
-			>
-				<ProjectInitial project={project} size="sm" />
-				<span className="min-w-0 flex-1 truncate">{project.name}</span>
-				<span aria-hidden className={TRAILING_SLOT}>
-					<ChevronRight
-						size={12}
-						strokeWidth={2}
-						className={cn("text-subtle-foreground transition-transform", open && "rotate-90")}
-					/>
-				</span>
-			</button>
-			{open && (
-				<div
-					id={listId}
-					className="mb-1 ml-4 flex flex-col gap-px border-border-strong border-l pl-2"
-				>
-					{projectSettingsPages.map((page) => {
-						const selected = openPage === page.id;
-						const className = cn(NAVIGATION_ITEM, navigationItemState(selected));
-						const count = counts[page.id];
-						const current = selected ? "page" : undefined;
-						const label = count === undefined ? undefined : `${page.label}, ${count}`;
-						return (
-							<Link
-								key={page.id}
-								{...projectSettingsPageLink(project, page.id)}
-								aria-label={label}
-								aria-current={current}
-								className={className}
-							>
-								<NavigationItemContent label={page.label} count={count} />
-							</Link>
-						);
-					})}
-				</div>
-			)}
-		</div>
-	);
-}
-
-const OPEN_PROJECTS_KEY = "sugabots-settings-open-projects";
-
-/**
- * Whether `projectId` was last opened or closed in the navigation on this device,
- * and the way to choose: undefined until somebody does. Kept in the browser,
- * like a pane's width, so it survives leaving settings and reloading.
- */
-function useRememberedOpen(projectId: string): [boolean | undefined, (open: boolean) => void] {
-	const [chosen, setChosen] = useState(() => storedOpenProjects()[projectId]);
-	const choose = (open: boolean) => {
-		setChosen(open);
-		try {
-			localStorage.setItem(
-				OPEN_PROJECTS_KEY,
-				JSON.stringify({ ...storedOpenProjects(), [projectId]: open }),
-			);
-		} catch {
-			// Storage can be off. The choice still holds until the page is left.
-		}
-	};
-	return [chosen, choose];
-}
-
-function storedOpenProjects(): Record<string, boolean> {
-	try {
-		const stored: unknown = JSON.parse(localStorage.getItem(OPEN_PROJECTS_KEY) ?? "{}");
-		if (typeof stored !== "object" || stored === null) return {};
-		return Object.fromEntries(
-			Object.entries(stored).filter(
-				(entry): entry is [string, boolean] => typeof entry[1] === "boolean",
-			),
-		);
-	} catch {
-		return {};
-	}
-}
-
-/** What each of a project's pages holds, counted once the project is open in the navigation. */
-function useProjectCounts(project: Project, open: boolean): Partial<Record<string, number>> {
-	const members = useProjectMembers(open ? project.id : undefined);
-	const bots = useProjectBots(open ? project.id : undefined);
-	return {
-		people: members.data?.length || undefined,
-		bots: bots.data?.length || undefined,
-	};
-}
-
-/** Makes a project and opens its settings: the + beside Projects in the navigation. */
-function NewProjectButton() {
-	const navigate = useNavigate();
-	const [creating, setCreating] = useState(false);
-	return (
-		<>
-			<IconButton
-				label="New project"
-				size="sm"
-				onClick={() => setCreating(true)}
-				className={cn(
-					TRAILING_SLOT,
-					"h-5.5 rounded-xs text-subtle-foreground hover:bg-row-hover [&_svg]:size-3.25",
-				)}
-			>
-				<Plus strokeWidth={2} />
-			</IconButton>
-			<Dialog open={creating} onOpenChange={setCreating}>
-				<NewProjectDialog
-					onCreated={async (project) => {
-						setCreating(false);
-						await navigate(projectSettingsLink(project));
-					}}
-				/>
-			</Dialog>
-		</>
-	);
-}
-
 /**
  * Settings on a tablet: one list, as a phone's own settings are, with you at
  * the top and every section a row that opens it full screen. The sidebar
@@ -565,7 +355,8 @@ function CompactSettingsList() {
 /**
  * The groups of the list of settings: you, the workspace's sections, its
  * projects and its bots. A phone's You tab lists them too, with `linkState`
- * saying where each page's Back returns.
+ * saying where your and the workspace's pages' Back returns; a project's and
+ * a bot's settings are their own pages, with Back of their own.
  */
 export function SettingsListGroups({
 	linkState,
@@ -629,7 +420,7 @@ export function SettingsListGroups({
 							icon={<ProjectInitial project={project} size="sm" />}
 							label={project.name}
 							chevron
-							render={<Link {...projectSettingsLink(project)} state={linkState} />}
+							render={<Link {...projectSettingsLink(project)} />}
 						/>
 					))}
 				</SettingsGroup>
@@ -642,7 +433,7 @@ export function SettingsListGroups({
 							icon={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={20} />}
 							label={bot.name}
 							chevron
-							render={<Link {...botSettingsLink(bot)} state={linkState} />}
+							render={<Link {...botSettingsLink(bot)} />}
 						/>
 					))}
 				</SettingsGroup>
@@ -725,23 +516,13 @@ function sectionCrumb(id: SettingSection["id"]): Crumb {
 /** The trail to the open page, read from its address. */
 function useSettingsCrumbs(): Crumb[] {
 	const pathname = useSettingsPath();
-	const { data: projects } = useProjects();
-	const { bots } = useBots();
-	const [, sectionId, item, page] = pathname.split("/").filter(Boolean);
+	const [, sectionId, item] = pathname.split("/").filter(Boolean);
 	if (sectionId === undefined || sectionId === "general") {
 		return [workspaceCrumb, { label: "General" }];
 	}
 	const yours = yourSettingSections.find((section) => section.id === sectionId);
 	if (yours) {
 		return [{ label: "Your settings" }, { label: yours.label }];
-	}
-	if (sectionId === "projects" && item !== undefined) {
-		const project = findProject(projects, item);
-		return project ? projectCrumbs(project, page) : [];
-	}
-	if (sectionId === "bots" && item !== undefined) {
-		const bot = findBot(bots, item);
-		return bot ? botCrumbs(bot, page) : [];
 	}
 	if (item === undefined) {
 		return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
@@ -753,32 +534,6 @@ function useSettingsCrumbs(): Crumb[] {
 		return [workspaceCrumb, sectionCrumb("providers"), { label: <ProviderPageName id={item} /> }];
 	}
 	return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
-}
-
-/** A project's part of the trail: its settings, then the page. */
-function projectCrumbs(project: Project, page: string | undefined): Crumb[] {
-	const projectCrumb = {
-		label: `${project.name} settings`,
-		link: <Link {...projectSettingsLink(project)} />,
-	};
-	const label = projectSettingsPages.find((one) => one.id === (page ?? "general"))?.label;
-	return [projectCrumb, { label: label ?? page }];
-}
-
-/** A bot's part of the trail: its settings, then the page. */
-function botCrumbs(bot: Bot, page: string | undefined): Crumb[] {
-	const trail: Crumb[] = [
-		workspaceCrumb,
-		sectionCrumb("bots"),
-		{
-			label: bot.name,
-			link: page === undefined ? undefined : <Link {...botSettingsLink(bot)} />,
-		},
-	];
-	const shown = botSettingsPage(page ?? "");
-	if (!shown || shown === "general") return trail;
-	const pageLabel = botSettingsPages.find((one) => one.id === shown)?.label ?? shown;
-	return [...trail, { label: pageLabel }];
 }
 
 function MemberName({ membershipId }: { membershipId: string }) {
@@ -799,14 +554,6 @@ function ProviderPageName({ id }: { id: string }) {
 function useSettingsPath(): string {
 	const workspacePath = useMatch({ from: "/$workspace", select: (match) => match.pathname });
 	return useLocation({ select: (location) => location.pathname.slice(workspacePath.length) });
-}
-
-/** Which of `project`'s pages the address is on. */
-function projectPageAt(pathname: string, project: Project) {
-	const [, section, slug, page] = pathname.split("/").filter(Boolean);
-	if (section !== "projects" || slug !== project.slug) return undefined;
-	if (page === undefined) return "general";
-	return projectSettingsPage(page);
 }
 
 /** `/settings` is General, so it matches itself alone; the rest stay selected while you are inside one of their pages. */

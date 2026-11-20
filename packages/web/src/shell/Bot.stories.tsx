@@ -54,7 +54,7 @@ export const Bubbles = meta.story({
 				<div key={color} style={botColorVariables(color)} className="flex items-end gap-2 text-sm">
 					<BotAvatar color={color} face="pill" shape="circle" size={34} />
 					<p
-						className="m-0 rounded-bubble rounded-bl-tail bg-bot-tint text-bot-text"
+						className="m-0 rounded-bubble bg-bot-tint text-bot-text"
 						style={{ padding: "9px 15px" }}
 					>
 						Filed it as <span className="font-mono text-bot-mono text-xs">PLAT-482</span> for{" "}

@@ -9,7 +9,7 @@ import {
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
 import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
-import { conversation, toolCall, turn } from "../../database/schema.ts";
+import { toolCall, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { decidersOf } from "../tools/approval-deciders.ts";
@@ -76,14 +76,13 @@ export const makeControls = Effect.gen(function* () {
 							db
 								.select({
 									call: toolCall,
-									conversationId: conversation.id,
+									conversationId: toolCall.conversationId,
 									botId: turn.botId,
 									owner: turn.owner,
 									turn: { status: turn.status, cancelRequested: turn.cancelRequested },
 								})
 								.from(toolCall)
 								.innerJoin(turn, eq(turn.id, toolCall.turnId))
-								.innerJoin(conversation, eq(conversation.id, toolCall.conversationId))
 								.where(eq(toolCall.id, input.toolCallId))
 								.limit(1)
 								// The call alone: the turn is locked by whoever transitions it.
@@ -110,8 +109,12 @@ export const makeControls = Effect.gen(function* () {
 										),
 									)
 								: undefined;
-						const forAutomation = yield* admission.forAutomation(candidate.conversationId);
-						if (!mayDecideToolCall(reached, computerProject, forAutomation, deciders)) {
+						// Only the conversation's people decide differently while an automation runs.
+						const forAutomation =
+							deciders === "conversation"
+								? yield* admission.forAutomation(candidate.conversationId)
+								: false;
+						if (!mayDecideToolCall(reached.standing, computerProject, forAutomation, deciders)) {
 							return yield* new ToolApprovalForbidden();
 						}
 						const approvalId = candidate.call.approvalId;

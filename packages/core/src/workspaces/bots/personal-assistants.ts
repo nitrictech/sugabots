@@ -54,9 +54,12 @@ export const make = Effect.gen(function* () {
 			});
 		});
 
-	/** Moves `assistant` onto `model`. Only its model changes, so none of `update`'s refusals can happen. */
-	const moveOnto = (workspaceId: string, assistant: PersonFacingBotRow, model: string) =>
-		bots.update(workspaceId, assistant.id, { model }).pipe(Effect.orDie);
+	/** Moves `userId`'s `assistant` onto `model`. Only its model changes, so none of `update`'s refusals can happen. */
+	const moveOnto = (
+		person: { workspaceId: string; userId: string },
+		assistant: PersonFacingBotRow,
+		model: string,
+	) => bots.update(person.workspaceId, assistant.id, { model }, person.userId).pipe(Effect.orDie);
 
 	return Service.of({
 		provision: ({ workspaceId, userId }) =>
@@ -67,7 +70,9 @@ export const make = Effect.gen(function* () {
 						const assistant = yield* provision(workspaceId, userId);
 						if (assistant.model !== null) return assistant;
 						const model = yield* modelProviders.defaultModel(workspaceId);
-						return model === undefined ? assistant : yield* moveOnto(workspaceId, assistant, model);
+						return model === undefined
+							? assistant
+							: yield* moveOnto({ workspaceId, userId }, assistant, model);
 					}),
 				),
 			),
@@ -82,7 +87,7 @@ export const make = Effect.gen(function* () {
 						}
 						const assistant = yield* provision(workspaceId, userId, model);
 						if (yield* isOffered(workspaceId, assistant.model)) return assistant;
-						return yield* moveOnto(workspaceId, assistant, model);
+						return yield* moveOnto({ workspaceId, userId }, assistant, model);
 					}),
 				),
 			),

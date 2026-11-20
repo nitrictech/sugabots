@@ -4,7 +4,7 @@ import { ChevronLeft, SquarePen } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useModels } from "@/lib/bots.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
-import { ownerPages, ownerProblems } from "@/lib/owner-pages.ts";
+import { type OwnerPageName, ownerPages, ownerProblems } from "@/lib/owner-pages.ts";
 import { ownerLink, ownerName, type ResourceOwner, useLeadBot } from "@/lib/resource-owner.tsx";
 import { OwnerWork, useOwnerWork } from "@/shell/OwnerWork.tsx";
 import { ProblemMark } from "@/ui/attention-dot.tsx";
@@ -13,7 +13,7 @@ import { SearchField } from "@/ui/search-field.tsx";
 import { sidebarRow } from "@/ui/sidebar-row.ts";
 
 /** Which of a bot's or project's own pages is open, if one is. */
-export type OwnerSidebarPage = "files" | "automations" | "connections" | undefined;
+export type OwnerSidebarPage = OwnerPageName | undefined;
 
 /**
  * The sidebar on a bot's or a project's pages, beside the rail: the way back to
@@ -29,7 +29,7 @@ export function OwnerSidebar({
 	owner: ResourceOwner;
 	/** The thread open, marked in the list. */
 	selectedConversationId: string | undefined;
-	/** The owner's files, automations or connections, while one of them is the page open. */
+	/** The owner's own page open, if one is: its files, automations, computer, connections or settings. */
 	page: OwnerSidebarPage;
 }) {
 	const lead = useLeadBot(owner);

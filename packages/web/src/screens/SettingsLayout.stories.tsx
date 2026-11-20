@@ -100,10 +100,8 @@ export const AsAMember = meta.story({
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas }) => {
 		const nav = await canvas.findByRole("navigation", { name: "Settings" });
-		// Waiting on their projects waits on the answers the list is drawn from.
-		await expect(await within(nav).findByRole("button", { name: "Revenue" })).toBeInTheDocument();
+		await expect(await within(nav).findByRole("link", { name: /^People/ })).toBeInTheDocument();
 		await expect(within(nav).queryByRole("link", { name: "Models" })).toBeNull();
-		await expect(within(nav).queryByRole("button", { name: "New project" })).toBeNull();
 	},
 });
 
@@ -139,21 +137,5 @@ export const PhoneSection = meta.story({
 		const page = await canvas.findByRole("main");
 		await expect(await within(page).findByRole("link", { name: "Settings" })).toBeInTheDocument();
 		await expect(await within(page).findByRole("heading", { name: "Members" })).toBeInTheDocument();
-	},
-});
-
-/** On a tablet, settings drill down as on a phone: one of a project's pages full screen, with the way back to the project. */
-export const TabletSection = meta.story({
-	globals: TABLET,
-	render: () => <StoryApp path={`${settings}/projects/revenue/bots`} />,
-	play: async ({ canvas }) => {
-		const page = await canvas.findByRole("main");
-		await expect(await within(page).findByRole("link", { name: "Project" })).toHaveAttribute(
-			"href",
-			`${settings}/projects/revenue`,
-		);
-		await expect(await within(page).findByRole("heading", { name: "Bots" })).toBeInTheDocument();
-		await expect(canvas.queryByRole("navigation", { name: "Settings" })).toBeNull();
-		await expect(canvas.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
 	},
 });

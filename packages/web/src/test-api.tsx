@@ -19,6 +19,7 @@ import {
 	connectionWithTools,
 	listedConnection,
 	type TestConnection,
+	testPerson,
 } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -26,7 +27,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { fireEvent, render } from "@testing-library/react";
 import { Effect } from "effect";
 import { onTestFinished, vi } from "vitest";
-import { SIDE_BY_SIDE } from "@/lib/media.ts";
+import { REDUCED_MOTION, SIDE_BY_SIDE } from "@/lib/media.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import type { Session } from "@/lib/session.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
@@ -127,6 +128,7 @@ const VIEWER_IN_PROJECT: ProjectPermissions = {
 	...MEMBER_IN_PROJECT,
 	manageMembers: false,
 	manageBots: false,
+	resources: { ...USER_OF_RESOURCES, runAutomations: false, useDesktop: false },
 };
 
 /** Every bot permission, as its creator or an administrator gets them. */
@@ -338,7 +340,12 @@ export const personalAssistant: Bot = {
 	visibility: "private",
 	assistant: true,
 	pinned: false,
-	permissions: { ...MANAGER_OF_BOT, delete: false },
+	// As the API answers: its person manages all but its computer, which Sugabots manages.
+	permissions: {
+		...MANAGER_OF_BOT,
+		delete: false,
+		resources: { ...MANAGER_OF_RESOURCES, manageComputer: false },
+	},
 	createdAt: "2026-09-10T00:00:00.000Z",
 };
 
@@ -373,18 +380,13 @@ export const builtInBots: SystemBot[] = [
 export const summariser = builtInBots[0] as SystemBot;
 export const compaction = builtInBots[1] as SystemBot;
 
-/** The id of `bot`'s default project, where its threads are. */
-export function defaultProjectOf(bot: Bot): string {
-	return `${bot.id.slice(0, -4)}f${bot.id.slice(-3)}`;
-}
-
 /** The first thread with `bot`, one per bot, by the bot's id. */
 export function threadWith(bot: Bot): ProjectThread {
 	return {
 		kind: "project_thread",
 		id: `${bot.id.slice(0, -4)}c${bot.id.slice(-3)}`,
 		workspaceId: bot.workspaceId,
-		projectId: defaultProjectOf(bot),
+		projectId: bot.defaultProjectId,
 		botId: bot.id,
 		title: `Working with ${bot.name}`,
 		archivedAt: null,
@@ -430,7 +432,8 @@ export function threadDetails(
 		automationRun: null,
 		participants: [participant],
 		projectBots: [participant],
-		members: [],
+		// Sam reaches the bot, so its default project.
+		peopleReachingProject: [testPerson({ id: sam.id, name: sam.name })],
 		messages: [],
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -451,6 +454,7 @@ export function listedThread(
 		unreadMessages: 0,
 		needsApproval: false,
 		mentionsYou: false,
+		activity: null,
 		...standing,
 	};
 }
@@ -467,10 +471,8 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			unreadForYou: 0,
 		}),
 	);
-	client.api.chats.recentThreads.mockReturnValue(Effect.succeed({ threads: [] }));
 	client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
 	client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
-	client.api.chats.directMessages.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.chats.markRead.mockReturnValue(Effect.succeed(undefined));
 	client.api.chats.markAllRead.mockReturnValue(Effect.succeed(undefined));
 	client.api.chats.markItemRead.mockReturnValue(Effect.succeed(undefined));
@@ -534,6 +536,9 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		),
 	);
 	client.api.projects.listMembers.mockReturnValue(Effect.succeed([]));
+	client.api.projects.listPeople.mockReturnValue(
+		Effect.succeed([testPerson({ id: sam.id, name: sam.name })]),
+	);
 	// Both of the seed's Suga-Team bots are in each project.
 	client.api.projects.listBots.mockReturnValue(Effect.succeed([triager, linear]));
 	// An administrator manages every bot; anyone else only uses the seed's, which they did not make.
@@ -619,23 +624,29 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	);
 }
 
+/** Answers connection reads from `connections` in full: each project's list with counts, and one of a project's connections with its tools. */
+export function serveConnections(...connections: TestConnection[]): void {
+	client.api.connections.list.mockImplementation(({ params }: { params: { projectId: string } }) =>
+		Effect.succeed(
+			connections.filter((one) => one.projectId === params.projectId).map(listedConnection),
+		),
+	);
+	client.api.connections.get.mockImplementation(
+		({ params }: { params: { projectId: string; connectionId: string } }) => {
+			const found = connections.find(
+				(one) => one.projectId === params.projectId && one.id === params.connectionId,
+			);
+			return found
+				? Effect.succeed(connectionWithTools(found))
+				: Effect.fail(new NotFound({ message: userText`No such connection` }));
+		},
+	);
+}
+
 /**
  * An answer a case gives later, to see what the page does while a request is
  * still in flight: the endpoint returns `effect`, which waits for `answer`.
  */
-/** Answers a bot's connection reads from `connections` in full: the list with counts, and one connection with its tools. */
-export function serveConnections(...connections: TestConnection[]): void {
-	const byId = ({ params }: { params: { connectionId: string } }) =>
-		connections.find((one) => one.id === params.connectionId);
-	client.api.connections.list.mockReturnValue(Effect.succeed(connections.map(listedConnection)));
-	client.api.connections.get.mockImplementation((input: { params: { connectionId: string } }) => {
-		const found = byId(input);
-		return found
-			? Effect.succeed(connectionWithTools(found))
-			: Effect.fail(new NotFound({ message: userText`No such connection` }));
-	});
-}
-
 export function pendingAnswer() {
 	const { promise, resolve } = Promise.withResolvers<Effect.Effect<unknown, unknown>>();
 	return { effect: Effect.flatten(Effect.promise(() => promise)), answer: resolve };
@@ -708,25 +719,51 @@ export function onWideScreen(): void {
 	});
 }
 
+/** Asks for reduced motion, on a phone's screen, for the rest of the test. */
+export function prefersReducedMotion(): void {
+	const matchMedia = window.matchMedia;
+	vi.stubGlobal("matchMedia", (query: string) => ({
+		...matchMedia(query),
+		matches: query === REDUCED_MOTION,
+	}));
+	onTestFinished(() => {
+		vi.unstubAllGlobals();
+	});
+}
+
+/** Types `text` into a composer's `box`, as a person would, all at once. */
+export function writeDraft(box: HTMLElement, text: string): void {
+	box.textContent = text;
+	fireEvent.input(box);
+}
+
+/**
+ * Renders the app at `path`, signed in as `user` (Sam by default; `null` for
+ * signed out). `queries` is the app's cache, a fresh one unless given, so one
+ * test's projects cannot answer another's; pass one seeded beforehand to start
+ * the app as `main.tsx` does with what /me answered.
+ */
 export function mount(
 	path: string,
-	user: SessionUser | null = sam,
-	refresh: () => Promise<void> = vi.fn(),
+	{
+		user = sam,
+		refresh = vi.fn(),
+		queries = createQueryClient(),
+	}: {
+		user?: SessionUser | null;
+		refresh?: () => Promise<void>;
+		queries?: QueryClient;
+	} = {},
 ) {
 	const router = createAppRouter({
 		history: createMemoryHistory({ initialEntries: [path] }),
 	});
 
 	render(
-		// A fresh cache per case, so one test's projects cannot answer another's.
-		<TestApp
-			router={router}
-			queries={createQueryClient()}
-			session={{ user, error: undefined, refresh }}
-		/>,
+		<TestApp router={router} queries={queries} session={{ user, error: undefined, refresh }} />,
 	);
 
-	return router;
+	return { router, queries };
 }
 
 /** The app as `main.tsx` mounts it, for a case that changes the session after mounting. */

@@ -2,13 +2,13 @@ import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import type { AcceptedRun } from "@sugabots/contracts";
 import { handleFromName, MAX_AUTOMATION_TRIGGERS } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden, ResourceHidden } from "../../authorization/access.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
-import { query, transaction } from "../../database/database.ts";
+import { query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import {
@@ -29,10 +29,12 @@ import {
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	onPostgres,
 	type Promised,
 	runOnPostgres,
+	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
@@ -767,35 +769,17 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			{ projectId: ownProjectId },
 			{ name: "Busy", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
-		let release = () => {};
-		const released = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		let locked = () => {};
-		const lockHeld = new Promise<void>((resolve) => {
-			locked = resolve;
-		});
-		const holding = runOnPostgres(
-			transaction(
-				lockTriggers(created.automation.id).pipe(
-					Effect.tap(() => Effect.sync(locked)),
-					Effect.andThen(Effect.promise(() => released)),
-				),
-			),
-		);
-		await lockHeld;
+		const holding = holdTransaction(lockTriggers(created.automation.id));
+		await holding.held;
 
-		const refused = await Promise.race([
-			webhooks.accept({
+		// Answers while the triggers are still locked: a wait here would never end.
+		expect(
+			await webhooks.accept({
 				triggerId: firstTriggerOf(created).addressed.triggerId,
 				delivery: bearerDelivery("incorrect"),
 			}),
-			new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000)),
-		]);
-		release();
-		await holding;
-
-		expect(refused).toBeUndefined();
+		).toBeUndefined();
+		await holding.release();
 	});
 
 	it("keeps a secret replaced while its webhook is being edited", async () => {
@@ -804,34 +788,20 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			{ name: "Alerts", instructions: "Handle input.", triggers: [{ kind: "webhook" }] },
 		);
 		const { addressed } = firstTriggerOf(created);
-		let releaseRotation = () => {};
-		const rotationHeld = new Promise<void>((resolve) => {
-			releaseRotation = resolve;
-		});
-		let rotated = (_secret: string) => {};
-		const rotatedSecret = new Promise<string>((resolve) => {
-			rotated = resolve;
-		});
 		// The new secret is written but not committed until the edit is waiting.
-		const rotation = runOnPostgres(
-			transaction(
-				Context.get(conversations, Automations.Service)
-					.rotateSecret(addressed)
-					.pipe(
-						Effect.tap((secret) => Effect.sync(() => rotated(secret ?? ""))),
-						Effect.andThen(Effect.promise(() => rotationHeld)),
-					),
-			).pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId))),
+		const rotation = holdTransaction(
+			Context.get(conversations, Automations.Service)
+				.rotateSecret(addressed)
+				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId))),
 		);
-		const secret = await rotatedSecret;
+		const secret = (await rotation.held) ?? "";
 
 		const edit = automations.updateTrigger(addressed, {
 			kind: "webhook",
 			auth: { kind: "api_key", header: "X-Alert-Key" },
 		});
-		await waitUntilBlocked();
-		releaseRotation();
-		await Promise.all([rotation, edit]);
+		await waitUntilWaitingOnLocks(1);
+		await Promise.all([rotation.release(), edit]);
 
 		expect(
 			await webhooks.accept({
@@ -1538,55 +1508,21 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 			if (!run) throw new Error("The run asked for no turn");
 			const prepared = await prepareRunnable(execution, run);
 			const pending = await parkForApproval(prepared);
-			let releaseTurn = () => {};
-			const turnHeld = new Promise<void>((resolve) => {
-				releaseTurn = resolve;
-			});
-			let locked = () => {};
-			const turnLocked = new Promise<void>((resolve) => {
-				locked = resolve;
-			});
-			const holding = runOnPostgres(
-				transaction(
-					Effect.gen(function* () {
-						yield* query((db) =>
-							db.select().from(turn).where(eq(turn.id, prepared.turnId)).for("update"),
-						);
-						locked();
-						yield* Effect.promise(() => turnHeld);
-					}),
-				),
+			const holding = holdTransaction(
+				query((db) => db.select().from(turn).where(eq(turn.id, prepared.turnId)).for("update")),
 			);
-			await turnLocked;
+			await holding.held;
 
-			const decided = await Promise.race([
-				onPostgresAs(userId)(Context.get(conversations, Turns.Controls))
-					.decide({ toolCallId: pending.id, decision: "allow_once" })
-					.then(() => "decided"),
-				new Promise((resolve) => setTimeout(() => resolve("still waiting"), 2_000)),
-			]);
-			releaseTurn();
-			await holding;
-
-			expect(decided).toBe("decided");
+			// Decides while the turn is still locked: a wait here would never end.
+			await expect(
+				onPostgresAs(userId)(Context.get(conversations, Turns.Controls)).decide({
+					toolCallId: pending.id,
+					decision: "allow_once",
+				}),
+			).resolves.toBeUndefined();
+			await holding.release();
 		});
 	});
-
-	/** Waits until another connection to the test database is waiting on a lock. */
-	async function waitUntilBlocked() {
-		for (let attempt = 0; attempt < 100; attempt++) {
-			const [waiting] = await onDatabase((db) =>
-				db.execute<{ count: number }>(
-					sql`select count(*)::int as count from pg_stat_activity
-						where datname = current_database() and wait_event_type = 'Lock'`,
-					"objects",
-				),
-			);
-			if ((waiting?.count ?? 0) > 0) return;
-			await new Promise((resolve) => setTimeout(resolve, 20));
-		}
-		throw new Error("Nothing waited on a lock");
-	}
 
 	/** Parks one call to a new connection of the bot's for approval, as the turn's reply. */
 	async function parkForApproval(prepared: PreparedTurn) {

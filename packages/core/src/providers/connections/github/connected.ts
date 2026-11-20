@@ -502,6 +502,6 @@ class PermissionNotGranted
 		return `The connection's GitHub App hasn't been granted ${this.permissions}. Whoever owns the app adds it under Permissions in the app's settings on GitHub, then the account it is installed on accepts the new permissions.`;
 	}
 	get userMessage() {
-		return userText`The bot's GitHub App needs more permissions. Its owner adds them in the app's settings on GitHub.`;
+		return userText`The connection's GitHub App needs more permissions. Its owner adds them in the app's settings on GitHub.`;
 	}
 }

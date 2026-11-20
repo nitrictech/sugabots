@@ -10,9 +10,9 @@ import { connectionLabel, splitToolKey, stepLabel } from "@/lib/tool-names.ts";
  * that is not a connection's tool is named by its action.
  */
 export function useApprovalApp(request: ApprovalRequest) {
-	const looks = useConnectionLooks([request.bot.id], request.projectId);
+	const looksOf = useConnectionLooks([request.bot.id], request.projectId);
 	const { handle, name } = splitToolKey(request.call.tool);
-	const look = looks.get(handle);
+	const look = looksOf(request.bot.id).get(handle);
 	const action = stepLabel(request.call.tool, name);
 	return { look, appName: handle ? connectionLabel(handle, look?.name) : action, action };
 }

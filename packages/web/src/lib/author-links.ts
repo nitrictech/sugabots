@@ -16,12 +16,13 @@ export interface AuthorLink {
 	from: "/$workspace";
 	to: string;
 	params: Readonly<Record<string, string>>;
-	state: (state: HistoryState) => HistoryState;
+	/** For a person's page, which returns to the conversation on Back. */
+	state?: (state: HistoryState) => HistoryState;
 }
 
 /**
- * Where an author's name in a conversation leads, with Back returning to it
- * under `backLabel`: a person's page among the workspace's members, or a bot's
+ * Where an author's name in a conversation leads: a person's page among the
+ * workspace's members, whose Back returns to it under `backLabel`, or a bot's
  * settings. Undefined until the members are loaded, and for a person who has
  * left the workspace.
  */
@@ -30,7 +31,7 @@ export function useAuthorLinks(backLabel: string): (author: PagedAuthor) => Auth
 	const members = useWorkspaceMembers(workspace?.id);
 	const backHere = useBackToHere(backLabel);
 	return (author) => {
-		if (author.kind === "bot") return { ...botSettingsLink(author), state: backHere };
+		if (author.kind === "bot") return botSettingsLink(author);
 		const membership = members.data?.find((member) => member.user.id === author.id);
 		if (!membership) return undefined;
 		return { ...memberSettingsLink(membership), state: backHere };

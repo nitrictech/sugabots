@@ -16,6 +16,7 @@ import {
 	query,
 	queryCatching,
 	serviceOperations,
+	type Transaction,
 	transaction,
 } from "../../database/database.ts";
 import { violatedUniqueConstraint } from "../../database/errors.ts";
@@ -41,19 +42,33 @@ export interface Interface {
 		workspaceId: string,
 		input: { createdById: string; bot: NewBot },
 	) => Effect.Effect<PersonFacingBotRow, BotNameTaken | BotHandleReserved>;
+	/**
+	 * Refused when it makes the bot private while it leads a project people
+	 * made (see `refuseWhileLeading`), naming to `viewerId` the projects they see.
+	 */
 	readonly update: (
 		workspaceId: string,
 		botId: string,
 		changes: BotUpdate,
+		viewerId: string,
 	) => Effect.Effect<
 		PersonFacingBotRow,
 		BotNameTaken | BotHandleReserved | BotGone | SystemBotImmutable | LeadsProjects
 	>;
-	/** Refused while the bot leads a project people made (see `refuseWhileLeading`). */
-	readonly remove: (
+	/**
+	 * Deletes the bot, its default project with it, after `beforeDeleting`.
+	 * Refused while the bot leads a project people made (see
+	 * `refuseWhileLeading`), naming to `viewerId` the projects they see.
+	 * `beforeDeleting` runs once the bot is locked and found free to delete, and
+	 * the lock is held until the deletion commits, so no project can choose
+	 * the bot as lead in between; when it fails, the bot is kept.
+	 */
+	readonly remove: <E, R>(
 		workspaceId: string,
 		botId: string,
-	) => Effect.Effect<void, SystemBotImmutable | LeadsProjects>;
+		viewerId: string,
+		beforeDeleting: Effect.Effect<void, E, R>,
+	) => Effect.Effect<void, SystemBotImmutable | LeadsProjects | E, Exclude<R, Transaction>>;
 	/**
 	 * `userId`'s Personal Assistant, made on `model`, or with no model, if they
 	 * have none. One they have is returned exactly as they left it.
@@ -196,7 +211,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		update: (workspaceId, botId, changes) =>
+		update: (workspaceId, botId, changes, viewerId) =>
 			operation(
 				"update",
 				transaction(
@@ -225,7 +240,7 @@ export const make = Effect.gen(function* () {
 						// Only public bots are in projects people made, so one made private
 						// leaves them, unless it leads one. Its default project it keeps.
 						if (updated.visibility === "private") {
-							yield* refuseWhileLeading(updated.id);
+							yield* refuseWhileLeading(updated.id, { viewerId });
 							yield* query((db) =>
 								db
 									.delete(projectBot)
@@ -242,7 +257,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		remove: (workspaceId, botId) =>
+		remove: (workspaceId, botId, viewerId, beforeDeleting) =>
 			operation(
 				"remove",
 				transaction(
@@ -251,9 +266,11 @@ export const make = Effect.gen(function* () {
 							return yield* new SystemBotImmutable();
 						}
 						const named = and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId));
-						// Locked first, so a project choosing it as lead meanwhile is seen below.
+						// Locked first, and held through `beforeDeleting`, so a project
+						// choosing it as lead waits until it is gone.
 						yield* query((db) => db.select({ id: bot.id }).from(bot).where(named).for("update"));
-						yield* refuseWhileLeading(botId);
+						yield* refuseWhileLeading(botId, { viewerId });
+						yield* beforeDeleting;
 						yield* query((db) => db.delete(bot).where(named));
 					}),
 				),

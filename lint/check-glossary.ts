@@ -122,6 +122,11 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 		plural: "main threads",
 		replacement: "a project's threads",
 	},
+	{
+		word: "direct message",
+		plural: "direct messages",
+		replacement: "a project's thread, or a bot's",
+	},
 ];
 
 /** Tracked files that keep old words on purpose, or aren't ours to edit. */

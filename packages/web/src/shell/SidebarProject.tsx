@@ -7,7 +7,6 @@ import { projectLink, projectNewThreadLink, projectSettingsLink } from "@/lib/li
 import { ownerMarkTransition } from "@/lib/owner-mark.ts";
 import { ownerProblems } from "@/lib/owner-pages.ts";
 import { projectPalettes } from "@/lib/project-looks.ts";
-import type { useBackToHere } from "@/lib/settings-back.tsx";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
 import { hasNews, RowAttention } from "@/shell/SidebarBot.tsx";
 import { ProblemMark } from "@/ui/attention-dot.tsx";
@@ -30,14 +29,11 @@ export type ProjectStanding = ProjectMarker & { project: Project };
 export function SidebarProject({
 	standing,
 	selected,
-	settingsBack,
 	notificationSettings,
 }: {
 	standing: ProjectStanding;
 	/** Whether the page open is in this project. */
 	selected: boolean;
-	/** History state for the settings link, so its Back returns to the page it left. */
-	settingsBack?: ReturnType<typeof useBackToHere>;
 	/** What the viewer is notified about, once loaded. */
 	notificationSettings?: NotificationSettings;
 }) {
@@ -95,7 +91,7 @@ export function SidebarProject({
 				<IconButton
 					label={`${project.name} settings`}
 					size="sm"
-					render={<Link {...projectSettingsLink(project)} state={settingsBack} />}
+					render={<Link {...projectSettingsLink(project)} />}
 					className="hidden group-hover/project:grid group-has-focus-visible/project:grid"
 				>
 					<SettingsIcon />

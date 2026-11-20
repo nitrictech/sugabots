@@ -289,7 +289,7 @@ describe("a bot's Connections page", () => {
 
 	it("opens a connection on its own page, its tools apart by whether they make changes", async () => {
 		serveConnections(wikiAt("allow"));
-		const router = mount(connectionsPage);
+		const { router } = mount(connectionsPage);
 		await showConnections();
 
 		expect(screen.queryByText("Search pages")).toBeNull();
@@ -322,7 +322,7 @@ describe("a bot's Connections page", () => {
 
 	it("opens a connection from its row, which offers nothing to change on the list", async () => {
 		serveConnections(wikiAt("ask"));
-		const router = mount(connectionsPage);
+		const { router } = mount(connectionsPage);
 		await showConnections();
 
 		const row = await screen.findByRole("article", { name: "Wiki" });
@@ -532,7 +532,7 @@ describe("a bot's Connections page", () => {
 			serveConnections();
 			return Effect.void;
 		});
-		const router = mount(wikiPage);
+		const { router } = mount(wikiPage);
 		await openedWiki();
 
 		fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
@@ -592,7 +592,7 @@ describe("a bot's Connections page", () => {
 describe("coming back from a connection sign-in", () => {
 	it("opens the Connections of the bot the sign-in was for", async () => {
 		serveConnections(wiki);
-		const router = mount(
+		const { router } = mount(
 			`/connections/oauth/return?workspace=${project.workspaceId}&project=${linear.defaultProjectId}`,
 		);
 
@@ -602,7 +602,7 @@ describe("coming back from a connection sign-in", () => {
 
 	it("says once why a sign-in for a bot did not finish", async () => {
 		serveConnections(wiki);
-		const router = mount(
+		const { router } = mount(
 			`/connections/oauth/return?workspace=${project.workspaceId}&project=${linear.defaultProjectId}&oauth_error=refused`,
 		);
 

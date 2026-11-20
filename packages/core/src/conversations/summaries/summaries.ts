@@ -31,7 +31,7 @@ import { admitSummary, type SummaryRequest } from "./summary.workflow.ts";
  * Summaries, written by the `summarise` system bot.
  *
  * After a bot completes a turn, a summary is requested for the conversation, though
- * a project's thread or a direct message is never summarised. The
+ * a thread of a project people made is never summarised. The
  * system bot reads what was said since the last summary and rewrites it, and on
  * the first pass also titles the conversation. Its turns live in a system conversation hanging off
  * the one being summarised, so a person can read back what the system bot did
@@ -105,7 +105,7 @@ export const make = Effect.gen(function* () {
 							botId: scope.conversationBotId,
 						};
 						if (!isBotConversation(served))
-							return skipped("Projects' threads and direct messages are not summarised");
+							return skipped("Threads of projects people made are not summarised");
 						const summariser = yield* query((db) =>
 							findRunnableSystemBot(db, scope.workspaceId, SUMMARISE_SYSTEM_BOT),
 						);

@@ -5,8 +5,14 @@ import { COMPUTER_DISK_WARNING_SHARE, computerDiskShare } from "@sugabots/contra
 import { type UserText, userText } from "@sugabots/errors";
 import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { Clock, Context, Data, DateTime, Duration, Effect, Layer, Semaphore } from "effect";
-import { Database, query, serviceOperations } from "../database/database.ts";
-import { computerLease, computer as computerTable } from "../database/schema.ts";
+import { Database, query, serviceOperations, type Transaction } from "../database/database.ts";
+import {
+	computerLease,
+	computerProvider as computerProviderTable,
+	computer as computerTable,
+	project as projectTable,
+	workspace as workspaceTable,
+} from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
 import { Egress } from "../providers/network/egress.ts";
 import type { UserFacing } from "../user-message.ts";
@@ -134,6 +140,12 @@ export interface Interface {
 	 * be reached it fails and keeps the record, so the project is kept to try again.
 	 */
 	readonly destroy: (project: Project) => Effect.Effect<void, Computers.Unavailable>;
+	/**
+	 * Does {@link destroy} for every project in the workspace that has a
+	 * computer, for a workspace about to be deleted. Stops at the first
+	 * provider that can't be reached, keeping that record and those not yet reached.
+	 */
+	readonly destroyAllIn: (workspaceId: string) => Effect.Effect<void, Computers.Unavailable>;
 	/**
 	 * Moves the project's work to a new computer made by `provider`, the
 	 * workspace's enabled one, from its image, then destroys the old computer.
@@ -284,8 +296,37 @@ export const make = Effect.gen(function* () {
 				.limit(1),
 		).pipe(Effect.map(([row]) => row));
 
-	const forget = (projectId: string) =>
-		query((db) => db.delete(computerTable).where(eq(computerTable.projectId, projectId)));
+	/**
+	 * Deletes `row`'s record, while it still records the same computer: one
+	 * another process put in its place meanwhile is kept, recorded.
+	 */
+	const forget = (row: ComputerRow) =>
+		query((db) => db.delete(computerTable).where(sameComputer(row)));
+
+	/**
+	 * Destroys `row`'s computer at the provider that made it, then forgets it.
+	 * With that provider's settings gone there is nobody to ask, so it is only
+	 * forgotten. The caller holds the project's lock.
+	 */
+	const destroyRecordedComputer = (row: ComputerRow) =>
+		Effect.gen(function* () {
+			const configured = yield* providers.connection(row.workspaceId, row.computerProviderId);
+			if (configured) {
+				yield* computers.forConnection(configured.connection).destroy(row.providerComputerId);
+			}
+			yield* forget(row);
+		});
+
+	/** What {@link Interface.destroy} does. */
+	const destroyProjectComputer = (project: Project) =>
+		oneAtATime(project.projectId)(
+			Effect.uninterruptible(
+				Effect.gen(function* () {
+					const row = yield* recorded(project);
+					if (row) yield* destroyRecordedComputer(row);
+				}),
+			),
+		);
 
 	/** Whether the project's record still points at `row`'s computer, and says it is running. */
 	const isRecordedRunning = (row: ComputerRow) =>
@@ -417,7 +458,7 @@ export const make = Effect.gen(function* () {
 					row.computerProviderId,
 					row.providerComputerId,
 				);
-				yield* forget(project.projectId);
+				yield* forget(row);
 				return replaced(yield* made(project, provider));
 			}
 			const at = computers.forConnection(provider.connection);
@@ -457,7 +498,7 @@ export const make = Effect.gen(function* () {
 			const fresh = yield* madeAndRecorded(
 				connection,
 				yield* specFor(project, row.id, at),
-				(computer, image) => moveRecord(row.id, row.computerProviderId, computer.id, image),
+				(computer, image) => moveRecord(row, row.computerProviderId, computer.id, image),
 			);
 			yield* at
 				.destroy(row.providerComputerId)
@@ -469,16 +510,23 @@ export const make = Effect.gen(function* () {
 			return fresh;
 		}).pipe(Effect.uninterruptible);
 
-	/** Points the project's record at its new computer, made from `image`, which is running and unused. */
+	/**
+	 * Points the project's record, `row`, at its new computer, made from
+	 * `image`, which is running and unused. Dies when the record no longer
+	 * records `row`'s computer, as when its project was deleted meanwhile by
+	 * another process, or another process replaced the computer first, so
+	 * `madeAndRecorded` destroys the new computer rather than leaving it
+	 * recorded nowhere.
+	 */
 	const moveRecord = (
-		recordId: string,
+		row: ComputerRow,
 		providerId: string,
 		computerId: Computers.ComputerId,
 		image: string,
 	) =>
 		Effect.gen(function* () {
 			const now = yield* DateTime.nowAsDate;
-			yield* query((db) =>
+			const [moved] = yield* query((db) =>
 				db
 					.update(computerTable)
 					.set({
@@ -490,8 +538,12 @@ export const make = Effect.gen(function* () {
 						diskUsage: null,
 						diskMeasuredAt: null,
 					})
-					.where(eq(computerTable.id, recordId)),
+					.where(sameComputer(row))
+					.returning({ id: computerTable.id }),
 			);
+			if (!moved) {
+				return yield* Effect.die(new Error("The computer's record was deleted or moved meanwhile"));
+			}
 		});
 
 	/** Takes or extends `holder`'s lease on the project's computer. */
@@ -583,7 +635,7 @@ export const make = Effect.gen(function* () {
 						.from(computerTable)
 						.where(
 							and(
-								eq(computerTable.id, row.id),
+								sameComputer(row),
 								isNull(computerTable.pausedAt),
 								lt(computerTable.lastUsedAt, idleSince),
 								noLiveLease(now),
@@ -597,13 +649,11 @@ export const make = Effect.gen(function* () {
 				yield* clearDiskIfFilling(row, at);
 				yield* at.pause(row.providerComputerId).pipe(
 					Effect.andThen(
-						query((db) =>
-							db.update(computerTable).set({ pausedAt: now }).where(eq(computerTable.id, row.id)),
-						),
+						query((db) => db.update(computerTable).set({ pausedAt: now }).where(sameComputer(row))),
 					),
 					Effect.catchTags({
 						// Gone at the provider: the next use makes a new one.
-						ComputerMissing: () => forget(row.projectId),
+						ComputerMissing: () => forget(row),
 						ComputerUnavailable: (failure) =>
 							Effect.logWarning("Could not pause an idle computer; trying again later", failure),
 					}),
@@ -709,7 +759,7 @@ export const make = Effect.gen(function* () {
 				const fresh = yield* madeAndRecorded(
 					provider.connection,
 					yield* specFor(row, row.id, to),
-					(computer, image) => moveRecord(row.id, provider.id, computer.id, image),
+					(computer, image) => moveRecord(row, provider.id, computer.id, image),
 				);
 				yield* destroyOld;
 				return fresh;
@@ -760,7 +810,7 @@ export const make = Effect.gen(function* () {
 						Effect.catchTag("ComputerFileFailed", () => Effect.succeed(false)),
 						Effect.flatMap((unpacked) =>
 							unpacked
-								? moveRecord(row.id, provider.id, computer.id, image)
+								? moveRecord(row, provider.id, computer.id, image)
 								: Effect.fail(
 										new UpgradeFailed({
 											reason: userText`The work couldn't be unpacked in the new computer. The old one is untouched.`,
@@ -844,13 +894,16 @@ export const make = Effect.gen(function* () {
 			db
 				.update(computerTable)
 				.set({ lastUsedAt: row.lastUsedAt })
-				.where(eq(computerTable.id, row.id)),
+				.where(sameComputer({ ...row, providerComputerId: freshId })),
 		).pipe(
 			Effect.andThen(at.pause(freshId)),
 			Effect.andThen(
 				Effect.flatMap(DateTime.nowAsDate, (now) =>
 					query((db) =>
-						db.update(computerTable).set({ pausedAt: now }).where(eq(computerTable.id, row.id)),
+						db
+							.update(computerTable)
+							.set({ pausedAt: now })
+							.where(sameComputer({ ...row, providerComputerId: freshId })),
 					),
 				),
 			),
@@ -1055,7 +1108,7 @@ export const make = Effect.gen(function* () {
 					const at = computers.forConnection(provider.connection);
 					for (const row of yield* madeBy(workspaceId, provider.id)) {
 						yield* oneAtATime(row.projectId)(
-							at.destroy(row.providerComputerId).pipe(Effect.andThen(forget(row.projectId))),
+							at.destroy(row.providerComputerId).pipe(Effect.andThen(forget(row))),
 						);
 					}
 				}),
@@ -1151,43 +1204,28 @@ export const make = Effect.gen(function* () {
 							const row = yield* recorded(project);
 							if (!row) return;
 							yield* requireIdle(row.id);
-							const configured = yield* providers.connection(
-								row.workspaceId,
-								row.computerProviderId,
-							);
-							if (configured) {
-								yield* computers
-									.forConnection(configured.connection)
-									.destroy(row.providerComputerId);
-							}
-							yield* forget(project.projectId);
+							yield* destroyRecordedComputer(row);
 						}),
 					),
 				),
 			),
 
-		destroy: (project) =>
+		destroy: (project) => operation("destroy", destroyProjectComputer(project)),
+
+		destroyAllIn: (workspaceId) =>
 			operation(
-				"destroy",
-				oneAtATime(project.projectId)(
-					Effect.uninterruptible(
-						Effect.gen(function* () {
-							const row = yield* recorded(project);
-							if (!row) return;
-							const configured = yield* providers.connection(
-								row.workspaceId,
-								row.computerProviderId,
-							);
-							// With its provider's settings gone, there is nobody to ask.
-							if (configured) {
-								yield* computers
-									.forConnection(configured.connection)
-									.destroy(row.providerComputerId);
-							}
-							yield* forget(project.projectId);
-						}),
-					),
-				),
+				"destroyAllIn",
+				Effect.gen(function* () {
+					const rows = yield* query((db) =>
+						db
+							.select({ projectId: computerTable.projectId })
+							.from(computerTable)
+							.where(eq(computerTable.workspaceId, workspaceId)),
+					);
+					for (const { projectId } of rows) {
+						yield* destroyProjectComputer({ workspaceId, projectId });
+					}
+				}),
 			),
 
 		upgrade: (project, provider) =>
@@ -1278,10 +1316,14 @@ function measuredDiskOf(
 	return { ...row.diskUsage, measuredAt: row.diskMeasuredAt };
 }
 
-/** The row, while it still records the same computer at the provider. */
-function sameComputer(row: ComputerRow) {
+/**
+ * The row, while it still records the same computer: the one its provider
+ * knows by that id. Another process replacing the computer changes them.
+ */
+function sameComputer(row: Pick<ComputerRow, "id" | "computerProviderId" | "providerComputerId">) {
 	return and(
 		eq(computerTable.id, row.id),
+		eq(computerTable.computerProviderId, row.computerProviderId),
 		eq(computerTable.providerComputerId, row.providerComputerId),
 	);
 }
@@ -1402,6 +1444,117 @@ export class ComputerInUse
 export class NoComputer extends Data.TaggedError("NoComputer") implements UserFacing {
 	get userMessage() {
 		return userText`There's no computer to upgrade. Its next one is made from the current image.`;
+	}
+}
+
+/**
+ * Locks the project until the caller's transaction ends, for a caller that has
+ * destroyed its computer and is about to delete it, so no computer is recorded
+ * for it meanwhile: recording one waits on the lock, then fails once the
+ * project is gone, and its machine is destroyed. Fails if one was recorded
+ * after the computer was destroyed, so the caller deletes nothing and can try
+ * again.
+ */
+export const lockWithoutComputer = (
+	project: Project,
+): Effect.Effect<void, ComputerMadeMeanwhile, Database | Transaction> =>
+	Effect.gen(function* () {
+		yield* query((db) =>
+			db
+				.select({ id: projectTable.id })
+				.from(projectTable)
+				.where(eq(projectTable.id, project.projectId))
+				.for("update"),
+		);
+		const [madeMeanwhile] = yield* query((db) =>
+			db
+				.select({ id: computerTable.id })
+				.from(computerTable)
+				.where(eq(computerTable.projectId, project.projectId))
+				.limit(1),
+		);
+		if (madeMeanwhile) return yield* new ComputerMadeMeanwhile();
+	});
+
+/**
+ * Locks the provider until the caller's transaction ends, for a caller that
+ * has destroyed its computers and is about to remove it, as
+ * {@link lockWithoutComputer} locks a project: no computer is recorded as
+ * made by it meanwhile, and it fails if one was since they were destroyed.
+ */
+export const lockProviderWithoutComputers = (
+	workspaceId: string,
+	providerId: string,
+): Effect.Effect<void, ComputerMadeMeanwhile, Database | Transaction> =>
+	Effect.gen(function* () {
+		yield* query((db) =>
+			db
+				.select({ id: computerProviderTable.id })
+				.from(computerProviderTable)
+				.where(
+					and(
+						eq(computerProviderTable.id, providerId),
+						eq(computerProviderTable.workspaceId, workspaceId),
+					),
+				)
+				.for("update"),
+		);
+		const [madeMeanwhile] = yield* query((db) =>
+			db
+				.select({ id: computerTable.id })
+				.from(computerTable)
+				.where(eq(computerTable.computerProviderId, providerId))
+				.limit(1),
+		);
+		if (madeMeanwhile) return yield* new ComputerMadeMeanwhile();
+	});
+
+/**
+ * Locks the workspace and its projects until the caller's transaction ends,
+ * for a caller that has destroyed the workspace's computers and is about to
+ * delete it: no project is made, and no project's computer recorded or moved,
+ * until the workspace is gone, so recording one afterwards fails and its
+ * machine is destroyed. Fails if one was recorded since they were destroyed,
+ * as {@link lockWithoutComputer} does for a project.
+ */
+export const lockWorkspaceWithoutComputers = (
+	workspaceId: string,
+): Effect.Effect<void, ComputerMadeMeanwhile, Database | Transaction> =>
+	Effect.gen(function* () {
+		yield* query((db) =>
+			db
+				.select({ id: workspaceTable.id })
+				.from(workspaceTable)
+				.where(eq(workspaceTable.id, workspaceId))
+				.for("update"),
+		);
+		yield* query((db) =>
+			db
+				.select({ id: projectTable.id })
+				.from(projectTable)
+				.where(eq(projectTable.workspaceId, workspaceId))
+				.for("update"),
+		);
+		const [madeMeanwhile] = yield* query((db) =>
+			db
+				.select({ id: computerTable.id })
+				.from(computerTable)
+				.where(eq(computerTable.workspaceId, workspaceId))
+				.limit(1),
+		);
+		if (madeMeanwhile) return yield* new ComputerMadeMeanwhile();
+	});
+
+/**
+ * A computer was made while what it belongs to was being deleted, or its
+ * member removed, so nothing was removed.
+ */
+export class ComputerMadeMeanwhile
+	extends Data.TaggedError("ComputerMadeMeanwhile")
+	implements UserFacing
+{
+	get userMessage() {
+		return userText`A computer started meanwhile, so nothing was removed. Try again.`;
 	}
 }
 

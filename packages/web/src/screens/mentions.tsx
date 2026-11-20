@@ -7,7 +7,7 @@ import {
 	type GroupMentionHandle,
 	type MessageAuthor,
 	mentionedHandles,
-	NOTIFYING_CONVERSATION_KINDS,
+	notifiesPeople,
 	type Participant,
 	type PersonParticipant,
 	splitAroundMentions,
@@ -32,32 +32,32 @@ import { MentionCard } from "./MentionCard.tsx";
 
 /**
  * Everyone a mention in the conversation can name: those in it, then the project's bots
- * and people who are not.
+ * and the people who reach the project who are not.
  */
 export function mentionableIn(
-	details: Pick<ConversationDetails, "participants" | "projectBots" | "members">,
+	details: Pick<ConversationDetails, "participants" | "projectBots" | "peopleReachingProject">,
 ): Participant[] {
 	const joined = new Set(details.participants.map(({ id }) => id));
 	return [
 		...details.participants,
 		...details.projectBots.filter(({ id }) => !joined.has(id)),
-		...details.members.filter(({ id }) => !joined.has(id)),
+		...details.peopleReachingProject.filter(({ id }) => !joined.has(id)),
 	];
 }
 
 /** The bots among `projectBots` that `draft` names, each once, in the order it first names them. */
-export function botsNamed(draft: string, projectBots: readonly Participant[]): BotParticipant[] {
-	const bots = projectBots.filter((member): member is BotParticipant => member.kind === "bot");
-	const handles = new Set(mentionedHandles(draft));
-	return [...handles].flatMap((handle) => bots.filter((bot) => bot.handle === handle));
+export function botsNamed(draft: string, projectBots: readonly BotParticipant[]): BotParticipant[] {
+	return mentionedHandles(draft).flatMap((handle) =>
+		projectBots.filter((bot) => bot.handle === handle),
+	);
 }
 
-/** `@here` or `@channel`, which a person writes in a thread to notify its project's people. */
+/** `@here` or `@channel`, which a person writes in a thread to notify the people who reach its project. */
 export interface GroupMention {
 	kind: "group";
 	handle: GroupMentionHandle;
 	/**
-	 * The people it would notify: the project's people but its writer, never a bot.
+	 * The people it would notify: those who reach the project but its writer, never a bot.
 	 * Each one's own notification settings can still hold theirs back.
 	 */
 	notifies: readonly PersonParticipant[];
@@ -71,21 +71,40 @@ type Writer = { kind: "person"; id: string } | { kind: Exclude<MessageAuthor["ki
 
 /**
  * `@here` and `@channel` as `writer` can use them in a conversation of kind
- * `conversationKind`, each notifying `members`, the project's people, but the
- * writer. None where they would notify nobody, so they stay text: written by a
- * bot or an automation, in a conversation that notifies nobody, or in a project with nobody else in it. None in a
- * direct message either, where everybody in it is told of every message.
+ * `conversationKind`, each notifying `peopleReachingProject` but the writer.
+ * None where they would notify nobody, so they stay text: written by a bot or
+ * an automation, in a conversation that notifies nobody, or in a project
+ * nobody else reaches.
  */
 export function groupMentionsBy(
 	writer: Writer,
-	members: readonly PersonParticipant[],
+	peopleReachingProject: readonly PersonParticipant[],
 	conversationKind: ConversationKind,
 ): GroupMention[] {
-	if (writer.kind !== "person" || !NOTIFYING_CONVERSATION_KINDS.has(conversationKind)) return [];
-	if (conversationKind === "direct_message") return [];
-	const notifies = members.filter((member) => member.id !== writer.id);
+	if (writer.kind !== "person" || !notifiesPeople(conversationKind)) return [];
+	const notifies = peopleReachingProject.filter((person) => person.id !== writer.id);
 	if (notifies.length === 0) return [];
 	return GROUP_MENTION_HANDLES.map((handle) => ({ kind: "group", handle, notifies }));
+}
+
+/**
+ * Whom `user`'s composer offers to mention in a conversation of kind
+ * `conversationKind`: everyone `mentionableIn` gives but the user, then
+ * `@here` and `@channel` where they would notify anyone.
+ */
+export function composerMentionable(
+	details: Pick<ConversationDetails, "participants" | "projectBots" | "peopleReachingProject">,
+	user: { id: string },
+	conversationKind: ConversationKind,
+): MentionTarget[] {
+	return [
+		...mentionableIn(details).filter((candidate) => candidate.id !== user.id),
+		...groupMentionsBy(
+			{ kind: "person", id: user.id },
+			details.peopleReachingProject,
+			conversationKind,
+		),
+	];
 }
 
 /**

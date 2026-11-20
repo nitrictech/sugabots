@@ -2,6 +2,7 @@ import { Outlet } from "@tanstack/react-router";
 import { cn } from "cn";
 import type { ReactNode } from "react";
 import { useAppBadge } from "@/lib/app-badge.ts";
+import { useEnsuredAssistant } from "@/lib/bots.ts";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { useWorkspaceEvents } from "@/lib/conversation-events.ts";
 import { useNotificationsInThisBrowser } from "@/lib/notifications.ts";
@@ -24,6 +25,7 @@ export function Shell() {
 	useWorkspaceEvents();
 	useNotificationsInThisBrowser();
 	useVisibleHeight();
+	useEnsuredAssistant();
 	const sidebarHiding = useSidebarHidingState();
 	const { unreadForYou, waitingApprovals } = useAttentionCounts();
 	const { workspace } = useWorkspace();

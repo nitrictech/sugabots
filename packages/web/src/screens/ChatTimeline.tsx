@@ -1,5 +1,4 @@
 import type {
-	Bot,
 	BotParticipant,
 	ChatHistoryEntry,
 	ChatMessageItem,
@@ -32,7 +31,6 @@ export function ChatTimeline({
 	items,
 	details,
 	host,
-	bot,
 	conversationId,
 	user,
 	mentionable,
@@ -49,10 +47,8 @@ export function ChatTimeline({
 }: {
 	items: readonly ChatMessageItem[];
 	details: ConversationDetails;
-	/** The bot whose thread it is, as the conversation lists it; none in a project's thread or a direct message. */
+	/** The bot whose thread it is, as the conversation lists it; none in a project's thread. */
 	host: BotParticipant | undefined;
-	/** The bot whose thread it is; null in a project's thread or a direct message. */
-	bot: Bot | null;
 	conversationId: string;
 	user: SessionUser;
 	/** Everyone here and the project's bots and people. */
@@ -73,9 +69,7 @@ export function ChatTimeline({
 	onReply: (message: Message) => void;
 	onJumpToMessage: (messageId: string) => void;
 }) {
-	const authorLinkOf = useAuthorLinks(
-		details.conversation.kind === "direct_message" ? "Direct message" : "Thread",
-	);
+	const authorLinkOf = useAuthorLinks("Thread");
 	const reactions = useReactions(user);
 	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
 	const automationFeed = details.conversation.kind === "automation_feed";
@@ -96,7 +90,7 @@ export function ChatTimeline({
 							host={host}
 							isRunning={false}
 							participants={mentionable}
-							members={details.members}
+							peopleReachingProject={details.peopleReachingProject}
 							conversationKind={details.conversation.kind}
 							projectId={details.conversation.projectId}
 							dividers={false}
@@ -125,7 +119,6 @@ export function ChatTimeline({
 										started={started}
 										startedBy={message.author}
 										projectBots={details.projectBots}
-										bot={bot}
 									/>
 								))
 							}

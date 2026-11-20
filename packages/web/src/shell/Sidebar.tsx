@@ -3,11 +3,12 @@ import { Link, useMatchRoute, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Bot as BotIcon, ChevronRight, Hash, Plus } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef } from "react";
-import { findBot, useAssistant, useBots, useEnsuredAssistant } from "@/lib/bots.ts";
+import { findBot, useAssistant, useBots } from "@/lib/bots.ts";
 import { useProjectMarkers } from "@/lib/chats.ts";
 import { useFolded } from "@/lib/folded.ts";
 import { botsLink, projectsLink } from "@/lib/links.ts";
 import { useNotificationSettings } from "@/lib/notifications.ts";
+import { OWNER_PAGE_NAMES } from "@/lib/owner-pages.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
 import { findProject, useProjects } from "@/lib/projects.ts";
 import type { ResourceOwner } from "@/lib/resource-owner.tsx";
@@ -15,7 +16,6 @@ import { useSession, useSignOut } from "@/lib/session.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
 import { AccountMenu } from "@/shell/AccountMenu.tsx";
-import { DirectMessages } from "@/shell/DirectMessages.tsx";
 import { HelpMenu } from "@/shell/HelpMenu.tsx";
 import { IconRail } from "@/shell/IconRail.tsx";
 import { useNewBot } from "@/shell/NewBot.tsx";
@@ -40,7 +40,7 @@ export type SidebarView = "settings" | "projects";
  * automations), the workspace narrowed to `IconRail` at the far left, and
  * beside it that bot's or project's own sidebar, `OwnerSidebar`. Everywhere
  * else: the person's Personal Assistant, the projects they are in, the bots
- * they pinned, then their direct messages, and you, Settings and Help at the foot. Its top is always left
+ * they pinned, and you, Settings and Help at the foot. Its top is always left
  * clear for the button that puts it away, which sits over it while a chat is
  * open, so what is under it never moves; without `resizable`, its edge does
  * not drag. A phone has `MobileTabBar` and
@@ -48,10 +48,8 @@ export type SidebarView = "settings" | "projects";
  */
 export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 	const { data: projects } = useProjects();
-	const { bots, isPending: botsPending, error: botsError } = useBots();
+	const { bots } = useBots();
 	const assistant = useAssistant();
-	// The sidebar is on every page, hidden on a phone, so this makes it wherever the person lands.
-	useEnsuredAssistant(!botsPending && !botsError && !assistant);
 	const { markerOf } = useProjectMarkers();
 	const { data: notificationSettings } = useNotificationSettings();
 	const { workspace } = useWorkspace();
@@ -116,12 +114,6 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 				}
 				// A phone has its tabs instead, and Home in place of the projects.
 				className="max-md:hidden"
-				directMessages={
-					<DirectMessages
-						selectedConversationId={place.directMessageId}
-						newMessageOpen={place.newDirectMessage}
-					/>
-				}
 			/>
 			{newBot.dialog}
 		</>
@@ -163,10 +155,6 @@ interface SidebarPlace {
 	/** The conversation open, if one is. */
 	conversationId: string | undefined;
 	view: SidebarView | undefined;
-	/** The direct message open, if one is. */
-	directMessageId: string | undefined;
-	/** Whether New message is open, starting a direct message. */
-	newDirectMessage: boolean;
 	inSettings: boolean;
 }
 
@@ -180,25 +168,16 @@ function useSidebarPlace(): SidebarPlace {
 			? "projects"
 			: undefined;
 	return {
-		projectSlug: inSettings ? undefined : project,
-		botHandle: inSettings ? undefined : bot,
-		ownerPage:
-			matchRoute({ to: "/$workspace/bots/$bot/files", fuzzy: true }) ||
-			matchRoute({ to: "/$workspace/projects/$project/files", fuzzy: true })
-				? "files"
-				: matchRoute({ to: "/$workspace/bots/$bot/automations", fuzzy: true }) ||
-						matchRoute({ to: "/$workspace/projects/$project/automations", fuzzy: true })
-					? "automations"
-					: matchRoute({ to: "/$workspace/bots/$bot/connections", fuzzy: true }) ||
-							matchRoute({ to: "/$workspace/projects/$project/connections", fuzzy: true })
-						? "connections"
-						: undefined,
+		projectSlug: project,
+		botHandle: bot,
+		ownerPage: OWNER_PAGE_NAMES.find(
+			(page) =>
+				matchRoute({ to: `/$workspace/bots/$bot/${page}`, fuzzy: true }) ||
+				matchRoute({ to: `/$workspace/projects/$project/${page}`, fuzzy: true }),
+		),
 		atHome: Boolean(matchRoute({ to: "/$workspace" })),
 		conversationId: conversation,
 		view,
-		directMessageId:
-			conversation && matchRoute({ to: "/$workspace/dm/$conversation" }) ? conversation : undefined,
-		newDirectMessage: Boolean(matchRoute({ to: "/$workspace/dm/new" })),
 		inSettings,
 	};
 }
@@ -222,7 +201,6 @@ export function SidebarView({
 	rail,
 	focus,
 	className,
-	directMessages,
 }: {
 	/** The viewer's Personal Assistant, once it is there, with how it stands. */
 	assistant?: BotStanding;
@@ -252,11 +230,9 @@ export function SidebarView({
 	resizable?: boolean;
 	/** At the far left, before it, as the workspace narrows to on a bot's or a project's pages. */
 	rail?: ReactNode;
-	/** Shown in place of the projects, bots and direct messages, as a bot's or project's own sidebar is on its pages. */
+	/** Shown in place of the projects and bots, as a bot's or project's own sidebar is on its pages. */
 	focus?: ReactNode;
 	className?: string;
-	/** The viewer's direct messages, under the bots. */
-	directMessages?: ReactNode;
 }) {
 	const [folded, toggleFolded] = useFolded();
 	const [width, setWidth] = usePaneWidth("sidebar");
@@ -313,7 +289,6 @@ export function SidebarView({
 									key={standing.project.id}
 									standing={standing}
 									selected={standing.project.slug === currentProjectSlug}
-									settingsBack={settingsBack}
 									notificationSettings={notificationSettings}
 								/>
 							))}
@@ -356,7 +331,6 @@ export function SidebarView({
 								))}
 							</ul>
 						</FoldSection>
-						{directMessages}
 					</div>
 				)}
 				<div className="mt-auto flex items-center gap-1.5 border-border border-t px-3 py-2">

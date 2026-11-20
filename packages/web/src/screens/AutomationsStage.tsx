@@ -204,7 +204,7 @@ function AutomationFeed({
 			) : (
 				opened.data && (
 					<ConversationChat
-						conversationPlace={{ project: null, conversation: { kind: "botThread", bot } }}
+						conversationPlace={{ bot }}
 						conversationId={opened.data.id}
 						user={user}
 						itemConversationId={itemConversationId}

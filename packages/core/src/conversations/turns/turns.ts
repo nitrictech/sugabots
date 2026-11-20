@@ -142,18 +142,25 @@ export const layer = Layer.mergeAll(
 /** The turn's durable workflow, for the engine to run over {@link stepsLayer}. */
 export const workflow = turnWorkflow;
 
-/** What the turn workflow's steps do: the rest of a turn's machinery. */
-export const stepsLayer = turnStepsLayer.pipe(
-	Layer.provide(
-		Layer.mergeAll(
-			TurnExecution.layer,
-			ApprovedToolCalls.layer,
-			BotRepository.layer,
-			ConversationFiles.layer,
-			Files.authoringLayer,
+/**
+ * What the turn workflow's steps do: the rest of a turn's machinery.
+ * Suspended: the steps' module reaches this one through the bot threads and
+ * the chats, so `turnStepsLayer` is read once the layer is built, not while
+ * the modules load.
+ */
+export const stepsLayer = Layer.suspend(() =>
+	turnStepsLayer.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				TurnExecution.layer,
+				ApprovedToolCalls.layer,
+				BotRepository.layer,
+				ConversationFiles.layer,
+				Files.authoringLayer,
+			),
 		),
+		Layer.provide(internals),
 	),
-	Layer.provide(internals),
 );
 
 /**

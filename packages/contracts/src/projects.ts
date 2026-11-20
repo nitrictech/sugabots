@@ -192,7 +192,7 @@ export const projectUpdateSchema = newProjectSchema.mapFields(Struct.map(Schema.
 
 export type ProjectUpdate = typeof projectUpdateSchema.Type;
 
-/** Somebody in a project. Every administrator is in every project. */
+/** Somebody in a project. Every administrator is in every project people made. */
 export const projectMemberSchema = Schema.Struct({
 	userId: uuidSchema,
 	name: Schema.String,

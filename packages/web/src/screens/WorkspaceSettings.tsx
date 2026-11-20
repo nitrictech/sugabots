@@ -1,6 +1,5 @@
 import { type Liveliness, livelinessLevels } from "@sugabots/avatars";
 import {
-	type Bot,
 	USER_NAME_MAX_LENGTH,
 	WORKSPACE_NAME_MAX_LENGTH,
 	type WorkspaceRole,
@@ -26,11 +25,7 @@ import {
 	useWorkspaceRole,
 	useWorkspaceTimeZone,
 } from "@/lib/workspace.ts";
-import type {
-	BotSettingsPage as BotSettingsPageId,
-	ProjectSettingsPage,
-	WorkspaceSettingSection,
-} from "@/lib/workspace-settings.ts";
+import type { WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -46,37 +41,22 @@ import {
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { useCopy } from "@/ui/use-copy.ts";
-import { BotSettingsPage } from "./BotSettingsPage.tsx";
 import { ComputerSettings } from "./ComputerSettings.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { NotificationsSettings } from "./NotificationsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
-import { ComputerSettingsPage } from "./ResourceSettings.tsx";
 import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
-import { WorkspaceBotsSettings } from "./WorkspaceBotsSettings.tsx";
 import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
-import { WorkspaceProjectsSettings } from "./WorkspaceProjectsSettings.tsx";
 
 export function WorkspaceSettings({
 	section,
-	selectedBot,
-	selectedProjectId,
-	projectPage,
-	botPage,
 	selectedProviderId,
 	modelChoice,
 	selectedMemberId,
 }: {
 	section: WorkspaceSettingSection;
-	/** A bot open on its own page. */
-	selectedBot?: Bot;
-	selectedProjectId?: string;
-	/** Which of the selected project's pages is open. */
-	projectPage?: ProjectSettingsPage;
-	/** Which of the selected bot's pages is open. */
-	botPage?: BotSettingsPageId;
 	/** The provider open on the Models page. */
 	selectedProviderId?: string;
 	/** Which model the Models page shows the choice of instead: new bots' or the system bots'. */
@@ -104,18 +84,6 @@ export function WorkspaceSettings({
 				) : (
 					<ModelsSettings />
 				)
-			) : selectedBot && botPage === "computer" ? (
-				<ComputerSettingsPage key={selectedBot.id} owner={{ bot: selectedBot }} />
-			) : selectedBot ? (
-				<BotSettingsPage key={selectedBot.id} bot={selectedBot} />
-			) : section === "projects" ? (
-				<WorkspaceProjectsSettings
-					selectedProjectId={selectedProjectId}
-					projectPage={projectPage}
-					canCreateProjects={may.createProjects}
-				/>
-			) : section === "bots" ? (
-				<WorkspaceBotsSettings canCreate={may.createBots} />
 			) : (
 				<>
 					{section === "general" && (

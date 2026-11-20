@@ -7,7 +7,6 @@ import { useConversationEvents, useConversationNotices } from "@/lib/conversatio
 import { conversationFileUrl } from "@/lib/conversation-files.ts";
 import { useConversation } from "@/lib/conversations.ts";
 import { OwnerLink, type ResourceOwner } from "@/lib/resource-owner.tsx";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -52,7 +51,7 @@ export function ItemPanel({
 	 * right; undefined in a project, where it is drawn from the bot it is with.
 	 */
 	chatBotId: string | undefined;
-	/** Whose the thread it opened from is, whose automation a run's settings are among; none for a direct message. */
+	/** Whose the thread it opened from is, whose automation a run's settings are among. */
 	owner?: ResourceOwner;
 	itemConversationId: string;
 	entry?: ChatHistoryEntry;
@@ -84,9 +83,11 @@ export function ItemPanel({
 						item.conversationId === details?.conversation.parentConversationId &&
 						item.kind === "run",
 				);
+	// A run records the bot that ran it; a run in a project people made is with no bot of its own.
+	const hostBotId = automationRun?.botId ?? details?.conversation.botId;
 	const host = details?.participants.find(
 		(participant): participant is BotParticipant =>
-			participant.kind === "bot" && participant.id === details.conversation.botId,
+			participant.kind === "bot" && participant.id === hostBotId,
 	);
 	// A collaboration is seen from the chat's bot: it first, on the right, and the other bot beside it.
 	const mine =
@@ -191,14 +192,14 @@ export function ItemPanel({
 					/>
 				)}
 				<ConversationMessages
-					fileUrlOf={(fileId) => conversationFileUrl(conversationId, fileId)}
+					fileUrlOf={(fileId) => conversationFileUrl(itemConversationId, fileId)}
 					messages={shownMessages}
 					answeringFace={findAnsweringFace(shownMessages, true)}
 					host={host}
 					// A notice says the reply is not coming, so nobody is shown typing it.
 					isRunning={details.conversation.status === "running" && notices.length === 0}
 					participants={mentionableIn(details)}
-					members={details.members}
+					peopleReachingProject={details.peopleReachingProject}
 					conversationKind={details.conversation.kind}
 					projectId={details.conversation.projectId}
 					onOpenItem={onOpenItem}
@@ -287,7 +288,6 @@ function ItemPage({
  * event that started it, and the way to its automation's settings.
  */
 function AutomationHeaderActions({ run, owner }: { run: Run; owner: ResourceOwner | undefined }) {
-	const backToRun = useBackToHere("Run");
 	return (
 		<>
 			{run.trigger.kind === "webhook" && (
@@ -332,11 +332,7 @@ function AutomationHeaderActions({ run, owner }: { run: Run; owner: ResourceOwne
 					label="Automation settings"
 					variant="bar"
 					render={
-						<OwnerLink
-							owner={owner}
-							to={{ page: "automation", automationId: run.automationId }}
-							state={backToRun}
-						/>
+						<OwnerLink owner={owner} to={{ page: "automation", automationId: run.automationId }} />
 					}
 				>
 					<SettingsIcon />

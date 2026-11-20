@@ -58,8 +58,6 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 	const review = useReviewToolCall(request.conversationId);
 	const { project, askedIn } = useAskedIn(request);
 	const fields = fieldsOf(call.input) ?? [];
-	// A phone answers with two wide buttons, as Approvals does.
-	const phone = !useMediaQuery(SIDE_BY_SIDE);
 
 	return (
 		<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">
@@ -107,18 +105,8 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 					{found.kind === "answered" ? (
 						// Announced when the person has just answered it here.
 						<AnswerGiven answer={found.request.answer} announced={review.isSuccess} />
-					) : awaitsApproval(call) ? (
-						<Answer
-							pending={review.isPending || review.isSuccess}
-							error={review.error}
-							onDecide={(decision) => review.mutate({ toolCallId: call.id, decision })}
-							actionLabel={action}
-							pinned={phone}
-						/>
 					) : (
-						<p className="m-0 text-xs text-muted-foreground">
-							No longer waiting: {bot.name} stopped before it was answered.
-						</p>
+						<PendingApprovalAnswer request={request} actionLabel={action} review={review} />
 					)}
 					<span className="flex-1 max-md:hidden" />
 					<RequestConversationLink
@@ -129,6 +117,41 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 				</div>
 			</article>
 		</div>
+	);
+}
+
+/**
+ * Allow and Deny for a request still waiting on the person, or, once its bot
+ * stopped before it was answered, that it no longer waits. A phone answers with
+ * two wide buttons. `review` answers it, so the caller can tell once it has.
+ */
+export function PendingApprovalAnswer({
+	request,
+	actionLabel,
+	review,
+}: {
+	request: ApprovalRequest;
+	/** What would be allowed, for Allow's accessible name. */
+	actionLabel: string;
+	review: ReturnType<typeof useReviewToolCall>;
+}) {
+	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const { call, bot } = request;
+	if (!awaitsApproval(call)) {
+		return (
+			<p className="m-0 text-xs text-muted-foreground">
+				No longer waiting: {bot.name} stopped before it was answered.
+			</p>
+		);
+	}
+	return (
+		<Answer
+			pending={review.isPending || review.isSuccess}
+			error={review.error}
+			onDecide={(decision) => review.mutate({ toolCallId: call.id, decision })}
+			actionLabel={actionLabel}
+			pinned={phone}
+		/>
 	);
 }
 

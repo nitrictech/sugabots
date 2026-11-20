@@ -12,8 +12,6 @@ const OWNERS: Record<string, readonly string[]> = {
 	conversation: ["core/src/conversations/repository/repository.ts"],
 	thread: ["core/src/conversations/repository/repository.ts"],
 	projectThread: ["core/src/conversations/repository/repository.ts"],
-	directMessage: ["core/src/conversations/repository/repository.ts"],
-	directMessageMember: ["core/src/conversations/repository/repository.ts"],
 	automationFeed: ["core/src/conversations/repository/repository.ts"],
 	systemConversation: ["core/src/conversations/repository/repository.ts"],
 	conversationParticipant: ["core/src/conversations/repository/repository.ts"],

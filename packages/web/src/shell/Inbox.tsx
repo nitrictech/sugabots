@@ -1,10 +1,10 @@
 import type { InboxItem, Project } from "@sugabots/contracts";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
-import { CheckCheck, Inbox as InboxIcon, ListFilter, MessageCircle } from "lucide-react";
+import { CheckCheck, Inbox as InboxIcon, ListFilter } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
 import { useAttentionCounts, useInboxFeed, useMarkAllRead } from "@/lib/chats.ts";
-import { directMessageLink, inboxItemPageLink, inboxMessageLink } from "@/lib/links.ts";
+import { inboxItemPageLink, inboxMessageLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import { useProjects } from "@/lib/projects.ts";
@@ -361,11 +361,6 @@ function FaceOf({ item }: { item: InboxItem }) {
 	}
 }
 
-/** The message a row is about, when it is one. */
-function itemMessageId(item: InboxItem): string | undefined {
-	return item.kind === "mention" || item.kind === "message" ? item.messageId : undefined;
-}
-
 /** The id a row is chosen by: its message's, or its run's or collaboration's own conversation's. */
 function itemIdOf(item: InboxItem): string {
 	return item.kind === "run" || item.kind === "collaboration"
@@ -373,7 +368,7 @@ function itemIdOf(item: InboxItem): string {
 		: item.messageId;
 }
 
-/** The project an item is in, once the projects are loaded; none in a bot's own threads or a direct message. */
+/** The project an item is in, once the projects are loaded; none in a bot's own threads. */
 function projectOf(item: InboxItem, projects: readonly Project[] | undefined): Project | undefined {
 	const { place } = item;
 	if (place.kind !== "project") return undefined;
@@ -408,7 +403,6 @@ function InboxRow({
 	selected: boolean;
 }) {
 	const { title, detail } = wordsOf(item);
-	const direct = item.place.kind === "direct_message";
 	const content = (
 		<>
 			<span className="w-1.5 shrink-0 pt-1.75">
@@ -433,12 +427,6 @@ function InboxRow({
 							<span className="sr-only">in {project.name}</span>
 						</span>
 					)}
-					{direct && (
-						<span title="Direct message" className="flex text-muted-foreground">
-							<MessageCircle aria-hidden size={14} strokeWidth={2} />
-							<span className="sr-only">in a direct message</span>
-						</span>
-					)}
 				</span>
 				<span className="flex min-w-0 items-baseline gap-2">
 					<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{detail}</span>
@@ -449,9 +437,7 @@ function InboxRow({
 	);
 	return (
 		<Link
-			{...(direct
-				? directMessageLink(item.rootConversationId, { message: itemMessageId(item) })
-				: linkOf(item))}
+			{...linkOf(item)}
 			aria-current={selected ? "page" : undefined}
 			className={cn(
 				"focus-ring flex gap-3 rounded-lg p-2.5 transition-colors",

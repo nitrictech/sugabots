@@ -21,11 +21,6 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			.handle("threads", ({ params }) =>
 				view.threads(params.projectId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
-			.handle("recentThreads", ({ params, query }) =>
-				view
-					.recentThreads({ workspace: params.workspace, limit: query.limit })
-					.pipe(asSessionUser, asHttpError(chatErrors)),
-			)
 			.handle("attention", ({ params }) =>
 				view.attention(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
@@ -49,22 +44,6 @@ export const chatRoutes = HttpApiBuilder.group(ServerApi, "chats", (handlers) =>
 			)
 			.handle("startInterview", ({ params }) =>
 				chats.startInterview(params.botId).pipe(asSessionUser, asHttpError(chatErrors)),
-			)
-			.handle("directMessages", ({ params }) =>
-				view.directMessages(params.workspace).pipe(asSessionUser, asHttpError(chatErrors)),
-			)
-			.handle("sendDirectMessage", ({ params, payload }) =>
-				chats
-					.sendDirectMessage({
-						workspace: params.workspace,
-						userIds: payload.userIds,
-						messageId: payload.id,
-						content: payload.message,
-					})
-					.pipe(asSessionUser, asHttpError(chatErrors)),
-			)
-			.handle("directMessage", ({ params }) =>
-				view.directMessage(params.conversationId).pipe(asSessionUser, asHttpError(chatErrors)),
 			)
 			.handle("openAutomationFeed", ({ params }) =>
 				chats
@@ -167,8 +146,6 @@ const storeOutagesAsDefects = {
 const chatErrors = {
 	...refusals,
 	HostUnavailable: BadRequest,
-	DirectToSelf: BadRequest,
-	TooManyInDirect: BadRequest,
 	MessageIdConflict: Conflict,
 	ReplyTargetNotFound: BadRequest,
 	BotHasNoModel: Conflict,

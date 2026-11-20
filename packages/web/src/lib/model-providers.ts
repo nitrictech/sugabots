@@ -9,6 +9,7 @@ import type {
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
+import { botsQuery } from "@/lib/bots.ts";
 import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
 export function useModelProviders() {
@@ -30,13 +31,15 @@ export function useModelProviders() {
 export function useProviderActions() {
 	const workspaceId = useWorkspace().workspace?.id;
 	const queryClient = useQueryClient();
-	// The first model a workspace switches on becomes its default and every
-	// built-in bot's, so any of these changes can move those too.
+	// The first model a workspace switches on becomes its default, every system bot's and every
+	// model-less Personal Assistant's, and switching a model off moves the bots on it, so any of
+	// these changes can move the bots too.
 	const refresh = () =>
 		Promise.all([
 			queryClient.invalidateQueries({ queryKey: ["model-providers", workspaceId] }),
 			queryClient.invalidateQueries({ queryKey: ["models", workspaceId] }),
 			queryClient.invalidateQueries({ queryKey: ["system-bots", workspaceId] }),
+			queryClient.invalidateQueries({ queryKey: botsQuery(workspaceId).queryKey }),
 		]);
 	const requiredWorkspaceId = useRequiredWorkspaceId();
 
@@ -173,11 +176,7 @@ export function useProviderActions() {
 					}),
 				);
 			},
-			onSuccess: () =>
-				Promise.all([
-					refresh(),
-					queryClient.invalidateQueries({ queryKey: ["bots", workspaceId] }),
-				]),
+			onSuccess: refresh,
 		}),
 		switchOff: useMutation({
 			mutationFn: ({ providerId, ...payload }: { providerId: string } & ProviderSwitchOff) => {
@@ -189,11 +188,7 @@ export function useProviderActions() {
 					}),
 				);
 			},
-			onSuccess: () =>
-				Promise.all([
-					refresh(),
-					queryClient.invalidateQueries({ queryKey: ["bots", workspaceId] }),
-				]),
+			onSuccess: refresh,
 		}),
 		updateModel: useMutation({
 			mutationFn: ({

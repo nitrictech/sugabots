@@ -90,12 +90,7 @@ export function DesktopStage({
 				>
 					Give it one in its settings, so it can run commands, open websites and edit files.{" "}
 					{resourcePermissions(owner).openSettings && (
-						<OwnerLink
-							owner={owner}
-							to={{ page: "computer" }}
-							state={backToThread}
-							className="text-link underline"
-						>
+						<OwnerLink owner={owner} to={{ page: "computer" }} className="text-link underline">
 							Open {ownerName(owner)}'s computer settings.
 						</OwnerLink>
 					)}

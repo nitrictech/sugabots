@@ -6,24 +6,22 @@ import {
 	type Message,
 	type ProjectThread,
 	type Run,
+	START_THREAD_TOOL,
 	streamEvent,
 } from "@sugabots/contracts";
 import { Forbidden, InternalServerError, NotFound } from "@sugabots/contracts/http";
 import { testPerson } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
-import { createMemoryHistory } from "@tanstack/react-router";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createQueryClient } from "@/lib/query.ts";
 import { workspacesQuery } from "@/lib/workspace.ts";
-import { createAppRouter } from "@/router.tsx";
 import {
 	apiAnswers,
 	bots,
 	builtInBots,
 	controlledEventStream,
-	defaultProjectOf,
 	juno,
 	linear,
 	listedThread,
@@ -31,9 +29,9 @@ import {
 	pendingAnswer,
 	projects,
 	sam,
-	TestApp,
 	triager,
 	workspace,
+	writeDraft,
 } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
@@ -43,7 +41,7 @@ const chat: ProjectThread = {
 	kind: "project_thread",
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	workspaceId: linear.workspaceId,
-	projectId: defaultProjectOf(linear),
+	projectId: linear.defaultProjectId,
 	botId: linear.id,
 	title: linear.name,
 	archivedAt: null,
@@ -80,7 +78,7 @@ const automationRun: Run = {
 };
 const person = testPerson({ id: sam.id, name: sam.name });
 /** In the project, but has not written in any of its conversations. */
-const podmate = testPerson({ id: "0199a3a0-0000-7000-8000-000000000501", name: "Robin Vale" });
+const robin = testPerson({ id: "0199a3a0-0000-7000-8000-000000000501", name: "Robin Vale" });
 const host = {
 	kind: "bot" as const,
 	id: linear.id,
@@ -239,7 +237,8 @@ function details(
 		conversation: {
 			id,
 			workspaceId: linear.workspaceId,
-			projectId: null,
+			// As the server places it: a collaboration is in no project, the rest in the bot's default one.
+			projectId: kind === "collaboration" ? null : linear.defaultProjectId,
 			botId: kind === "collaboration" ? triager.id : linear.id,
 			rootConversationId: chat.id,
 			kind,
@@ -252,9 +251,11 @@ function details(
 			updatedAt: "2026-09-18T09:22:00.000Z",
 		},
 		automationRun: kind === "run" ? automationRun : null,
-		participants: kind === "collaboration" ? [host, collaborator] : [person, host],
-		projectBots: [host, collaborator],
-		members: [person, podmate],
+		// The bot it asked for help has joined the thread, though it is not in the project.
+		participants: kind === "collaboration" ? [host, collaborator] : [person, host, collaborator],
+		// A bot's threads are its default project's, whose only bot is the bot itself.
+		projectBots: [host],
+		peopleReachingProject: [person, robin],
 		messages,
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -373,17 +374,11 @@ function chatAnswers() {
 }
 
 /** Goes to the thread's bot's settings, which unmounts the thread, and back to its composer. */
-async function leaveAndReturn(router: ReturnType<typeof mount>): Promise<HTMLElement> {
-	await router.navigate({ to: `/suga/settings/bots/${linear.handle}` });
+async function leaveAndReturn(router: ReturnType<typeof mount>["router"]): Promise<HTMLElement> {
+	await router.navigate({ to: `/suga/bots/${linear.handle}/settings` });
 	await waitFor(() => expect(screen.queryByLabelText(`Message ${linear.name}`)).toBeNull());
 	await router.navigate({ to: conversationPage });
 	return await screen.findByLabelText(`Message ${linear.name}`);
-}
-
-/** Writes `text` into the message box, as typing it would. */
-function writeDraft(box: HTMLElement, text: string) {
-	box.textContent = text;
-	fireEvent.input(box);
 }
 
 /**
@@ -454,14 +449,7 @@ describe("a bot's thread", () => {
 		// As /me leaves the cache when the app starts.
 		const queries = createQueryClient();
 		queries.setQueryData(workspacesQuery.queryKey, [workspace]);
-		const path = conversationPage;
-		render(
-			<TestApp
-				router={createAppRouter({ history: createMemoryHistory({ initialEntries: [path] }) })}
-				queries={queries}
-				session={{ user: sam, error: undefined, refresh: vi.fn() }}
-			/>,
-		);
+		mount(conversationPage, { queries });
 
 		await screen.findByText(mainMessage.content);
 		expect(client.api.projects.list).toHaveBeenCalledOnce();
@@ -526,36 +514,36 @@ describe("a bot's thread", () => {
 		await waitFor(() => expect(messages.scrollTop).toBe(1_200));
 	});
 
-	it("with other people in the thread, says the bot stays out only of a draft mentioning just people", async () => {
+	it("with other people in the thread, says the bot may let a draft mentioning just people pass", async () => {
 		const shared = details(chat.id, "Chat", "project_thread", [mainMessage]);
 		client.api.conversations.get.mockReturnValue(
-			Effect.succeed({ ...shared, participants: [...shared.participants, podmate] }),
+			Effect.succeed({ ...shared, participants: [...shared.participants, robin] }),
 		);
 		mount(conversationPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
-		expect(screen.queryByText(`${linear.name} won't reply.`)).toBeNull();
+		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
 
-		writeDraft(composer, `@${podmate.handle} can you check?`);
+		writeDraft(composer, `@${robin.handle} can you check?`);
 
-		expect(await screen.findByText(`${linear.name} won't reply.`)).toBeTruthy();
-		const box = screen.getByLabelText(`Message ${podmate.name}`);
+		expect(await screen.findByText(`${linear.name} may reply.`)).toBeTruthy();
+		const box = screen.getByLabelText(`Message ${robin.name}`);
 		// The finished mention is drawn in the box as the person's handle, as a sent message draws it.
-		expect(within(box).getByText(`@${podmate.handle}`)).toBeTruthy();
+		expect(within(box).getByText(`@${robin.handle}`)).toBeTruthy();
 
-		writeDraft(box, `@${podmate.handle} and @${linear.handle}, can you check?`);
+		writeDraft(box, `@${robin.handle} and @${linear.handle}, can you check?`);
 
-		await waitFor(() => expect(screen.queryByText(`${linear.name} won't reply.`)).toBeNull());
+		expect(await screen.findByText(`${linear.name} will reply here.`)).toBeTruthy();
 		expect(screen.getByLabelText(`Message ${linear.name}`)).toBeTruthy();
 	});
 
-	it("offers the project's people and bots to mention, so the chat's bot can bring one in, but not you", async () => {
+	it("offers the project's people and the bots here to mention, but not you", async () => {
 		mount(conversationPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
 		writeDraft(composer, "@");
 
 		const list = within(await screen.findByRole("listbox"));
 		expect(list.getByRole("option", { name: new RegExp(linear.name) })).toBeTruthy();
-		expect(list.getByRole("option", { name: new RegExp(podmate.name) })).toBeTruthy();
+		expect(list.getByRole("option", { name: new RegExp(robin.name) })).toBeTruthy();
 		expect(list.getByRole("option", { name: new RegExp(triager.name) })).toBeTruthy();
 		expect(list.queryByRole("option", { name: new RegExp(sam.name) })).toBeNull();
 		// After the people and bots come the two groups, which are not people the project has.
@@ -564,9 +552,64 @@ describe("a bot's thread", () => {
 		expect(list.getAllByRole("option")).toHaveLength(5);
 	});
 
+	it("names the bot as the one who replies to a draft mentioning a bot outside its project", async () => {
+		mount(conversationPage);
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
+
+		writeDraft(composer, `@${triager.handle} can you check?`);
+
+		// The floor ignores a bot outside the project; whether the bot asks it for help is the bot's choice.
+		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
+	});
+
+	it("says the bot replied to will reply, though the reply mentions only people", async () => {
+		const shared = details(chat.id, "Chat", "project_thread", [mainMessage, botMessage]);
+		client.api.conversations.get.mockReturnValue(
+			Effect.succeed({ ...shared, participants: [...shared.participants, robin] }),
+		);
+		mount(conversationPage);
+		const composer = await screen.findByLabelText(`Message ${linear.name}`);
+		const [answer] = await screen.findAllByRole("article", {
+			name: new RegExp(`^${linear.name},`),
+		});
+		fireEvent.click(within(answer as HTMLElement).getByRole("button", { name: "Reply" }));
+
+		writeDraft(composer, `@${robin.handle} can you check?`);
+
+		expect(await screen.findByLabelText(`Message ${robin.name}`)).toBeTruthy();
+		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
+		expect(screen.queryByText(`${linear.name} may reply.`)).toBeNull();
+	});
+
+	it("in an automation's feed, says its bot won't reply to a draft mentioning just people", async () => {
+		client.api.conversations.get.mockReturnValue(
+			Effect.succeed({
+				...details(chat.id, "Overnight review", "automation_feed", []),
+				automation: {
+					id: automationRun.automationId,
+					projectId: linear.defaultProjectId,
+					state: "enabled",
+					failed: false,
+					pausedAfterFailures: false,
+				},
+			}),
+		);
+		mount(conversationPage);
+		const composer = await screen.findByLabelText(`Message ${linear.name} about this automation`);
+		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
+
+		writeDraft(composer, `@${robin.handle} can you check?`);
+
+		expect(await screen.findByText(`${linear.name} won't reply.`)).toBeTruthy();
+	});
+
 	it("offers no @here or @channel when nobody else could be notified", async () => {
 		client.api.conversations.get.mockReturnValue(
-			Effect.succeed({ ...details(chat.id, "Chat", "project_thread", [mainMessage]), members: [] }),
+			Effect.succeed({
+				...details(chat.id, "Chat", "project_thread", [mainMessage]),
+				peopleReachingProject: [person],
+			}),
 		);
 		mount(conversationPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
@@ -577,17 +620,30 @@ describe("a bot's thread", () => {
 		expect(list.queryByRole("option", { name: /@here|@channel/ })).toBeNull();
 	});
 
-	it("offers no composer to a bot with no model, and says where to choose one", async () => {
+	it("holds a message for a bot with no model, saying where to choose one, but sends one for people only", async () => {
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed(bots.map((one) => (one.id === linear.id ? { ...one, model: null } : one))),
+		);
+		client.api.chats.send.mockReturnValue(
+			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
 		);
 		mount(conversationPage);
 
 		expect(await screen.findByText(/has no model yet, so it cannot answer/)).toBeDefined();
 		expect(screen.getByRole("link", { name: "Choose a model" }).getAttribute("href")).toBe(
-			`/suga/settings/bots/${linear.handle}`,
+			`/suga/bots/${linear.handle}/settings`,
 		);
-		expect(screen.queryByLabelText(`Message ${linear.name}`)).toBeNull();
+		const composer = screen.getByLabelText(`Message ${linear.name}`);
+		writeDraft(composer, "Send the update");
+		const send = screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement;
+		expect(send.disabled).toBe(true);
+		expect(screen.queryByText(`${linear.name} will reply here.`)).toBeNull();
+
+		// A message for people alone asks no bot to reply, so it goes.
+		writeDraft(composer, `@${robin.handle} can you check?`);
+		await waitFor(() => expect(screen.queryByText(/has no model yet/)).toBeNull());
+		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+		await waitFor(() => expect(client.api.chats.send).toHaveBeenCalled());
 	});
 
 	it("clears the composer while the message is still in flight", async () => {
@@ -622,7 +678,7 @@ describe("a bot's thread", () => {
 	});
 
 	it("keeps an unsent draft while you are elsewhere, with the cursor at its end", async () => {
-		const router = mount(conversationPage);
+		const { router } = mount(conversationPage);
 		writeDraft(await screen.findByLabelText(`Message ${linear.name}`), "Half a thought");
 
 		const composer = await leaveAndReturn(router);
@@ -635,7 +691,7 @@ describe("a bot's thread", () => {
 		client.api.chats.send.mockReturnValue(
 			Effect.succeed({ message: mainMessage, routing: { status: "routed" } }),
 		);
-		const router = mount(conversationPage);
+		const { router } = mount(conversationPage);
 		writeDraft(await screen.findByLabelText(`Message ${linear.name}`), "Send the update");
 		fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 		await waitFor(() => expect(client.api.chats.send).toHaveBeenCalled());
@@ -786,7 +842,7 @@ describe("a bot's thread", () => {
 		const conversationWith = (reply: Message) =>
 			Effect.succeed(details(chat.id, "Chat", "project_thread", [mainMessage, reply]));
 		answerThreadWith(() => conversationWith(writing));
-		const router = mount(conversationPage);
+		const { router } = mount(conversationPage);
 		await screen.findByRole("status", { name: `${linear.name} is typing` });
 
 		answerThreadWith(() => conversationWith(answered));
@@ -941,8 +997,6 @@ describe("a bot's thread", () => {
 	});
 
 	it("shows what the bot said before a collaboration while it waits on the answer", async () => {
-		// The lead-in used to wait for the whole reply, then land above the
-		// collaboration row and the typing line that had already been drawn.
 		const waiting = {
 			...botMessage,
 			status: "streaming" as const,
@@ -977,7 +1031,7 @@ describe("a bot's thread", () => {
 	});
 
 	it("opens a read-only collaboration panel from an inline part", async () => {
-		const router = mount(conversationPage);
+		const { router } = mount(conversationPage);
 		fireEvent.click(
 			await screen.findByRole("button", {
 				name: new RegExp(`^Open Collaboration: ${linear.name} .*${triager.name}`),
@@ -1079,7 +1133,7 @@ describe("a bot's thread", () => {
 		onTestFinished(() => {
 			vi.unstubAllGlobals();
 		});
-		const router = mount(conversationPage);
+		const { router } = mount(conversationPage);
 
 		expect(await screen.findByRole("complementary", { name: "Details" })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Details", pressed: true }));
@@ -1105,14 +1159,23 @@ describe("a bot's thread", () => {
 		return back;
 	}
 
+	/** A phone's Back at the head of a bot's own page, which returns to the page it was opened from. */
+	async function backFromBotPage() {
+		const header = (await screen.findByRole("heading", { name: "Settings", level: 1 })).closest(
+			"header",
+		);
+		if (!header) throw new Error("No page header");
+		return within(header).getByRole("link", { name: "Back" });
+	}
+
 	it("leads from its bot's settings back to the thread they were opened from", async () => {
-		const router = mount(conversationPage);
+		const { router } = mount(conversationPage);
 		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 		const details = await screen.findByRole("complementary", { name: "Details" });
 
 		fireEvent.click(within(details).getByRole("link", { name: "Settings" }));
 		await screen.findByRole("heading", { name: linear.name });
-		fireEvent.click(await backToThread());
+		fireEvent.click(await backFromBotPage());
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
@@ -1124,7 +1187,7 @@ describe("a bot's thread", () => {
 			author: testPerson({ id: juno.id, name: juno.name }),
 			createdAt: "2026-09-18T09:15:00.000Z",
 		});
-		const router = mount(conversationPage);
+		const { router } = mount(conversationPage);
 		const messages = await screen.findByRole("log", { name: "Chat messages" });
 
 		fireEvent.click(await within(messages).findByRole("link", { name: juno.name }));
@@ -1145,15 +1208,15 @@ describe("a bot's thread", () => {
 			author: collaborator,
 			createdAt: "2026-09-18T09:15:00.000Z",
 		});
-		const router = mount(conversationPage);
+		const { router } = mount(conversationPage);
 		const messages = await screen.findByRole("log", { name: "Chat messages" });
 
 		fireEvent.click(
 			(await within(messages).findAllByRole("link", { name: triager.name }))[0] as HTMLElement,
 		);
 		await screen.findByRole("heading", { name: triager.name });
-		expect(router.state.location.pathname).toBe(`/suga/settings/bots/${triager.handle}`);
-		fireEvent.click(await backToThread());
+		expect(router.state.location.pathname).toBe(`/suga/bots/${triager.handle}/settings`);
+		fireEvent.click(await backFromBotPage());
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(conversationPage));
 	});
@@ -1161,7 +1224,7 @@ describe("a bot's thread", () => {
 	it("lists the people in a thread with more than one in it from its header, the viewer as you", async () => {
 		const shared = details(chat.id, "Chat", "project_thread", [mainMessage]);
 		client.api.conversations.get.mockReturnValue(
-			Effect.succeed({ ...shared, participants: [...shared.participants, podmate] }),
+			Effect.succeed({ ...shared, participants: [...shared.participants, robin] }),
 		);
 		mount(conversationPage);
 
@@ -1170,12 +1233,12 @@ describe("a bot's thread", () => {
 		const people = await screen.findByRole("menu");
 		const [first, second, ...rest] = within(people).getAllByRole("menuitem");
 		expect(first?.textContent).toContain("(you)");
-		expect(second?.textContent).toContain(podmate.name);
+		expect(second?.textContent).toContain(robin.name);
 		expect(rest).toEqual([]);
 	});
 
 	it("closes a direct-linked collaboration without leaving the thread", async () => {
-		const router = mount(`${conversationPage}?item=${collaborationId}`);
+		const { router } = mount(`${conversationPage}?item=${collaborationId}`);
 		const panel = await screen.findByRole("complementary", { name: collaborationEntry.title });
 		expect(within(panel).getByRole("heading", { name: "Collaboration" })).toBeDefined();
 		fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
@@ -1184,6 +1247,59 @@ describe("a bot's thread", () => {
 			expect(screen.queryByRole("complementary", { name: collaborationEntry.title })).toBeNull(),
 		);
 		expect(router.state.location.pathname).toBe(conversationPage);
+	});
+
+	it("opens a thread the bot started with a bot outside its project at that bot's address", async () => {
+		const startedId = "0199a3a0-0000-7000-8000-0000000002a1";
+		const startedThread = details(startedId, "Release checklist", "project_thread", []);
+		answerMessagesWith({
+			...botMessage,
+			id: "0199a3a0-0000-7000-8000-0000000002a2",
+			parts: [
+				{ type: "text", text: "I've asked Triager." },
+				{
+					type: "tool_call",
+					id: "0199a3a0-0000-7000-8000-0000000002a3",
+					tool: START_THREAD_TOOL,
+					input: {},
+					output: {
+						thread: {
+							id: startedId,
+							title: "Release checklist",
+							with: triager.name,
+							withBotId: triager.id,
+						},
+					},
+					status: "completed",
+					error: null,
+					mutating: true,
+					atOffset: 0,
+					startedAt: "2026-09-18T09:16:00.000Z",
+					finishedAt: "2026-09-18T09:16:01.000Z",
+				},
+			],
+			content: "I've asked Triager.",
+			createdAt: "2026-09-18T09:16:00.000Z",
+		});
+		const usual = client.api.conversations.get.getMockImplementation();
+		client.api.conversations.get.mockImplementation(
+			(request: { params: { conversationId: string } }) =>
+				request.params.conversationId === startedId
+					? Effect.succeed({
+							...startedThread,
+							conversation: { ...startedThread.conversation, botId: triager.id },
+						})
+					: usual?.(request),
+		);
+		const { router } = mount(conversationPage);
+
+		fireEvent.click(await screen.findByRole("link", { name: "Open thread: Release checklist" }));
+
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe(
+				`/suga/bots/${triager.handle}/threads/${startedId}`,
+			),
+		);
 	});
 });
 
@@ -1434,7 +1550,7 @@ describe("people typing in the thread", () => {
 	});
 
 	it("does not say you are typing just because a draft was kept from before", async () => {
-		const router = mount(conversationPage);
+		const { router } = mount(conversationPage);
 		writeDraft(await screen.findByLabelText(`Message ${linear.name}`), "Half a thought");
 		await waitFor(() => expect(client.api.events.typing).toHaveBeenCalledTimes(1));
 		client.api.events.typing.mockClear();
@@ -1559,6 +1675,13 @@ describe("a collaboration open beside the thread", () => {
 		);
 		await within(panel).findByText("Trying again");
 		expect(within(notices).queryByText(/has no model chosen/)).toBeNull();
+	});
+
+	it("is not a thread of the bot asked, at that bot's thread address", async () => {
+		answerConversation(() => Effect.succeed(collaboration));
+		mount(`/suga/bots/${triager.handle}/threads/${collaborationId}`);
+
+		expect(await screen.findByText("Conversation not found")).toBeDefined();
 	});
 
 	it("says when the collaboration could not be loaded", async () => {

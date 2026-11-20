@@ -25,7 +25,6 @@ import { countOf } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { automationStartsLabel } from "@/lib/routine-schedule.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useSystemBots } from "@/lib/system-bots.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
@@ -81,7 +80,6 @@ export function DetailsSidebar({
 	onOpenDesktop: () => void;
 	onClose: () => void;
 }) {
-	const backToThread = useBackToHere("Thread");
 	const activity = useConversationActivity(conversationId).data;
 	const summariser = useSystemBots().data?.find(({ key }) => key === "summarise");
 	const modelName = useModelName(bot.model);
@@ -105,7 +103,7 @@ export function DetailsSidebar({
 					</div>
 					<div className="flex justify-center gap-7 pt-2">
 						<RoundAction
-							render={<Link {...botSettingsLink(bot)} state={backToThread} />}
+							render={<Link {...botSettingsLink(bot)} />}
 							icon={<SettingsIcon size={20} />}
 							label="Settings"
 						/>
@@ -430,7 +428,6 @@ function Automations({
  * sign-in expired says so instead, with a sign-in for someone who may.
  */
 function Context({ bot, memory }: { bot: Bot; memory: ConversationContext | undefined }) {
-	const backToThread = useBackToHere("Thread");
 	const connections = useConnections(bot.defaultProjectId);
 	const list =
 		connections.data?.filter(
@@ -450,7 +447,6 @@ function Context({ bot, memory }: { bot: Bot; memory: ConversationContext | unde
 								) : (
 									<Link
 										{...botSettingsLink(bot)}
-										state={backToThread}
 										className="focus-ring -mx-1.5 flex h-7.5 items-center gap-2.5 rounded-md px-1.5 transition-colors hover:bg-row-hover max-md:h-11 max-md:gap-3 max-md:active:bg-row-selected"
 									>
 										<ConnectionMark

@@ -24,14 +24,17 @@ interface ReactionChange {
 
 /**
  * Adds or takes back the user's reactions, showing each at once. They are sent
- * one at a time, in the order they were made. An answer, or a refusal putting
- * back what the message had, is only taken while nothing newer has changed
- * the message: another of the user's reactions, or the conversation's event saying
- * what the message has.
+ * one at a time, in the order they were made. Whether a click adds or takes
+ * back is read from the user's last click still being sent, else from the
+ * message, so two clicks before the first shows still add and take back. An
+ * answer, or a refusal putting back what the message had and asking the server
+ * again, is only taken while nothing newer has changed the message: another of
+ * the user's reactions, or the conversation's event saying what the message has.
  */
 export function useReactions(user: SessionUser) {
 	const queries = useQueryClient();
 	const mutation = useMutation({
+		mutationKey: REACTION_MUTATION_KEY,
 		scope: { id: "reactions" },
 		mutationFn: ({ message, emoji, reacting }: ReactionChange) => {
 			const request = { params: { messageId: message.id, emoji } };
@@ -59,8 +62,12 @@ export function useReactions(user: SessionUser) {
 				setMessageReactions(queries, message, reactions);
 		},
 		onError: (_error, { message }, context) => {
-			if (context && isLatestChange(message.id, context.change)) {
-				setMessageReactions(queries, message, context.before);
+			if (!context || !isLatestChange(message.id, context.change)) return;
+			// `before` is the message as drawn when clicked, which misses the user's earlier
+			// clicks still being sent then, so the server is asked what the message has.
+			setMessageReactions(queries, message, context.before);
+			for (const queryKey of messageLoadKeys(message)) {
+				void queries.invalidateQueries({ queryKey });
 			}
 		},
 		onSettled: (_result, _error, _change, context) => {
@@ -69,15 +76,44 @@ export function useReactions(user: SessionUser) {
 			}
 		},
 	});
+	/** Whether the user has `emoji` on the message, counting what they have asked for and is still being sent. */
+	const reacted = (message: Message, emoji: string) =>
+		lastSentChange(queries, message, emoji)?.reacting ?? hasReacted(message, emoji, user.id);
 	return {
 		/** Adds the user's `emoji` to the message, or takes it back if they had it. */
 		toggle: (message: Message, emoji: string) =>
-			mutation.mutate({ message, emoji, reacting: !hasReacted(message, emoji, user.id) }),
+			mutation.mutate({ message, emoji, reacting: !reacted(message, emoji) }),
 		/** Adds the user's `emoji` to the message, unless they have it already. */
 		add: (message: Message, emoji: string) => {
-			if (!hasReacted(message, emoji, user.id)) mutation.mutate({ message, emoji, reacting: true });
+			if (!reacted(message, emoji)) mutation.mutate({ message, emoji, reacting: true });
 		},
 	};
+}
+
+/** Marks the user's reaction requests in the mutation cache, for `lastSentChange` to find. */
+const REACTION_MUTATION_KEY = ["reaction"];
+
+/**
+ * The user's last change to `emoji` on the message that is still being sent,
+ * if any. Read from the mutation cache, which holds a request from its click,
+ * even while it waits behind earlier ones, rather than from the message, which
+ * shows a click only once its change is applied, after the click that follows
+ * may already have read it.
+ */
+function lastSentChange(
+	queries: QueryClient,
+	message: Message,
+	emoji: string,
+): ReactionChange | undefined {
+	const pending = queries.getMutationCache().findAll({
+		mutationKey: REACTION_MUTATION_KEY,
+		status: "pending",
+		predicate: ({ state }) => {
+			const change = state.variables as ReactionChange | undefined;
+			return change?.message.id === message.id && change.emoji === emoji;
+		},
+	});
+	return pending.at(-1)?.state.variables as ReactionChange | undefined;
 }
 
 /**
@@ -125,13 +161,19 @@ async function cancelMessageLoads(
 	queries: QueryClient,
 	message: Pick<Message, "conversationId">,
 ): Promise<QueryKey[]> {
-	const keys: QueryKey[] = [
+	const loading = messageLoadKeys(message).filter(
+		(queryKey) => queries.isFetching({ queryKey }) > 0,
+	);
+	await Promise.all(loading.map((queryKey) => queries.cancelQueries({ queryKey })));
+	return loading;
+}
+
+/** The queries that load the message's conversation and its pages. */
+function messageLoadKeys(message: Pick<Message, "conversationId">): QueryKey[] {
+	return [
 		["conversation", message.conversationId],
 		["conversation-messages", message.conversationId],
 	];
-	const loading = keys.filter((queryKey) => queries.isFetching({ queryKey }) > 0);
-	await Promise.all(loading.map((queryKey) => queries.cancelQueries({ queryKey })));
-	return loading;
 }
 
 /**

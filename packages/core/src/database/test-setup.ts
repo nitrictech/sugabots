@@ -1,5 +1,6 @@
 import { PgClient } from "@effect/sql-pg";
 import { Effect, Layer, Redacted } from "effect";
+import pg from "pg";
 import type { TestProject } from "vitest/node";
 import { applyMigrations } from "./migrations.ts";
 import { testDatabaseUrl } from "./test-database.ts";
@@ -16,7 +17,8 @@ import { testDatabaseUrl } from "./test-database.ts";
  * copies into a database of its own (see `test-worker-setup.ts`), so files in
  * different workers never see each other's rows or claim each other's jobs.
  * The copies from the last run are dropped here, and each worker makes its
- * copy afresh from the emptied template.
+ * copy afresh from the emptied template. One run uses a template at a time:
+ * another run against it waits for this one to end.
  *
  * `testDatabaseUrl` is what decides the database, and it refuses the
  * development one — this truncates every table, so being sure of that first is
@@ -35,15 +37,55 @@ declare module "vitest" {
  * URL comes from the project's resolved env — the same one the test files get
  * — rather than from `process.env`, which is usually empty here.
  */
-export default async function prepareTestDatabase(project: TestProject): Promise<void> {
+export default async function prepareTestDatabase(
+	project: TestProject,
+): Promise<(() => Promise<void>) | undefined> {
 	const url = project.config.env?.DATABASE_URL ?? testDatabaseUrl(process.env);
 	project.provide("testDatabaseTemplateUrl", url);
 	if (!url) {
 		return;
 	}
-	await Effect.runPromise(createIfMissing(url));
-	await Effect.runPromise(Effect.andThen(applyMigrations, empty).pipe(Effect.provide(poolAt(url))));
-	await Effect.runPromise(dropWorkerCopies(url));
+	const endRun = await waitForTestRun(url);
+	try {
+		await Effect.runPromise(createIfMissing(url));
+		await Effect.runPromise(
+			Effect.andThen(applyMigrations, empty).pipe(Effect.provide(poolAt(url))),
+		);
+		await Effect.runPromise(dropWorkerCopies(url));
+	} catch (error) {
+		await endRun();
+		throw error;
+	}
+	return endRun;
+}
+
+/**
+ * Waits until no other Vitest run is using the template at `templateUrl`, then
+ * claims it until the returned function is called, which Vitest does when this
+ * run ends. A worker's database is the template's name with the worker's pool
+ * number on the end, and every run numbers its workers from 1, so two runs at
+ * once would drop and share each other's worker databases; the second run
+ * waits for the first instead. Workers within one run are unaffected. A run in
+ * watch mode holds the claim until the watcher exits.
+ *
+ * The claim is a Postgres advisory lock keyed by the template's name, held on a
+ * connection of its own to the server's default database, since advisory locks
+ * only conflict within one database. Postgres releases it if this process dies
+ * without ending the run.
+ */
+async function waitForTestRun(templateUrl: string): Promise<() => Promise<void>> {
+	const connection = new pg.Client({ connectionString: serverUrl(templateUrl) });
+	await connection.connect();
+	try {
+		await connection.query("select pg_advisory_lock(hashtextextended($1, 0))", [
+			databaseName(templateUrl),
+		]);
+	} catch (error) {
+		await connection.end();
+		throw error;
+	}
+	// Ending the connection releases the lock.
+	return () => connection.end();
 }
 
 /**
@@ -99,12 +141,17 @@ function withServer(
 	url: string,
 	use: (client: PgClient.PgClient, name: string) => Effect.Effect<void, unknown>,
 ): Effect.Effect<void> {
-	const server = new URL(url);
-	server.pathname = "/postgres";
 	return Effect.flatMap(PgClient.PgClient, (client) => use(client, databaseName(url))).pipe(
 		Effect.orDie,
-		Effect.provide(poolAt(server.toString())),
+		Effect.provide(poolAt(serverUrl(url))),
 	);
+}
+
+/** The server's default database, on the server of the database at `url`. */
+function serverUrl(url: string): string {
+	const server = new URL(url);
+	server.pathname = "/postgres";
+	return server.toString();
 }
 
 function exists(client: PgClient.PgClient, name: string) {

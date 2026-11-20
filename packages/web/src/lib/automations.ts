@@ -234,7 +234,7 @@ export function useAutomationActions() {
 }
 
 /** When the automation's routines run it next, in words: "Today at 14:00", "Tomorrow at 7:00", "Mon at 9:00"; none without a routine. */
-export function nextRunAt(automation: Automation, now = new Date()): string | undefined {
+function nextRunAt(automation: Automation): string | undefined {
 	const [next] = automation.triggers
 		.flatMap((trigger) =>
 			trigger.kind === "routine" && trigger.nextScheduledAt ? [trigger.nextScheduledAt] : [],
@@ -243,7 +243,7 @@ export function nextRunAt(automation: Automation, now = new Date()): string | un
 	if (!next) return undefined;
 	const at = new Date(next);
 	const daysAhead = Math.round(
-		(new Date(at).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 86_400_000,
+		(new Date(at).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86_400_000,
 	);
 	const day =
 		daysAhead <= 0

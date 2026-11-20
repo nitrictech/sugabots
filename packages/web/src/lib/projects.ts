@@ -108,6 +108,18 @@ export function useProjectMembers(projectId: string | undefined) {
 }
 
 /**
+ * The people who reach the project: in a project people made, its members; in
+ * a bot's default project, whoever reaches the bot.
+ */
+export function usePeopleReachingProject(projectId: string) {
+	return useQuery({
+		queryKey: ["project-people", projectId],
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.projects.listPeople({ params: { projectId } }), { signal }),
+	});
+}
+
+/**
  * Adds a workspace member to a project, or takes them out. One mutation for both
  * directions because the caller is one list with an add and a remove on it.
  */
@@ -149,7 +161,10 @@ export function useJoinProject() {
 	});
 }
 
-/** Fetches again what shows who is in the project `projectId`: the projects, which count its people, and its people. */
+/**
+ * Fetches again what shows who is in the project `projectId`: the projects,
+ * which count its people, its people, and who reaches it.
+ */
 function refreshMembership(
 	queries: QueryClient,
 	workspaceId: string | undefined,
@@ -158,6 +173,7 @@ function refreshMembership(
 	return Promise.all([
 		queries.invalidateQueries({ queryKey: ["projects", workspaceId] }),
 		queries.invalidateQueries({ queryKey: ["project-members", projectId] }),
+		queries.invalidateQueries({ queryKey: ["project-people", projectId] }),
 	]);
 }
 

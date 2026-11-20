@@ -18,14 +18,18 @@ import {
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	type Promised,
 	runOnPostgres,
 	servedOnPostgres,
+	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
 import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
 import { unimplemented } from "../../testing.ts";
+import { LeadsProjects } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
+import { ProjectRepository } from "../projects/project-repository.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { BotAdministration } from "./bot-administration.ts";
 import { BotRepository } from "./bot-repository.ts";
@@ -340,6 +344,30 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		expect(await onDatabase((db) => db.select().from(bot).where(eq(bot.id, made.id)))).toEqual([]);
 	});
 
+	it("keeps a bot's computer when its deletion is refused for a lead chosen meanwhile", async () => {
+		const made = await administration.create({
+			workspace: workspaceId,
+			bot: { name: "Builder", model: OFFERED },
+		});
+		const [launch] = await onDatabase((db) =>
+			db.insert(project).values({ workspaceId, name: "Launch", slug: "launch" }).returning(),
+		);
+		if (!launch) throw new Error("could not create the project");
+		const choosing = holdTransaction(
+			Effect.flatMap(ProjectRepository.Service, (projects) =>
+				projects.update(workspaceId, launch.id, { leadBotId: made.id }),
+			).pipe(Effect.provide(ProjectRepository.layer)),
+		);
+		await choosing.held;
+
+		const removing = administration.remove({ botId: made.id });
+		await waitUntilWaitingOnLocks(1);
+		await choosing.release();
+
+		await expect(removing).rejects.toBeInstanceOf(LeadsProjects);
+		expect(destroyedComputers).toEqual([]);
+	});
+
 	it("pins a bot to the actor's sidebar and takes it off again", async () => {
 		const asMember = administrationAs(await aMember());
 		const made = await administration.create({
@@ -356,7 +384,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		expect(await administration.get({ botId: made.id })).toMatchObject({ pinned: true });
 	});
 
-	it("takes a bot made private out of every project it was in", async () => {
+	it("takes a bot made private out of every project people made that it was in", async () => {
 		const made = await administration.create({
 			workspace: workspaceId,
 			bot: { name: "Triage", model: OFFERED },

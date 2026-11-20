@@ -1,10 +1,11 @@
 import { useRender } from "@base-ui/react/use-render";
+import type { LivelyFace } from "@sugabots/avatars";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import type { ReactElement, ReactNode } from "react";
+import { type ReactElement, type ReactNode, useRef } from "react";
 import { botLink, projectLink } from "@/lib/links.ts";
 import { OWNER_MARK_SIZE_PX, ownerMarkTransition } from "@/lib/owner-mark.ts";
-import { BotAvatar } from "@/shell/Bot.tsx";
+import { TurnTakingAvatar } from "@/shell/Bot.tsx";
 import { attentionOf, type BotStanding } from "@/shell/SidebarBot.tsx";
 import { ProjectInitial, type ProjectStanding } from "@/shell/SidebarProject.tsx";
 import { AttentionDot } from "@/ui/attention-dot.tsx";
@@ -87,22 +88,21 @@ export function IconRail({
 	);
 }
 
-/** A bot on the rail, as its face. */
+/**
+ * A bot on the rail, as its face: the same lively face as its sidebar row, so
+ * moving between the two draws one face, not two that differ.
+ */
 function BotPlace({ standing, current }: { standing: BotStanding; current: boolean }) {
+	const face = useRef<LivelyFace>(null);
 	return (
 		<RailItem
 			label={standing.bot.name}
-			render={<Link {...botLink(standing.bot)} />}
+			render={<Link {...botLink(standing.bot)} onPointerEnter={() => face.current?.play("hop")} />}
 			current={current}
 			marker={attentionOf(standing)}
 		>
 			<span style={ownerMarkTransition(standing.bot.id)} className="flex">
-				<BotAvatar
-					color={standing.bot.color}
-					face={standing.bot.face}
-					shape={standing.bot.shape}
-					size={OWNER_MARK_SIZE_PX}
-				/>
+				<TurnTakingAvatar bot={standing.bot} size={OWNER_MARK_SIZE_PX} faceRef={face} />
 			</span>
 		</RailItem>
 	);

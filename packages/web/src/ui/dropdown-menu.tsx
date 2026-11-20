@@ -55,7 +55,7 @@ function DropdownMenuContent({
 
 /** A menu row's look, for the options of a select or listbox. */
 export const MENU_ITEM =
-	"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-tail px-2.5 py-2 text-sm outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
+	"relative flex min-h-9 cursor-pointer select-none items-center gap-2.5 rounded-sm px-2.5 py-2 text-sm outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
 
 function DropdownMenuItem({
 	className,

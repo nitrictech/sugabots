@@ -12,7 +12,6 @@ import {
 	MESSAGE_MAX_LENGTH,
 	messageSchema,
 	participantSchema,
-	personParticipantSchema,
 	toolCallPartSchema,
 } from "./conversations.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
@@ -75,29 +74,25 @@ export const automationFeedSchema = Schema.Struct({
 
 export type AutomationFeed = typeof automationFeedSchema.Type;
 
-/** The most people a direct message between people may have, its sender included. */
-export const MAX_DIRECT_MESSAGE_PEOPLE = 9;
-
-/**
- * A direct message between two people, or a group of them, which nobody else
- * sees. It is in no project, and has no bots. Its people never change: a
- * different set of people is a different one.
- */
-const directMessageSchema = Schema.Struct({
-	kind: Schema.Literal("direct_message"),
-	...conversationFields,
-});
-
-export type DirectMessage = typeof directMessageSchema.Type;
-
-/** Something people open and post in: a project's thread, an automation's feed, or a direct message. */
-const conversationSchema = Schema.Union([
-	projectThreadSchema,
-	automationFeedSchema,
-	directMessageSchema,
-]);
+/** Something people open and post in: a project's thread or an automation's feed. */
+const conversationSchema = Schema.Union([projectThreadSchema, automationFeedSchema]);
 
 export type Conversation = typeof conversationSchema.Type;
+
+/**
+ * What the bots are doing in a thread, as its row in a list says it: a bot's
+ * turn is `working` on a reply, or `waiting` on an approval, each `since` the
+ * turn started or the tool call asked; or a bot `finished` its reply `at`,
+ * and the person has not read it yet. Not the thread's own done state, which
+ * a person sets.
+ */
+const threadActivitySchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("working"), since: isoTimestampSchema }),
+	Schema.Struct({ kind: Schema.Literal("waiting"), since: isoTimestampSchema }),
+	Schema.Struct({ kind: Schema.Literal("finished"), at: isoTimestampSchema }),
+]);
+
+export type ThreadActivity = typeof threadActivitySchema.Type;
 
 /**
  * One of a project's threads as its list shows it. `conversation` is the
@@ -128,6 +123,8 @@ const listedThreadSchema = Schema.Struct({
 	needsApproval: Schema.Boolean,
 	/** A message the person has not read mentions them. */
 	mentionsYou: Schema.Boolean,
+	/** What its bots are doing now, or have finished unread; null when neither. */
+	activity: Schema.NullOr(threadActivitySchema),
 });
 
 export type ListedThread = typeof listedThreadSchema.Type;
@@ -203,13 +200,12 @@ export type ApprovalInbox = typeof approvalInboxSchema.Type;
 
 /**
  * What the conversation people open is, and so where it is listed: a thread or
- * automation feed in a project people made, one in a bot's default project,
- * which is listed under the bot, or a direct message, which is in no project.
+ * automation feed in a project people made, or one in a bot's default project,
+ * which is listed under the bot.
  */
-export const conversationPlaceSchema = Schema.Union([
+const conversationPlaceSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("project"), projectId: uuidSchema }),
 	Schema.Struct({ kind: Schema.Literal("bot"), botId: uuidSchema }),
-	Schema.Struct({ kind: Schema.Literal("direct_message") }),
 ]);
 
 export type ConversationPlace = typeof conversationPlaceSchema.Type;
@@ -218,7 +214,7 @@ export type ConversationPlace = typeof conversationPlaceSchema.Type;
 const inboxPlaceFields = {
 	/** The conversation people open that it is in. */
 	rootConversationId: uuidSchema,
-	/** What `rootConversationId` is: a project's or a bot's thread or automation feed, or a direct message. */
+	/** What `rootConversationId` is: a project's or a bot's thread or automation feed. */
 	place: conversationPlaceSchema,
 	at: isoTimestampSchema,
 	/**
@@ -315,42 +311,6 @@ export const projectThreadListSchema = Schema.Struct({
 
 export type ProjectThreadList = typeof projectThreadListSchema.Type;
 
-/** One of a bot's threads, as a list of threads across bots shows it: always with its bot. */
-const botThreadSchema = Schema.Struct({
-	...listedThreadSchema.fields,
-	conversation: Schema.Struct({
-		...projectThreadSchema.fields,
-		/** The bot whose default project it is in. */
-		botId: uuidSchema,
-	}),
-});
-
-export type BotThread = typeof botThreadSchema.Type;
-
-export const RECENT_THREADS_MAX_LIMIT = 50;
-
-/** How many recent threads to list. */
-export const recentThreadsQuerySchema = Schema.Struct({
-	limit: Schema.String.check(Schema.isPattern(/^\d+$/)).pipe(
-		Schema.decodeTo(Schema.FiniteFromString),
-		Schema.check(
-			Schema.isInt(),
-			Schema.isBetween({ minimum: 1, maximum: RECENT_THREADS_MAX_LIMIT }),
-		),
-	),
-});
-
-/**
- * The threads the person has been working on most lately, newest message
- * first: those not done that they take part in, of the bots they pinned and
- * of their Personal Assistant.
- */
-export const recentThreadsSchema = Schema.Struct({
-	threads: Schema.mutable(Schema.Array(botThreadSchema)),
-});
-
-export type RecentThreads = typeof recentThreadsSchema.Type;
-
 /**
  * How much in the workspace waits for the person, counted over the same
  * window as the inbox, but not only its latest items.
@@ -360,73 +320,11 @@ export const attentionCountsSchema = Schema.Struct({
 	unreadInInbox: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	/** Approvals waiting on a decision the person may make. */
 	waitingApprovals: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	/**
-	 * Unread messages that mention the person outside their direct messages,
-	 * automation results that mention them, and every unread message in their
-	 * direct messages.
-	 */
+	/** Unread messages and automation results that mention the person. */
 	unreadForYou: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
 export type AttentionCounts = typeof attentionCountsSchema.Type;
-
-/**
- * One of the person's direct messages, with one other person or a group.
- * `people` leaves out the person themselves, and anybody who has left the
- * workspace; `formerMembers` counts those.
- */
-export const directMessageListItemSchema = Schema.Struct({
-	conversation: directMessageSchema,
-	/** The others in it, by name. */
-	people: Schema.mutable(Schema.Array(personParticipantSchema)),
-	/** How many others in it have left the workspace. */
-	formerMembers: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	/** Its newest message with words in it, or null until one is written. */
-	lastMessage: Schema.NullOr(
-		Schema.Struct({
-			/** The message's first line, shortened for a one-line row. */
-			preview: Schema.String,
-			/** Who wrote it; null once their account is gone. */
-			authorUserId: Schema.NullOr(uuidSchema),
-			at: isoTimestampSchema,
-		}),
-	),
-	/** How many messages the others finished since the person last read it or wrote in it. */
-	unreadMessages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
-
-export type DirectMessageListItem = typeof directMessageListItemSchema.Type;
-
-/** The person's direct messages in a workspace, the most recent message first. */
-export const directMessageListSchema = Schema.Struct({
-	items: Schema.mutable(Schema.Array(directMessageListItemSchema)),
-});
-
-export type DirectMessageList = typeof directMessageListSchema.Type;
-
-/**
- * A message to one person or a group: it goes to the direct message between
- * the sender and them, which is opened if they have none. Naming the sender
- * too changes nothing, so up to the whole group may be named.
- */
-export const newDirectMessageSchema = Schema.Struct({
-	/** The others it is to, by id. */
-	userIds: Schema.Array(uuidSchema).check(
-		Schema.isMinLength(1),
-		Schema.isMaxLength(MAX_DIRECT_MESSAGE_PEOPLE),
-	),
-	/** The message's id, so sending it again does not send it twice. */
-	id: uuidSchema,
-	message: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MESSAGE_MAX_LENGTH)),
-});
-
-export type NewDirectMessage = typeof newDirectMessageSchema.Type;
-
-/** The direct message a new message went to, and the message. */
-export const sentDirectMessageSchema = Schema.Struct({
-	conversation: directMessageSchema,
-	message: messageSchema,
-}).annotate({ identifier: "SentDirectMessage" });
 
 /**
  * The first message of a new thread in a project: a bot's thread is started

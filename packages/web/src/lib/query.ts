@@ -4,8 +4,9 @@ import { QueryClient } from "@tanstack/react-query";
 /**
  * The query cache.
  *
- * One client for the process, created outside React so it survives re-renders
- * and so tests can hand a fresh one to each case.
+ * `SessionRouter` creates one for each signed-in person, and a new one when
+ * somebody else signs in, so nothing cached for one person is shown to the next.
+ * Tests hand a fresh one to each case.
  *
  * Two defaults worth explaining:
  *
@@ -13,9 +14,8 @@ import { QueryClient } from "@tanstack/react-query";
  *   network blip; retrying it three times only delays showing the person what
  *   happened. Anything else — a dropped connection, a 500 — is retried once.
  * - **`staleTime` of thirty seconds.** Lists like the sidebar's projects change
- *   rarely and are read on every navigation. Once the workspace stream carries
- *   `project.changed` (NIT-1792 adds the first of these), invalidation replaces
- *   the guess and this can go to `Infinity`.
+ *   rarely and are read on every navigation, which reuses a list fetched in the
+ *   last thirty seconds rather than asking again.
  */
 export function createQueryClient(): QueryClient {
 	return new QueryClient({

@@ -1,15 +1,17 @@
-import type { useAnyConversationPlace } from "@/lib/chats.ts";
-import type { ResourceOwner } from "@/lib/resource-owner.tsx";
-
-/** Where any conversation is: one of a project's threads, one of a bot's, or a direct message. */
-export type AnyConversationPlace = NonNullable<ReturnType<typeof useAnyConversationPlace>["found"]>;
+import type { BotParticipant, ConversationDetails } from "@sugabots/contracts";
+import type { ConversationPlace } from "@/lib/chats.ts";
 
 /**
- * Whose a conversation is, as their pages show it: a bot's thread is its bot's,
- * a project's thread its project's. A direct message is nobody's.
+ * The lead bot of the project a conversation is in, as the conversation lists
+ * it: the bot itself in one of a bot's threads, which are its default
+ * project's. Undefined in a project with no lead yet.
  */
-export function conversationOwner(place: AnyConversationPlace): ResourceOwner | undefined {
-	if (place.project) return { project: place.project };
-	if (place.conversation.kind === "botThread") return { bot: place.conversation.bot };
-	return undefined;
+export function leadOf(
+	place: ConversationPlace,
+	details: Pick<ConversationDetails, "participants" | "projectBots">,
+): BotParticipant | undefined {
+	const leadId = "project" in place ? place.project.leadBotId : place.bot.id;
+	return [...details.projectBots, ...details.participants].find(
+		(member): member is BotParticipant => member.kind === "bot" && member.id === leadId,
+	);
 }

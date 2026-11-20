@@ -23,6 +23,17 @@ export const AUTOMATION_TOOLS = [
 	UPDATE_AUTOMATION_TOOL,
 ] as const;
 
+/**
+ * Whether a turn has the automation tools, for the automations of the project
+ * it is in. A Personal Assistant has none: its automations are its person's to
+ * manage. Switched off as {@link AUTOMATIONS_KEY}, they are there but refused.
+ */
+export function hasAutomationTools<
+	Turn extends { bot: { assistantOf: string | null }; projectId: string | null },
+>(turn: Turn): turn is Turn & { projectId: string } {
+	return turn.bot.assistantOf === null && turn.projectId !== null;
+}
+
 /** Whether an automation tool changes something, so a turn that dies after calling it is not retried blindly. */
 export const AUTOMATION_TOOL_MUTATES: Record<(typeof AUTOMATION_TOOLS)[number], boolean> = {
 	[LIST_AUTOMATIONS_TOOL]: false,

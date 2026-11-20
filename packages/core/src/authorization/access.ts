@@ -17,7 +17,6 @@ import type { Executor } from "../database/database.ts";
 import type * as schema from "../database/schema.ts";
 import {
 	bot,
-	directMessageMember,
 	placedConversation,
 	project,
 	projectMember,
@@ -57,9 +56,8 @@ import {
  * are, has no members: it is reached through its bot. An automation's feed
  * and its runs are reached as its project is. A collaboration is reached as the conversation it was opened from,
  * whichever bot was asked, so asking a private bot shows its answer to the
- * people of that conversation and nobody else. A direct message between people
- * is reached through a `direct_message_member` row while its person is in the
- * workspace, whatever their role. A system bot's conversation is reached by nobody.
+ * people of that conversation and nobody else. A system bot's conversation is
+ * reached by nobody.
  *
  * **Hidden** and **forbidden** are different refusals. A resource the caller
  * cannot reach is hidden, so an id cannot be probed for; a resource they can
@@ -92,15 +90,15 @@ export interface BotStanding {
 }
 
 /**
- * The caller's standing towards a conversation they reach: a conversation in
- * a project (a thread, an automation's feed or a run) by their standing in the
- * project, and a direct message, being in which permits only reading it and
- * writing in it. A collaboration's standing is the one towards the
- * conversation it was opened from, not towards the bot that was asked.
+ * The caller's standing towards a conversation they reach: their standing in
+ * its project (a thread's, an automation's feed's or a run's). A
+ * collaboration's standing is the one towards the conversation it was opened
+ * from, not towards the bot that was asked.
  */
-export type ConversationStanding =
-	| { kind: "project"; conversation: schema.PlacedConversationRow; standing: ProjectStanding }
-	| { kind: "direct_message"; conversation: schema.PlacedConversationRow };
+export interface ConversationStanding {
+	conversation: schema.PlacedConversationRow;
+	standing: ProjectStanding;
+}
 
 /**
  * The resource is not there, or the caller may not know that it is. Answered
@@ -355,7 +353,6 @@ export const conversationStandingFor = Effect.fn("Access.conversationStandingFor
 			defaultBot,
 			role: workspaceMember.role,
 			membershipId: projectMember.id,
-			inDirectMessage: reachesDirectMessageFor(placedConversation, userId),
 		})
 		.from(placedConversation)
 		.leftJoin(
@@ -379,17 +376,12 @@ export const conversationStandingFor = Effect.fn("Access.conversationStandingFor
 		.limit(1);
 	if (!row) return undefined;
 	const actor: Actor = { userId, workspaceRole: row.role ?? undefined };
-	if (row.project) {
-		const inProject: ConversationStanding = {
-			kind: "project",
-			conversation: row.conversation,
-			standing: projectStanding(row.project, actor, row.membershipId !== null, row.defaultBot),
-		};
-		return inProject.standing.may("project.read") ? inProject : undefined;
-	}
-	if (row.conversation.kind !== "direct_message") return undefined;
-	const direct: ConversationStanding = { kind: "direct_message", conversation: row.conversation };
-	return row.inDirectMessage ? direct : undefined;
+	if (!row.project) return undefined;
+	const inProject: ConversationStanding = {
+		conversation: row.conversation,
+		standing: projectStanding(row.project, actor, row.membershipId !== null, row.defaultBot),
+	};
+	return inProject.standing.may("project.read") ? inProject : undefined;
 });
 
 /**
@@ -470,11 +462,11 @@ export const listedProjectStandingsFor = Effect.fn("Access.listedProjectStanding
  * calls are decided there too: only a public bot is in a project people
  * made, and whoever decides there may use it.
  *
- * `reached` is the caller's standing towards the conversation, which a
- * `ConversationStanding` is; undefined when they have none.
+ * `conversationProject` is the caller's standing in the conversation's
+ * project; undefined when they do not reach the conversation.
  */
 export function mayDecideToolCall(
-	reached: DecidingStanding | undefined,
+	conversationProject: ProjectStanding | undefined,
 	computerProject: ProjectStanding | undefined,
 	inAutomation: boolean,
 	deciders: ToolApprovalDeciders,
@@ -482,15 +474,12 @@ export function mayDecideToolCall(
 	if (deciders === "computer-managers") {
 		return computerProject?.may("computer.request.decide") ?? false;
 	}
-	if (reached?.kind !== "project") return false;
+	if (!conversationProject) return false;
 	const needed = inAutomation
 		? (["approval.decide", "approval.automation.decide"] as const)
 		: (["approval.decide"] as const);
-	return needed.every((permission) => reached.standing.may(permission));
+	return needed.every((permission) => conversationProject.may(permission));
 }
-
-/** What `mayDecideToolCall` reads of a caller's standing towards a conversation. */
-type DecidingStanding = { kind: "project"; standing: ProjectStanding } | { kind: "direct_message" };
 
 /**
  * SQL for the project whose computer a turn of `turnBotId` in the conversation
@@ -543,6 +532,21 @@ export function reachesProjectFor(
 }
 
 /**
+ * SQL selecting the ids of the people who reach the project `projectId`
+ * names (see `reachesProjectFor`), one `user_id` column, for an `in (…)`: in a
+ * project people made, its members; in a bot's default project, which has
+ * none, the workspace's people who reach the bot.
+ */
+export function peopleReachingProject(projectId: SQLWrapper): SQL<string> {
+	return sql`select reaching_person.user_id
+		from ${workspaceMember} as reaching_person
+		inner join ${project} as reached_project
+			on reached_project.workspace_id = reaching_person.workspace_id
+		where reached_project.id = ${outerColumn(projectId)}
+			and ${reachesProjectFor(sql`reached_project.id`, sql`reaching_person.user_id`)}`;
+}
+
+/**
  * SQL for "`userId` reaches the bot `botId` names": what `reachesBot`
  * decides for one bot, written again as a `where` clause, so a change to it
  * must be made here too. System bots are reached by nobody.
@@ -569,8 +573,6 @@ export function reachesBotFor(botId: SQLWrapper, userId: string | SQLWrapper): S
  * somebody reaches it is decided from.
  */
 export interface ConversationReachColumns {
-	id: SQLWrapper;
-	workspaceId: SQLWrapper;
 	kind: SQLWrapper;
 	rootConversationId: SQLWrapper;
 	projectId: SQLWrapper;
@@ -580,8 +582,8 @@ export interface ConversationReachColumns {
  * SQL for "`userId` reaches the conversation `row`": the project rule for a
  * project's thread, an automation feed and a run, a bot's default project
  * included; the rule of the conversation it was opened from for a
- * collaboration; and membership of the direct message for one between
- * people. A system bot's conversation is in no project, so nobody reaches it. Written as SQL for lists, as
+ * collaboration. A system bot's conversation is in no project, so nobody
+ * reaches it. Written as SQL for lists, as
  * `conversationStandingFor` decides it for one conversation.
  */
 export function reachesConversationFor(
@@ -593,27 +595,7 @@ export function reachesConversationFor(
 		from ${placedConversation} as reach_opened_from
 		where reach_opened_from.id = ${outerColumn(row.rootConversationId)}
 			and ${reachesProjectFor(sql`reach_opened_from.project_id`, userId)}
-	) else (${reachesProjectFor(row.projectId, userId)} or ${reachesDirectMessageFor(row, userId)}) end)`;
-}
-
-/**
- * SQL for "`userId` is in the direct message `row` and still in its
- * workspace". False for every other conversation, which has no
- * `direct_message_member` rows.
- */
-function reachesDirectMessageFor(
-	row: { id: SQLWrapper; workspaceId: SQLWrapper },
-	userId: string | SQLWrapper,
-): SQL<boolean> {
-	return sql`exists (
-		select 1
-		from ${directMessageMember} as reach_direct_member
-		inner join ${workspaceMember} as reach_direct_workspace_member
-			on reach_direct_workspace_member.user_id = reach_direct_member.user_id
-			and reach_direct_workspace_member.workspace_id = ${outerColumn(row.workspaceId)}
-		where reach_direct_member.conversation_id = ${outerColumn(row.id)}
-			and reach_direct_member.user_id = ${outerColumn(userId)}
-	)`;
+	) else ${reachesProjectFor(row.projectId, userId)} end)`;
 }
 
 /** Roles that reach a project once they have been added to it. */

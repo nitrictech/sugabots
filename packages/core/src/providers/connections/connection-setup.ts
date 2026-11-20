@@ -144,15 +144,14 @@ interface ConnectionLocation extends ProjectLocation {
 	connectionId: string;
 }
 
-/** Where a sign-in's browser goes back to: the project. */
-type SignInReturn = ProjectLocation;
-
 /**
  * How a sign-in ended. `at` is there once the sign-in is known to be for a
  * project whose connections the caller manages, so the browser can be sent
  * back to it.
  */
-type SignInOutcome = { at: SignInReturn } | { failure: ConnectionSignInFailure; at?: SignInReturn };
+type SignInOutcome =
+	| { at: ProjectLocation }
+	| { failure: ConnectionSignInFailure; at?: ProjectLocation };
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ConnectionSetup",
@@ -434,13 +433,12 @@ export const make = Effect.gen(function* () {
 					if (allowed._tag === "Failure") return { failure: "not_allowed" as const };
 
 					const project = { workspaceId: owner.workspaceId, projectId: owner.projectId };
-					const back: SignInReturn = project;
 					if (callback.error || !callback.code) {
 						yield* Effect.logWarning("An authorization server refused a connection's sign-in", {
 							error: callback.error,
 							description: callback.errorDescription,
 						});
-						return { failure: "refused" as const, at: back };
+						return { failure: "refused" as const, at: project };
 					}
 					const at = { ...project, connectionId: owner.connectionId };
 					const found = yield* requireConnection(at);
@@ -452,11 +450,11 @@ export const make = Effect.gen(function* () {
 					);
 					if (finished._tag === "Failure") {
 						yield* Effect.logWarning("A connection's sign-in did not finish", finished.failure);
-						return { failure: "not_completed" as const, at: back };
+						return { failure: "not_completed" as const, at: project };
 					}
 
 					yield* discoverQuietly(at);
-					return { at: back };
+					return { at: project };
 				}),
 			),
 	});

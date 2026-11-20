@@ -288,9 +288,9 @@ export const project = pgTable(
  * The administrators' rows are written by triggers, which Drizzle has no way
  * to declare, so they live in migrations and are named here because this is
  * where somebody checking what writes these rows looks:
- * `project_administrators` adds every owner and admin to a new project, and
- * `administrator_projects` adds a new owner or admin to every project; neither
- * touches a bot's default project. Both take
+ * `project_administrators` adds every owner and admin to a new project people
+ * made, and `administrator_projects` adds a new owner or admin to every project
+ * people made. Both take
  * `lock_project_membership(workspace_id)`, as must anything that removes a row
  * on the strength of somebody's role, so a promotion cannot slip between them.
  */

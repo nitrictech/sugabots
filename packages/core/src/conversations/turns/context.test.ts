@@ -169,6 +169,16 @@ describe("modelPrompt", () => {
 		expect(instruction(["automations"])).not.toContain("Routines you set up");
 	});
 
+	it("says nothing of setting up routines to a Personal Assistant, which has no automation tools", () => {
+		const instruction = modelPrompt(
+			{ ...context(), bot: { ...context().bot, assistantOf: crypto.randomUUID() } },
+			environment({ builtInTools: [] }),
+		).messages.at(-1)?.content;
+
+		expect(instruction).toContain("Current time:");
+		expect(instruction).not.toContain("Routines you set up");
+	});
+
 	it("writes the bot's own tool calls into its history as one line each, not the whole output", () => {
 		const input = context();
 		const own = input.messages[1];

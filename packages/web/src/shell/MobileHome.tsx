@@ -1,17 +1,15 @@
-import type { Project } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Bot, Hash, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAssistant, useBots } from "@/lib/bots.ts";
-import { useDirectMessages, useProjectMarkers } from "@/lib/chats.ts";
+import { useProjectMarkers } from "@/lib/chats.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
-import { botLink, botsLink, newDirectMessageLink, projectLink, projectsLink } from "@/lib/links.ts";
+import { botLink, botsLink, projectLink, projectsLink } from "@/lib/links.ts";
 import { ownerPages } from "@/lib/owner-pages.ts";
 import { useProjects } from "@/lib/projects.ts";
-import { OwnerLink, ownerLink } from "@/lib/resource-owner.tsx";
+import { OwnerLink, ownerLink, ownerName, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { DirectMessageCards } from "@/shell/DirectMessages.tsx";
 import { OwnerWork, useOwnerWork } from "@/shell/OwnerWork.tsx";
 import { sidebarBots } from "@/shell/Sidebar.tsx";
 import { SidebarBot } from "@/shell/SidebarBot.tsx";
@@ -56,32 +54,8 @@ function MobilePage({
 }
 
 /**
- * Home on a phone with the direct messages open: each one, most recent first,
- * and + to start another.
- */
-export function MobileDirectMessages({ className }: { className?: string }) {
-	const list = useDirectMessages();
-	return (
-		<MobilePage
-			title="Direct messages"
-			className={className}
-			action={
-				<IconButton label="New message" render={<Link {...newDirectMessageLink()} />}>
-					<Plus strokeWidth={2.2} />
-				</IconButton>
-			}
-		>
-			<DirectMessageCards
-				items={list.data?.items ?? []}
-				status={list.isError ? "failed" : list.isSuccess ? "ready" : "loading"}
-			/>
-		</MobilePage>
-	);
-}
-
-/**
- * Home on a phone: the Personal Assistant, the projects the person is in,
- * each opening its threads, and the bots they pinned.
+ * Home on a phone: the Personal Assistant, the projects the person is in and
+ * the bots they pinned, each opening its threads.
  */
 export function MobileHome({ className }: { className?: string }) {
 	const { data: projects } = useProjects();
@@ -136,20 +110,20 @@ export function MobileHome({ className }: { className?: string }) {
 }
 
 /**
- * A project on a phone, its sidebar as a page: its work, as the sidebar
- * beside it lists it on a wider screen, then its own pages, and + to start a
- * thread.
+ * A bot or a project on a phone, its sidebar as a page: its work, as the
+ * sidebar beside it lists it on a wider screen, then its own pages, and + to
+ * start a thread.
  */
-export function MobileProject({ project }: { project: Project }) {
-	const owner = { project };
+export function MobileOwner({ owner }: { owner: ResourceOwner }) {
 	const work = useOwnerWork(owner);
 	const computersOn = useComputerAccess().data?.enabled === true;
+	const name = ownerName(owner);
 	return (
 		<MobilePage
-			title={project.name}
+			title={name}
 			action={
 				<IconButton
-					label={`New thread in ${project.name}`}
+					label={"bot" in owner ? `New thread with ${name}` : `New thread in ${name}`}
 					render={ownerLink(owner, { page: "newThread" })}
 				>
 					<Plus strokeWidth={2.2} />

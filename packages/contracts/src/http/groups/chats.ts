@@ -8,17 +8,11 @@ import {
 	chatHistoryPageSchema,
 	chatMessagesPageSchema,
 	chatPageQuerySchema,
-	directMessageListItemSchema,
-	directMessageListSchema,
 	firstThreadMessageSchema,
 	inboxFeedSchema,
-	newDirectMessageSchema,
 	projectThreadListSchema,
 	projectThreadMarkersSchema,
 	projectThreadSchema,
-	recentThreadsQuerySchema,
-	recentThreadsSchema,
-	sentDirectMessageSchema,
 	startedThreadSchema,
 	threadNameSchema,
 } from "../../chats.ts";
@@ -33,12 +27,6 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		HttpApiEndpoint.get("threads", "/projects/:projectId/threads", {
 			params: { projectId: Schema.String },
 			success: projectThreadListSchema,
-			error: refused,
-		}),
-		HttpApiEndpoint.get("recentThreads", "/workspaces/:workspace/chats/recent-threads", {
-			params: { workspace: workspaceIdOrSlugSchema },
-			query: recentThreadsQuerySchema,
-			success: recentThreadsSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.get("attention", "/workspaces/:workspace/chats/attention", {
@@ -68,28 +56,6 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		HttpApiEndpoint.post("startInterview", "/bots/:botId/interview", {
 			params: { botId: Schema.String },
 			success: Schema.NullOr(projectThreadSchema),
-			error: refused,
-		}),
-		/** The caller's direct messages with other people, the most recent first. */
-		HttpApiEndpoint.get("directMessages", "/workspaces/:workspace/direct-messages", {
-			params: { workspace: workspaceIdOrSlugSchema },
-			success: directMessageListSchema,
-			error: refused,
-		}),
-		/**
-		 * Sends a message to other people in the workspace, in the caller's direct
-		 * message with them, which is opened if they have none.
-		 */
-		HttpApiEndpoint.post("sendDirectMessage", "/workspaces/:workspace/direct-messages", {
-			params: { workspace: workspaceIdOrSlugSchema },
-			payload: newDirectMessageSchema,
-			success: sentDirectMessageSchema.pipe(HttpApiSchema.status(201)),
-			error: [BadRequest, Conflict, ...refused],
-		}),
-		/** One of the caller's direct messages, as their list shows it. */
-		HttpApiEndpoint.get("directMessage", "/direct-messages/:conversationId", {
-			params: { conversationId: Schema.String },
-			success: directMessageListItemSchema,
 			error: refused,
 		}),
 		/** The automation's feed, where its runs post, opened on first use. */

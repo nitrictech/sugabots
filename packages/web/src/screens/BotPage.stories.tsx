@@ -99,7 +99,7 @@ function expiredConnection(n: number, name: string, url: string): TestConnection
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000007${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
-		projectId: "0199a3a0-0000-7000-8000-00000000b071",
+		projectId: growthDesk.defaultProjectId,
 		name,
 		handle: name.toLowerCase(),
 		url,
@@ -165,7 +165,11 @@ export const SignInsExpired = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("3 connections' sign-ins expired.")).toBeVisible();
+		await expect(
+			await canvas.findByText(
+				`${growthDesk.name} can't use 3 connections until you sign in again.`,
+			),
+		).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Open connections" })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/bots/${growthDesk.handle}/connections`,
@@ -482,6 +486,57 @@ export const NamedChat = meta.story({
 	},
 });
 
+/** `minutes` before now, as an ISO time. */
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+/**
+ * Each thread's row says what its bots are doing, under its title: working on
+ * a reply, waiting on an approval, or done with one the viewer hasn't read.
+ * A thread with none of these shows only who is talking in it.
+ */
+export const ThreadActivity = meta.story({
+	beforeEach({ msw }) {
+		const thread = storyProjectThreadFor(revenue);
+		const titled = (title: string, suffix: string) => ({
+			...thread,
+			id: `0199a3a0-0000-7000-8000-00000000c9${suffix}`,
+			title,
+		});
+		msw.use(
+			http.get(`${API}/projects/${revenue.id}/threads`, () =>
+				HttpResponse.json({
+					automations: [],
+					threads: [
+						{
+							...storyListedThread(titled("Deploy the pricing page", "e1")),
+							activity: { kind: "working", since: minutesAgo(20) },
+						},
+						{
+							...storyListedThread(titled("Refund for Acme", "e2")),
+							activity: { kind: "waiting", since: minutesAgo(2) },
+						},
+						{
+							...storyListedThread(titled("Weekly revenue report", "e3")),
+							activity: { kind: "finished", at: minutesAgo(1) },
+						},
+						storyListedThread(thread),
+					],
+				}),
+			),
+			...appHandlers(),
+		);
+	},
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}/files`} />,
+	play: async ({ canvas }) => {
+		const list = await canvas.findByRole("region", { name: "Threads" });
+		await expect(await within(list).findByText("Working 20m")).toBeVisible();
+		await expect(within(list).getByText("Waiting 2m")).toBeVisible();
+		await expect(
+			within(within(list).getByRole("link", { name: /^Weekly revenue report/ })).getByText("Done"),
+		).toBeVisible();
+	},
+});
+
 /** On a phone the project's thread takes the screen, with Back to the project's list. */
 export const ProjectThreadOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
@@ -640,10 +695,16 @@ export const ReactToAMessage = meta.story({
 
 /**
  * The chat's handlers, with reactions kept on its messages as the API keeps
- * them, so a reload still has them. A reaction added is answered after
- * `addedAfterMs`.
+ * them, so a reload still has them. A reaction added is answered once
+ * `addAnswered` settles, and `onTakenBack` hears each one taken back once it is.
  */
-function reactionHandlers(chat: Message[], { addedAfterMs = 0 } = {}) {
+function reactionHandlers(
+	chat: Message[],
+	{
+		addAnswered = Promise.resolve(),
+		onTakenBack = () => {},
+	}: { addAnswered?: Promise<void>; onTakenBack?: () => void } = {},
+) {
 	const you = { id: storyUser.id, name: storyUser.name, at: "2026-09-18T06:09:00.000Z" };
 	const change = (messageId: string, emoji: string, reacting: boolean) => {
 		const index = chat.findIndex(({ id }) => id === messageId);
@@ -669,14 +730,30 @@ function reactionHandlers(chat: Message[], { addedAfterMs = 0 } = {}) {
 	return [
 		...appHandlers({ messages: { [growthDesk.id]: chat } }),
 		http.put(`${API}/messages/:messageId/reactions/:emoji`, async ({ params }) => {
-			await delay(addedAfterMs);
+			await addAnswered;
 			return change(String(params.messageId), String(params.emoji), true);
 		}),
-		http.delete(`${API}/messages/:messageId/reactions/:emoji`, ({ params }) =>
-			change(String(params.messageId), String(params.emoji), false),
-		),
+		http.delete(`${API}/messages/:messageId/reactions/:emoji`, ({ params }) => {
+			const answer = change(String(params.messageId), String(params.emoji), false);
+			onTakenBack();
+			return answer;
+		}),
 	];
 }
+
+/** Jay, who reacted 👍 to the bot's question before the viewer did. */
+const jay = {
+	id: "0199a3a0-0000-7000-8000-0000000005f1",
+	name: "Jay Park",
+	at: "2026-09-18T06:08:00.000Z",
+};
+
+/**
+ * `ChangeYourMindQuickly`'s chat as its API keeps it, the add it holds until
+ * the play answers it, and when the take-back has reached it: made by the
+ * story's setup, read by its play.
+ */
+let quickChange: { chat: Message[]; answerAdd: () => void; takenBack: Promise<void> } | undefined;
 
 /**
  * Reactions are sent in the order they were made, so clicking one on and
@@ -684,39 +761,68 @@ function reactionHandlers(chat: Message[], { addedAfterMs = 0 } = {}) {
  */
 export const ChangeYourMindQuickly = meta.story({
 	beforeEach({ msw }) {
-		const jay = {
-			id: "0199a3a0-0000-7000-8000-0000000005f1",
-			name: "Jay Park",
-			at: "2026-09-18T06:08:00.000Z",
-		};
 		const chat = conversation.map((message) =>
 			/Want me to draft replies/.test(message.content)
 				? { ...message, reactions: [{ emoji: "👍", people: [jay] }] }
 				: { ...message },
 		);
-		msw.use(...reactionHandlers(chat, { addedAfterMs: 300 }));
+		const added = Promise.withResolvers<void>();
+		const takenBack = Promise.withResolvers<void>();
+		quickChange = { chat, answerAdd: added.resolve, takenBack: takenBack.promise };
+		msw.use(
+			...reactionHandlers(chat, {
+				addAnswered: added.promise,
+				onTakenBack: takenBack.resolve,
+			}),
+		);
 	},
 	play: async ({ canvas }) => {
+		if (!quickChange) throw new Error("The story's setup did not run");
+		const { chat, answerAdd, takenBack } = quickChange;
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		const asked = (await within(log).findByText(/Want me to draft replies/)).closest("article");
 		if (!asked) throw new Error("The bot's question is not a message row");
-		const thumbs = within(asked).getByRole("button", { name: /^👍/ });
-		await userEvent.click(thumbs);
-		await expect(thumbs).toHaveAccessibleName("👍 2: Jay Park and You reacted with 👍");
-		await userEvent.click(thumbs);
-		await expect(thumbs).toHaveAccessibleName("👍 1: Jay Park reacted with 👍");
-		// Past the slow answer to the first click, and the second's after it.
-		await new Promise((resolve) => setTimeout(resolve, 600));
-		await expect(thumbs).toHaveAccessibleName("👍 1: Jay Park reacted with 👍");
+		await userEvent.click(within(asked).getByRole("button", { name: /^👍/ }));
+		// Taken back while the API has still not answered the add.
+		await userEvent.click(
+			await within(asked).findByRole("button", {
+				name: "👍 2: Jay Park and You reacted with 👍",
+			}),
+		);
+		await within(asked).findByRole("button", { name: "👍 1: Jay Park reacted with 👍" });
+
+		answerAdd();
+		await takenBack;
+
+		const askedId = asked.getAttribute("data-message-id");
+		await expect(chat.find(({ id }) => id === askedId)?.reactions).toEqual([
+			{ emoji: "👍", people: [jay] },
+		]);
+		const thumbs = await within(asked).findByRole("button", {
+			name: "👍 1: Jay Park reacted with 👍",
+		});
 		await expect(thumbs).toHaveAttribute("aria-pressed", "false");
 	},
 });
 
+/**
+ * Opens the thread's Details once the thread has loaded, and returns them.
+ * The Details button is drawn while the thread loads and drawn again once it
+ * has, so it is found only after; and Details may already be open, as a wide
+ * screen opens them unless this browser last closed them, so it is pressed
+ * only when they are closed.
+ */
+async function openDetails(canvas: ReturnType<typeof within>): Promise<HTMLElement> {
+	await canvas.findByRole("log", { name: "Chat messages" });
+	const toggle = canvas.getByRole("button", { name: "Details" });
+	if (toggle.getAttribute("aria-pressed") === "false") await userEvent.click(toggle);
+	return canvas.findByRole("complementary", { name: "Details" });
+}
+
 /** Details open beside the chat: the bot's card, summary, who has written and what it can use. */
 export const Details = meta.story({
 	play: async ({ canvas }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
-		await expect(await canvas.findByRole("complementary", { name: "Details" })).toBeInTheDocument();
+		await expect(await openDetails(canvas)).toBeInTheDocument();
 	},
 });
 
@@ -823,7 +929,7 @@ const collaboration: ConversationDetails = {
 	automationRun: null,
 	participants: [asked, asker],
 	projectBots: [asker, asked],
-	members: [],
+	peopleReachingProject: [],
 	olderMessagesCursor: null,
 	queuedSince: null,
 	reads: [],
@@ -916,9 +1022,8 @@ export const Computer = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...computerHandlers(conversation));
 	},
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
-		const details = await canvas.findByRole("complementary", { name: "Details" });
+	play: async ({ canvas }) => {
+		const details = await openDetails(canvas);
 		await expect(await within(details).findByRole("button", { name: "Not running" })).toBeVisible();
 	},
 });
@@ -928,9 +1033,8 @@ export const Computer = meta.story({
  * and opens to say what computers are for and how to get them.
  */
 export const NoComputer = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Details" }));
-		const details = await canvas.findByRole("complementary", { name: "Details" });
+	play: async ({ canvas }) => {
+		const details = await openDetails(canvas);
 		await userEvent.click(await within(details).findByRole("button", { name: "No computer" }));
 		const computer = await canvas.findByRole("region", { name: `${growthDesk.name}'s computer` });
 		await expect(await within(computer).findByText("Computers aren't set up yet")).toBeVisible();
@@ -1020,6 +1124,10 @@ const fileHandlers = () => {
 	};
 	return [
 		...appHandlers({ messages: { [growthDesk.id]: [...conversation, madePricing] } }),
+		// The bot's files, which the file opened must be among to be shown as the bot's.
+		http.get(`${API}/projects/:projectId/files`, ({ params }) =>
+			HttpResponse.json(params.projectId === growthDesk.defaultProjectId ? [pricing] : []),
+		),
 		http.get(files, () => HttpResponse.json(shown)),
 		http.get(`${files}/versions/:version`, () => HttpResponse.json(shown)),
 		http.get(`${files}/versions`, () => HttpResponse.json([shown.shownVersion])),

@@ -37,7 +37,6 @@ export function useMessageSending({
 	attachments,
 	recipients,
 	scrollToLatest,
-	onSent,
 }: {
 	conversationId: string;
 	user: SessionUser;
@@ -48,7 +47,6 @@ export function useMessageSending({
 	attachments: Pick<ComposerAttachments, "takeForSending">;
 	recipients: Pick<ChatRecipients, "named" | "answering">;
 	scrollToLatest: () => void;
-	onSent: (() => void) | undefined;
 }): MessageSending {
 	const send = useSendMessage(conversationId, user);
 	const [startError, setStartError] = useState<string>();
@@ -80,7 +78,6 @@ export function useMessageSending({
 			scrollToLatest();
 			await sent;
 			scrollToLatest();
-			onSent?.();
 		} catch (failure) {
 			setDraft((current) => (current === "" ? submitted : current));
 			setReplyingTo((current) => current ?? answered);

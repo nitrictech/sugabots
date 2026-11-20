@@ -1,33 +1,28 @@
-import type { ConversationDetails, PersonParticipant, SessionUser } from "@sugabots/contracts";
-import { directPeopleTitle, isOneToOne } from "@/lib/chats.ts";
+import type { ConversationDetails, PersonParticipant } from "@sugabots/contracts";
+import type { ConversationPlace } from "@/lib/chats.ts";
 import { OwnerPageCrumb, ProjectCrumb } from "@/shell/BotCrumb.tsx";
-import { DirectPeopleAvatar } from "@/shell/DirectMessages.tsx";
 import {
 	AutomationFace,
 	type BackTo,
+	backToOwner,
 	ChatHeader,
 	type ChatPlace,
 	type DoneToggle,
 	type HeaderPlace,
-	PHONE_FACE_SIZE_PX,
 	PlainChatHeader,
 } from "./ChatHeader.tsx";
-import type { AnyConversationPlace } from "./conversation-place.ts";
-import { DirectMembersButton } from "./DirectMembers.tsx";
 import { ProjectThreadMenu, type ProjectThreadToChange } from "./ProjectThreadMenu.tsx";
 
 /**
- * The bar across the top of a conversation, as its kind has it: a bot's thread's,
- * with its bot and who is in it; an automation's feed's, under its bot's
- * automations; a project's thread's, under its project, with its menu; or a
- * direct message's, with whom it is with. All but the feed's sit over the chat
- * while `overChat`.
+ * The bar across the top of a conversation, as its kind has it: an automation's
+ * feed's, under its project's or bot's automations; a project's thread's, under
+ * its project, with its menu; or a bot's thread's, with its bot and who is in it. All
+ * but the feed's sit over the chat while `overChat`.
  */
 export function ConversationHeader({
 	conversationPlace,
 	details,
 	conversationId,
-	user,
 	place,
 	detailsAvailable,
 	projectThreadName,
@@ -36,11 +31,10 @@ export function ConversationHeader({
 	overChat,
 	onOpenDesktop,
 }: {
-	conversationPlace: AnyConversationPlace;
+	conversationPlace: ConversationPlace;
 	/** The conversation once loaded. */
 	details: ConversationDetails | undefined;
 	conversationId: string;
-	user: SessionUser;
 	place: ChatPlace;
 	/** Whether Details may open beside the chat: not while something is open large there. */
 	detailsAvailable: boolean;
@@ -55,10 +49,20 @@ export function ConversationHeader({
 	onOpenDesktop: () => void;
 }) {
 	const headerPlace = headerPlaceOf(place, {
-		back: backOf(conversationPlace),
+		back: backToOwner(conversationPlace),
 		detailsAvailable,
 	});
-	if (conversationPlace.project) {
+	if (details?.automation) {
+		return (
+			<PlainChatHeader
+				{...headerPlace}
+				title={details.conversation.title}
+				face={<AutomationFace />}
+				crumbs={<OwnerPageCrumb owner={conversationPlace} page="automations" />}
+			/>
+		);
+	}
+	if ("project" in conversationPlace) {
 		const { project } = conversationPlace;
 		return (
 			<PlainChatHeader
@@ -73,38 +77,10 @@ export function ConversationHeader({
 			/>
 		);
 	}
-	const { conversation } = conversationPlace;
-	if (conversation.kind === "directMessage") {
-		return (
-			<PlainChatHeader
-				{...headerPlace}
-				overChat={overChat}
-				// Nothing opens beside a direct message: who is in a group drops down from its people's count.
-				details={undefined}
-				title={directPeopleTitle(conversation)}
-				face={<DirectPeopleAvatar {...conversation} size={PHONE_FACE_SIZE_PX} />}
-				detail={
-					isOneToOne(conversation) ? undefined : (
-						<DirectMembersButton direct={conversation} user={user} />
-					)
-				}
-			/>
-		);
-	}
-	if (details?.automation) {
-		return (
-			<PlainChatHeader
-				{...headerPlace}
-				title={details.conversation.title}
-				face={<AutomationFace />}
-				crumbs={<OwnerPageCrumb owner={{ bot: conversation.bot }} page="automations" />}
-			/>
-		);
-	}
 	return (
 		<ChatHeader
 			{...headerPlace}
-			bot={conversation.bot}
+			bot={conversationPlace.bot}
 			overChat={overChat}
 			title={details?.conversation.title}
 			done={done}
@@ -115,14 +91,6 @@ export function ConversationHeader({
 			onOpenDesktop={onOpenDesktop}
 		/>
 	);
-}
-
-/** Where Back returns to from a conversation: its project, its bot, or the direct messages. */
-function backOf(conversationPlace: AnyConversationPlace): BackTo {
-	if (conversationPlace.project) return { to: "project", project: conversationPlace.project };
-	const { conversation } = conversationPlace;
-	if (conversation.kind === "botThread") return { to: "bot", bot: conversation.bot };
-	return { to: "directMessages" };
 }
 
 /**

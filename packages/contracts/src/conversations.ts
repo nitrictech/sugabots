@@ -24,25 +24,27 @@ export const MAX_CONVERSATION_HISTORY_LIMIT = 100;
 
 /**
  * What kind of conversation it is: a project's thread (a bot's threads being
- * its default project's), a direct message between people, a collaboration a
- * bot asked for, an automation's run or feed, or a system bot's conversation.
+ * its default project's), a collaboration a bot asked for, an automation's run
+ * or feed, or a system bot's conversation.
  */
-export const conversationKindSchema = Schema.Literals([
+const conversationKindSchema = Schema.Literals([
 	"project_thread",
 	"collaboration",
 	"run",
 	"automation_feed",
 	"system",
-	"direct_message",
 ]);
 
 export type ConversationKind = typeof conversationKindSchema.Type;
 
-/** The conversations whose messages notify people: not an automation's feed, nor those bots work in. */
-export const NOTIFYING_CONVERSATION_KINDS: ReadonlySet<ConversationKind> = new Set([
-	"project_thread",
-	"direct_message",
-]);
+/**
+ * Whether ordinary messages in a conversation of `kind` notify people: only a
+ * thread's, not an automation feed's or those of the conversations bots work
+ * in. One exception: an automation's result posted only in its feed notifies
+ * the people it mentions, which the notifications check separately.
+ */
+export const notifiesPeople = (kind: ConversationKind): kind is "project_thread" =>
+	kind === "project_thread";
 
 export const conversationHistoryQuerySchema = Schema.Struct({
 	cursor: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
@@ -67,11 +69,11 @@ export const placedConversationSchema = Schema.Struct({
 	workspaceId: uuidSchema,
 	/** The project it is in; only a project's own conversations are in one. */
 	projectId: Schema.NullOr(uuidSchema),
-	/** The bot it is with; null on a project's thread and a direct message. */
+	/** The bot it is with; null in a project people made. */
 	botId: Schema.NullOr(uuidSchema),
 	/**
 	 * The conversation people open that it is in: its own id on a bot's thread,
-	 * a project's thread, a direct message and an automation's feed; the
+	 * a project's thread and an automation's feed; the
 	 * one it hangs under on a collaboration; the automation's feed on a run.
 	 * Null on a system bot's conversation.
 	 */
@@ -88,9 +90,9 @@ export const placedConversationSchema = Schema.Struct({
 	 * collaboration, which holds the card for it, or the one a system bot serves.
 	 */
 	parentConversationId: Schema.NullOr(uuidSchema),
-	/** When somebody marked the bot's thread done; null while it is open, and on any other kind. */
+	/** When somebody marked the thread done; null while it is open, and on any other kind. */
 	doneAt: Schema.NullOr(isoTimestampSchema),
-	/** Who started a bot's thread, a project's thread or a direct message. */
+	/** Who started a bot's thread or a project's thread. */
 	startedById: Schema.NullOr(uuidSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
@@ -175,8 +177,10 @@ export function mentionPattern(handle: string, ...more: string[]): string {
 /**
  * Handles that address everyone in a conversation instead of one participant,
  * as `@here` and `@channel` do in Slack. Nothing tells who is active, so
- * both reach everyone who can see the conversation. They never give a bot a
- * turn: only a bot's own handle does.
+ * both reach everyone who can see the conversation. They address people, never
+ * a bot, so a message whose only mentions are these mentions only people, and
+ * follows the floor's rule for that (see `decideFloor`): in a project's thread
+ * the lead bot may still take a turn it can decline.
  */
 export const GROUP_MENTION_HANDLES = ["here", "channel"] as const;
 
@@ -692,9 +696,13 @@ export const conversationDetailsSchema = Schema.Struct({
 	 * The project's bots, whether or not they have spoken. Who a mention can name,
 	 * which is wider than who has joined.
 	 */
-	projectBots: Schema.mutable(Schema.Array(participantSchema)),
-	/** The project's people, whether or not they have written here: the people a mention can name. */
-	members: Schema.mutable(Schema.Array(personParticipantSchema)),
+	projectBots: Schema.mutable(Schema.Array(botParticipantSchema)),
+	/**
+	 * The people who reach the project, whether or not they have written here:
+	 * with the conversation's people, those a mention can name. In a project
+	 * people made, its members; in a bot's default project, whoever reaches the bot.
+	 */
+	peopleReachingProject: Schema.mutable(Schema.Array(personParticipantSchema)),
 	messages: Schema.mutable(Schema.Array(messageSchema)),
 	olderMessagesCursor: Schema.NullOr(Schema.String),
 	/**

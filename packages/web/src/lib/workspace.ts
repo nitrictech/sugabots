@@ -190,9 +190,9 @@ export function useCancelWorkspaceInvitation(workspaceId: string) {
 }
 
 /**
- * Leaving takes the whole client with it: every project, bot and conversation on
- * screen belonged to a workspace this person is no longer in, so the cache is
- * cleared rather than refetched.
+ * Leaving makes everything cached stale: every project, bot and conversation on
+ * screen belonged to a workspace this person is no longer in. So every query is
+ * invalidated, and those on screen are fetched again.
  */
 export function useLeaveWorkspace(workspaceId: string) {
 	const queries = useQueryClient();
@@ -223,8 +223,11 @@ function useMemberChange<Input>(workspaceId: string, change: (input: Input) => P
 				queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "members"] }),
 				queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
 				queries.invalidateQueries({ queryKey: ["projects"] }),
-				// Making somebody an administrator or the owner puts them in every project.
+				// Making somebody an administrator or the owner puts them in every project people
+				// made. A private bot's default project, and someone else's Personal Assistant's,
+				// are still reached only as their bot is.
 				queries.invalidateQueries({ queryKey: ["project-members"] }),
+				queries.invalidateQueries({ queryKey: ["project-people"] }),
 				queries.invalidateQueries({ queryKey: ["bots"] }),
 			]),
 	});

@@ -36,6 +36,8 @@ export function ComputerSheet({
 	const missing = useComputerGap({ bot });
 	const may = useWorkspacePermissions();
 	const update = useUpdateBot(bot.id);
+	// Whether it uses a computer is the computer's to manage, not the rest of the bot's.
+	const mayGiveComputer = bot.permissions.resources.manageComputer;
 	const backToThread = useBackToHere("Thread");
 	const title = `${bot.name}'s computer`;
 
@@ -79,12 +81,14 @@ export function ComputerSheet({
 				<NoComputer
 					text={`${bot.name} doesn't have a computer`}
 					detail={
-						bot.permissions.update
+						mayGiveComputer
 							? "Give it one to run commands, browse and make files."
-							: "Ask somebody who can edit it to give it one."
+							: bot.assistant
+								? "Sugabots sets up your Personal Assistant, its computer included."
+								: "Ask somebody who can edit it to give it one."
 					}
 				>
-					{bot.permissions.update && (
+					{mayGiveComputer && (
 						<>
 							<Button
 								className="h-11 w-full text-sm"

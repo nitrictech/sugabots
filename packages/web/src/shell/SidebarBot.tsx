@@ -18,10 +18,10 @@ import { sidebarRow } from "@/ui/sidebar-row.ts";
 export type BotStanding = ProjectMarker & { bot: Bot };
 
 /**
- * A bot on one line, which opens its page, where a thread with it starts. At its
- * end, what is new in it, and beside that an alert while something is wrong
- * that its settings or automations set right. Right-clicked, it offers its
- * notifications.
+ * A bot on one line, which opens its page: its threads on a phone, and
+ * starting a thread with it on a wider screen. At its end, what is new in it,
+ * and beside that an alert while something is wrong that its settings or
+ * automations set right. Right-clicked, it offers its notifications.
  */
 export function SidebarBot({
 	standing,
@@ -79,7 +79,7 @@ export function SidebarBot({
  * The end of a sidebar row, as wide as the + beside a section's name, so a
  * row's dot, its +, and the section's + all line up.
  */
-export const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
+const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
 
 /** What waits on the viewer in a bot or project. */
 type Waiting = Pick<ProjectMarker, "unreadMessages" | "needsApproval">;

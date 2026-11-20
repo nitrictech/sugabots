@@ -60,12 +60,16 @@ one call run. There's no "always allow": the next call asks again.
 
 - **Anyone who can talk to the bot**, except viewers, can answer approvals in
   its threads. In a project, anyone in it except viewers can answer.
-- **Viewers** see "Waiting for someone with permission to answer this."
-- **Only those who manage the automation** can answer approvals raised by an
-  [automation](/docs/automations) run: for a bot's own, the bot's creator, the
-  owner and admins; for a project's, the owner and admins. On your Personal
-  Assistant, that's you.
-- **Only those who manage the computer** can allow it to reach an internet
-  address it couldn't before: for a bot's own computer, the bot's creator,
-  the owner and admins; for a [project's computer](/docs/projects#computer),
-  the owner and admins.
+- **Viewers** see "Waiting for someone with permission to answer this," except
+  in their own Personal Assistant's threads, where they answer its approvals.
+- **Only those who manage the automation, and can see the conversation**, can
+  answer approvals raised by an [automation](/docs/automations) run: for the
+  own automations of a bot people made, the bot's creator, the owner and
+  admins; for a Personal Assistant's, its person, viewers included; for a
+  project's, the owner and admins. An admin can't see a private bot's threads, so can't
+  answer its automation's approvals.
+- **Only those who manage the computer, and can see the conversation**, can
+  allow it to reach an internet address it couldn't before: for a bot's own
+  computer, the bot's creator, the owner and admins; for a
+  [project's computer](/docs/projects#computer), the owner and admins. An admin
+  can't see a private bot's threads, so can't answer a request raised in one.

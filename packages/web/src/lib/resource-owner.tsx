@@ -1,22 +1,24 @@
 import { useRender } from "@base-ui/react/use-render";
 import type { Bot, Project, ResourcePermissions } from "@sugabots/contracts";
-import { type HistoryState, Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { type ComponentProps, type ReactElement, useCallback } from "react";
 import { useBot } from "@/lib/bots.ts";
 import {
 	botAutomationFeedLink,
 	botAutomationsLink,
+	botComputerLink,
 	botConnectionLink,
 	botConnectionsLink,
 	botFileLink,
 	botFilesLink,
 	botLink,
 	botNewAutomationLink,
+	botNewThreadLink,
 	botSettingsLink,
-	botSettingsPageLink,
 	conversationLink,
 	projectAutomationFeedLink,
 	projectAutomationsLink,
+	projectComputerLink,
 	projectConnectionLink,
 	projectConnectionsLink,
 	projectFileLink,
@@ -25,7 +27,6 @@ import {
 	projectNewAutomationLink,
 	projectNewThreadLink,
 	projectSettingsLink,
-	projectSettingsPageLink,
 } from "@/lib/links.ts";
 
 /*
@@ -55,8 +56,8 @@ export function resourcePermissions(owner: ResourceOwner): ResourcePermissions {
 
 /**
  * The bot that works on the owner's threads and runs its automations: a bot
- * itself, a project's lead bot once the roster has it. Undefined for a project
- * from before leads that has none yet.
+ * itself, or a project's lead bot. Undefined until the roster has it, or
+ * while the project has no lead bot.
  */
 export function useLeadBot(owner: ResourceOwner): Bot | undefined {
 	const lead = useBot("project" in owner ? owner.project.leadBotId : null);
@@ -65,7 +66,7 @@ export function useLeadBot(owner: ResourceOwner): Bot | undefined {
 
 /** One of the pages a bot and a project each have. */
 export type OwnerPage =
-	/** A bot's own page, or a project's newest thread. */
+	/** On a phone, the bot's or project's threads and pages; wider, a bot's new thread or a project's newest. */
 	| { page: "home" }
 	| { page: "newThread" }
 	| { page: "thread"; conversationId: string }
@@ -103,8 +104,9 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 		const { bot } = owner;
 		switch (to.page) {
 			case "home":
-			case "newThread":
 				return botLink(bot);
+			case "newThread":
+				return botNewThreadLink(bot);
 			case "thread":
 				return conversationLink({ bot, conversationId: to.conversationId });
 			case "files":
@@ -122,7 +124,7 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 			case "connection":
 				return botConnectionLink(bot, { id: to.connectionId });
 			case "computer":
-				return botSettingsPageLink(bot, "computer");
+				return botComputerLink(bot);
 			case "settings":
 				return botSettingsLink(bot);
 		}
@@ -150,7 +152,7 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 		case "connection":
 			return projectConnectionLink(project, { id: to.connectionId });
 		case "computer":
-			return projectSettingsPageLink(project, "computer");
+			return projectComputerLink(project);
 		case "settings":
 			return projectSettingsLink(project);
 	}
@@ -171,36 +173,25 @@ function versionSearch(version: number | undefined): { version?: number } {
 	return version === undefined ? {} : { version };
 }
 
-/** History state for the entry a link or navigation opens, as `useBackToHere` writes it. */
-type NextHistoryState = (state: HistoryState) => HistoryState;
-
 /** Goes to one of the owner's pages, as `ownerLink` links to it, in place of this one when `replace`. */
 export function useNavigateToOwnerPage() {
 	const navigate = useNavigate();
 	return useCallback(
-		(
-			owner: ResourceOwner,
-			to: OwnerPage,
-			options: { replace?: boolean; state?: NextHistoryState } = {},
-		) => navigate({ ...ownerLinkOptions(owner, to), ...options }),
+		(owner: ResourceOwner, to: OwnerPage, options: { replace?: boolean } = {}) =>
+			navigate({ ...ownerLinkOptions(owner, to), ...options }),
 		[navigate],
 	);
 }
 
-/**
- * `ownerLink`'s link with `props` of its own, such as its children and class,
- * and `state` for the history entry it opens.
- */
+/** `ownerLink`'s link with `props` of its own, such as its children and class. */
 export function OwnerLink({
 	owner,
 	to,
-	state,
 	ref,
 	...props
 }: {
 	owner: ResourceOwner;
 	to: OwnerPage;
-	state?: NextHistoryState;
 } & ComponentProps<"a">) {
-	return useRender({ render: ownerLink(owner, to), props: { ...props, state }, ref });
+	return useRender({ render: ownerLink(owner, to), props, ref });
 }
