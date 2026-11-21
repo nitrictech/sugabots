@@ -9,6 +9,7 @@ import {
 	RouterProvider,
 } from "@tanstack/react-router";
 import { setupWorker } from "msw/browser";
+import { HttpNetworkFrame } from "msw/experimental";
 import addonMsw from "msw-storybook-addon";
 import { useEffect, useState } from "react";
 import { configure } from "storybook/test";
@@ -79,8 +80,12 @@ export default definePreview({
 			const worker = setupWorker();
 			await worker.start({
 				quiet: true,
-				onUnhandledRequest(request, print) {
-					if (new URL(request.url).origin === "https://api.storybook.test") print.error();
+				onUnhandledFrame({ frame, defaults }) {
+					if (
+						frame instanceof HttpNetworkFrame &&
+						new URL(frame.data.request.url).origin === "https://api.storybook.test"
+					)
+						defaults.error();
 				},
 			});
 			return worker;
