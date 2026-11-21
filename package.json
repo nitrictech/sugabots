@@ -47,7 +47,7 @@
 		"@types/node": "^26.6.6",
 		"@vitejs/plugin-react": "^6.3.0",
 		"drizzle-kit": "1.0.0-rc.5",
-		"portless": "^0.17.0",
+		"portless": "^0.18.1",
 		"typescript": "^7.0.2",
 		"vite": "catalog:",
 		"vitest": "^5.1.1"

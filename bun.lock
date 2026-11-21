@@ -10,7 +10,7 @@
         "@types/node": "^26.6.6",
         "@vitejs/plugin-react": "^6.3.0",
         "drizzle-kit": "1.0.0-rc.5",
-        "portless": "^0.17.0",
+        "portless": "^0.18.1",
         "typescript": "^7.0.2",
         "vite": "catalog:",
         "vitest": "^5.1.1",
@@ -2125,7 +2125,7 @@
 
     "pngjs": ["pngjs@7.0.0", "", {}, "sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow=="],
 
-    "portless": ["portless@0.17.0", "", { "os": [ "linux", "win32", "darwin", ], "bin": { "portless": "dist/cli.js" } }, "sha512-UJdy5sGmNSwi8ETvVniUTqULJht16qvBR9rvsFqsVekEyabMH2xJ5mwIEYBmSSHVCUmQvAmaYAhBcCs8PA7IBA=="],
+    "portless": ["portless@0.18.1", "", { "os": [ "linux", "win32", "darwin", ], "bin": { "portless": "dist/cli.js" } }, "sha512-3gfeicAvS5kwFUbZrsZpt1oU1MUBvfiy2S0MT/n8mwWEp/ZjQsWI0mC353GEi/q8JUVgdx7lBGDzCcMI9O1MXg=="],
 
     "postcss": ["postcss@8.5.33", "", { "dependencies": { "nanoid": "^3.3.20", "picocolors": "^1.1.1", "source-map-js": "^1.2.2" } }, "sha512-RVHEU9/Pp1Fnjr/MpAJsZoADukCKhfIi15OunEYiGktIkYLkPVvC1sioWolGDS7XByMTx9m/IGbro0Js13zhnQ=="],
 
