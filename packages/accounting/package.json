@@ -11,8 +11,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@opencode-ai/models": "^0.0.135",
-		"ai": "^7.0.173",
+		"@opencode-ai/models": "^0.0.142",
+		"ai": "^7.0.179",
 		"effect": "catalog:"
 	}
 }
