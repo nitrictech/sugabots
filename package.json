@@ -43,7 +43,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.12",
-		"@effect/tsgo": "^0.69.0",
+		"@effect/tsgo": "^0.73.2",
 		"@types/node": "^26.6.6",
 		"@vitejs/plugin-react": "^6.3.0",
 		"drizzle-kit": "1.0.0-rc.5",
