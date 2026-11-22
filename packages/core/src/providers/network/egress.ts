@@ -353,6 +353,11 @@ export function isPrivateAddress(address: string, family: 4 | 6) {
 function pinnedDispatcher(hostname: string, addresses?: ResolvedAddress[]): Dispatcher {
 	let nextAddress = 0;
 	return new Agent({
+		// undici 8 negotiates HTTP/2 by default, which multiplexes every
+		// concurrent request to a provider over one long-lived session, so a
+		// session undici fails to retire (nodejs/undici#6149) breaks every chat
+		// on that provider. HTTP/1.1 keeps each request on its own connection.
+		allowH2: false,
 		connect: addresses
 			? {
 					servername: isIP(hostname) ? undefined : hostname,
