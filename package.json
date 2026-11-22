@@ -11,10 +11,10 @@
 		"@effect/platform-node": "4.0.0-rc.117",
 		"@effect/sql-pg": "4.0.0-rc.117",
 		"@types/pg": "^8.23.1",
-		"better-auth": "^1.7.23",
+		"better-auth": "^1.7.27",
 		"drizzle-orm": "1.0.0-rc.5",
 		"effect": "4.0.0-rc.117",
-		"vite": "^8.2.2",
+		"vite": "^8.3.8",
 		"vite-plugin-static-copy": "^4.1.1"
 	},
 	"engines": {
@@ -43,13 +43,13 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.12",
-		"@effect/tsgo": "^0.69.0",
+		"@effect/tsgo": "^0.73.2",
 		"@types/node": "^26.6.6",
 		"@vitejs/plugin-react": "^6.3.0",
 		"drizzle-kit": "1.0.0-rc.5",
-		"portless": "^0.17.0",
+		"portless": "^0.18.1",
 		"typescript": "^7.0.2",
 		"vite": "catalog:",
-		"vitest": "^5.0.5"
+		"vitest": "^5.1.1"
 	}
 }
