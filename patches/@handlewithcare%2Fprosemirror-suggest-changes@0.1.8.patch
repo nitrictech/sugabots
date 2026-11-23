@@ -1,0 +1,13 @@
+diff --git a/dist/commands.js b/dist/commands.js
+index c6606e7c6cb3b6269d9e0a6bb8bceeaae88e9c63..64cafc00544b7456e966b054f5d41830588b5ffb 100644
+--- a/dist/commands.js
++++ b/dist/commands.js
+@@ -49,7 +49,7 @@ import { getSuggestionMarks } from "./utils.js";
+             const nextChar = // textBetween is fine with negative positions (??),
+             // but it errors if passed a position greater than the
+             // size of the doc
+-            deletionTo <= tr.doc.content.size ? tr.doc.textBetween(deletionTo, deletionTo + 1, "x", "x") : "";
++            deletionTo < tr.doc.content.size ? tr.doc.textBetween(deletionTo, deletionTo + 1, "x", "x") : "";
+             const addedRange = prevChar === " " && nextChar === " " ? 1 : 0;
+             tr.deleteRange(deletionFrom, deletionTo + addedRange);
+             return false;

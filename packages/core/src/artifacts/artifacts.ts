@@ -68,7 +68,9 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
  * A `document` people have opened in the editor is live (see `live.ts`): its
  * content is what the live document holds, an agent's change is made to that,
  * and the version the change writes is a snapshot of it, people's edits
- * included.
+ * included. A change made in a thread somebody started by asking for an edit
+ * from inside the document writes nothing and is refused as `Suggested`: it
+ * waits in the document for one of the people there to accept it.
  */
 export interface AuthoringInterface {
 	readonly list: (by: AgentInPod) => Effect.Effect<ArtifactSummary[]>;
@@ -78,7 +80,7 @@ export interface AuthoringInterface {
 		input: { kind: ArtifactKind; title: string; content: string },
 	) => Effect.Effect<Artifact, TooLarge>;
 	readonly replace: (
-		by: AgentInPod,
+		by: AgentInThread,
 		input: {
 			artifactId: string;
 			baseVersion: number;
@@ -89,13 +91,13 @@ export interface AuthoringInterface {
 			/** What the writer takes the artifact to be; refused with `KindFixed` if it is another kind. */
 			kind?: ArtifactKind;
 		},
-	) => Effect.Effect<Artifact, NotFound | Stale | KindFixed | TooLarge>;
+	) => Effect.Effect<Artifact, NotFound | Stale | KindFixed | TooLarge | NotWritten>;
 	/**
 	 * Replaces the one place `oldText` appears in the current content with
 	 * `newText`, as a new version, so a small change needn't resend the rest.
 	 */
 	readonly edit: (
-		by: AgentInPod,
+		by: AgentInThread,
 		input: {
 			artifactId: string;
 			baseVersion: number;
@@ -104,7 +106,7 @@ export interface AuthoringInterface {
 			/** Write over `baseVersion` instead of after it, as when the same reply wrote it. */
 			inPlace?: boolean;
 		},
-	) => Effect.Effect<Artifact, NotFound | Stale | EditTextUnmatched | TooLarge>;
+	) => Effect.Effect<Artifact, NotFound | Stale | EditTextUnmatched | TooLarge | NotWritten>;
 }
 
 export class Authoring extends Context.Service<Authoring, AuthoringInterface>()(
@@ -193,7 +195,7 @@ export const makeAuthoring = Effect.gen(function* () {
 				);
 
 	/** How people in a live document see the agent's change signed. */
-	const authorOfChange = (by: AgentInPod) =>
+	const authorOfChange = (by: AgentInThread) =>
 		query((db) =>
 			db
 				.select({ name: agent.name, color: agent.color, face: agent.face, shape: agent.shape })
@@ -204,6 +206,7 @@ export const makeAuthoring = Effect.gen(function* () {
 				row
 					? Effect.succeed({
 							name: row.name,
+							threadId: by.threadId,
 							look: { color: row.color, face: row.face, shape: row.shape },
 						})
 					: Effect.die(new Error(`Agent ${by.agentId} changed a document but has no row`)),
@@ -339,6 +342,15 @@ export const makeAuthoring = Effect.gen(function* () {
 					if (kind && kind !== before.artifact.kind) {
 						return yield* new KindFixed({ kind: before.artifact.kind });
 					}
+					if (before.artifact.kind === "document") {
+						// Checked again under the lock below. Here it keeps a stale write out of the live document.
+						if (baseVersion !== before.artifact.currentVersion) {
+							return yield* new Stale({ currentVersion: before.artifact.currentVersion });
+						}
+						yield* writtenOrNot(
+							yield* live.rewrite(before.artifact.id, yield* authorOfChange(by), () => content),
+						);
+					}
 					const written = yield* withContent(
 						before.artifact.id,
 						before.artifact.kind,
@@ -354,9 +366,6 @@ export const makeAuthoring = Effect.gen(function* () {
 								),
 							),
 					);
-					if (written.kind === "document") {
-						yield* live.rewrite(written.id, yield* authorOfChange(by), () => content);
-					}
 					return { ...written, content };
 				}),
 			),
@@ -380,11 +389,13 @@ export const makeAuthoring = Effect.gen(function* () {
 										replacedOnce(markdown, oldText, newText),
 									)
 								: undefined;
+						yield* writtenOrNot(inLive);
 						const current =
 							inLive?.markdown ??
 							(yield* atVersion(found, found.artifact.currentVersion))?.content ??
 							"";
-						const edited = inLive?.changed ? current : replacedOnce(current, oldText, newText);
+						const edited =
+							inLive?.outcome === "written" ? current : replacedOnce(current, oldText, newText);
 						if (edited === undefined) {
 							return yield* new EditTextUnmatched({ matches: occurrences(current, oldText) });
 						}
@@ -422,6 +433,18 @@ export const readVersionUnchecked =
 			if (!found) return undefined;
 			return yield* atVersionIn(blobs)(found, version);
 		});
+
+/** Fails with why a change to a live document wrote nothing to it, where the agent should hear why. */
+const writtenOrNot = (rewritten: LiveDocuments.Rewritten | undefined) =>
+	rewritten?.outcome === "suggested"
+		? Effect.fail(new Suggested())
+		: rewritten?.outcome === "blocked"
+			? Effect.fail(
+					rewritten.blocked === "unreadable"
+						? new Unreadable()
+						: new SuggestionBlocked({ blocked: rewritten.blocked }),
+				)
+			: Effect.void;
 
 /** How many times `text` appears in `content`. */
 const occurrences = (content: string, text: string) =>
@@ -493,6 +516,29 @@ export class KindFixed extends Data.TaggedError("ArtifactKindFixed")<{
 export class TooLarge extends Data.TaggedError("ArtifactTooLarge")<{
 	readonly maxCharacters: number;
 }> {}
+
+/**
+ * The change was not made: somebody asked for it from inside the document,
+ * so it is shown there and takes effect if one of the people in it accepts.
+ */
+export class Suggested extends Data.TaggedError("ArtifactChangeSuggested") {}
+
+/**
+ * The change was to be a suggestion and couldn't be shown as one: what it
+ * changes can't carry a suggestion's marks (`unmarkable`), as a code block can't.
+ */
+export class SuggestionBlocked extends Data.TaggedError("ArtifactSuggestionBlocked")<{
+	readonly blocked: "unmarkable";
+}> {}
+
+/**
+ * The live document holds content this version of the app cannot read, as a
+ * newer version's would be, so changing it here would lose that content.
+ */
+export class Unreadable extends Data.TaggedError("ArtifactUnreadable") {}
+
+/** Why a change to a live document left it and its versions as they were. */
+export type NotWritten = Suggested | SuggestionBlocked | Unreadable;
 
 /** An edit's text appears in the artifact `matches` times, not exactly once. */
 export class EditTextUnmatched extends Data.TaggedError("EditTextUnmatched")<{

@@ -1,4 +1,5 @@
 import { API_BASE_PATH } from "@sugabots/contracts/http";
+import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { LiveDocuments } from "@sugabots/core/artifacts/live";
 import { WORD_CONTENT_TYPE, wordFileOf } from "@sugabots/core/artifacts/word";
@@ -52,6 +53,12 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 				if (!request.headers.origin || !trusted.has(request.headers.origin)) {
 					return HttpServerResponse.text("Untrusted origin", { status: 403 });
 				}
+				// An editor built for another schema would delete what it could not hold.
+				if (schemaOf(request.url) !== LIVE_DOCUMENT_SCHEMA) {
+					return HttpServerResponse.text("Reload to get the editor this document needs", {
+						status: 409,
+					});
+				}
 				const artifact = yield* requestedDocument;
 				yield* edit(yield* request.upgrade, (outgoing) => live.join(artifact, outgoing));
 				return HttpServerResponse.empty();
@@ -83,6 +90,10 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 		);
 	}),
 );
+
+/** The schema the editor asking to join says it was built for, from the address it asked at. */
+const schemaOf = (url: string) =>
+	Number(new URL(url, "http://live.invalid").searchParams.get("schema"));
 
 /** Why a request for a document gets no document, as the status that says so. */
 class Refused extends Data.TaggedError("DocumentRefused")<{

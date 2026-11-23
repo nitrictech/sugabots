@@ -65,6 +65,8 @@
 	--disabled-foreground: light-dark(#a1a1aa, #52525b);
 	/* A text action, such as Cancel or Create in a dialog header. */
 	--link: light-dark(#111113, #ededed);
+	/* What a bot proposes in a document, and the text a request to it is about: the palette's one blue. */
+	--suggestion: light-dark(#2563eb, #60a5fa);
 
 	/* Hairlines, faintest first; `border-strong` edges a field or the composer. */
 	--border-subtle: light-dark(#f1f1f3, #1c1c1f);
@@ -186,6 +188,7 @@
 	--color-row-selected: var(--row-selected);
 	--color-disabled-foreground: var(--disabled-foreground);
 	--color-link: var(--link);
+	--color-suggestion: var(--suggestion);
 	--color-soft-foreground: var(--soft-foreground);
 	--color-border-strong: var(--border-strong);
 	--color-border-dashed: var(--border-dashed);
@@ -851,8 +854,8 @@
 .live-document {
 	outline: none;
 	color: var(--body-foreground);
-	font-size: 14px;
-	line-height: 1.65;
+	font-size: 16px;
+	line-height: 1.7;
 }
 
 .live-document > * + * {
@@ -868,17 +871,20 @@
 }
 
 .live-document h1 {
-	font-size: 22px;
+	font-size: 34px;
+	font-weight: 700;
+	line-height: 1.2;
+	letter-spacing: -0.01em;
 }
 
 .live-document h2 {
-	margin-top: 1.4em;
-	font-size: 18px;
+	margin-top: 1.6em;
+	font-size: 22px;
 }
 
 .live-document h3 {
-	margin-top: 1.2em;
-	font-size: 15px;
+	margin-top: 1.4em;
+	font-size: 18px;
 }
 
 .live-document ul {
@@ -907,7 +913,7 @@
 	padding: 1px 5px;
 	border-radius: 4px;
 	background: var(--chip);
-	font: 500 13px var(--font-mono);
+	font: 500 14px var(--font-mono);
 }
 
 .live-document pre {
@@ -943,4 +949,42 @@
 	line-height: 1.3;
 	white-space: nowrap;
 	user-select: none;
+}
+
+/* A suggestion in a document, a person's or a bot's: what it would add, and what it would remove, until somebody accepts or rejects it. */
+.live-document ins[data-id] {
+	border-radius: 2px;
+	background: color-mix(in srgb, var(--suggestion) 12%, transparent);
+	color: var(--suggestion);
+	text-decoration: none;
+}
+
+.live-document del[data-id] {
+	color: var(--subtle-foreground);
+	text-decoration: line-through;
+}
+
+/* Where a block being dragged will land: the blue of a suggestion, lighter so it reads as a guide and not as text. */
+.drop-line {
+	border-radius: 2px;
+	background: color-mix(in srgb, var(--suggestion) 55%, transparent);
+}
+
+/* The text a request for edits is about, while the person writes what to change. */
+.live-document .edit-target {
+	border-radius: 3px;
+	outline: 1.5px dashed var(--suggestion);
+	outline-offset: 2px;
+	background: color-mix(in srgb, var(--suggestion) 12%, transparent);
+	/* A selection over several lines is outlined line by line. */
+	box-decoration-break: clone;
+}
+/* What goes in an empty block of a document, said in its place until something is written there. */
+.live-document .is-empty::before {
+	content: attr(data-placeholder);
+	/* Out of the flow, so the caret sits at the start of the line and not after the words. */
+	float: left;
+	height: 0;
+	color: var(--subtle-foreground);
+	pointer-events: none;
 }

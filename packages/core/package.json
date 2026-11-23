@@ -23,6 +23,7 @@
 		"@alibaba-group/opensandbox": "1.1.0",
 		"@effect/platform-node": "catalog:",
 		"@effect/sql-pg": "catalog:",
+		"@handlewithcare/prosemirror-suggest-changes": "^0.1.8",
 		"@hocuspocus/server": "^4.9.0",
 		"@modelcontextprotocol/sdk": "^1.32.2",
 		"@mozilla/readability": "^0.6.0",

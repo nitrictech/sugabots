@@ -33,10 +33,15 @@ describe("a document being edited live", () => {
 		render(
 			<TooltipProvider>
 				<LiveDocument
+					workspaceId="workspace"
 					podId="pod"
 					artifactId={ARTIFACT_ID}
 					title="Launch plan"
 					as={{ name: "Sam", email: "sam@example.com" }}
+					bot={{ agentId: "agent", name: "Planner" }}
+					onWordImport={() => {}}
+					presenceSlot={document.body}
+					statusSlot={null}
 				/>
 			</TooltipProvider>,
 		);
@@ -44,10 +49,41 @@ describe("a document being edited live", () => {
 		expect(await screen.findByRole("heading", { name: "Launch plan" })).toBeDefined();
 		expect(screen.getByText("Ship on Friday.")).toBeDefined();
 
-		api?.send(ARTIFACT_ID);
+		api?.send({ artifactId: ARTIFACT_ID, ask: "rewrite" });
 
 		await waitFor(() => expect(screen.getByText("Ship on Monday.")).toBeDefined());
 		expect(screen.getByRole("img", { name: "Planner" })).toBeDefined();
-		expect(screen.getByRole("button", { name: "Download as Word" })).toBeDefined();
+	});
+
+	it("stops and says to reload when the document holds a block it cannot, deleting nothing", async () => {
+		const artifactId = "0199a3a0-0000-7000-8000-000000000003";
+		render(
+			<TooltipProvider>
+				<LiveDocument
+					workspaceId="workspace"
+					podId="pod"
+					artifactId={artifactId}
+					title="Launch plan"
+					as={{ name: "Sam", email: "sam@example.com" }}
+					bot={undefined}
+					onWordImport={() => {}}
+					presenceSlot={document.body}
+					statusSlot={null}
+				/>
+			</TooltipProvider>,
+		);
+		expect(await screen.findByRole("heading", { name: "Launch plan" })).toBeDefined();
+
+		// Somebody on a newer version of the app adds a block this editor has no node for.
+		api?.send({ artifactId, ask: "unknown block" });
+
+		expect(await screen.findByRole("alert")).toHaveProperty(
+			"textContent",
+			expect.stringContaining("Reload to get the latest editor"),
+		);
+		// The heading, the paragraph and the block from elsewhere are all still in the document.
+		const counted = new Promise<{ blocks: number }>((resolve) => api?.once("message", resolve));
+		api?.send({ artifactId, ask: "count blocks" });
+		expect(await counted).toEqual({ blocks: 3 });
 	});
 });

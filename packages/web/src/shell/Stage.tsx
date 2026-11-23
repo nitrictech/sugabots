@@ -43,14 +43,17 @@ export function StageBack({ parent }: { parent: StageParent }) {
  * Something a bot made or is doing, opened large beside its chat or a list so
  * it can be talked about while it is looked at. On a phone it covers them.
  * With `parent`, it is a view inside another, and its Back, before the
- * title, returns there, as Escape does; without, Escape closes it.
+ * title, returns there, as Escape does; without, Escape closes it. While
+ * `fullScreen` is on it covers the whole window, and Escape first ends that.
  */
 export function Stage({
 	label,
 	icon,
 	title,
 	byline,
+	note,
 	actions,
+	fullScreen,
 	parent,
 	onClose,
 	children,
@@ -62,6 +65,10 @@ export function Stage({
 	title: string;
 	/** A quieter line under the title, such as who made it and when. */
 	byline?: ReactNode;
+	/** A quiet word after the title, such as whether what is shown is saved. */
+	note?: ReactNode;
+	/** Covering the whole window, on screens wider than a phone, where it already covers the page. */
+	fullScreen?: { on: boolean; onExit: () => void };
 	/** Controls for what is shown, before Close. */
 	actions?: ReactNode;
 	/** The view this one was opened from, when it is one level inside another. */
@@ -70,12 +77,18 @@ export function Stage({
 	children: ReactNode;
 }) {
 	const { leave } = useLeave();
-	const keys = usePanelKeys<HTMLElement>(() => (parent ? parent.onBack() : onClose()));
+	const keys = usePanelKeys<HTMLElement>(() => {
+		if (fullScreen?.on) return fullScreen.onExit();
+		return parent ? parent.onBack() : onClose();
+	});
 	return (
 		<section
 			aria-label={label}
 			{...keys}
-			className="flex min-h-0 min-w-0 flex-1 flex-col bg-background outline-none max-md:absolute max-md:inset-0 max-md:z-40"
+			className={cn(
+				"flex min-h-0 min-w-0 flex-1 flex-col bg-background outline-none max-md:absolute max-md:inset-0 max-md:z-40",
+				fullScreen?.on && "md:fixed md:inset-0 md:z-40",
+			)}
 		>
 			<header className="flex h-13 shrink-0 items-center gap-2 border-border border-b pr-3 pl-4 max-md:h-auto max-md:border-b-0 max-md:px-4 max-md:pt-safe-or-3 max-md:pb-2">
 				{parent && <StageBack parent={parent} />}
@@ -95,9 +108,12 @@ export function Stage({
 				)}
 				{!parent && <span className="contents max-md:hidden">{icon}</span>}
 				<div className="flex min-w-0 flex-1 flex-col pl-1 leading-snug">
-					<h2 className="m-0 truncate font-medium text-sm text-foreground max-md:font-semibold max-md:text-base">
-						{title}
-					</h2>
+					<div className="flex min-w-0 items-baseline gap-2.5">
+						<h2 className="m-0 truncate font-medium text-sm text-foreground max-md:font-semibold max-md:text-base">
+							{title}
+						</h2>
+						{note && <span className="shrink-0 text-subtle-foreground text-xs">{note}</span>}
+					</div>
 					{byline && <p className="m-0 truncate text-subtle-foreground text-xs">{byline}</p>}
 				</div>
 				{actions}

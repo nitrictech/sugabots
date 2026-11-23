@@ -51,5 +51,8 @@
 		"typescript": "^7.0.2",
 		"vite": "catalog:",
 		"vitest": "^5.0.5"
+	},
+	"patchedDependencies": {
+		"@handlewithcare/prosemirror-suggest-changes@0.1.8": "patches/@handlewithcare%2Fprosemirror-suggest-changes@0.1.8.patch"
 	}
 }

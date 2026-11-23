@@ -2,18 +2,28 @@ export * as LiveDocuments from "./live.ts";
 
 import { type Document, Hocuspocus } from "@hocuspocus/server";
 import type { AgentColor, AgentFace, AgentShape, Artifact } from "@sugabots/contracts";
+import {
+	type EditRequest,
+	LIVE_DOCUMENT_CONTENT,
+	LIVE_DOCUMENT_EDIT_REQUESTS,
+	liveDocumentExtensions,
+	suggestionId,
+	suggestionsAsAttributes,
+	suggestionsFromAttributes,
+} from "@sugabots/contracts/live-document";
 import { getSchema } from "@tiptap/core";
 import { MarkdownManager } from "@tiptap/markdown";
 import { Node } from "@tiptap/pm/model";
-import { StarterKit } from "@tiptap/starter-kit";
 import {
 	prosemirrorToYXmlFragment,
 	updateYFragment,
 	yXmlFragmentToProseMirrorRootNode,
 } from "@tiptap/y-tiptap";
 import { Context, Effect, Layer, Stream } from "effect";
-import { applyUpdate, encodeStateAsUpdate } from "yjs";
+import { applyUpdate, Doc, encodeStateAsUpdate, XmlElement, type XmlFragment, XmlText } from "yjs";
 import { BlobStore } from "../blob-store/blob-store.ts";
+import { Ids } from "../ids/ids.ts";
+import { type Blocked, changedTo, withoutSuggestions } from "./suggestions.ts";
 
 /**
  * A `document` artifact while it is being edited: one copy held in this
@@ -33,7 +43,10 @@ export interface Interface {
 	 * `outgoing`, and what they send goes to the participant returned.
 	 */
 	readonly join: (artifact: Artifact, outgoing: Outgoing) => Effect.Effect<Participant>;
-	/** The live document as markdown, or `undefined` if the artifact has never been opened live. */
+	/**
+	 * The live document as markdown, without the suggestions pending in it, or
+	 * `undefined` if the artifact has never been opened live.
+	 */
 	readonly markdown: (artifactId: string) => Effect.Effect<string | undefined>;
 	/**
 	 * Changes the live document to the markdown `change` returns for what it
@@ -41,6 +54,11 @@ export interface Interface {
 	 * differ are written, so what people are typing elsewhere is kept. A
 	 * `change` returning `undefined` changes nothing. `undefined` if the
 	 * artifact has never been opened live.
+	 *
+	 * A change the agent makes in a thread somebody started by asking for an
+	 * edit from inside the document is not made: it is shown to the people in
+	 * the document as a suggestion, and the document reads as before until one
+	 * of them accepts it.
 	 */
 	readonly rewrite: (
 		artifactId: string,
@@ -55,6 +73,7 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const blobs = yield* BlobStore.Service;
+	const ids = yield* Ids.Service;
 
 	const stored = (artifactId: string) =>
 		blobs.get(stateKey(artifactId)).pipe(
@@ -165,27 +184,46 @@ export const make = Effect.gen(function* () {
 			),
 
 		rewrite: (artifactId, author, change) =>
-			Effect.flatMap(isLive(artifactId), (live) =>
-				live
-					? withDocument(artifactId, (document): Rewritten => {
-							const before = toMarkdown(document);
-							const after = change(before);
-							if (after === undefined) return { markdown: before, changed: false };
-							document.awareness.setLocalState({
-								user: { name: author.name, color: AGENT_COLOR, agent: author.look },
-							});
-							updateYFragment(document, fragmentOf(document), fromMarkdown(after), {
-								mapping: new Map(),
-								isOMark: new Map(),
-							});
-							return { markdown: toMarkdown(document), changed: true };
-						}).pipe(Effect.tap(() => Effect.forkDetach(hideAuthorLater(artifactId))))
-					: Effect.succeed(undefined),
-			),
+			Effect.gen(function* () {
+				if (!(yield* isLive(artifactId))) return undefined;
+				const unique = yield* ids.next;
+				const rewritten = yield* withDocument(artifactId, (document): Rewritten => {
+					const { content, unreadable } = read(document);
+					const markdown = asMarkdown(content);
+					const wanted = change(markdown);
+					if (wanted === undefined) return { markdown, outcome: "unchanged" };
+					// Writing what could be read back would write over what could not.
+					if (unreadable) return { markdown, outcome: "blocked", blocked: "unreadable" };
+					const requests = document.getMap<EditRequest>(LIVE_DOCUMENT_EDIT_REQUESTS);
+					const request = requests.get(author.threadId);
+					const after = changedTo(
+						content,
+						fromMarkdown(wanted),
+						request
+							? { suggestionId: suggestionId(unique, { kind: "agent", name: author.name }) }
+							: "edit",
+					);
+					if (after === "unchanged") return { markdown, outcome: "unchanged" };
+					if (typeof after === "string") return { markdown, outcome: "blocked", blocked: after };
+					document.awareness.setLocalState({
+						user: { name: author.name, color: AGENT_COLOR, agent: author.look },
+					});
+					updateYFragment(document, fragmentOf(document), suggestionsAsAttributes(after), {
+						mapping: new Map(),
+						isOMark: new Map(),
+					});
+					if (request) requests.set(author.threadId, { ...request, answered: true });
+					return { markdown: toMarkdown(document), outcome: request ? "suggested" : "written" };
+				});
+				if (rewritten.outcome === "written" || rewritten.outcome === "suggested") {
+					yield* Effect.forkDetach(hideAuthorLater(artifactId));
+				}
+				return rewritten;
+			}),
 	});
 });
 
-/** Needs the blob store, which the entry point provides. */
+/** Needs the blob store and ids, which the entry point provides. */
 export const layer = Layer.effect(Service, make);
 
 /** Where a live document's bytes for a person go. */
@@ -202,9 +240,14 @@ export interface Participant {
 	readonly leave: () => void;
 }
 
-/** The agent a change is shown as coming from: its name, and its face to draw beside the people's. */
+/**
+ * The agent a change is shown as coming from: its name, its face to draw
+ * beside the people's, and the thread it is working in, which decides
+ * whether its change is made or suggested.
+ */
 export interface Author {
 	readonly name: string;
+	readonly threadId: string;
 	readonly look: {
 		readonly color: AgentColor;
 		readonly face: AgentFace;
@@ -212,11 +255,20 @@ export interface Author {
 	};
 }
 
-/** The live document after `rewrite`, and whether `change` asked for anything. */
-export interface Rewritten {
-	readonly markdown: string;
-	readonly changed: boolean;
-}
+/**
+ * What `rewrite` did, and the live document's markdown after it: `written`
+ * into the document, `suggested` to the people in it, `unchanged` because the
+ * change asked for nothing, or `blocked`: it was to be a suggestion and
+ * couldn't be shown as one, or the document holds content this version of the
+ * app cannot read (`unreadable`), which a write would lose.
+ */
+export type Rewritten =
+	| { readonly markdown: string; readonly outcome: "written" | "suggested" | "unchanged" }
+	| {
+			readonly markdown: string;
+			readonly outcome: "blocked";
+			readonly blocked: Blocked | "unreadable";
+	  };
 
 interface ConnectionContext {
 	artifactId: string;
@@ -224,22 +276,48 @@ interface ConnectionContext {
 	startFrom?: string;
 }
 
-/**
- * What a live document may hold. The editor in the web app builds its schema
- * from the same extensions (`screens/LiveDocument.tsx`): a node one side has
- * and the other lacks is dropped when it syncs.
- */
-const extensions = [StarterKit];
+const extensions = liveDocumentExtensions({ undo: true });
 const schema = getSchema(extensions);
 const markdownOf = new MarkdownManager({ extensions });
 
-/** The shared type the editor's collaboration extension binds to by default. */
-const FRAGMENT = "default";
+const fragmentOf = (document: Document) => document.getXmlFragment(LIVE_DOCUMENT_CONTENT);
 
-const fragmentOf = (document: Document) => document.getXmlFragment(FRAGMENT);
+/**
+ * The document's content, with what is suggested for whole blocks marked on
+ * them as the document carries it, and whether all of it could be read.
+ *
+ * Reading shared content deletes whatever this schema cannot hold, such as a
+ * block written by a newer version of the app. So it is read from a copy,
+ * which is thrown away, and the document itself keeps everything.
+ */
+function read(document: Document): { content: Node; unreadable: boolean } {
+	const copy = new Doc();
+	applyUpdate(copy, encodeStateAsUpdate(document));
+	const shared = copy.getXmlFragment(LIVE_DOCUMENT_CONTENT);
+	const before = sizeOf(shared);
+	const content = suggestionsFromAttributes(yXmlFragmentToProseMirrorRootNode(shared, schema));
+	const after = sizeOf(shared);
+	return { content, unreadable: after.blocks !== before.blocks || after.text !== before.text };
+}
 
-const toMarkdown = (document: Document) =>
-	markdownOf.serialize(yXmlFragmentToProseMirrorRootNode(fragmentOf(document), schema).toJSON());
+/** How many blocks and how much text shared content holds, which reading it must not change. */
+function sizeOf(shared: XmlFragment | XmlElement): { blocks: number; text: number } {
+	let [blocks, text] = [0, 0];
+	for (const child of shared.toArray()) {
+		if (child instanceof XmlText) text += child.length;
+		if (!(child instanceof XmlElement)) continue;
+		const within = sizeOf(child);
+		blocks += 1 + within.blocks;
+		text += within.text;
+	}
+	return { blocks, text };
+}
+
+/** Content as it reads until someone accepts a suggestion pending in it. */
+const asMarkdown = (content: Node) => markdownOf.serialize(withoutSuggestions(content).toJSON());
+
+/** The document as it reads until someone accepts a suggestion pending in it, as far as it can be read. */
+const toMarkdown = (document: Document) => asMarkdown(read(document).content);
 
 const fromMarkdown = (markdown: string) => Node.fromJSON(schema, markdownOf.parse(markdown));
 

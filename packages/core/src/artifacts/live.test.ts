@@ -1,8 +1,9 @@
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import type { Artifact } from "@sugabots/contracts";
+import type { EditRequest } from "@sugabots/contracts/live-document";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { Doc, type XmlElement, type XmlFragment, XmlText } from "yjs";
+import { Doc, XmlElement, type XmlFragment, XmlText } from "yjs";
 import { agent, pod, thread, user, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Artifacts } from "./artifacts.ts";
@@ -72,6 +73,119 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 		expect(await runOnPostgres(later.authoring.read(by, made.id))).toMatchObject({
 			content: "Kim's First draft.",
 		});
+	});
+
+	it("shows a change somebody asked for from inside the document as a suggestion, writing nothing", async () => {
+		const { authoring, live } = await services();
+		const made = await runOnPostgres(
+			authoring.create(by, {
+				kind: "document",
+				title: "Launch plan",
+				content: "Ship on Friday.",
+			}),
+		);
+		const person = await joinAsPerson(live, made, "Kim");
+		// Kim asks Scribe for an edit from inside the document, which starts the thread Scribe works in.
+		const requests = person.document.getMap<EditRequest>("editRequests");
+		requests.set(by.threadId, {
+			instruction: "Move it to Monday",
+			agent: "Scribe",
+			answered: false,
+		});
+		// Long enough for the request to reach the API's copy of the document, which nothing here can watch.
+		await new Promise((resolve) => setTimeout(resolve, 150));
+
+		const refusal = await runOnPostgres(
+			Effect.flip(
+				authoring.edit(by, {
+					artifactId: made.id,
+					baseVersion: 1,
+					oldText: "Friday",
+					newText: "Monday",
+				}),
+			),
+		);
+
+		expect(refusal._tag).toBe("ArtifactChangeSuggested");
+		// The person's editor holds both wordings, marked; the document still reads as it did.
+		await until(() => textOf(person.document).includes("Monday."));
+		expect(textOf(person.document)).toMatch(
+			/^Ship on <deletion[^>]*>Friday\.<\/deletion><insertion[^>]*>Monday\.<\/insertion>$/,
+		);
+		expect(await runOnPostgres(authoring.read(by, made.id))).toMatchObject({
+			version: 1,
+			content: "Ship on Friday.",
+		});
+		expect(requests.get(by.threadId)?.answered).toBe(true);
+		person.destroy();
+	});
+
+	it("shows a whole paragraph an agent adds on request as a suggestion too", async () => {
+		const { authoring, live } = await services();
+		const made = await runOnPostgres(
+			authoring.create(by, { kind: "document", title: "Launch plan", content: "Ship on Friday." }),
+		);
+		const person = await joinAsPerson(live, made, "Kim");
+		person.document
+			.getMap<EditRequest>("editRequests")
+			.set(by.threadId, { instruction: "Add a line on sales", agent: "Scribe", answered: false });
+		// Long enough for the request to reach the API's copy of the document, which nothing here can watch.
+		await new Promise((resolve) => setTimeout(resolve, 150));
+
+		const refusal = await runOnPostgres(
+			Effect.flip(
+				authoring.replace(by, {
+					artifactId: made.id,
+					baseVersion: 1,
+					content: "Ship on Friday.\n\nBrief sales too.",
+				}),
+			),
+		);
+
+		expect(refusal._tag).toBe("ArtifactChangeSuggested");
+		const blocks = person.document.getXmlFragment("default");
+		await until(() => blocks.length === 2);
+		// The new paragraph says it is proposed, in the attribute that reaches everyone.
+		expect((blocks.get(1) as XmlElement).getAttribute("suggestion")).toContain("insertion");
+		expect(await runOnPostgres(authoring.read(by, made.id))).toMatchObject({
+			version: 1,
+			content: "Ship on Friday.",
+		});
+		person.destroy();
+	});
+
+	it("neither deletes nor writes over a block from a newer version of the app, which it cannot read", async () => {
+		const { authoring, live } = await services();
+		const made = await runOnPostgres(
+			authoring.create(by, { kind: "document", title: "Launch plan", content: "Ship on Friday." }),
+		);
+		const person = await joinAsPerson(live, made, "Kim");
+		const blocks = person.document.getXmlFragment("default");
+		blocks.push([new XmlElement("fromANewerVersion")]);
+		// Long enough for the block to reach the API's copy of the document, which nothing here can watch.
+		await new Promise((resolve) => setTimeout(resolve, 150));
+
+		const read = await runOnPostgres(authoring.read(by, made.id));
+		const refusal = await runOnPostgres(
+			Effect.flip(
+				authoring.edit(by, {
+					artifactId: made.id,
+					baseVersion: 1,
+					oldText: "Friday",
+					newText: "Monday",
+				}),
+			),
+		);
+
+		expect(read.content).toBe("Ship on Friday.");
+		expect(refusal._tag).toBe("ArtifactUnreadable");
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		expect(blocks.toArray().map((block) => (block as XmlElement).nodeName)).toEqual([
+			"paragraph",
+			"fromANewerVersion",
+		]);
+		expect(textOf(person.document)).toBe("Ship on Friday.");
+		person.destroy();
 	});
 
 	it("leaves a document nobody has opened as its versions", async () => {

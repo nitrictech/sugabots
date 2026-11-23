@@ -7,8 +7,19 @@ import type {
 } from "@sugabots/contracts";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Check, ChevronDown, Download, FileText, Link2, Trash2 } from "lucide-react";
-import { type CSSProperties, type ReactNode, useRef, useState } from "react";
+import {
+	Check,
+	ChevronDown,
+	FileCode,
+	FileText,
+	FileType,
+	History,
+	Maximize2,
+	Minimize2,
+	Trash2,
+	Upload,
+} from "lucide-react";
+import { type CSSProperties, type ReactNode, useCallback, useRef, useState } from "react";
 import {
 	useArtifact,
 	useArtifacts,
@@ -28,14 +39,17 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuSub,
+	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
-import { useCopy } from "@/ui/use-copy.ts";
+import { ArtifactShare, type ExportOption } from "./ArtifactShare.tsx";
 import { ARTIFACT_KINDS } from "./artifact-kinds.tsx";
-import { LiveDocument } from "./LiveDocument.tsx";
+import { downloadAsWord, LiveDocument, type WordImport } from "./LiveDocument.tsx";
 
 type Loading = "loading" | "failed";
 
@@ -231,6 +245,14 @@ export function ArtifactStage({
 	const versions = useArtifactVersions(pod.id, artifactId);
 	const remove = useDeleteArtifact(pod.id);
 	const { user } = useSession();
+	// A function kept in state is set with one that returns it, or React would call it.
+	const [importWord, setImportWord] = useState<WordImport>();
+	const [presenceSlot, setPresenceSlot] = useState<HTMLElement | null>(null);
+	const [statusSlot, setStatusSlot] = useState<HTMLElement | null>(null);
+	const onWordImport = useCallback(
+		(importer: WordImport | undefined) => setImportWord(() => importer),
+		[],
+	);
 	// A document's current version is edited where it is read; an earlier version is only read.
 	const editing =
 		shown.data?.kind === "document" &&
@@ -256,12 +278,26 @@ export function ArtifactStage({
 			editor={
 				editing ? (
 					<LiveDocument
+						workspaceId={pod.workspaceId}
 						podId={pod.id}
 						artifactId={artifactId}
 						title={shown.data?.title ?? ""}
 						as={{ name: editing.name, email: editing.email, image: editing.image }}
+						bot={shown.data?.createdBy ?? undefined}
+						onWordImport={onWordImport}
+						presenceSlot={presenceSlot}
+						statusSlot={statusSlot}
 					/>
 				) : undefined
+			}
+			presence={
+				editing ? <span ref={setPresenceSlot} className="flex items-center gap-2" /> : undefined
+			}
+			status={editing ? <span ref={setStatusSlot} /> : undefined}
+			word={
+				editing
+					? { onDownload: () => downloadAsWord(pod.id, artifactId), onImport: importWord }
+					: undefined
 			}
 			deletion={
 				pod.permissions.deleteArtifacts
@@ -279,6 +315,18 @@ export function ArtifactStage({
 const DELETE_DESCRIPTION =
 	"Every version goes with it, for everyone in the pod. Replies that showed it keep only its name. This can't be undone.";
 
+/** The file each kind of artifact is kept as, as an export says it. */
+const RAW_FILES = {
+	document: { label: "Markdown", description: "Plain-text .md file", Icon: FileCode },
+	html: { label: "Web page", description: ".html file that opens in a browser", Icon: FileText },
+} satisfies Record<Artifact["kind"], Omit<ExportOption, "onSave">>;
+
+/** A document being edited, as a Word file: saved as one, and replaced with one's content once the editor is up. */
+interface WordFile {
+	onDownload: () => void;
+	onImport: WordImport | undefined;
+}
+
 /** Deleting what is shown, for those who may. */
 interface Deletion {
 	pending: boolean;
@@ -294,12 +342,25 @@ export function ArtifactStageView({
 	onVersionChange,
 	onClose,
 	editor,
+	presence,
+	status,
+	word,
 	deletion,
 }: {
 	pod: Pod;
 	artifact: Artifact | Loading;
-	/** Shown in place of the artifact's content, to edit it. */
+	/**
+	 * Shown in place of the artifact's content, to edit it. Who wrote each
+	 * version and when moves into the ⋯ menu with the versions, so the bar holds
+	 * only what is used while writing.
+	 */
 	editor?: ReactNode;
+	/** Who else has the artifact open, shown first among its controls. */
+	presence?: ReactNode;
+	/** Whether what is being edited is saved, after the title. */
+	status?: ReactNode;
+	/** Without it, the artifact has nothing to do with Word files. */
+	word?: WordFile;
 	/** Newest first. */
 	versions: readonly ArtifactVersionSummary[];
 	now: Date;
@@ -309,8 +370,9 @@ export function ArtifactStageView({
 	deletion?: Deletion;
 }) {
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
+	const [fullScreen, setFullScreen] = useState(false);
+	const wordFile = useRef<HTMLInputElement>(null);
 	const router = useRouter();
-	const copying = useCopy("Copy link");
 	if (typeof artifact !== "object") {
 		return (
 			<Stage label="Artifact" icon={null} title="" onClose={onClose}>
@@ -324,11 +386,21 @@ export function ArtifactStageView({
 	}
 	const kind = ARTIFACT_KINDS[artifact.kind];
 	const shown = artifact.shownVersion;
-	function copyLink() {
-		if (typeof artifact !== "object") return;
-		const href = router.buildLocation(artifactLink(pod, artifact.id)).href;
-		void copying.copy(new URL(href, window.location.origin).href);
-	}
+	const link = () =>
+		new URL(router.buildLocation(artifactLink(pod, artifact.id)).href, window.location.origin).href;
+	const exports: ExportOption[] = [
+		...(word
+			? [
+					{
+						label: "Word",
+						description: "Editable .docx document",
+						Icon: FileType,
+						onSave: word.onDownload,
+					},
+				]
+			: []),
+		{ ...RAW_FILES[artifact.kind], onSave: () => downloadArtifact(artifact) },
+	];
 	return (
 		<Stage
 			label={artifact.title}
@@ -339,36 +411,73 @@ export function ArtifactStageView({
 			}
 			title={artifact.title}
 			byline={
-				<>
-					{shown.author?.name ?? "A removed bot"}{" "}
-					<time dateTime={shown.createdAt}>{writtenWhen(new Date(shown.createdAt), now)}</time>
-				</>
+				editor ? undefined : (
+					<>
+						{shown.author?.name ?? "A removed bot"}{" "}
+						<time dateTime={shown.createdAt}>{writtenWhen(new Date(shown.createdAt), now)}</time>
+					</>
+				)
 			}
+			note={status}
+			fullScreen={{ on: fullScreen, onExit: () => setFullScreen(false) }}
 			actions={
 				<>
-					<VersionPicker
-						artifact={artifact}
-						versions={versions}
-						now={now}
-						onVersionChange={onVersionChange}
-					/>
-					<MoreMenu>
-						<DropdownMenuItem onClick={() => downloadArtifact(artifact)}>
-							<Download aria-hidden />
-							Download
-						</DropdownMenuItem>
-						{/* Left open, so it can say it copied. */}
-						<DropdownMenuItem closeOnClick={false} onClick={copyLink}>
-							{copying.copied ? <Check aria-hidden /> : <Link2 aria-hidden />}
-							{copying.label}
-						</DropdownMenuItem>
-						{deletion && (
-							<DropdownMenuItem variant="destructive" onClick={() => setConfirmingDelete(true)}>
-								<Trash2 aria-hidden />
-								Delete
-							</DropdownMenuItem>
+					{presence}
+					{!editor && (
+						<VersionPicker
+							artifact={artifact}
+							versions={versions}
+							now={now}
+							onVersionChange={onVersionChange}
+						/>
+					)}
+					<ArtifactShare title={artifact.title} pod={pod} link={link} exports={exports} />
+					<span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border-strong max-md:hidden" />
+					<IconButton
+						label={fullScreen ? "Exit full screen" : "Full screen"}
+						variant="bar"
+						aria-pressed={fullScreen}
+						onClick={() => setFullScreen(!fullScreen)}
+						className="max-md:hidden"
+					>
+						{fullScreen ? (
+							<Minimize2 aria-hidden size={15} strokeWidth={1.75} />
+						) : (
+							<Maximize2 aria-hidden size={15} strokeWidth={1.75} />
 						)}
-					</MoreMenu>
+					</IconButton>
+					{(editor || word?.onImport || deletion) && (
+						<MoreMenu variant="bar">
+							{editor && (
+								<DropdownMenuSub>
+									<DropdownMenuSubTrigger>
+										<History aria-hidden />
+										Version history
+									</DropdownMenuSubTrigger>
+									<DropdownMenuContent side="left" align="start">
+										<VersionItems
+											artifact={artifact}
+											versions={versions}
+											now={now}
+											onVersionChange={onVersionChange}
+										/>
+									</DropdownMenuContent>
+								</DropdownMenuSub>
+							)}
+							{word?.onImport && (
+								<DropdownMenuItem onClick={() => wordFile.current?.click()}>
+									<Upload aria-hidden />
+									Import from Word (.docx)
+								</DropdownMenuItem>
+							)}
+							{deletion && (
+								<DropdownMenuItem variant="destructive" onClick={() => setConfirmingDelete(true)}>
+									<Trash2 aria-hidden />
+									Delete
+								</DropdownMenuItem>
+							)}
+						</MoreMenu>
+					)}
 				</>
 			}
 			onClose={onClose}
@@ -378,6 +487,20 @@ export function ArtifactStageView({
 					title={artifact.title}
 					content={artifact.content}
 					at={{ podId: artifact.podId, artifactId: artifact.id, version: shown.number }}
+				/>
+			)}
+			{word?.onImport && (
+				// Outside the menu, which is gone by the time the person has chosen a file.
+				<input
+					ref={wordFile}
+					type="file"
+					accept=".docx"
+					hidden
+					onChange={(event) => {
+						const [file] = event.target.files ?? [];
+						if (file) void word.onImport?.(file);
+						event.target.value = "";
+					}}
 				/>
 			)}
 			{deletion && (
@@ -425,29 +548,49 @@ function VersionPicker({
 				<ChevronDown aria-hidden size={12} className="text-subtle-foreground" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
-				{versions.map((version) => (
-					<DropdownMenuItem
-						key={version.number}
-						onClick={() =>
-							onVersionChange(version.number === artifact.version ? undefined : version.number)
-						}
-					>
-						<Check
-							aria-hidden
-							className={version.number === shown.number ? undefined : "invisible"}
-						/>
-						<span className="flex-1">
-							Version {version.number}
-							<span className="text-muted-foreground"> {byline(version.author)}</span>
-						</span>
-						<time dateTime={version.createdAt} className="text-xs text-subtle-foreground">
-							{formatListTime(new Date(version.createdAt), now)}
-						</time>
-					</DropdownMenuItem>
-				))}
+				<VersionItems
+					artifact={artifact}
+					versions={versions}
+					now={now}
+					onVersionChange={onVersionChange}
+				/>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);
+}
+
+/** An artifact's versions as menu items, the one shown ticked, each switching to it. */
+function VersionItems({
+	artifact,
+	versions,
+	now,
+	onVersionChange,
+}: {
+	artifact: Artifact;
+	versions: readonly ArtifactVersionSummary[];
+	now: Date;
+	onVersionChange: (version: number | undefined) => void;
+}) {
+	return versions.map((version) => (
+		<DropdownMenuItem
+			key={version.number}
+			onClick={() =>
+				onVersionChange(version.number === artifact.version ? undefined : version.number)
+			}
+		>
+			<Check
+				aria-hidden
+				className={version.number === artifact.shownVersion.number ? undefined : "invisible"}
+			/>
+			<span className="flex-1">
+				Version {version.number}
+				<span className="text-muted-foreground"> {byline(version.author)}</span>
+			</span>
+			<time dateTime={version.createdAt} className="text-xs text-subtle-foreground">
+				{formatListTime(new Date(version.createdAt), now)}
+			</time>
+		</DropdownMenuItem>
+	));
 }
 
 /** When a version was written, to follow its author: "at 2:46", "yesterday", "on Mon", "on 14 Sep". */

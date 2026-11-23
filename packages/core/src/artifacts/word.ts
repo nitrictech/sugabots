@@ -9,7 +9,7 @@ export const WORD_CONTENT_TYPE =
 /**
  * A `document` artifact's markdown as a Word file titled `title`: headings,
  * lists, quotes, links, code and tables as Word's own, in Word's default
- * styles. Images and raw HTML come out as their text.
+ * styles. Images and raw HTML come out as their text, but for underline.
  */
 export const wordFileOf = (title: string, markdown: string): Effect.Effect<Uint8Array> =>
 	Effect.promise(async () => {
@@ -25,7 +25,8 @@ export const wordFileOf = (title: string, markdown: string): Effect.Effect<Uint8
 const markdownAsHtml = new Marked({
 	renderer: {
 		image: ({ text }) => escapeHtml(text),
-		html: ({ text }) => escapeHtml(text),
+		// Underline is the one mark markdown has no sign for, so the editor writes it as this tag.
+		html: ({ text }) => (/^<\/?u>$/.test(text.trim()) ? text : escapeHtml(text)),
 	},
 });
 

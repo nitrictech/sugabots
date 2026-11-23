@@ -48,6 +48,9 @@ type Written = typeof artifactWrittenSchema.Type;
 
 type Refusal = { status: "refused"; reason: string };
 
+/** A change that waits in the document for a person, which the model should report and not retry. */
+type Suggested = { status: "suggested"; note: string };
+
 const artifactIdSchema = Schema.String.check(Schema.isUUID()).annotate({
 	description: "The artifact's id, from artifact_list or the write that made it",
 });
@@ -96,7 +99,7 @@ export function artifactTools({
 
 	const refusingChanges = <E extends AuthoringFailure>(
 		change: Effect.Effect<Artifact, E>,
-	): Promise<Written | Refusal> =>
+	): Promise<Written | Refusal | Suggested> =>
 		run(
 			change.pipe(
 				Effect.map(written),
@@ -229,10 +232,28 @@ type AuthoringFailure =
 	| Artifacts.Stale
 	| Artifacts.KindFixed
 	| Artifacts.TooLarge
-	| Artifacts.EditTextUnmatched;
+	| Artifacts.EditTextUnmatched
+	| Artifacts.NotWritten;
 
-function refusalFor(failure: AuthoringFailure): Refusal {
+function refusalFor(failure: AuthoringFailure): Refusal | Suggested {
 	switch (failure._tag) {
+		case "ArtifactChangeSuggested":
+			return {
+				status: "suggested",
+				note: "This change was asked for from inside the document, so it is shown there as a suggestion and takes effect once somebody accepts it. The document reads as before for now. Say that you suggested it; don't make the change again.",
+			};
+		case "ArtifactUnreadable":
+			return {
+				status: "refused",
+				reason:
+					"This document holds content you can't read from here, so changing it would lose that content. Say so, and leave the document as it is.",
+			};
+		case "ArtifactSuggestionBlocked":
+			return {
+				status: "refused",
+				reason:
+					"This change has to be shown as a suggestion, and a suggestion can't be shown inside a code block. Say so, and ask them to change the code block themselves.",
+			};
 		case "ArtifactNotFound":
 			return { status: "refused", reason: "There is no artifact with that id in this pod." };
 		case "ArtifactStale":

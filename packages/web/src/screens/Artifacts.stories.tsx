@@ -170,14 +170,16 @@ export const Document = meta.story({
 			),
 		).toBeVisible();
 		await expect(canvas.getByRole("button", { name: /Version 3/ })).toBeVisible();
-		await userEvent.click(canvas.getByRole("button", { name: "More" }));
-		await expect(await screen.findByRole("menuitem", { name: "Download" })).toBeVisible();
-		await expect(screen.getByRole("menuitem", { name: "Copy link" })).toBeVisible();
-		await expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+		// Nothing to import or delete here, so there is no menu of more actions.
+		await expect(canvas.queryByRole("button", { name: "More" })).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: "Share" }));
+		await expect(await screen.findByRole("button", { name: "Copy link" })).toBeVisible();
+		await userEvent.click(screen.getByLabelText("Export"));
+		await expect(screen.getByRole("button", { name: /Markdown/ })).toBeVisible();
 		await userEvent.keyboard("{Escape}");
 		// The accessibility check after the story would otherwise catch the
-		// menu's focus guards while it is still closing.
-		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+		// popover's focus guards while it is still closing.
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	},
 });
 

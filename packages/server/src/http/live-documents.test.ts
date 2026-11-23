@@ -2,9 +2,11 @@ import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import type { Artifact } from "@sugabots/contracts";
+import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { LiveDocuments } from "@sugabots/core/artifacts/live";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
+import { Ids } from "@sugabots/core/ids/ids";
 import { unimplemented } from "@sugabots/core/testing";
 import { Context, Effect, Exit, Layer, Scope, Stream } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
@@ -28,7 +30,8 @@ const resolveUser: UserResolver = async (headers) =>
 
 const POD_ID = "0199a3a0-0000-7000-8000-000000000001";
 const ARTIFACT_ID = "0199a3a0-0000-7000-8000-000000000002";
-const PATH = `/api/pods/${POD_ID}/artifacts/${ARTIFACT_ID}/live`;
+const LIVE = `/api/pods/${POD_ID}/artifacts/${ARTIFACT_ID}/live`;
+const PATH = `${LIVE}?schema=${LIVE_DOCUMENT_SCHEMA}`;
 const WORD_PATH = `/api/pods/${POD_ID}/artifacts/${ARTIFACT_ID}/word`;
 
 const plan: Artifact = {
@@ -46,6 +49,7 @@ const plan: Artifact = {
 
 const PLANNER = {
 	name: "Planner",
+	threadId: "0199a3a0-0000-7000-8000-000000000003",
 	look: { color: "green", face: "pill", shape: "circle" },
 } as const;
 
@@ -78,6 +82,7 @@ beforeAll(async () => {
 						),
 				}),
 			),
+			Effect.provide(Ids.layer),
 			Scope.provide(scope),
 		),
 	);
@@ -138,6 +143,18 @@ describe("a document's live WebSocket", () => {
 		const response = await fetch(`http://127.0.0.1:${apiPort}${WORD_PATH}`);
 
 		expect(response.status).toBe(401);
+	});
+
+	it("refuses an editor built for another schema, which would delete what it could not hold", async () => {
+		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${LIVE}?schema=1`, {
+			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
+		} as unknown as string[]);
+		const outcome = await new Promise<string>((resolve) => {
+			socket.onopen = () => resolve("opened");
+			socket.onerror = () => resolve("refused");
+		});
+
+		expect(outcome).toBe("refused");
 	});
 
 	it("refuses a socket nobody is signed in on", async () => {

@@ -13,7 +13,14 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@handlewithcare/prosemirror-suggest-changes": "^0.1.8",
 		"@sugabots/errors": "workspace:*",
+		"@tiptap/core": "^3.35.0",
+		"@tiptap/extension-blockquote": "^3.35.0",
+		"@tiptap/extension-document": "^3.35.0",
+		"@tiptap/extension-list": "^3.35.0",
+		"@tiptap/pm": "^3.35.0",
+		"@tiptap/starter-kit": "^3.35.0",
 		"effect": "catalog:",
 		"mdast-util-from-markdown": "^2.1.0",
 		"mdast-util-to-string": "^4.0.0",
