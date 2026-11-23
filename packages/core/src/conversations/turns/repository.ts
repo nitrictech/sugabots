@@ -60,7 +60,7 @@ import { WorkAdmission } from "./work-admission.ts";
  * unfinished tool calls, through `ToolCallRepository`.
  *
  * A bot's turn writes a reply into its conversation. A system bot's turn (the
- * Summariser summarising, the Compaction bot compacting) writes something else
+ * Compaction bot compacting) writes something else
  * instead, so those have commands of their own and announce nothing.
  */
 export interface Interface {
@@ -136,8 +136,6 @@ export interface Interface {
 		contextTokens: number | undefined,
 	) => Effect.Effect<void>;
 	readonly failSystemBotTurn: (turnId: string, userMessage: UserText) => Effect.Effect<void>;
-	/** Asks the turn to stop, and says who has to be told. */
-	readonly requestCancel: (turnId: string) => Effect.Effect<CancelRequest>;
 	/** isCancellationRequested reports whether somebody asked the turn to stop, or it is gone. */
 	readonly isCancellationRequested: (turnId: string) => Effect.Effect<boolean>;
 	/** Records a turn waiting for approvals as cancelled. Does nothing once it stopped waiting. */
@@ -700,31 +698,6 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		requestCancel: (turnId) =>
-			operation(
-				"requestCancel",
-				transaction(
-					Effect.gen(function* (): Effect.fn.Return<CancelRequest, never, Database | Transaction> {
-						const locked = yield* lockedTurn(eq(turn.id, turnId));
-						if (!locked) return { _tag: "Refused" };
-						const decided = transition(locked.state, TurnEvent.RequestCancel());
-						if (decided._tag === "Refused") return { _tag: "Refused" };
-						yield* write(turnId, decided.state);
-						if (decided.followUp?._tag === "SignalOwner") {
-							return { _tag: "SignalOwner", owner: decided.followUp.owner };
-						}
-						// The turn's workflow stops on this event; it reads the flag only as a fallback.
-						yield* emit([
-							ConversationEvent.TurnCancelRequested({
-								conversationId: locked.conversationId,
-								turnId,
-							}),
-						]);
-						return { _tag: "Announced" };
-					}),
-				),
-			),
-
 		isCancellationRequested: (turnId) =>
 			operation(
 				"isCancellationRequested",
@@ -903,11 +876,6 @@ export interface NotRunnable {
 	readonly reason: string;
 	readonly ended: Ended | undefined;
 }
-
-type CancelRequest =
-	| { readonly _tag: "SignalOwner"; readonly owner: string }
-	| { readonly _tag: "Announced" }
-	| { readonly _tag: "Refused" };
 
 const PlacedPart = Schema.Struct({ id: Schema.String, atOffset: Schema.Int });
 

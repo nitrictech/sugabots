@@ -1,24 +1,17 @@
 import { Schema } from "effect";
-import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
+import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import {
 	conversationActivitySchema,
 	conversationDetailsSchema,
 	conversationHistoryQuerySchema,
 	messageReactionsSchema,
-	placedConversationSchema,
 	reactionEmojiSchema,
 } from "../../conversations.ts";
-import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { Conflict, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 export class ConversationsApi extends HttpApiGroup.make("conversations")
 	.add(
-		HttpApiEndpoint.get("list", "/workspaces/:workspace/conversations", {
-			params: { workspace: workspaceIdOrSlugSchema },
-			success: Schema.Array(placedConversationSchema),
-			error: refused,
-		}),
 		// HEAD answers the same with a one-message page, for asking whether the
 		// conversation is there without its history.
 		HttpApiEndpoint.get("get", "/conversations/:conversationId", {
@@ -42,11 +35,6 @@ export class ConversationsApi extends HttpApiGroup.make("conversations")
 		HttpApiEndpoint.delete("unreact", "/messages/:messageId/reactions/:emoji", {
 			params: { messageId: Schema.String, emoji: reactionEmojiSchema },
 			success: messageReactionsSchema,
-			error: refused,
-		}),
-		HttpApiEndpoint.post("cancelTurn", "/turns/:turnId/cancel", {
-			params: { turnId: Schema.String },
-			success: HttpApiSchema.Empty(202),
 			error: refused,
 		}),
 	)

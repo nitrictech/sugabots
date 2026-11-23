@@ -3,7 +3,6 @@ import {
 	type BotStartedThread,
 	botStartedThreadSchema,
 	type Message,
-	type Participant,
 	START_THREAD_TOOL,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
@@ -11,12 +10,11 @@ import { Option, Schema } from "effect";
 import { ChevronRight } from "lucide-react";
 import { threadByIdLink } from "@/lib/links.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
 
 /**
  * A thread a bot started with `start_thread` in its reply, shown from the call,
  * hanging off the reply that names it: a curve down from the reply, the faces
- * of who started it and the other bot it is with, when that bot is among
+ * of the bot that started it and the other bot it is with, when that bot is among
  * `projectBots`, and its title. The whole line opens the thread, by its id
  * alone: the bot it is with may be outside this project, and its route finds it.
  */
@@ -26,16 +24,13 @@ export function BotStartedThreadLine({
 	projectBots,
 }: {
 	started: BotStartedThread;
-	startedBy: Message["author"];
+	startedBy: BotParticipant;
 	projectBots: readonly BotParticipant[];
 }) {
 	const otherBot = started.withBotId
 		? projectBots.find((member) => member.id === started.withBotId)
 		: undefined;
-	const faces = [
-		...(startedBy.kind === "automation_trigger" ? [] : [startedBy]),
-		...(otherBot ? [otherBot] : []),
-	];
+	const faces = otherBot ? [startedBy, otherBot] : [startedBy];
 	return (
 		<Link
 			{...threadByIdLink(started.id)}
@@ -65,47 +60,34 @@ export function BotStartedThreadLine({
 	);
 }
 
-/** One face on the line, ringed so it reads apart from the one before it, which it overlaps. */
-function LineFace({ face }: { face: Participant }) {
-	return face.kind === "bot" ? (
+/** One bot's face on the line, ringed so it reads apart from the one before it, which it overlaps. */
+function LineFace({ face }: { face: BotParticipant }) {
+	return (
 		<BotAvatar
 			color={face.color}
 			face={face.face}
 			shape={face.shape}
 			size={16}
 			ringed={{ color: "var(--background)", width: 1.5 }}
-			// Positioned, as a person's face is, so each face sits over the one before it.
+			// Positioned, so each face sits over the one before it.
 			className="relative -mr-0.5 max-md:-mr-1.5 max-md:size-5.5"
-		/>
-	) : (
-		<PersonAvatar
-			person={face}
-			size={16}
-			className="-mr-0.5 ring-2 ring-background max-md:-mr-1.5 max-md:size-5.5! max-md:text-3xs!"
 		/>
 	);
 }
 
 const decodeStartThreadOutput = Schema.decodeUnknownOption(
-	Schema.Union([
-		Schema.Struct({ thread: botStartedThreadSchema }),
-		// What calls recorded as `start_task` answered.
-		Schema.Struct({ task: botStartedThreadSchema }),
-	]),
+	Schema.Struct({ thread: botStartedThreadSchema }),
 );
-
-/** The name some recorded calls of `start_thread` have. */
-const START_TASK_TOOL = "start_task";
 
 /** The threads a bot's message started with `start_thread`, in the order it started them. */
 export function threadsStartedBy(message: Message): BotStartedThread[] {
 	return message.parts.flatMap((part) => {
 		if (part.type !== "tool_call") return [];
-		if (part.tool !== START_THREAD_TOOL && part.tool !== START_TASK_TOOL) return [];
+		if (part.tool !== START_THREAD_TOOL) return [];
 		if (part.status !== "completed") return [];
 		return Option.match(decodeStartThreadOutput(part.output), {
 			onNone: () => [],
-			onSome: (output) => ["thread" in output ? output.thread : output.task],
+			onSome: (output) => [output.thread],
 		});
 	});
 }

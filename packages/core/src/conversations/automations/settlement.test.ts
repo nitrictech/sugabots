@@ -445,7 +445,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 		},
 	);
 
-	it("settles without waiting on the Summariser summarising the run's conversation", async () => {
+	it("settles without waiting on the Compaction bot compacting the run's conversation", async () => {
 		const { accepted, run } = await aRunningRun();
 		await finishTurnsIn(accepted.conversationId);
 		const [triggerMessage] = await onDatabase((db) =>
@@ -455,19 +455,19 @@ describe.skipIf(!process.env.DATABASE_URL)("automation settlement, against Postg
 				.where(eq(message.conversationId, accepted.conversationId)),
 		);
 		if (!triggerMessage) throw new Error("Settlement test trigger message is missing");
-		const summaryConversation = await onDatabase((db) =>
+		const compactionConversation = await onDatabase((db) =>
 			seedConversation(db, {
 				workspaceId,
 				kind: "system",
 				botId,
-				systemBotKey: "summarise",
-				title: "Summary",
+				systemBotKey: "compact",
+				title: "Compaction",
 				servedConversationId: accepted.conversationId,
 			}),
 		);
 		await onDatabase((db) =>
 			db.insert(turn).values({
-				conversationId: summaryConversation.id,
+				conversationId: compactionConversation.id,
 				botId,
 				triggerMessageId: triggerMessage.id,
 				status: "running",

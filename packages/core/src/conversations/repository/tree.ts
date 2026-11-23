@@ -27,7 +27,7 @@ export const lineageOf = (conversationId: SQLWrapper) => sql`(
 /**
  * The conversation `rootConversationId` and the collaborations under it, as a
  * relation of `(id)`: where an automation run's work happens. A system bot's
- * conversation (the Summariser's summaries) hangs off the one it serves but is
+ * conversation (the Compaction bot's) hangs off the one it serves but is
  * not part of the work, so it and whatever hangs off it are left out.
  */
 export const workingConversationsOf = (rootConversationId: SQLWrapper) => sql`(

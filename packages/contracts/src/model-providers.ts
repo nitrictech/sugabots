@@ -203,7 +203,6 @@ export const modelProviderSchema = Schema.Struct({
 	/** For a provider signed in to rather than given a key (ChatGPT, SuperGrok), whether somebody has. */
 	signedIn: Schema.Boolean,
 	customHeaders: Schema.mutable(Schema.Array(Schema.Struct({ name: Schema.String }))),
-	modelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	lastTestError: Schema.NullOr(Schema.String),
 	/** Whoever connected it, while it is connected and they are still in the workspace. */
 	connectedBy: Schema.NullOr(namedPersonSchema),
@@ -248,10 +247,10 @@ export function providerIsUsable(
 export function providerIsReady(
 	provider: Pick<
 		ModelProvider,
-		"preset" | "hasApiKey" | "signedIn" | "active" | "status" | "modelCount"
+		"preset" | "hasApiKey" | "signedIn" | "active" | "status" | "models"
 	>,
 ): boolean {
-	return providerIsConnected(provider) && provider.status !== "error" && provider.modelCount > 0;
+	return providerIsConnected(provider) && provider.status !== "error" && provider.models.length > 0;
 }
 
 /**
@@ -363,12 +362,12 @@ export function effectiveCapabilities(
 
 /**
  * Where the workspace's settings move when a change stops offering the model
- * they name: the model new bots start on, and the one summaries run on. Each
+ * they name: the model new bots start on, and the one system bots run on. Each
  * is needed only when it names a model being switched off.
  */
 const settingMovesFields = {
 	newBotsTo: Schema.optional(modelIdSchema),
-	summariesTo: Schema.optional(modelIdSchema),
+	systemBotsTo: Schema.optional(modelIdSchema),
 };
 
 /** Switching off a model and moving the bots that run on it to another the workspace offers. */

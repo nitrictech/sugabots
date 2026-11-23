@@ -84,13 +84,6 @@ describe("a person's message in a project's thread", () => {
 		);
 	});
 
-	it("goes to nobody but the bots it addresses in a project with no lead yet", () => {
-		expect(floorOf(input({ lead: null, content: "Morning all" }))).toEqual(nobody);
-		expect(floorOf(input({ lead: null, content: "@scout?" }))).toEqual(
-			turns({ botId: scout, reason: "mention" }),
-		);
-	});
-
 	it("offers no optional turn to a lead with no model, which could only fail", () => {
 		expect(
 			floorOf(input({ lead: { id: lead, hasModel: false }, content: "@sam can you look?" })),
@@ -115,9 +108,5 @@ describe("a person's message in an automation's feed", () => {
 	it("goes to nobody when it mentions only people", () => {
 		expect(floorOf(feed("@sam can you look?"))).toEqual(nobody);
 		expect(floorOf(feed("@channel the report is late"))).toEqual(nobody);
-	});
-
-	it("goes to nobody in a project with no lead yet", () => {
-		expect(floorOf({ ...feed("Any news?"), lead: null })).toEqual(nobody);
 	});
 });

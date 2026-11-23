@@ -50,6 +50,7 @@ import {
 } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { LookPicker } from "@/shell/LookPicker.tsx";
+import { Splash } from "@/shell/Splash.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
@@ -65,8 +66,8 @@ import { ProviderSignInRow } from "./ProviderSignIn.tsx";
 /*
  * Setting up a workspace: name it, connect a model, make the first bot, invite
  * people, then meet the bot. Signing in comes before, on the login page, which
- * is the welcome. The first bot is the person's Personal Assistant, which the
- * workspace made with it, so making it here is giving it a face and a name.
+ * is the welcome. The first bot is a public bot of its own, beside the
+ * person's Personal Assistant, which the workspace already made.
  */
 
 type Step = "workspace" | "model" | "bot" | "invite" | "ready";
@@ -102,7 +103,7 @@ export function Onboarding(props: SetupProps) {
 		if (workspaceId) chooseWorkspace(workspaceId);
 	}, [workspaceId]);
 
-	if (workspaceId && chosen?.id !== workspaceId) return <div className="h-full bg-list" />;
+	if (workspaceId && chosen?.id !== workspaceId) return <Splash />;
 	return <SetupSteps {...props} />;
 }
 
@@ -181,9 +182,9 @@ function SetupSteps({ session, workspace, onAddress, onCancel }: SetupProps) {
 				<InviteStep workspaceId={workspace.id} onContinue={() => setChosen("ready")} />
 			) : firstBot ? (
 				<ReadyStep workspace={workspace} bot={firstBot} />
-			) : step === "ready" ? (
+			) : (
 				<BotStep model={assistant.model} made={undefined} onCreated={() => setChosen("invite")} />
-			) : null}
+			)}
 		</OnboardingFrame>
 	);
 }
@@ -399,7 +400,7 @@ function ConnectProviderStep({
 							key={provider.id}
 							icon={<ProviderTile name={provider.name} preset={provider.preset} />}
 							label={provider.name}
-							sub={`${provider.modelCount} models`}
+							sub={countOf(provider.models.length, "model", "models")}
 							chevron
 							onClick={() => continueWith(provider).catch(() => {})}
 						/>
@@ -630,6 +631,11 @@ function BotStep({
 /** An address as far as the invite goes: something, an @, something with a dot. */
 const LOOKS_LIKE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** The addresses in what was typed, split at spaces, commas and semicolons, leaving out what isn't one. */
+function emailsIn(typed: string): string[] {
+	return typed.split(/[\s,;]+/).filter((one) => LOOKS_LIKE_EMAIL.test(one));
+}
+
 function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContinue: () => void }) {
 	const invite = useInviteWorkspaceMember(workspaceId);
 	const [emails, setEmails] = useState<string[]>([]);
@@ -639,7 +645,7 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 	const inputId = useId();
 
 	function addDraft() {
-		const typed = draft.split(/[\s,;]+/).filter((one) => LOOKS_LIKE_EMAIL.test(one));
+		const typed = emailsIn(draft);
 		if (typed.length === 0) return;
 		setEmails((current) => [...new Set([...current, ...typed])]);
 		setDraft("");
@@ -658,12 +664,7 @@ function InviteStep({ workspaceId, onContinue }: { workspaceId: string; onContin
 
 	async function submit(event: FormEvent) {
 		event.preventDefault();
-		const all = [
-			...new Set([
-				...emails,
-				...draft.split(/[\s,;]+/).filter((one) => LOOKS_LIKE_EMAIL.test(one)),
-			]),
-		];
+		const all = [...new Set([...emails, ...emailsIn(draft)])];
 		if (all.length === 0) {
 			onContinue();
 			return;

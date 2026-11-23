@@ -30,16 +30,14 @@ export interface Reacting {
 export function MessageReactions({
 	message,
 	reacting,
-	className,
 }: {
 	message: Message;
 	reacting: Reacting | undefined;
-	className?: string;
 }) {
 	const reactions = message.reactions ?? [];
 	if (reactions.length === 0) return null;
 	return (
-		<ul aria-label="Reactions" className={cn("m-0 flex list-none flex-wrap gap-1 p-0", className)}>
+		<ul aria-label="Reactions" className="m-0 flex list-none flex-wrap gap-1 p-0">
 			{reactions.map((reaction) => {
 				const mine = reacting !== undefined && isAmong(reaction, reacting.userId);
 				const who = whoReacted(reaction, reacting?.userId);

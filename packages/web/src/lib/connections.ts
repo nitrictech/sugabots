@@ -15,7 +15,6 @@ import {
 } from "@sugabots/contracts";
 import {
 	queryOptions,
-	skipToken,
 	useMutation,
 	useQueries,
 	useQuery,
@@ -29,22 +28,24 @@ export function usableToolCount(connection: Connection): number {
 	return connection.toolCounts.allow + connection.toolCounts.ask;
 }
 
+/** Whether someone must sign the connection in again, or fix it: it is not signed in, its sign-in expired, or it is failing. */
+export function connectionNeedsAttention(connection: Connection): boolean {
+	return !connection.signedIn || connection.signInExpired || connection.status === "error";
+}
+
 /**
- * A project's connections, each with how many tools are at each setting;
- * nothing is asked before a project is chosen. A bot's are its default
- * project's.
+ * A project's connections, each with how many tools are at each setting. A
+ * bot's are its default project's.
  */
-export function useConnections(projectId: string | undefined) {
+export function useConnections(projectId: string) {
 	return useQuery(connectionsQuery(projectId));
 }
 
-function connectionsQuery(projectId: string | undefined) {
+function connectionsQuery(projectId: string) {
 	return queryOptions({
 		queryKey: ["connections", projectId],
-		queryFn: projectId
-			? ({ signal }) =>
-					Effect.runPromise(client.api.connections.list({ params: { projectId } }), { signal })
-			: skipToken,
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.connections.list({ params: { projectId } }), { signal }),
 	});
 }
 

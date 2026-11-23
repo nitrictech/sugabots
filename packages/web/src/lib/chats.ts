@@ -98,7 +98,10 @@ export function useProjectThreads(projectId: string | undefined) {
 	return useQuery(projectThreadsQuery(useWorkspace().workspace?.id, projectId));
 }
 
-/** One of a bot's threads, with the bot. */
+/** Whether an open thread waits on the viewer: a tool call for them to approve, or a mention of them. */
+export function needsViewer(row: ListedThread): boolean {
+	return row.conversation.doneAt === null && (row.needsApproval || row.mentionsYou);
+}
 
 /** When a thread last had something in it: its newest message, else when it was started. */
 export function lastMovedAt(row: ListedThread): number {
@@ -357,9 +360,7 @@ export function placeBot(place: ConversationPlace): Bot | undefined {
 
 /**
  * Where the conversation `conversationId` is, in the project at `projectSlug`;
- * `undefined` when there is none or it is not one in that project. Read from
- * the project's list, and from the conversation itself only when the list
- * does not have it, as an archived thread or one of its automations' feeds.
+ * `undefined` when there is none or it is not one in that project.
  */
 export function useProjectThreadPlace(
 	projectSlug: string,
@@ -367,23 +368,11 @@ export function useProjectThreadPlace(
 ): { found: { project: Project } | undefined; isPending: boolean; error: unknown } {
 	const projects = useProjects();
 	const project = findProject(projects.data, projectSlug);
-	const list = useProjectThreads(project?.id);
-	const listed =
-		list.data?.threads.some((thread) => thread.conversation.id === conversationId) ?? false;
-	const unlisted = useQuery({
-		...conversationQuery(conversationId),
-		enabled: conversationId !== undefined && list.isSuccess && !listed,
-	});
-	const unlistedKind = unlisted.data?.conversation?.kind;
-	const inProject =
-		listed ||
-		((unlistedKind === "project_thread" || unlistedKind === "automation_feed") &&
-			unlisted.data?.conversation?.projectId === project?.id);
+	const { inProject, isPending, error } = useConversationInProject(project?.id, conversationId);
 	return {
 		found: project && inProject ? { project } : undefined,
-		isPending:
-			projects.isPending || list.isPending || (list.isSuccess && !listed && unlisted.isPending),
-		error: projects.error ?? list.error ?? unlisted.error,
+		isPending: projects.isPending || isPending,
+		error: projects.error ?? error,
 	};
 }
 
@@ -396,7 +385,24 @@ export function useBotThreadPlace(
 	bot: Bot,
 	conversationId: string | undefined,
 ): { found: { bot: Bot } | undefined; isPending: boolean; error: unknown } {
-	const list = useProjectThreads(bot.defaultProjectId);
+	const { inProject, isPending, error } = useConversationInProject(
+		bot.defaultProjectId,
+		conversationId,
+	);
+	return { found: inProject ? { bot } : undefined, isPending, error };
+}
+
+/**
+ * Whether the conversation `conversationId` is in the project `projectId`, a
+ * bot's default one or one people made: one of its threads or automations'
+ * feeds. Read from the project's list, and from the conversation itself only
+ * when the list does not have it, as an archived thread.
+ */
+function useConversationInProject(
+	projectId: string | undefined,
+	conversationId: string | undefined,
+): { inProject: boolean; isPending: boolean; error: unknown } {
+	const list = useProjectThreads(projectId);
 	const listed =
 		list.data?.threads.some((item) => item.conversation.id === conversationId) ||
 		list.data?.automations.some((item) => item.conversation?.id === conversationId) ||
@@ -405,14 +411,14 @@ export function useBotThreadPlace(
 		...conversationQuery(conversationId),
 		enabled: conversationId !== undefined && list.isSuccess && !listed,
 	});
-	// Not by its bot, which on a collaboration names the bot asked, whoever's thread it hangs under.
+	// By its project, not its bot, which on a collaboration names the bot asked, whoever's thread it hangs under.
 	const unlistedKind = unlisted.data?.conversation?.kind;
-	const ours =
+	const inProject =
 		listed ||
 		((unlistedKind === "project_thread" || unlistedKind === "automation_feed") &&
-			unlisted.data?.conversation?.projectId === bot.defaultProjectId);
+			unlisted.data?.conversation?.projectId === projectId);
 	return {
-		found: ours ? { bot } : undefined,
+		inProject,
 		isPending: list.isPending || (list.isSuccess && !listed && unlisted.isPending),
 		error: list.error ?? unlisted.error,
 	};

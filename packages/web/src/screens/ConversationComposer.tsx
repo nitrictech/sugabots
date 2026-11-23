@@ -6,7 +6,7 @@ import { listNames } from "@/lib/name-list.ts";
 import { BotsWithoutModelNotice, useRequiredRepliers } from "./BotsWithoutModelNotice.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ConnectionsNotice } from "./ConnectionsNotice.tsx";
-import type { ChatRecipients, DraftAudience, DraftFloor } from "./chat-recipients.ts";
+import type { ChatRecipients, DraftAudience } from "./chat-recipients.ts";
 import { composerMentionable } from "./mentions.tsx";
 import type { MessageSending } from "./message-sending.ts";
 import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
@@ -18,7 +18,8 @@ const EVERY_NAME = { maxNamed: Number.POSITIVE_INFINITY };
 
 /**
  * The foot of a chat: the composer, saying whom the message goes to, and
- * under it who is typing, or else which bots will reply. While a bot that
+ * under it who is typing, or else which bots will reply when that is not
+ * simply the lead. While a bot that
  * must reply to the draft has no model, the server would refuse it, so the
  * composer says so in place of the reply hint and holds Send.
  */
@@ -62,7 +63,7 @@ export function ConversationComposer({
 		[details, user],
 	);
 	const held = withoutModel.length > 0;
-	const hint = held ? undefined : replyHint(audience.floor);
+	const hint = held ? undefined : replyHint(audience);
 	return (
 		<div className="mx-auto w-full max-w-200 shrink-0 px-4 max-md:pb-tab-bar md:px-5">
 			<ChatComposer
@@ -129,8 +130,12 @@ function composerLabel({
 	return `Message ${chatName}`;
 }
 
-/** Under the composer while nobody is typing: who answers the message, by the floor's rule. */
-function replyHint(floor: DraftFloor): string | undefined {
+/**
+ * Under the composer while nobody is typing: who answers the message, by the
+ * floor's rule. Nothing while the lead answers a draft that mentions nobody,
+ * as it answers every such message.
+ */
+function replyHint({ floor, mentions }: DraftAudience): string | undefined {
 	switch (floor.kind) {
 		case "bots":
 			return `${listNames(
@@ -138,7 +143,7 @@ function replyHint(floor: DraftFloor): string | undefined {
 				EVERY_NAME,
 			)} will reply here.`;
 		case "lead":
-			return `${floor.lead.name} will reply here.`;
+			return mentions.length > 0 ? `${floor.lead.name} will reply here.` : undefined;
 		case "leadMayReply":
 			return `${floor.lead.name} may reply.`;
 		case "leadWontReply":

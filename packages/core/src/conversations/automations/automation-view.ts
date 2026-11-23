@@ -7,19 +7,11 @@ import { userText } from "@sugabots/errors";
 import { and, asc, desc, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { Authorization } from "../../authorization/authorization.ts";
-import { Visibility } from "../../authorization/visibility.ts";
 import { type Executor, query, serviceOperations } from "../../database/database.ts";
 import { automation, automationRun, placedConversation } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { decodeCursor, earlierThan, encodeCursor } from "../cursor.ts";
-import {
-	AutomationNotFound,
-	automationWithTriggers,
-	inScope,
-	scopeOf,
-	toAutomation,
-	triggersOf,
-} from "./automation.ts";
+import { toAutomation, triggersOf } from "./automation.ts";
 import type { Automations } from "./automations.ts";
 import { latestRunOf, listStatusColumns, resultPosted, toListStatus, toRun } from "./execution.ts";
 
@@ -27,33 +19,8 @@ import { latestRunOf, listStatusColumns, resultPosted, toListStatus, toRun } fro
 export const makeView = Effect.gen(function* () {
 	const operation = yield* serviceOperations<ViewMethods>("Automations");
 	const authorization = yield* Authorization.Service;
-	const visibility = yield* Visibility.Service;
 
 	return {
-		listInWorkspace: (workspace) =>
-			operation(
-				"listInWorkspace",
-				Effect.gen(function* () {
-					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
-					const reachesProject = yield* visibility.reachesProject;
-					const rows = yield* query((db) =>
-						db
-							.select()
-							.from(automation)
-							.where(
-								and(
-									eq(automation.workspaceId, workspaceId),
-									isNull(automation.deletedAt),
-									reachesProject(automation.projectId),
-								),
-							)
-							.orderBy(asc(automation.name), asc(automation.id)),
-					);
-					const triggers = yield* triggersOf(rows.map((row) => row.id));
-					return rows.map((row) => toAutomation(row, triggers.get(row.id) ?? []));
-				}),
-			),
-
 		list: ({ projectId }) =>
 			operation(
 				"list",
@@ -89,42 +56,6 @@ export const makeView = Effect.gen(function* () {
 				}),
 			),
 
-		get: (addressed) =>
-			operation(
-				"get",
-				Effect.gen(function* () {
-					const scope = yield* scopeOf(authorization, addressed, "automation.read");
-					const [row] = yield* query((db) =>
-						db.select().from(automation).where(inScope(scope)).limit(1),
-					);
-					if (!row) return yield* new AutomationNotFound();
-					return yield* automationWithTriggers(row);
-				}),
-			),
-
-		listRuns: (addressed, page = { limit: DEFAULT_RUN_PAGE_LIMIT }) =>
-			operation(
-				"listRuns",
-				Effect.gen(function* () {
-					const scope = yield* scopeOf(authorization, addressed, "automation.history.read");
-					const [definition] = yield* query((db) =>
-						db
-							.select({ id: automation.id })
-							.from(automation)
-							.where(
-								and(
-									eq(automation.id, scope.automationId),
-									eq(automation.workspaceId, scope.workspaceId),
-									eq(automation.projectId, scope.projectId),
-								),
-							)
-							.limit(1),
-					);
-					if (!definition) return yield* new AutomationNotFound();
-					return yield* runsPage(eq(automationRun.automationId, scope.automationId), page);
-				}),
-			),
-
 		listProjectRuns: ({ projectId }, page = { limit: DEFAULT_RUN_PAGE_LIMIT }) =>
 			operation(
 				"listProjectRuns",
@@ -153,10 +84,7 @@ const listedRows = (db: Executor, which: SQL | undefined) => {
 		.orderBy(asc(automation.name), asc(automation.id));
 };
 
-type ViewMethods = Pick<
-	Automations.Interface,
-	"listInWorkspace" | "list" | "get" | "listRuns" | "listProjectRuns"
->;
+type ViewMethods = Pick<Automations.Interface, "list" | "listProjectRuns">;
 
 /**
  * A page of the runs `which` picks, by the run and its automation, newest first. A removed automation keeps

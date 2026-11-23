@@ -69,28 +69,24 @@ export function usePrefetchReachableRepositories(
 }
 
 /** A GitHub connection's repositories, and changing them. */
-export function useConnectionRepositories(
-	projectId: string | undefined,
-	connectionId: string | undefined,
-) {
+export function useConnectionRepositories(projectId: string, connectionId: string | undefined) {
 	const queryClient = useQueryClient();
 	const queryKey = ["connection-repositories", projectId, connectionId];
 	const store = { onSuccess: (data: unknown) => queryClient.setQueryData(queryKey, data) };
 	const params = () => {
-		if (!projectId || !connectionId) throw new Error("No GitHub connection");
+		if (!connectionId) throw new Error("No GitHub connection");
 		return { projectId, connectionId };
 	};
 	return {
 		repositories: useQuery({
 			queryKey,
-			queryFn:
-				projectId && connectionId
-					? ({ signal }) =>
-							Effect.runPromise(
-								client.api.gitHubConnections.repositories({ params: { projectId, connectionId } }),
-								{ signal },
-							)
-					: skipToken,
+			queryFn: connectionId
+				? ({ signal }) =>
+						Effect.runPromise(
+							client.api.gitHubConnections.repositories({ params: { projectId, connectionId } }),
+							{ signal },
+						)
+				: skipToken,
 		}),
 		add: useMutation({
 			mutationFn: (repository: string) =>

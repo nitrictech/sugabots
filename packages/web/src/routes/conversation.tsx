@@ -36,8 +36,6 @@ export function preloadChatScreenForWideLayout() {
 	if (matchesMedia(SIDE_BY_SIDE)) ConversationPage.preload();
 }
 
-export const API_DID_NOT_ANSWER = "The API did not answer. Reload this page to try again.";
-
 /** What a conversation's address says to open beside it, and how a page changes it. */
 export type SearchChange = {
 	search: (previous: ConversationSearch) => ConversationSearch;

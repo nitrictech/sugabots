@@ -205,7 +205,13 @@ describe.skipIf(!configured)("computer tools, against Postgres and OpenSandbox",
 			if (!host) throw new Error("fixture");
 			const newThread = (title: string) =>
 				onDatabase((db) =>
-					seedConversation(db, { workspaceId, kind: "project_thread", botId: host.id, title }),
+					seedConversation(db, {
+						workspaceId,
+						kind: "project_thread",
+						botId: host.id,
+						title,
+						startedById: ownerId,
+					}),
 				);
 			const where = await newThread("Pictures");
 			const [sent] = await onDatabase((db) =>

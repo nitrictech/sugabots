@@ -86,13 +86,7 @@ export const Opened = meta.story({
 		const bot = { ...growthDesk, usesComputer: true };
 		return (
 			<div className="fixed inset-0 flex">
-				<DesktopStage
-					conversationId={conversationId}
-					owner={{ bot }}
-					bot={bot}
-					mayUse
-					onClose={fn()}
-				/>
+				<DesktopStage conversationId={conversationId} owner={{ bot }} bot={bot} onClose={fn()} />
 			</div>
 		);
 	},

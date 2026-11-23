@@ -96,7 +96,7 @@ function foldersOf(listing: string): ComputerDiskFolder[] {
 			const [size = "", path = ""] = line.split("\t");
 			const bytes = Number(size);
 			if (size === "" || !Number.isSafeInteger(bytes)) return [];
-			if (path === Computers.CONVERSATIONS_DIRECTORY) return [{ kind: "threads", bytes }];
+			if (path === Computers.CONVERSATIONS_DIRECTORY) return [{ kind: "conversations", bytes }];
 			if (path === TEMPORARY_DIRECTORY) return [{ kind: "temporary", bytes }];
 			const botId = BOT_HOME.exec(path)?.[1];
 			return botId ? [{ kind: "home", botId, bytes }] : [];

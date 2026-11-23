@@ -32,8 +32,6 @@ interface Failed {
 
 /** A desktop and browser for one bot in one conversation, started on first use. */
 export interface BrowserSession {
-	/** The session's name in the computer, which the viewer finds its desktop by. */
-	readonly name: string;
 	/** Calls `tool` in the browser, giving up on it when `abortSignal` aborts. */
 	readonly call: (
 		tool: string,
@@ -69,13 +67,12 @@ function sessionName(turn: { conversationId: string; botId: string }) {
 	return `${turn.conversationId}-${turn.botId}`;
 }
 
-/** A bot's desktop in a conversation, running: where viewers reach it, and whether it had to start. */
+/** A bot's desktop in a conversation, running: where viewers reach it. */
 export interface Desktop {
 	/** The server a viewer may click and type through. */
 	readonly control: VncServer;
 	/** The server a viewer may only watch through. */
 	readonly watch: VncServer;
-	readonly started: boolean;
 }
 
 /** One of a desktop's VNC servers, which takes a WebSocket on its port. */
@@ -87,7 +84,6 @@ interface VncServer {
 
 /** A bot's browser in a conversation, running on its desktop. */
 export interface Browser {
-	readonly viewerPort: number;
 	/** Where its Playwright MCP server is. */
 	readonly browserPort: number;
 	/** Whether it had to start, so its tabs from before are gone. */
@@ -107,7 +103,6 @@ export const startDesktop = (computer: Computers.Computer, place: Place, turn: B
 			: Effect.succeed<Desktop>({
 					control: { port: reported.viewer, password: reported.password },
 					watch: { port: reported.watch, password: reported.watchPassword },
-					started: reported.started,
 				}),
 	);
 
@@ -122,7 +117,6 @@ const startBrowser = (computer: Computers.Computer, place: Place, turn: BotInCon
 		ports.browser === undefined
 			? Effect.fail(new DesktopUnavailable({ reason: NO_BROWSER }))
 			: Effect.succeed<Browser>({
-					viewerPort: ports.viewer,
 					browserPort: ports.browser,
 					started: ports.started,
 				}),
@@ -140,7 +134,6 @@ const desktopCommand = (
 ) =>
 	Effect.gen(function* () {
 		const directory = `${place.folder}/.browser/${turn.botId}`;
-		// Images from before desktops had colours ignore `--accent` and `--folder`.
 		const ran = yield* computer.exec(
 			`mkdir -p ${Computers.shellQuoted(place.home)} && sugabots-desktop ${command} ${Computers.shellQuoted(sessionName(turn))} ${Computers.shellQuoted(`${directory}/profile`)} ${Computers.shellQuoted(directory)} --accent ${Computers.shellQuoted(botPalettes[turn.color].face)} --folder ${Computers.shellQuoted(place.folder)}`,
 			{ env: { HOME: place.home }, timeout: "60 seconds", maxOutputCharacters: 2_000 },
@@ -180,7 +173,6 @@ export function browserSession(
 	place: Place,
 	turn: BotBrowsing,
 ): BrowserSession {
-	const name = sessionName(turn);
 	let connecting: Promise<{ client: Client; note?: UserText } | Failed> | undefined;
 	let told = false;
 
@@ -211,7 +203,6 @@ export function browserSession(
 	};
 
 	return {
-		name,
 		call: async (toolName, input, abortSignal) => {
 			connecting ??= connect().catch((cause: unknown) => {
 				connecting = undefined;

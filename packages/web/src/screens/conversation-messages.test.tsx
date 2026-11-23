@@ -120,8 +120,7 @@ function show(
 			<ConversationMessages
 				fileUrlOf={(fileId) => `/files/${fileId}`}
 				messages={shown}
-				host={host}
-				isRunning={false}
+				typing={{ host, isRunning: false }}
 				participants={participants}
 				peopleReachingProject={[jay]}
 				conversationKind="project_thread"

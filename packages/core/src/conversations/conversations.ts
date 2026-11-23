@@ -23,7 +23,6 @@ import { ConversationView } from "./conversation-view.ts";
 import type { ConversationEvent } from "./events.ts";
 import { FloorControl } from "./floor/floor-control.ts";
 import { Reactions } from "./reactions/reactions.ts";
-import { Summaries } from "./summaries/summaries.ts";
 import { Collaborations } from "./tools/collaborate/collaborations.ts";
 import { Turns } from "./turns/turns.ts";
 
@@ -52,7 +51,6 @@ const services = Layer.mergeAll(
 	// Moving the workspace's zone moves its automations' routines, through the repository that emits.
 	WorkspaceTimeZone.layer,
 	AutomationRunner.layer,
-	Summaries.layer,
 	Compactions.layer,
 	AutomationSettlement.layer,
 	ChatView.layer,
@@ -68,8 +66,8 @@ export type Services = Layer.Success<typeof services> | ConversationEvents.Servi
  * emit to its handlers, in order: the conversation feed tells watching clients what
  * happened, automation settlement ends the runs that work finished,
  * collaborations whose collaborator stopped without answering fail, the floor
- * passes after each completed reply, the reply asks for its conversation's
- * summary and, past the compaction line, its compaction once it commits, and
+ * passes after each completed reply, a reply past the compaction line asks for
+ * its conversation's compaction once it commits, and
  * people are notified of finished messages and approvals waiting on them.
  */
 export const layer = Layer.effectContext(
@@ -88,7 +86,6 @@ export const layer = Layer.effectContext(
 			Context.get(built, AutomationSettlement.Service).handler,
 			Context.get(built, Collaborations.Service).handler,
 			Context.get(built, FloorControl.Service).handler,
-			Context.get(built, Summaries.Service).handler,
 			Context.get(built, Compactions.Service).handler,
 			notifications.handler,
 		]);

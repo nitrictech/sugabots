@@ -4,7 +4,6 @@ import { seedConversation } from "@sugabots/core/conversations/seed.test-support
 import {
 	bot,
 	message,
-	project,
 	projectMember,
 	turn,
 	user,
@@ -12,6 +11,7 @@ import {
 	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
+import { seedProject } from "@sugabots/core/workspaces/projects/seed.test-support";
 import { onPostgresAs } from "@sugabots/core/workspaces/testing";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
@@ -19,10 +19,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { closedStreamAccess } from "./access.test-support.ts";
 import { StreamAccess } from "./access.ts";
 
-/**
- * Who may listen to what. The workspace half is a membership query, so it needs
- * a migrated database and skips without one, as `db/schema.test.ts` does.
- */
+/** Who may listen to what. The workspace half is a membership query, so it runs against Postgres. */
 
 /** The access with its answers run as `userId`, with nothing else to reach. */
 function asSomebody(access: StreamAccess.Interface, userId: string) {
@@ -106,16 +103,13 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				)
 				.returning(),
 		);
-		const [room] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId: space.id,
-					name: "Room",
-					slug: `room-${suffix}`,
-					createdById: member.id,
-				})
-				.returning(),
+		const room = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId: space.id,
+				name: "Room",
+				slug: `room-${suffix}`,
+				createdById: member.id,
+			}),
 		);
 		if (!publicBot || !privateBot || !room) {
 			throw new Error("fixture did not insert");
@@ -149,6 +143,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				kind: "project_thread",
 				projectId: room.id,
 				title: "A thread",
+				startedById: member.id,
 			}),
 		);
 		const [elsewhere] = await onDatabase((db) =>

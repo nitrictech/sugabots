@@ -4,7 +4,7 @@ import type { ConversationPlace } from "@/lib/chats.ts";
 /**
  * The lead bot of the project a conversation is in, as the conversation lists
  * it: the bot itself in one of a bot's threads, which are its default
- * project's. Undefined in a project with no lead yet.
+ * project's. Undefined until the conversation lists it.
  */
 export function leadOf(
 	place: ConversationPlace,

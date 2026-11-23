@@ -5,7 +5,6 @@ import {
 	type NetworkRuleAction,
 	Sandbox as OpenSandbox,
 	SandboxApiException,
-	type SandboxInfo,
 	SandboxManager,
 } from "@alibaba-group/opensandbox";
 import { createLifecycleClient } from "@alibaba-group/opensandbox/internal";
@@ -28,17 +27,9 @@ const EXEC_GRACE = Duration.seconds(15);
 /**
  * The user bots' commands run as, so nothing they run is root. The file API
  * names owners, so it needs a name as well as an id; `-o` lets it share its id
- * with a user the image already has, such as `node` in the Node images. Its
- * name and home are kept as the computers made before bots had their name
- * have them.
+ * with a user the image already has, such as `node` in the Node images.
  */
-const BOT_USER = { name: "agent", id: 1000, home: "/home/agent" } as const;
-
-/**
- * Where a sandbox's metadata names the volume its work is on. Computers made
- * before work had volumes have none, and their work goes with them.
- */
-const WORK_VOLUME_KEY = "sugabots.work-volume";
+const BOT_USER = { name: "bot", id: 1000, home: "/home/bot" } as const;
 
 /** States in which the server has the sandbox but can't start it again. */
 const STOPPED_STATES: ReadonlySet<string> = new Set(["Terminated", "Failed"]);
@@ -116,7 +107,7 @@ export const fromOpenSandbox = (
 						},
 						// Kept until Sugabots destroys it: a computer outlives any one turn.
 						timeoutSeconds: null,
-						metadata: { ...spec.labels, [WORK_VOLUME_KEY]: workVolume(spec.workName) },
+						metadata: spec.labels,
 						networkPolicy: policyOf(spec.reach),
 						// What lets the egress sidecar add credentials: it intercepts the
 						// sandbox's HTTPS, with a CA the sandbox trusts.
@@ -156,11 +147,7 @@ export const fromOpenSandbox = (
 				try: async () => {
 					const info = await manager().getSandboxInfo(id);
 					if (STOPPED_STATES.has(info.status.state)) {
-						throw new Computers.Stopped({
-							provider: "opensandbox",
-							computerId: id,
-							workKept: keepsWorkApart(info),
-						});
+						throw new Computers.Stopped({ provider: "opensandbox", computerId: id });
 					}
 					const resumed = info.status.state === "Paused";
 					const sandbox = resumed
@@ -175,20 +162,16 @@ export const fromOpenSandbox = (
 				try: async (): Promise<Computers.Info> => {
 					const info = await manager().getSandboxInfo(id);
 					const state = info.status.state;
-					const workKeptApart = keepsWorkApart(info);
-					if (STOPPED_STATES.has(state) && !workKeptApart) {
-						throw new Computers.Missing({ provider: "opensandbox", computerId: id });
-					}
 					return {
 						state:
 							state === "Running" || state === "Pending" || state === "Resuming"
 								? "running"
 								: "paused",
-						image: String((info.image as { uri?: string } | undefined)?.uri ?? ""),
-						workKeptApart,
+						// On its own volume, which outlives the sandbox.
+						workKeptApart: true,
 					};
 				},
-				catch: (cause) => (cause instanceof Computers.Missing ? cause : missingOr(id)(cause)),
+				catch: missingOr(id),
 			}),
 		pause: (id) =>
 			Effect.tryPromise({
@@ -301,10 +284,6 @@ export const fromOpenSandbox = (
 /** The Docker volume or Kubernetes claim a sandbox's work is on. */
 export function workVolume(workName: string) {
 	return `sugabots-work-${workName}`;
-}
-
-function keepsWorkApart(info: SandboxInfo) {
-	return info.metadata?.[WORK_VOLUME_KEY] !== undefined;
 }
 
 /**

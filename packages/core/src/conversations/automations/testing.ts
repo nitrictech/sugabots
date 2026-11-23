@@ -2,17 +2,11 @@ import { handleFromName } from "@sugabots/contracts";
 import { and, eq, ne } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { query } from "../../database/database.ts";
-import {
-	automationRun,
-	bot,
-	project,
-	user,
-	workspace,
-	workspaceMember,
-} from "../../database/schema.ts";
+import { automationRun, bot, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { lane } from "../../workflows/sql.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
+import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
 import { lanesForTests } from "../testing.ts";
 import { releaseTurn, runningTurns } from "../turns/testing.ts";
 import {
@@ -83,19 +77,6 @@ export async function anAutomationOwner() {
 	await onDatabase((db) =>
 		db.insert(workspaceMember).values({ workspaceId, userId, role: "admin" }),
 	);
-	const [room] = await onDatabase((db) =>
-		db
-			.insert(project)
-			.values({
-				workspaceId,
-				name: "Automation project",
-				slug: `automation-${suffix}`,
-				createdById: userId,
-			})
-			.returning(),
-	);
-	if (!room) throw new Error("Could not create automation test project");
-	const projectId = room.id;
 	const [owner] = await onDatabase((db) =>
 		db
 			.insert(bot)
@@ -111,6 +92,16 @@ export async function anAutomationOwner() {
 			.returning(),
 	);
 	if (!owner) throw new Error("Could not create automation test bot");
+	const room = await onDatabase((db) =>
+		seedProject(db, {
+			workspaceId,
+			name: "Automation project",
+			slug: `automation-${suffix}`,
+			createdById: userId,
+			leadBotId: owner.id,
+		}),
+	);
+	const projectId = room.id;
 	return {
 		userId,
 		workspaceId,

@@ -18,7 +18,7 @@ import { FileListView, FileStageView } from "./Files.tsx";
 import { PagesFromContentOrigin } from "./HtmlFrame.tsx";
 
 const now = new Date("2026-10-01T09:30:00.000Z");
-const summariser = { botId: growthDesk.id, name: growthDesk.name };
+const writer = { botId: growthDesk.id, name: growthDesk.name };
 
 const plan: WrittenFileSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
@@ -26,7 +26,7 @@ const plan: WrittenFileSummary = {
 	kind: "document",
 	title: "Q4 outreach plan",
 	version: 3,
-	createdBy: summariser,
+	createdBy: writer,
 	createdAt: "2026-09-29T07:00:00.000Z",
 	updatedAt: "2026-10-01T08:10:00.000Z",
 };
@@ -55,9 +55,9 @@ const brief: MessageFileSummary = {
 };
 
 const versions: FileVersionSummary[] = [
-	{ number: 3, author: summariser, createdAt: "2026-10-01T08:10:00.000Z" },
-	{ number: 2, author: summariser, createdAt: "2026-09-30T15:00:00.000Z" },
-	{ number: 1, author: summariser, createdAt: "2026-09-29T07:00:00.000Z" },
+	{ number: 3, author: writer, createdAt: "2026-10-01T08:10:00.000Z" },
+	{ number: 2, author: writer, createdAt: "2026-09-30T15:00:00.000Z" },
+	{ number: 1, author: writer, createdAt: "2026-09-29T07:00:00.000Z" },
 ];
 
 const planContent = `# Q4 outreach plan
@@ -322,7 +322,7 @@ export const InAConversation = meta.story({
 	render: () => (
 		<QueryPreview>
 			<div className="p-6 pl-12.5">
-				<FileCards parts={[written("file_edit", plan)]} botName={summariser.name} onOpen={fn()} />
+				<FileCards parts={[written("file_edit", plan)]} botName={writer.name} onOpen={fn()} />
 			</div>
 		</QueryPreview>
 	),
@@ -377,7 +377,7 @@ export const InlineDocument = meta.story({
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<FileCardView
 				file={asWritten(plan)}
-				botName={summariser.name}
+				botName={writer.name}
 				content={planContent}
 				onOpen={onOpen}
 			/>
@@ -401,7 +401,7 @@ export const InlineDeleted = meta.story({
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<FileCardView
 				file={asWritten(dashboard)}
-				botName={summariser.name}
+				botName={writer.name}
 				content="deleted"
 				onOpen={fn()}
 			/>
@@ -417,12 +417,7 @@ export const InlineDeleted = meta.story({
 export const InlineFailed = meta.story({
 	render: () => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
-			<FileCardView
-				file={asWritten(plan)}
-				botName={summariser.name}
-				content="failed"
-				onOpen={fn()}
-			/>
+			<FileCardView file={asWritten(plan)} botName={writer.name} content="failed" onOpen={fn()} />
 		</div>
 	),
 	play: async ({ canvas }) => {
@@ -465,7 +460,7 @@ export const InlinePage = meta.story({
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<FileCardView
 				file={asWritten(dashboard)}
-				botName={summariser.name}
+				botName={writer.name}
 				content={chartPage}
 				onOpen={fn()}
 			/>
@@ -488,7 +483,7 @@ export const InlinePageLoading = meta.story({
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<FileCardView
 				file={asWritten(dashboard)}
-				botName={summariser.name}
+				botName={writer.name}
 				content={undefined}
 				onOpen={fn()}
 			/>
@@ -511,7 +506,7 @@ export const InlinePageTall = meta.story({
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<FileCardView
 				file={asWritten(dashboard, "Every deal")}
-				botName={summariser.name}
+				botName={writer.name}
 				content={tallPage}
 				onOpen={fn()}
 			/>
@@ -553,7 +548,7 @@ export const PageFromContentOrigin = meta.story({
 			<div className="w-full max-w-155 p-6 pl-12.5">
 				<FileCardView
 					file={asWritten(dashboard)}
-					botName={summariser.name}
+					botName={writer.name}
 					content={chartPage}
 					onOpen={fn()}
 				/>

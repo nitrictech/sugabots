@@ -8,12 +8,6 @@ import { ItemPanel } from "./ItemPanel.tsx";
 
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
 const COLLABORATION = "0199a3a0-0000-7000-8000-000000000402";
-const user = {
-	id: "0199a3a0-0000-7000-8000-000000000009",
-	name: "Rowan Ellis",
-	email: "rowan@example.com",
-};
-
 const asker = {
 	kind: "bot" as const,
 	id: growthDesk.id,
@@ -62,7 +56,6 @@ const collaboration: ConversationDetails = {
 		title: "Checkout timeouts",
 		status: "running",
 		parentConversationId: null,
-		startedById: user.id,
 		doneAt: null,
 		createdAt: "2026-09-18T06:04:00.000Z",
 		updatedAt: "2026-09-18T06:05:00.000Z",

@@ -10,7 +10,7 @@ import {
 	streamEvent,
 } from "@sugabots/contracts";
 import { Forbidden, InternalServerError, NotFound } from "@sugabots/contracts/http";
-import { testPerson } from "@sugabots/contracts/testing";
+import { listedThread, testPerson } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -20,11 +20,9 @@ import { workspacesQuery } from "@/lib/workspace.ts";
 import {
 	apiAnswers,
 	bots,
-	builtInBots,
 	controlledEventStream,
 	juno,
 	linear,
-	listedThread,
 	mount,
 	pendingAnswer,
 	projects,
@@ -218,14 +216,8 @@ const automationCollaborationEntry: ChatHistoryEntry = {
 	title: "Verify the overnight alerts",
 };
 
-/** What the thread's Details show: a summary, and who has written lately. */
-const chatActivity: ConversationActivity = {
-	summary: {
-		content: "Chat is complete.",
-		updatedAt: "2026-09-18T09:22:00.000Z",
-	},
-	context: null,
-};
+/** What the thread's Details show: nothing measured yet. */
+const chatActivity: ConversationActivity = { context: null };
 
 function details(
 	id: string,
@@ -245,7 +237,6 @@ function details(
 			title,
 			status: "done",
 			parentConversationId: kind === "collaboration" ? chat.id : null,
-			startedById: sam.id,
 			doneAt: null,
 			createdAt: "2026-09-18T08:00:00.000Z",
 			updatedAt: "2026-09-18T09:22:00.000Z",
@@ -521,7 +512,7 @@ describe("a bot's thread", () => {
 		);
 		mount(conversationPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
-		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
+		expect(screen.queryByText(`${linear.name} will reply here.`)).toBeNull();
 
 		writeDraft(composer, `@${robin.handle} can you check?`);
 
@@ -555,7 +546,7 @@ describe("a bot's thread", () => {
 	it("names the bot as the one who replies to a draft mentioning a bot outside its project", async () => {
 		mount(conversationPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
-		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
+		expect(screen.queryByText(`${linear.name} will reply here.`)).toBeNull();
 
 		writeDraft(composer, `@${triager.handle} can you check?`);
 
@@ -597,7 +588,7 @@ describe("a bot's thread", () => {
 		);
 		mount(conversationPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name} about this automation`);
-		expect(screen.getByText(`${linear.name} will reply here.`)).toBeTruthy();
+		expect(screen.queryByText(`${linear.name} will reply here.`)).toBeNull();
 
 		writeDraft(composer, `@${robin.handle} can you check?`);
 
@@ -1364,13 +1355,6 @@ describe("a message opened from Inbox", () => {
 		).toBeDefined();
 	});
 
-	it("keeps the chat, with no run beside it, when its address names a run", async () => {
-		mount(`${opened(mainMessage.id)}&item=${automationId}`);
-
-		expect(await screen.findByRole("log", { name: "Chat messages" })).toBeDefined();
-		expect(screen.queryByRole("complementary", { name: automationEntry.title })).toBeNull();
-	});
-
 	it("shows an automation run chosen in Inbox as a page of its own, with the way back and to its chat", async () => {
 		mount(`/suga/inbox/${chat.id}?itemPage=${automationId}`);
 
@@ -1945,81 +1929,5 @@ describe("a collaboration open beside the thread", () => {
 		fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
 
 		await waitFor(() => expect(updates.close).toHaveBeenCalledOnce());
-	});
-});
-
-describe("the thread's summary", () => {
-	const chatPage = conversationPage;
-
-	function answerChatActivity(activity: () => ConversationActivity) {
-		client.api.conversations.activity.mockImplementation(() => Effect.sync(activity));
-	}
-
-	function summariserWithoutModel() {
-		client.api.systemBots.list.mockReturnValue(
-			Effect.succeed(
-				builtInBots.map((bot) => (bot.key === "summarise" ? { ...bot, model: null } : bot)),
-			),
-		);
-	}
-
-	async function openDetails() {
-		fireEvent.click(await screen.findByRole("button", { name: "Details" }));
-		return screen.findByRole("complementary", { name: "Details" });
-	}
-
-	it("says the system bots have no model, and where to choose one", async () => {
-		summariserWithoutModel();
-		answerChatActivity(() => ({ ...chatActivity, summary: null }));
-		mount(chatPage);
-		const sidebar = await openDetails();
-
-		expect(await within(sidebar).findByText(/The system bots write these/)).toBeDefined();
-		expect(
-			within(sidebar).getByRole("link", { name: "Choose their model" }).getAttribute("href"),
-		).toBe("/suga/settings/providers/system");
-	});
-
-	it("tells a member why there is no summary without a link they cannot follow", async () => {
-		apiAnswers({ role: "member" });
-		chatAnswers();
-		summariserWithoutModel();
-		answerChatActivity(() => ({ ...chatActivity, summary: null }));
-		mount(chatPage);
-		const sidebar = await openDetails();
-
-		expect(await within(sidebar).findByText(/The system bots write these/)).toBeDefined();
-		expect(within(sidebar).queryByRole("link", { name: "Choose their model" })).toBeNull();
-	});
-
-	it("says nothing about choosing the system bots' model before the system bots have loaded", async () => {
-		client.api.systemBots.list.mockReturnValue(Effect.never);
-		answerChatActivity(() => ({ ...chatActivity, summary: null }));
-		mount(chatPage);
-		const sidebar = await openDetails();
-
-		expect(
-			await within(sidebar).findByText("A summary will appear after the first reply."),
-		).toBeDefined();
-		expect(within(sidebar).queryByRole("link", { name: "Choose their model" })).toBeNull();
-	});
-
-	it("shows a new summary once the thread says it changed", async () => {
-		const updates = controlledEventStream();
-		client.events.conversation.mockImplementation((conversationId: string) =>
-			conversationId === chat.id ? updates.stream : controlledEventStream().stream,
-		);
-		let summarised = false;
-		answerChatActivity(() => (summarised ? chatActivity : { ...chatActivity, summary: null }));
-		mount(chatPage);
-		const sidebar = await openDetails();
-		expect(
-			await within(sidebar).findByText("A summary will appear after the first reply."),
-		).toBeDefined();
-
-		summarised = true;
-		updates.emit(streamEvent("conversation.changed", { conversationId: chat.id }));
-
-		expect(await within(sidebar).findByText("Chat is complete.")).toBeDefined();
 	});
 });

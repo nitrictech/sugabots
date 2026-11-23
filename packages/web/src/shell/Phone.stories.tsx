@@ -241,7 +241,7 @@ export const BotThread = meta.story({
 				}),
 			),
 			http.get(`${API}/conversations/${longThread.id}/activity`, () =>
-				HttpResponse.json(storyChatActivity(growthDesk)),
+				HttpResponse.json(storyChatActivity),
 			),
 		);
 	},

@@ -10,7 +10,6 @@ import { ProjectComputers } from "@sugabots/core/computers/project-computers";
 import { Automations } from "@sugabots/core/conversations/automations/automations";
 import { AutomationRuns } from "@sugabots/core/conversations/automations/runs";
 import { Conversations } from "@sugabots/core/conversations/conversations";
-import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
 import { ComputerTools } from "@sugabots/core/conversations/tools/computer";
@@ -109,7 +108,6 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	ConnectionSetup.layer,
 	Files.layer,
 	FilePages.layer,
-	ModelTrials.layer,
 	Usage.layer,
 ).pipe(Layer.provideMerge(Accounts.layer));
 

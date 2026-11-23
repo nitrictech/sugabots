@@ -17,9 +17,6 @@ import { bot } from "../../database/schema.ts";
  * for, and on its own only for a bot with none.
  */
 
-/** The system bot that keeps conversation summaries and titles up to date. */
-export const SUMMARISE_SYSTEM_BOT: SystemBotKey = "summarise";
-
 /** The system bot that compacts what a bot reads when its conversation gets long. */
 export const COMPACT_SYSTEM_BOT: SystemBotKey = "compact";
 
@@ -35,15 +32,6 @@ export interface SystemBotDefinition {
 }
 
 export const SYSTEM_BOTS: readonly SystemBotDefinition[] = [
-	{
-		key: SUMMARISE_SYSTEM_BOT,
-		name: "Summariser",
-		description: "Keeps concise summaries of ongoing conversations.",
-		color: "orange",
-		face: "arc",
-		shape: "circle",
-		prompt: "Summarize conversations accurately and concisely. Do not invent details.",
-	},
 	{
 		key: COMPACT_SYSTEM_BOT,
 		name: "Compaction",

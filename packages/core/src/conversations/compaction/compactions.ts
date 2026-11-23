@@ -33,7 +33,7 @@ import { needsCompaction, planCompaction } from "./window.ts";
  * compaction. The Compaction bot summarises the stretch of history just
  * before the newest messages, and from then on a bot in the conversation reads that
  * summary and the newest messages instead of the whole conversation. People still
- * see every message. Like the Summariser, its turns live in a system conversation hanging off the
+ * see every message. Its turns live in a system conversation hanging off the
  * one it works on. It runs on the model of the bot whose reply asked for it,
  * so a conversation is summarised as well as it is read, and falls back to the
  * system bots' model for a bot with none.
@@ -118,13 +118,13 @@ export const make = Effect.gen(function* () {
 							readerModel === null
 								? Turns.MAX_CONTEXT_WINDOW_TOKENS
 								: yield* query((db) => Turns.loadContextWindow(db, scope.workspaceId, readerModel));
-						const summariserTokens =
+						const compactorTokens =
 							model === readerModel
 								? readerTokens
 								: yield* query((db) => Turns.loadContextWindow(db, scope.workspaceId, model));
 						const plan = planCompaction(history, previous?.keptFrom, {
 							readerTokens,
-							summariserTokens,
+							compactorTokens,
 						});
 						if (!plan) return skipped("There is nothing new to summarise");
 

@@ -10,6 +10,7 @@ import {
 	useWorkspaces,
 } from "@/lib/workspace.ts";
 import { LoadFailure } from "@/shell/LoadFailure.tsx";
+import { Splash } from "@/shell/Splash.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { requireUser, rootRoute } from "./root.tsx";
 
@@ -46,7 +47,7 @@ function OnboardingRoute() {
 	if (failure) {
 		return <LoadFailure title="Could not start setup" error={failure.error} retry={refetch} />;
 	}
-	if (isPending) return <div className="h-full bg-list" />;
+	if (isPending) return <Splash />;
 	return (
 		<WorkspaceSetup
 			session={session}

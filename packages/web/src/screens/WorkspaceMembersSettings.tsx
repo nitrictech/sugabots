@@ -11,7 +11,7 @@ import { Link, linkOptions, useRouter } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
-import { formatTimeAfterVerb } from "@/lib/list-time.ts";
+import { formatDate, formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import { usePlaceProjectMember, useProjectMembers, useProjects } from "@/lib/projects.ts";
@@ -49,6 +49,7 @@ import {
 	SettingsGroup,
 	SettingsPage,
 	SettingsRow,
+	SettingsRowAlert,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
@@ -137,7 +138,7 @@ function Roster({
 	currentUserId?: string;
 	members: ReturnType<typeof useWorkspaceMembers>;
 }) {
-	const backToMembers = useBackToHere("Members");
+	const backToMembers = useBackToHere("People");
 	const invitations = useWorkspaceInvitations(workspaceId);
 	const [inviting, setInviting] = useState(false);
 
@@ -152,11 +153,11 @@ function Roster({
 			}
 		>
 			{members.isPending ? (
-				<p className="m-0 text-xs text-muted-foreground">Loading members…</p>
+				<p className="m-0 text-xs text-muted-foreground">Loading people…</p>
 			) : members.error ? (
-				<Alert>Members could not be loaded. Reload this page to try again.</Alert>
+				<Alert>People could not be loaded. Reload this page to try again.</Alert>
 			) : (
-				<SettingsGroup label="Members">
+				<SettingsGroup label="People">
 					{members.data?.map((member) => (
 						<SettingsRow
 							key={member.id}
@@ -254,11 +255,7 @@ function Invitations({
 					}
 				/>
 			))}
-			{failure != null && (
-				<div className="border-border border-t px-4 py-3">
-					<Alert>{failureMessage(failure)}</Alert>
-				</div>
-			)}
+			{failure != null && <SettingsRowAlert>{failureMessage(failure)}</SettingsRowAlert>}
 		</SettingsGroup>
 	);
 }
@@ -306,7 +303,7 @@ function MemberPage({
 	const [confirming, setConfirming] = useState(false);
 	const [transferring, setTransferring] = useState(false);
 	const back = useBackTarget({
-		label: "Members",
+		label: "People",
 		render: <Link from="/$workspace" to="./settings/$section" params={{ section: "members" }} />,
 	});
 	const role = member.role;
@@ -355,7 +352,7 @@ function MemberPage({
 				note={
 					isYou && isOwner
 						? `${workspaceRoleDescription(role)} To leave, transfer ownership to somebody else first.`
-						: role && workspaceRoleDescription(role)
+						: workspaceRoleDescription(role)
 				}
 			>
 				<SettingsRow
@@ -374,9 +371,7 @@ function MemberPage({
 					}
 				/>
 				{updateRole.error && (
-					<div className="border-border border-t px-4 py-3">
-						<Alert>{failureMessage(updateRole.error)}</Alert>
-					</div>
+					<SettingsRowAlert>{failureMessage(updateRole.error)}</SettingsRowAlert>
 				)}
 			</SettingsGroup>
 			{listedProjects.length > 0 && (
@@ -402,7 +397,7 @@ function MemberPage({
 			<SettingsGroup label="Details">
 				<SettingsRow
 					label="Joined"
-					trailing={<SettingsValue>{joinedDate(member.joinedAt)}</SettingsValue>}
+					trailing={<SettingsValue>{formatDate(new Date(member.joinedAt))}</SettingsValue>}
 				/>
 			</SettingsGroup>
 			{canTransferOwnership && !isYou && (
@@ -460,14 +455,6 @@ function MemberPage({
 			/>
 		</SettingsPage>
 	);
-}
-
-function joinedDate(joinedAt: string): string {
-	return new Date(joinedAt).toLocaleDateString(undefined, {
-		day: "numeric",
-		month: "short",
-		year: "numeric",
-	});
 }
 
 /** One project, with whether this person is on its roster and a switch to change that. */

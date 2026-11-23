@@ -2,8 +2,8 @@ import {
 	administersWorkspace,
 	type Bot,
 	type BotPermissions,
+	botParticipantOf,
 	type ConversationDetails,
-	type ListedThread,
 	type ModelProvider,
 	type Project,
 	type ProjectPermissions,
@@ -18,6 +18,7 @@ import { NotFound } from "@sugabots/contracts/http";
 import {
 	connectionWithTools,
 	listedConnection,
+	listedThread,
 	type TestConnection,
 	testPerson,
 } from "@sugabots/contracts/testing";
@@ -38,7 +39,7 @@ import { TooltipProvider } from "@/ui/tooltip.tsx";
  * The seam every web test mounts against: a fake `@/api.ts`, the real route
  * tree over a memory history, and the fixtures the dev seed makes.
  *
- * It lives outside the test files because two of them need the same fixtures
+ * It lives outside the test files because many of them need the same fixtures
  * and the same mock object. A test file opts in with one line:
  *
  * ```ts
@@ -200,7 +201,6 @@ export const modelProviders: ModelProvider[] = [
 		hasApiKey: true,
 		signedIn: false,
 		customHeaders: [],
-		modelCount: 1,
 		lastTestError: null,
 		connectedBy: null,
 		createdAt: "2026-09-09T00:00:00.000Z",
@@ -229,7 +229,6 @@ export const modelProviders: ModelProvider[] = [
 		hasApiKey: true,
 		signedIn: false,
 		customHeaders: [],
-		modelCount: 1,
 		lastTestError: null,
 		connectedBy: null,
 		createdAt: "2026-09-09T00:00:00.000Z",
@@ -350,22 +349,12 @@ export const personalAssistant: Bot = {
 };
 
 /**
- * The two system bots the product ships. They belong to the workspace, so
- * they are not in the bot roster at all — they have their own
- * endpoint, and both arrive here already set up. A test that wants the
- * not-set-up state overrides one with `model: null`, so that state does not
- * become the ambient condition of every summary assertion in the suite.
+ * The system bots the product ships. They belong to the workspace, so they
+ * are not in the bot roster at all — they have their own endpoint, and arrive
+ * here already set up. A test that wants the not-set-up state overrides one
+ * with `model: null`.
  */
-export const builtInBots: SystemBot[] = [
-	{
-		key: "summarise",
-		name: "Summariser",
-		description: "Keeps concise summaries of ongoing conversations.",
-		color: "orange",
-		face: "arc",
-		shape: "circle",
-		model: MODELS[1] as string,
-	},
+export const systemBots: SystemBot[] = [
 	{
 		key: "compact",
 		name: "Compaction",
@@ -377,8 +366,7 @@ export const builtInBots: SystemBot[] = [
 	},
 ];
 
-export const summariser = builtInBots[0] as SystemBot;
-export const compaction = builtInBots[1] as SystemBot;
+export const compaction = systemBots[0] as SystemBot;
 
 /** The first thread with `bot`, one per bot, by the bot's id. */
 export function threadWith(bot: Bot): ProjectThread {
@@ -396,29 +384,12 @@ export function threadWith(bot: Bot): ProjectThread {
 	};
 }
 
-/** Another thread with `bot`, nothing said in it yet. */
-export function conversationWith(bot: Bot): ProjectThread {
-	return {
-		...threadWith(bot),
-		id: `${bot.id.slice(0, -4)}d${bot.id.slice(-3)}`,
-		title: `Thread with ${bot.name}`,
-	};
-}
-
 /** `thread`, a thread of `bot`'s, as the conversations API returns it, with nothing said yet. */
 export function threadDetails(
 	bot: Bot,
 	thread: ProjectThread = threadWith(bot),
 ): ConversationDetails {
-	const participant = {
-		kind: "bot" as const,
-		id: bot.id,
-		name: bot.name,
-		handle: bot.handle,
-		color: bot.color,
-		face: bot.face,
-		shape: bot.shape,
-	};
+	const participant = botParticipantOf(bot);
 	const { kind: _kind, archivedAt: _archivedAt, ...conversation } = thread;
 	return {
 		conversation: {
@@ -427,7 +398,6 @@ export function threadDetails(
 			kind: "project_thread",
 			status: "done",
 			parentConversationId: null,
-			startedById: null,
 		},
 		automationRun: null,
 		participants: [participant],
@@ -438,24 +408,6 @@ export function threadDetails(
 		olderMessagesCursor: null,
 		queuedSince: null,
 		reads: [],
-	};
-}
-
-/** A project's thread as its list shows it, with nothing new in it unless `standing` says. */
-export function listedThread(
-	thread: ProjectThread,
-	standing: Partial<Omit<ListedThread, "conversation">> = {},
-): ListedThread {
-	return {
-		conversation: thread,
-		lastMessage: null,
-		participants: [],
-		messageCount: 1,
-		unreadMessages: 0,
-		needsApproval: false,
-		mentionsYou: false,
-		activity: null,
-		...standing,
 	};
 }
 
@@ -545,7 +497,10 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	const onBot = administersWorkspace(role)
 		? MANAGER_OF_BOT
 		: role === "viewer"
-			? { ...USER_OF_BOT, runAutomations: false, useDesktop: false }
+			? {
+					...USER_OF_BOT,
+					resources: { ...USER_OF_BOT.resources, runAutomations: false, useDesktop: false },
+				}
 			: USER_OF_BOT;
 	client.api.bots.list.mockReturnValue(
 		Effect.succeed([
@@ -554,11 +509,9 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		]),
 	);
 	client.api.bots.ensureAssistant.mockReturnValue(Effect.succeed(personalAssistant));
-	client.api.systemBots.list.mockReturnValue(Effect.succeed(builtInBots));
+	client.api.systemBots.list.mockReturnValue(Effect.succeed(systemBots));
 	serveConnections();
-	client.api.conversations.list.mockReturnValue(Effect.succeed([]));
 	client.api.automations.list.mockReturnValue(Effect.succeed([]));
-	client.api.automations.runs.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.automations.projectRuns.mockReturnValue(
 		Effect.succeed({ items: [], nextCursor: null }),
 	);
@@ -652,20 +605,14 @@ export function pendingAnswer() {
 	return { effect: Effect.flatten(Effect.promise(() => promise)), answer: resolve };
 }
 
-function quietEventStream(...events: StreamEvent[]) {
-	let finish = () => {};
-	const closed = new Promise<void>((resolve) => {
-		finish = resolve;
-	});
+/** A stream of events that sends none, and ends once closed. */
+function quietEventStream() {
+	const { promise: closed, resolve: close } = Promise.withResolvers<void>();
 	return {
-		lastEventId: undefined,
-		close: finish,
-		async *[Symbol.asyncIterator]() {
-			for (const event of events) {
-				yield event;
-			}
-			await closed;
-		},
+		close: () => close(),
+		[Symbol.asyncIterator]: (): AsyncIterator<StreamEvent> => ({
+			next: () => closed.then(() => ({ done: true, value: undefined })),
+		}),
 	};
 }
 
@@ -680,7 +627,6 @@ export function controlledEventStream() {
 
 	return {
 		stream: {
-			lastEventId: undefined,
 			close,
 			async *[Symbol.asyncIterator]() {
 				while (!closed) {

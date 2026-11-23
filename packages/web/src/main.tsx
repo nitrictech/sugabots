@@ -12,6 +12,7 @@ import { PagesFromContentOrigin } from "@/screens/HtmlFrame.tsx";
 import { LoadFailure } from "@/shell/LoadFailure.tsx";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
 import "@/app.css";
+import { Splash } from "@/shell/Splash.tsx";
 
 /**
  * The router is created once, outside the tree, and handed the session as
@@ -69,15 +70,6 @@ function queriesStartingFrom(me: Me | undefined): QueryClient {
 		queries.setQueryData(workspacesQuery.queryKey, me.workspaces);
 	}
 	return queries;
-}
-
-/**
- * The gap before the first paint of the app proper. Deliberately not a spinner:
- * it is one request against a local API, and a spinner that flashes for 40ms
- * reads as a fault.
- */
-function Splash() {
-	return <div className="h-full bg-list" />;
 }
 
 reloadWhenADeployReplacesChunks();

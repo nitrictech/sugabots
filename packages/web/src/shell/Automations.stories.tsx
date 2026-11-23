@@ -3,12 +3,11 @@ import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, leadResearcher } from "@/shell/story-fixtures.ts";
+import { growthDesk, leadResearcher, storyBots } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	chatPath,
 	StoryApp,
-	storyBots,
 	storyChatDetails,
 	storyThreadFor,
 	storyUser,
@@ -212,12 +211,6 @@ function automationHandlers() {
 					(one) => one.projectId === params.projectId,
 				),
 			),
-		),
-		http.get(`${API}/projects/:projectId/automations/:automationId/runs`, ({ params }) =>
-			HttpResponse.json({
-				items: params.automationId === outbound.id ? [outboundFailure] : [],
-				nextCursor: null,
-			}),
 		),
 		http.get(`${API}/conversations/${outbound.feed}`, () => HttpResponse.json(feed)),
 		http.get(`${API}/conversations/${outbound.feed}/messages`, () =>

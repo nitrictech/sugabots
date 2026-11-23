@@ -8,7 +8,7 @@ import {
 } from "./bots.ts";
 
 /**
- * The Summariser and Compaction as the settings screens see them.
+ * Compaction, the system bot, as the settings screens see it.
  *
  * A system bot belongs to the workspace rather than to anybody: there is one
  * of each, and every bot is served by it. That is why it has a shape of its
@@ -28,9 +28,8 @@ export const systemBotSchema = Schema.Struct({
 	shape: botShapeSchema,
 	/**
 	 * The model it runs on. `null` only while the workspace offers no model at
-	 * all, and until then the bot does not run: no summaries are written. The
-	 * first model the workspace offers becomes this one, and it cannot be
-	 * cleared after that.
+	 * all. The first model the workspace offers becomes this one, and it cannot
+	 * be cleared after that.
 	 */
 	model: Schema.NullOr(modelIdSchema),
 });

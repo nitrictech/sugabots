@@ -5,7 +5,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { noComputers } from "../../computers/testing.ts";
 import {
 	automation,
-	botSummary,
 	conversationRead,
 	message,
 	modelProvider,
@@ -118,15 +117,9 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 			bot: { name, model: "test-model", visibility },
 		});
 
-	it("shows the person the bots they reach, with what each has been doing, and nothing of others' private ones", async () => {
-		const writer = await aBot(adaId, "Writer");
-		const diary = await aBot(adaId, "Diary", "private");
-		await onDatabase((db) =>
-			db.insert(botSummary).values([
-				{ botId: writer.id, content: "Drafting the launch post.", coversThrough: new Date() },
-				{ botId: diary.id, content: "Ada's private notes.", coversThrough: new Date() },
-			]),
-		);
+	it("shows the person the bots they reach, and nothing of others' private ones", async () => {
+		await aBot(adaId, "Writer");
+		await aBot(adaId, "Diary", "private");
 
 		const seen = await guide.guide(sam());
 
@@ -136,7 +129,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 				handle: "@writer",
 				link: `http://sugabots.test/${workspaceSlug}/bots/writer`,
 				youCanTalkToIt: true,
-				lately: "Drafting the launch post.",
 			}),
 		]);
 		expect(seen.waitingOnYou).toEqual({
@@ -314,6 +306,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's guide", () =>
 				kind: "project_thread",
 				botId: writer.id,
 				title: "Launch",
+				startedById: adaId,
 			}),
 		);
 		const said = (content: string, createdAt: Date) => ({

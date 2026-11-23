@@ -6,23 +6,21 @@ import { type DragEvent, type ReactNode, useRef, useState } from "react";
 /**
  * An area that takes files dragged onto it from the computer, such as the
  * whole chat below its header, so a drop that misses the composer still lands.
- * While files are over it, a veil across it says they can be dropped. Without
- * `onDropFiles` it takes nothing, and drags pass over it as usual.
+ * While files are over it, a veil across it says they can be dropped.
  */
 export function FileDropTarget({
 	onDropFiles,
 	className,
 	children,
 }: {
-	onDropFiles?: (files: File[]) => void;
+	onDropFiles: (files: File[]) => void;
 	className?: string;
 	children: ReactNode;
 }) {
 	const [filesOver, setFilesOver] = useState(false);
 	// Entering a child leaves its parent, so the area is left only once every enter has its leave.
 	const enters = useRef(0);
-	const takesFiles = (event: DragEvent) =>
-		onDropFiles !== undefined && event.dataTransfer.types.includes("Files");
+	const takesFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
 
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: dropping is a pointer shortcut; the composer's + and paste attach the same files from a keyboard.
@@ -50,7 +48,7 @@ export function FileDropTarget({
 				enters.current = 0;
 				setFilesOver(false);
 				const files = [...event.dataTransfer.files];
-				if (files.length > 0) onDropFiles?.(files);
+				if (files.length > 0) onDropFiles(files);
 			}}
 		>
 			{children}

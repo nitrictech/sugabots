@@ -20,14 +20,14 @@ const COUNT_FONT = { share: 0.45, minimumPx: 9 };
  */
 export function ParticipantFaces({
 	participants,
-	shown = 4,
-	size = 20,
+	shown,
+	size,
 	surface = "var(--background)",
 }: {
 	participants: readonly Participant[];
 	/** How many faces show before the rest are counted. */
-	shown?: number;
-	size?: number;
+	shown: number;
+	size: number;
 	/** A CSS colour: the surface the stack sits on. */
 	surface?: string;
 }) {

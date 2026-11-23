@@ -13,6 +13,7 @@ import {
 	isWorkingWeek,
 	WEEKDAY_SHORT_NAMES,
 } from "@sugabots/contracts/routine-schedule-label";
+import { listNames } from "@/lib/name-list.ts";
 
 /*
  * A routine's timetable as people pick and read it: every so many days, weeks
@@ -42,7 +43,7 @@ export const REPEAT_OPTIONS = [
 	{ value: "monthly", label: "Monthly" },
 ] as const;
 
-export type Repeat = CalendarSchedule["repeat"];
+type Repeat = CalendarSchedule["repeat"];
 
 const WEEKDAYS: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri"];
 const MINUTES_PER_DAY = 24 * 60;
@@ -143,13 +144,16 @@ export function formatDayOfMonth(dayOfMonth: number | "last"): string {
  * the last day at 10:00".
  */
 export function scheduleSummary(schedule: CalendarSchedule): string {
-	const at = `at ${listOf(sortedTimes(schedule.times).map(formatTime))}`;
+	const at = `at ${listNames(sortedTimes(schedule.times).map(formatTime), { maxNamed: Infinity })}`;
 	switch (schedule.repeat) {
 		case "daily":
 			return `${every(schedule.every, "day")} ${at}`;
 		case "weekly":
 			if (schedule.every === 1 && isWorkingWeek(schedule.days)) return `every weekday ${at}`;
-			return `${every(schedule.every, "week")} on ${listOf(inWeekOrder(schedule.days).map((day) => WEEKDAY_SHORT_NAMES[day]))} ${at}`;
+			return `${every(schedule.every, "week")} on ${listNames(
+				inWeekOrder(schedule.days).map((day) => WEEKDAY_SHORT_NAMES[day]),
+				{ maxNamed: Infinity },
+			)} ${at}`;
 		case "monthly":
 			return `${every(schedule.every, "month")} on the ${formatDayOfMonth(schedule.dayOfMonth)} ${at}`;
 	}
@@ -188,11 +192,6 @@ function readingLabel(reading: RoutineReading): string {
 
 function every(count: number, unit: string): string {
 	return count === 1 ? `every ${unit}` : `every ${count} ${unit}s`;
-}
-
-function listOf(items: readonly string[]): string {
-	if (items.length <= 1) return items.join("");
-	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 function sortedTimes(times: readonly number[]): number[] {

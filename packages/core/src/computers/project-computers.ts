@@ -221,7 +221,7 @@ export const make = Effect.gen(function* () {
 			: Effect.succeed(connection);
 
 	/** Whether a computer made from `madeFrom` is behind what `connection` makes computers from now. */
-	const isBehind = (madeFrom: string | null, connection: Computers.Connection) =>
+	const isBehind = (madeFrom: string, connection: Computers.Connection) =>
 		connection.provider === "opensandbox"
 			? Effect.map(pinnedNow(connection.image), (pinned) =>
 					imageIsBehind(madeFrom, connection.image, pinned),
@@ -476,13 +476,10 @@ export const make = Effect.gen(function* () {
 				Effect.catchTag("ComputerMissing", () =>
 					Effect.map(restarted(project, row, provider.connection), replaced),
 				),
-				Effect.catchTag("ComputerStopped", (stopped) =>
+				Effect.catchTag("ComputerStopped", () =>
 					Effect.map(
 						restarted(project, row, provider.connection),
-						(computer): Opened => ({
-							computer,
-							arrival: stopped.workKept ? "rebooted" : "replaced",
-						}),
+						(computer): Opened => ({ computer, arrival: "rebooted" }),
 					),
 				),
 			);
@@ -1162,23 +1159,19 @@ export const make = Effect.gen(function* () {
 						.forConnection(configured.connection)
 						.info(row.providerComputerId)
 						.pipe(
-							Effect.flatMap((info) => {
-								// What Sugabots asked for, since a provider may name the image
-								// by a tag it has for it: OpenSandbox answers a computer made
-								// from `debian@sha256:…` with `debian:bookworm-slim`.
-								const image = row.image ?? info.image;
-								return Effect.map(
+							Effect.flatMap((info) =>
+								Effect.map(
 									current === undefined || current.id !== row.computerProviderId
 										? Effect.succeed(current !== undefined)
-										: isBehind(image, current.connection),
+										: isBehind(row.image, current.connection),
 									(upgradeAvailable): Status => ({
 										...present,
 										state: info.state,
-										image,
+										image: row.image,
 										upgradeAvailable,
 									}),
-								);
-							}),
+								),
+							),
 							Effect.catchTags({
 								ComputerMissing: () =>
 									Effect.succeed<Status>({ ...present, state: "lost", upgradeAvailable: false }),
@@ -1340,16 +1333,12 @@ function noLiveLease(now: Date) {
 
 /**
  * Whether a computer made from `madeFrom` is behind `configured`, whose tag
- * names `pinned` now if its registry said. A computer made before images were
- * recorded, from whatever its provider's host had for the tag, counts as
- * behind, so each is upgraded once onto a digest that is known. When the
- * registry didn't say, only a computer made from another image altogether is
- * known to be behind: one pinned from `configured`, or made before images
- * were recorded, may still be what its tag names.
+ * names `pinned` now if its registry said. When the registry didn't say, only
+ * a computer made from another image altogether is known to be behind: one
+ * pinned from `configured` may still be what its tag names.
  */
-function imageIsBehind(madeFrom: string | null, configured: string, pinned: string | undefined) {
+function imageIsBehind(madeFrom: string, configured: string, pinned: string | undefined) {
 	if (pinned !== undefined) return madeFrom !== pinned;
-	if (madeFrom === null) return false;
 	return madeFrom !== configured && !madeFrom.startsWith(`${withoutTag(configured)}@`);
 }
 
@@ -1395,11 +1384,7 @@ type Status =
 			 * didn't answer, or has lost its settings.
 			 */
 			readonly state: "running" | "paused" | "lost" | "unreachable";
-			/**
-			 * What it was made from, as Sugabots asked for it, or, for one made
-			 * before that was recorded, as its provider names it; only when the
-			 * provider answered.
-			 */
+			/** What it was made from, as Sugabots asked for it; only when the provider answered. */
 			readonly image?: string;
 			readonly providerId: string;
 			readonly createdAt: Date;

@@ -300,3 +300,34 @@ export function DialogFormBody({
 		</div>
 	);
 }
+
+/** How tall a `DialogFormScroll` may grow before it scrolls. */
+const SCROLL_HEIGHTS = {
+	picker: "max-h-picker",
+	"picker-tall": "max-h-picker-tall",
+	repos: "max-h-repos",
+} as const;
+
+/**
+ * A long list inside a `DialogFormBody`, such as a catalog to pick from, that
+ * scrolls on its own under what stays put above it, like its search. On a
+ * phone, where the dialog is a sheet that scrolls as a whole, it grows instead.
+ */
+export function DialogFormScroll({
+	height,
+	children,
+}: {
+	height: keyof typeof SCROLL_HEIGHTS;
+	children: ReactNode;
+}) {
+	return (
+		<div
+			className={cn(
+				"-mx-1 flex flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible",
+				SCROLL_HEIGHTS[height],
+			)}
+		>
+			{children}
+		</div>
+	);
+}

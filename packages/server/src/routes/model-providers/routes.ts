@@ -30,9 +30,6 @@ export const modelProviderRoutes = HttpApiBuilder.group(ServerApi, "modelProvide
 					.create({ workspace: params.workspace, provider: payload })
 					.pipe(asSessionUser, asHttpError(providerErrors)),
 			)
-			.handle("get", ({ params }) =>
-				providers.get(params).pipe(asSessionUser, asHttpError(providerErrors)),
-			)
 			.handle("update", ({ params, payload }) =>
 				providers
 					.update({ ...params, changes: payload })

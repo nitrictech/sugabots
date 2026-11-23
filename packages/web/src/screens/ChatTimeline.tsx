@@ -87,8 +87,6 @@ export function ChatTimeline({
 					{group.kind === "messages" ? (
 						<ConversationMessages
 							messages={group.messages}
-							host={host}
-							isRunning={false}
 							participants={mentionable}
 							peopleReachingProject={details.peopleReachingProject}
 							conversationKind={details.conversation.kind}
@@ -102,7 +100,6 @@ export function ChatTimeline({
 							approvalCapabilities={details.capabilities}
 							queued={queued}
 							sending={sending}
-							showsTyping={false}
 							answeringFace={answeringFace}
 							viewerWriting={viewerWriting}
 							viewerId={user.id}
@@ -111,17 +108,18 @@ export function ChatTimeline({
 							highlightedMessageId={pointedOut}
 							authorLinkOf={authorLinkOf}
 							onReply={onReply}
-							inAutomationFeed={automationFeed}
-							sideLinesOf={(message) =>
-								threadsStartedBy(message).map((started) => (
+							sideLinesOf={(message) => {
+								const { author } = message;
+								if (author.kind !== "bot") return null;
+								return threadsStartedBy(message).map((started) => (
 									<BotStartedThreadLine
 										key={started.id}
 										started={started}
-										startedBy={message.author}
+										startedBy={author}
 										projectBots={details.projectBots}
 									/>
-								))
-							}
+								));
+							}}
 							onJumpToMessage={onJumpToMessage}
 							reacting={reacting}
 						/>

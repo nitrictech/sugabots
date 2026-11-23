@@ -1,4 +1,9 @@
-import type { InboxFeed, InboxItem, Message } from "@sugabots/contracts";
+import {
+	botParticipantOf,
+	type InboxFeed,
+	type InboxItem,
+	type Message,
+} from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
@@ -223,15 +228,7 @@ const longChat: Message[] = Array.from({ length: 30 }, (_, index) => {
 		author:
 			index === 4
 				? testPerson({ id: "0199a3a0-0000-7000-8000-000000000011", name: "Jay Yu" })
-				: {
-						kind: "bot",
-						id: growthDesk.id,
-						name: growthDesk.name,
-						handle: growthDesk.handle,
-						color: growthDesk.color,
-						face: growthDesk.face,
-						shape: growthDesk.shape,
-					},
+				: botParticipantOf(growthDesk),
 		kind: "text",
 		status: "complete",
 		parts: [{ type: "text", text }],

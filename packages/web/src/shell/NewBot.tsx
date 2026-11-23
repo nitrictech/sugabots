@@ -44,6 +44,7 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { LetterTile } from "@/ui/letter-tile.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { SettingsRadioMark } from "@/ui/settings-page.tsx";
 
 /** How a bot looks: its colour, head and eyes. */
 export interface Look {
@@ -120,6 +121,19 @@ export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<v
 	const canCreate = Boolean(trimmedName && model) && !create.isPending;
 	// A phone has Create at the top, as its pages have their main action; one Create either way.
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
+	const failures = (
+		<>
+			{create.error && (
+				<Alert>
+					{failureMessage(create.error, {
+						Conflict: "A bot with that name already exists. Try another name.",
+						Forbidden: "You can't make a bot in this workspace.",
+					})}
+				</Alert>
+			)}
+			{models.error && <Alert>Models could not be loaded. Close this and try again.</Alert>}
+		</>
+	);
 
 	return (
 		<DialogContent
@@ -145,17 +159,7 @@ export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<v
 						alerts={
 							<>
 								<VisibilityChoice value={visibility} onChange={setVisibility} />
-								{create.error && (
-									<Alert>
-										{failureMessage(create.error, {
-											Conflict: "A bot with that name already exists. Try another name.",
-											Forbidden: "You can't make a bot in this workspace.",
-										})}
-									</Alert>
-								)}
-								{models.error && (
-									<Alert>Models could not be loaded. Close this and try again.</Alert>
-								)}
+								{failures}
 							</>
 						}
 						modelPicker={
@@ -199,15 +203,7 @@ export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<v
 								onCustomise={() => setCustomising(!customising)}
 							/>
 							<VisibilityChoice value={visibility} onChange={setVisibility} />
-							{create.error && (
-								<Alert>
-									{failureMessage(create.error, {
-										Conflict: "A bot with that name already exists. Try another name.",
-										Forbidden: "You can't make a bot in this workspace.",
-									})}
-								</Alert>
-							)}
-							{models.error && <Alert>Models could not be loaded. Close this and try again.</Alert>}
+							{failures}
 							<Button type="submit" className="w-full" disabled={!canCreate}>
 								Create
 							</Button>
@@ -614,15 +610,7 @@ function ModelRow({
 					</span>
 				)}
 			</span>
-			<span
-				aria-hidden
-				className={cn(
-					"grid size-4.5 shrink-0 place-items-center rounded-full border-2 transition-colors",
-					chosen ? "border-foreground" : "border-disabled-foreground",
-				)}
-			>
-				{chosen && <span className="size-2 rounded-full bg-foreground" />}
-			</span>
+			<SettingsRadioMark checked={chosen} />
 		</button>
 	);
 }

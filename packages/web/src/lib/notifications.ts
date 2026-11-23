@@ -16,7 +16,7 @@ import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { MUTE_LENGTHS, type MuteLength } from "@/lib/notification-choices.ts";
 
-/**
+/*
  * Browser notifications, shown by Sugabots' open tabs as Slack's web app
  * shows them: what the person chose to be notified about, turning them on in
  * this browser, and telling the server which conversation this tab shows, so
@@ -69,10 +69,7 @@ export function useChangeNotificationPreferences() {
 	return (change: Partial<NotificationPreferences>) => update.mutate(change);
 }
 
-/**
- * Where a level applies in place of the one above it: a project, in place of the
- * person's own, or one of its bots, in place of the project's.
- */
+/** Where a level applies in place of the person's own: a project, or a bot. */
 export type NotificationPlace = { kind: "project"; id: string } | { kind: "bot"; id: string };
 
 /** Sets the level for a place, or with null goes back to the one above it. */
@@ -80,9 +77,7 @@ export function useSetNotificationLevel() {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: ({ place, level }: { place: NotificationPlace; level: NotificationLevel | null }) =>
-			Effect.runPromise(
-				client.api.notifications.setLevel({ params: paramsOf(place), payload: { level } }),
-			),
+			Effect.runPromise(client.api.notifications.setLevel({ params: place, payload: { level } })),
 		onMutate: ({ place, level }) => {
 			queries.setQueryData<NotificationSettings>(settingsKey, (settings) =>
 				settings ? withLevel(settings, place, level) : settings,
@@ -99,7 +94,7 @@ export function useMuteNotifications() {
 		mutationFn: ({ place, until }: { place: NotificationPlace; until: Date | null }) =>
 			Effect.runPromise(
 				client.api.notifications.mute({
-					params: paramsOf(place),
+					params: place,
 					payload: { until: until?.toISOString() ?? null },
 				}),
 			),
@@ -110,10 +105,6 @@ export function useMuteNotifications() {
 		},
 		onSettled: () => queries.invalidateQueries({ queryKey: settingsKey }),
 	});
-}
-
-function paramsOf(place: NotificationPlace) {
-	return { kind: place.kind, id: place.id };
 }
 
 /** Where a place's own choices are kept in the settings, and its id there. */
@@ -411,9 +402,6 @@ export function levelChosenFor(
 }
 
 /** The level a place follows when none is chosen for it: the person's own. */
-export function levelAbove(
-	settings: NotificationSettings,
-	_place: NotificationPlace,
-): NotificationLevel {
+export function levelAbove(settings: NotificationSettings): NotificationLevel {
 	return settings.level;
 }

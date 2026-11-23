@@ -17,8 +17,8 @@ type ActedResult = { done: AssistantGuide.Place } | { refused: string };
 
 /**
  * The `workspace_guide` tool, a Personal Assistant's view of its person's
- * workspace: its projects, the bots they can reach with what each has been
- * doing lately, and what is waiting on them.
+ * workspace: its projects, the bots they can reach with what each is for,
+ * and what is waiting on them.
  */
 export function workspaceGuideTool({
 	guide,
@@ -31,7 +31,7 @@ export function workspaceGuideTool({
 }) {
 	return tool({
 		description:
-			"See the workspace as your person does: its projects, the bots they can reach with what each is for and what it has been doing lately, and what is waiting on them (approvals, unread mentions, failing automations), each with its link.",
+			"See the workspace as your person does: its projects, the bots they can reach with what each is for, and what is waiting on them (approvals, unread mentions, failing automations), each with its link.",
 		inputSchema: noInputSchema,
 		execute: (): Promise<AssistantGuide.Guide> => run(guide.guide(person)),
 	});

@@ -193,39 +193,39 @@ describe.skipIf(!process.env.DATABASE_URL)("bots, against Postgres", () => {
 	});
 
 	it("does not individually delete a system bot", async () => {
-		const system = await placeSummariser();
+		const system = await placeCompaction();
 		await expect(
 			repository.remove(workspaceId, system.id, adminId, Effect.void),
 		).rejects.toBeInstanceOf(BotRepository.SystemBotImmutable);
 	});
 
 	it("does not change a system bot as a bot people talk to", async () => {
-		const system = await placeSummariser();
+		const system = await placeCompaction();
 		await expect(
 			repository.update(workspaceId, system.id, { model: "another" }, adminId),
 		).rejects.toBeInstanceOf(BotRepository.SystemBotImmutable);
 	});
 
 	it("leaves system bots out of the list", async () => {
-		await placeSummariser();
+		await placeCompaction();
 		await create(adminId, { name: "Triage", model: "model" });
 		const visible = await visibleTo(adminId);
-		expect(visible.map((one) => one.name)).not.toContain("Summariser");
+		expect(visible.map((one) => one.name)).not.toContain("Compaction");
 		expect(visible.map((one) => one.name)).toContain("Triage");
 	});
 
-	/** The workspace's Summariser, with no model until somebody chooses one. */
-	async function placeSummariser() {
+	/** The workspace's Compaction bot, with no model until somebody chooses one. */
+	async function placeCompaction() {
 		const [system] = await onDatabase((db) =>
 			db
 				.insert(bot)
 				.values({
 					workspaceId,
-					name: "Summariser",
-					handle: "summariser",
-					systemBotKey: "summarise",
-					color: "orange",
-					face: "arc",
+					name: "Compaction",
+					handle: "compaction",
+					systemBotKey: "compact",
+					color: "purple",
+					face: "square",
 					model: null,
 				})
 				.returning(),

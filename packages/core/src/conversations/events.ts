@@ -188,11 +188,6 @@ export type ConversationEvent = Data.TaggedEnum<{
 		readonly workspaceId: string;
 		readonly conversationId: string;
 	};
-	/** The Summariser rewrote the conversation's summary, and on its first pass titled it. */
-	ConversationSummarised: {
-		readonly workspaceId: string;
-		readonly conversationId: string;
-	};
 	/** The compaction bot replaced the conversation's older history with a summary for its bots. */
 	ConversationCompacted: {
 		readonly workspaceId: string;

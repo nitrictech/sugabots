@@ -61,11 +61,6 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			success: modelProviderSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
 		}),
-		HttpApiEndpoint.get("get", `${root}/:providerId`, {
-			params: provider,
-			success: modelProviderSchema,
-			error: refused,
-		}),
 		HttpApiEndpoint.patch("update", `${root}/:providerId`, {
 			params: provider,
 			payload: modelProviderUpdateSchema,

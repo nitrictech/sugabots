@@ -27,7 +27,7 @@ export const botSettingsRoute = createRoute({
 	loader: () => BotSettingsPage.preload(),
 	component: () => {
 		const owner = useBotRouteOwner();
-		return owner && "bot" in owner ? <BotSettingsPage key={owner.bot.id} bot={owner.bot} /> : null;
+		return owner ? <BotSettingsPage key={owner.bot.id} bot={owner.bot} /> : null;
 	},
 });
 
@@ -37,7 +37,7 @@ export const botComputerRoute = createRoute({
 	loader: () => ComputerSettingsPage.preload(),
 	component: () => {
 		const owner = useBotRouteOwner();
-		if (!owner || !("bot" in owner)) return null;
+		if (!owner) return null;
 		// A Personal Assistant's computer is ours to set up; its person changes its look and connections.
 		if (owner.bot.assistant) return <Navigate {...botSettingsLink(owner.bot)} replace />;
 		return <ComputerSettingsPage key={owner.bot.id} owner={owner} />;
@@ -71,7 +71,7 @@ export const projectComputerRoute = createRoute({
 	loader: () => ComputerSettingsPage.preload(),
 	component: () => {
 		const owner = useProjectRouteOwner();
-		if (!owner || !("project" in owner)) return null;
+		if (!owner) return null;
 		return <ComputerSettingsPage key={owner.project.id} owner={owner} />;
 	},
 });
@@ -79,6 +79,6 @@ export const projectComputerRoute = createRoute({
 /** The project the address names, on `section` of its settings. */
 function ProjectSettings({ section }: { section: ProjectSettingsSection }) {
 	const owner = useProjectRouteOwner();
-	if (!owner || !("project" in owner)) return null;
+	if (!owner) return null;
 	return <ProjectSettingsPage key={owner.project.id} project={owner.project} section={section} />;
 }

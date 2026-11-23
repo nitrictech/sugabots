@@ -105,13 +105,13 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 					},
 					{
 						workspaceId,
-						// The workspace's Summariser, with no model until the workspace
+						// The workspace's Compaction bot, with no model until the workspace
 						// settles on one.
-						name: "Summariser",
-						handle: "summariser",
-						systemBotKey: "summarise",
-						color: "orange",
-						face: "arc",
+						name: "Compaction",
+						handle: "compaction",
+						systemBotKey: "compact",
+						color: "purple",
+						face: "square",
 						model: null,
 						createdById: adminId,
 					},
@@ -134,13 +134,13 @@ describe.skipIf(!process.env.DATABASE_URL)("onboarding, against Postgres", () =>
 		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(Onboarding.NoModelChosen);
 	});
 
-	it("makes the first bot's model the workspace's default and the Summariser's", async () => {
+	it("makes the first bot's model the workspace's default and Compaction's", async () => {
 		await complete(adminId, customBotId);
 
-		const [summariser] = await onDatabase((db) =>
+		const [compaction] = await onDatabase((db) =>
 			db.select({ model: bot.model }).from(bot).where(eq(bot.id, systemBotId)),
 		);
-		expect(summariser?.model).toBe("model");
+		expect(compaction?.model).toBe("model");
 		const [chosen] = await onDatabase((db) =>
 			db
 				.select({ modelId: workspaceDefaultModel.modelId })

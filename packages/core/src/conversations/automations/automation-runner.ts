@@ -25,8 +25,7 @@ import { type InvalidRoutineSchedule, latestMissedAndNextOccurrence } from "./sc
 export interface Interface {
 	/**
 	 * Accepts the run of the routine due soonest, if one is due, and sets when
-	 * it runs next. A routine of a project with no lead bot is skipped to its
-	 * next time.
+	 * it runs next.
 	 */
 	readonly processNextDue: () => Effect.Effect<
 		AcceptedRun | undefined,
@@ -75,17 +74,7 @@ export const make = Effect.gen(function* () {
 							triggerId: due.trigger.id,
 							triggerIdentity: scheduledAt,
 							trigger: { kind: "routine", scheduledAt, acceptedAt: now.toISOString() },
-						}).pipe(
-							// Refused before anything is written, so the routine moves on to its next time.
-							Effect.catchTag("AutomationProjectHasNoLead", () =>
-								Effect.as(
-									Effect.logWarning(
-										`Skipped a routine of automation ${due.automation.id}: its project has no lead bot`,
-									),
-									undefined,
-								),
-							),
-						);
+						});
 						yield* repository.scheduleNext([{ triggerId: due.trigger.id, at: occurrence.next }]);
 						return accepted;
 					}),

@@ -1,7 +1,7 @@
 import type { ComputerNetworkSettings } from "@sugabots/contracts";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
-import { SettingsPage } from "@/ui/settings-page.tsx";
+import { SettingsPage, SettingsRow } from "@/ui/settings-page.tsx";
 import { ComputerNetworkGroups } from "./ComputerNetworkSettings.tsx";
 
 const trustedHosts = [
@@ -37,6 +37,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	args: {
+		modeRow: <SettingsRow label="Allowlist" sub="Only the hosts below" />,
 		settings,
 		pending: false,
 		onAdd: fn(async () => undefined),
@@ -105,7 +106,10 @@ export const Refused = meta.story({
 
 /** Open: every host but the blocked ones, which can still be changed; the allowed hosts wait. */
 export const Open = meta.story({
-	args: { settings: { ...settings, mode: "open" } },
+	args: {
+		modeRow: <SettingsRow label="Open" sub="Any host but the blocked ones below" />,
+		settings: { ...settings, mode: "open" },
+	},
 	play: async ({ canvas, args, userEvent }) => {
 		await expect(canvas.getByText(/Any host but the blocked ones below/)).toBeVisible();
 		await expect(canvas.queryByLabelText("Allow host")).toBeNull();
@@ -119,7 +123,10 @@ export const Open = meta.story({
 
 /** Open at a provider that can't block hosts: the blocked hosts don't apply, so they aren't offered. */
 export const OpenWithoutBlocking = meta.story({
-	args: { settings: { ...settings, mode: "open", blocking: false } },
+	args: {
+		modeRow: <SettingsRow label="Open" sub="Any host" />,
+		settings: { ...settings, mode: "open", blocking: false },
+	},
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText("Any host")).toBeVisible();
 		await expect(canvas.getByText(/can't block hosts/)).toBeVisible();

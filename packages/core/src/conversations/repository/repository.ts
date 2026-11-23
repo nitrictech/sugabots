@@ -48,7 +48,6 @@ import {
 	toReplyTo,
 	withReplyTo,
 } from "./participants.ts";
-import type { BotConversationId } from "./rooms.ts";
 
 /**
  * The only writer of `conversation` and of each kind's own table, except a
@@ -97,11 +96,11 @@ export interface Interface {
 	) => Effect.Effect<void>;
 	/**
 	 * The automation's feed, where each of its runs posts, created on first use
-	 * with its project's lead bot in it, if the project has one.
+	 * with its project's lead bot in it.
 	 */
 	readonly openAutomationFeed: (
 		owned: Pick<schema.AutomationRow, "id" | "workspaceId" | "name">,
-		leadBotId: string | null,
+		leadBotId: string,
 	) => Effect.Effect<schema.PlacedConversationRow>;
 	/**
 	 * Posts a person's message with the files they attach, making them a
@@ -176,18 +175,6 @@ export interface Interface {
 		systemBotKey: SystemBotKey;
 		title: string;
 	}) => Effect.Effect<string>;
-	/**
-	 * Calls the bot's conversation `title`. Never a project's, which goes by
-	 * the name people gave it. True when the conversation was still there to
-	 * take it.
-	 */
-	readonly retitle: (conversationId: BotConversationId, title: string) => Effect.Effect<boolean>;
-	/** Retitles the conversation the system bot `systemBotKey` works in on `servedConversationId`. */
-	readonly retitleSystemConversation: (input: {
-		servedConversationId: BotConversationId;
-		systemBotKey: SystemBotKey;
-		title: string;
-	}) => Effect.Effect<void>;
 	/**
 	 * Records that `userId` has read the conversation `conversationId` up to
 	 * its newest finished message, and tells its watchers when that moved
@@ -439,14 +426,12 @@ export const make = Effect.gen(function* () {
 					.where(eq(project.id, input.projectId))
 					.limit(1),
 			);
-			const leadBotId = led?.leadBotId ?? null;
+			if (!led) return yield* Effect.die(new Error("The thread's project no longer exists"));
 			yield* query((db) =>
-				db
-					.insert(conversationParticipant)
-					.values([
-						{ conversationId: created.id, userId: input.startedById },
-						...(leadBotId ? [{ conversationId: created.id, botId: leadBotId }] : []),
-					]),
+				db.insert(conversationParticipant).values([
+					{ conversationId: created.id, userId: input.startedById },
+					{ conversationId: created.id, botId: led.leadBotId },
+				]),
 			);
 			return yield* placedById(created.id);
 		});
@@ -809,13 +794,11 @@ export const make = Effect.gen(function* () {
 								.returning({ conversationId: automationFeed.conversationId }),
 						);
 						if (opened) {
-							if (leadBotId !== null) {
-								yield* query((db) =>
-									db
-										.insert(conversationParticipant)
-										.values({ conversationId: created.id, botId: leadBotId }),
-								);
-							}
+							yield* query((db) =>
+								db
+									.insert(conversationParticipant)
+									.values({ conversationId: created.id, botId: leadBotId }),
+							);
 							return yield* placedById(created.id);
 						}
 						yield* discardConversation(created.id);
@@ -881,39 +864,6 @@ export const make = Effect.gen(function* () {
 						return raced;
 					}),
 				),
-			),
-
-		retitle: (conversationId, title) =>
-			operation(
-				"retitle",
-				Effect.flatMap(DateTime.nowAsDate, (now) =>
-					query((db) =>
-						db
-							.update(conversation)
-							.set({ title, updatedAt: now })
-							.where(eq(conversation.id, conversationId))
-							.returning({ id: conversation.id }),
-					),
-				).pipe(Effect.map((retitled) => retitled.length > 0)),
-			),
-
-		retitleSystemConversation: (input) =>
-			operation(
-				"retitleSystemConversation",
-				Effect.gen(function* () {
-					const working = yield* systemConversationOf(
-						input.servedConversationId,
-						input.systemBotKey,
-					);
-					if (!working) return;
-					const now = yield* DateTime.nowAsDate;
-					yield* query((db) =>
-						db
-							.update(conversation)
-							.set({ title: input.title, updatedAt: now })
-							.where(eq(conversation.id, working)),
-					);
-				}),
 			),
 
 		markRead: (userId, conversationId) =>

@@ -1,6 +1,7 @@
 import type { Bot } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { useAutomations } from "@/lib/automations.ts";
+import { API_DID_NOT_ANSWER } from "@/lib/failure.ts";
 import { botAutomationsLink } from "@/lib/links.ts";
 import {
 	ownerLink,
@@ -93,9 +94,7 @@ export function AutomationSetup({
 			<EmptyState
 				title={automations.isError ? "Could not load this automation" : "No such automation"}
 			>
-				{automations.isError
-					? "The API did not answer. Reload this page to try again."
-					: "It may have been removed."}
+				{automations.isError ? API_DID_NOT_ANSWER : "It may have been removed."}
 			</EmptyState>
 		);
 	}

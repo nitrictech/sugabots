@@ -2,7 +2,6 @@ import { createVerify, generateKeyPairSync } from "node:crypto";
 import { Effect, Layer } from "effect";
 import {
 	bot as botTable,
-	project,
 	projectMember,
 	user,
 	workspace,
@@ -11,6 +10,7 @@ import {
 import { onDatabase, runOnPostgres } from "../../../database/testing.ts";
 import { Installation } from "../../../installation/installation.ts";
 import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
+import { seedProject } from "../../../workspaces/projects/seed.test-support.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
 import { Egress } from "../../network/egress.ts";
 import type { GitHubApps } from "./github-app.ts";
@@ -173,16 +173,13 @@ export async function workspaceWithProject(label: string) {
 			{ workspaceId, userId: member.id, role: "member" },
 		]),
 	);
-	const [shared] = await onDatabase((db) =>
-		db
-			.insert(project)
-			.values({
-				workspaceId,
-				name: "Builders",
-				slug: `builders-${suffix}`,
-				createdById: admin.id,
-			})
-			.returning(),
+	const shared = await onDatabase((db) =>
+		seedProject(db, {
+			workspaceId,
+			name: "Builders",
+			slug: `builders-${suffix}`,
+			createdById: admin.id,
+		}),
 	);
 	if (!shared) throw new Error("fixture");
 	await onDatabase((db) =>

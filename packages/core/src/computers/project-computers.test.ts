@@ -4,18 +4,12 @@ import { COMPUTER_OPENSANDBOX_DEFAULT_SIZE } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { DateTime, type Duration, Effect, Fiber, Layer, Redacted } from "effect";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import {
-	computer,
-	computerLease,
-	project as projectTable,
-	user,
-	workspace,
-	workspaceMember,
-} from "../database/schema.ts";
+import { computer, computerLease, user, workspace, workspaceMember } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
+import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { ComputerCredentials } from "./computer-credentials.ts";
 import { ComputerProviderRepository } from "./computer-provider-repository.ts";
 import { Computers } from "./computers.ts";
@@ -129,13 +123,9 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId: space.id, userId: owner.id }),
 		);
-		const [made] = await onDatabase((db) =>
-			db
-				.insert(projectTable)
-				.values({ workspaceId: space.id, name: "Launch", slug: "launch" })
-				.returning(),
+		const made = await onDatabase((db) =>
+			seedProject(db, { workspaceId: space.id, name: "Launch", slug: "launch" }),
 		);
-		if (!made) throw new Error("fixture");
 		theProject = { workspaceId: space.id, projectId: made.id };
 		signedIn = ComputerCredentials.NOT_SIGNED_IN;
 		await addProvider();
@@ -406,7 +396,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			const sized = (kind: string) => disk?.folders?.find((folder) => folder.kind === kind);
 			expect(sized("home")).toMatchObject({ botId, bytes: expect.any(Number) });
 			expect(sized("home")?.bytes).toBeGreaterThanOrEqual(3_000_000);
-			expect(sized("threads")?.bytes).toBeGreaterThanOrEqual(2_000_000);
+			expect(sized("conversations")?.bytes).toBeGreaterThanOrEqual(2_000_000);
 			expect(sized("temporary")?.bytes).toBeGreaterThanOrEqual(1_000_000);
 		},
 		SLOW,

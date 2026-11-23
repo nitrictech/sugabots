@@ -6,11 +6,9 @@ import { PersonAvatar } from "@/ui/avatar.tsx";
 export function ParticipantAvatar({
 	participant,
 	size,
-	className,
 }: {
 	participant: Participant;
 	size: number;
-	className?: string;
 }) {
 	return participant.kind === "bot" ? (
 		<BotAvatar
@@ -18,9 +16,8 @@ export function ParticipantAvatar({
 			face={participant.face}
 			shape={participant.shape}
 			size={size}
-			className={className}
 		/>
 	) : (
-		<PersonAvatar person={participant} size={size} className={className} />
+		<PersonAvatar person={participant} size={size} />
 	);
 }

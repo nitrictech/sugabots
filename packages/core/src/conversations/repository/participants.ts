@@ -366,6 +366,6 @@ export const inProject = (projectId: SQLWrapper | string) =>
 
 /**
  * The condition on `bot` that selects bots people make: not a system bot,
- * such as the Summariser, and not anybody's Personal Assistant.
+ * such as Compaction, and not anybody's Personal Assistant.
  */
 export const madeByPeople = and(isNull(bot.systemBotKey), isNull(bot.assistantOf)) as SQL;

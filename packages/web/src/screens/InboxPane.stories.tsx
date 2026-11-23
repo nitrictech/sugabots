@@ -1,7 +1,8 @@
-import type {
-	ChatHistoryEntry,
-	Message as ChatMessage,
-	ConversationDetails,
+import {
+	botParticipantOf,
+	type ChatHistoryEntry,
+	type Message as ChatMessage,
+	type ConversationDetails,
 } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
@@ -25,15 +26,7 @@ import {
 const API = import.meta.env.VITE_API_URL as string;
 
 const chat = storyThreadFor(growthDesk);
-const bot = {
-	kind: "bot" as const,
-	id: growthDesk.id,
-	name: growthDesk.name,
-	handle: growthDesk.handle,
-	color: growthDesk.color,
-	face: growthDesk.face,
-	shape: growthDesk.shape,
-};
+const bot = botParticipantOf(growthDesk);
 
 /** A chat long enough that a jump to an early message has somewhere to scroll. */
 const messages: ChatMessage[] = Array.from({ length: 24 }, (_, index) => {

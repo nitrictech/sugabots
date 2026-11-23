@@ -28,7 +28,7 @@ const meta = preview.meta({
 			<Chat />
 			<ChatSidebar {...args} className="bg-background">
 				<div className="flex flex-col gap-4 px-3.5 pb-4">
-					<SidebarSection title="Summary" className="px-3.5 py-3">
+					<SidebarSection title="Answer" className="px-3.5 py-3">
 						<p className="m-0 text-sm">Linear Handler checked Sentry and opened an issue.</p>
 					</SidebarSection>
 				</div>

@@ -94,12 +94,6 @@ export type TemplateStatus = "missing" | "building" | "ready" | "failed";
 export interface Info {
 	readonly state: "running" | "paused";
 	/**
-	 * The image or template it was made from, as the provider names it, which
-	 * may be another name for it than it was made with: a tag for an image
-	 * made from its digest.
-	 */
-	readonly image: string;
-	/**
 	 * Whether its {@link WORKSPACE_DIRECTORY} is kept apart from it, so a new
 	 * computer made with the same {@link Spec.workName} carries on with that
 	 * work. Otherwise the work goes with the computer and must be copied out.
@@ -186,17 +180,11 @@ export interface Opened {
 /** Where bots work. It belongs to the bots' user. */
 export const WORKSPACE_DIRECTORY = "/workspace";
 
-/**
- * Where each conversation's folder is, named by the conversation's id. Called
- * `threads`, as the computers made before keep it.
- */
-export const CONVERSATIONS_DIRECTORY = `${WORKSPACE_DIRECTORY}/threads`;
+/** Where each conversation's folder is, named by the conversation's id. */
+export const CONVERSATIONS_DIRECTORY = `${WORKSPACE_DIRECTORY}/conversations`;
 
-/**
- * Where each bot's home is, named by the bot's id. Its name is kept as the
- * computers made before bots had their name have it, with every home in it.
- */
-export const BOTS_DIRECTORY = `${WORKSPACE_DIRECTORY}/agents`;
+/** Where each bot's home is, named by the bot's id. */
+export const BOTS_DIRECTORY = `${WORKSPACE_DIRECTORY}/bots`;
 
 export interface Computer {
 	readonly id: ComputerId;
@@ -355,13 +343,12 @@ export class Missing extends Data.TaggedError("ComputerMissing")<{
 
 /**
  * The computer stopped without being paused, as when its host shut down, and
- * the provider can't start it again. `workKept` says whether its work is kept
- * apart from it, for a new computer made with the same {@link Spec.workName}.
+ * the provider can't start it again. Its work is kept apart from it, for a new
+ * computer made with the same {@link Spec.workName}.
  */
 export class Stopped extends Data.TaggedError("ComputerStopped")<{
 	provider: Connection["provider"];
 	computerId: ComputerId;
-	workKept: boolean;
 }> {}
 
 /** A refusal about the file itself, which the bot can do something about. */

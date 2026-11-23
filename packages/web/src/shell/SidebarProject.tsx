@@ -2,10 +2,9 @@ import type { NotificationSettings, Project, ProjectMarker } from "@sugabots/con
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Lock, Plus } from "lucide-react";
-import { useBots, useModels } from "@/lib/bots.ts";
 import { projectLink, projectNewThreadLink, projectSettingsLink } from "@/lib/links.ts";
 import { ownerMarkTransition } from "@/lib/owner-mark.ts";
-import { ownerProblems } from "@/lib/owner-pages.ts";
+import { useOwnerProblems } from "@/lib/owner-pages.ts";
 import { projectPalettes } from "@/lib/project-looks.ts";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
 import { hasNews, RowAttention } from "@/shell/SidebarBot.tsx";
@@ -103,17 +102,11 @@ export function SidebarProject({
 
 /**
  * What is wrong with a project that its settings or automations set right,
- * settings first: none while the bots it is checked against are loading.
+ * settings first.
  */
 function useProjectProblem({ project, failedAutomations }: ProjectStanding): string | undefined {
-	const { bots } = useBots();
-	const lead = bots?.find((one) => one.id === project.leadBotId);
-	const enabledModels = useModels().data?.models;
-	const problems = ownerProblems(
-		{ project },
-		{ lead, enabledModels, automationFailed: failedAutomations > 0 },
-	);
-	return (bots && problems.settings) ?? problems.automations;
+	const problems = useOwnerProblems({ project }, failedAutomations > 0);
+	return problems.settings ?? problems.automations;
 }
 
 /** The lock after a private project's name. */
@@ -158,7 +151,7 @@ export function ProjectInitial({
 	size?: keyof typeof PROJECT_INITIAL_SIZES;
 	className?: string;
 }) {
-	const palette = project.color === null ? undefined : projectPalettes[project.color];
+	const palette = projectPalettes[project.color];
 	const small = size === "sm";
 	return (
 		<span
@@ -166,15 +159,11 @@ export function ProjectInitial({
 			className={cn(
 				"grid shrink-0 place-items-center font-semibold",
 				PROJECT_INITIAL_SIZES[size],
-				!palette && "bg-tile text-foreground",
-				palette && !small && "text-black/80",
+				!small && "text-black/80",
 				className,
 			)}
 			style={
-				palette &&
-				(small
-					? { background: palette.tile, color: palette.swatch }
-					: { background: palette.swatch })
+				small ? { background: palette.tile, color: palette.swatch } : { background: palette.swatch }
 			}
 		>
 			{initialOf(project.name)}

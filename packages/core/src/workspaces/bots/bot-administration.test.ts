@@ -30,6 +30,7 @@ import { unimplemented } from "../../testing.ts";
 import { LeadsProjects } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
 import { ProjectRepository } from "../projects/project-repository.ts";
+import { seedProject } from "../projects/seed.test-support.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { BotAdministration } from "./bot-administration.ts";
 import { BotRepository } from "./bot-repository.ts";
@@ -76,6 +77,10 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			),
 		);
 	});
+
+	/** The bot `botId` as the workspace's bots list shows it to `as`. */
+	const listedTo = async (as: Promised<BotAdministration.Interface>, botId: string) =>
+		(await as.list({ workspace: workspaceId })).find((one) => one.id === botId);
 
 	afterAll(async () => {
 		await closeDatabase();
@@ -161,10 +166,10 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		});
 
 		await onDatabase((db) => db.update(bot).set({ createdById: null }).where(eq(bot.id, made.id)));
-		expect((await administration.get({ botId: made.id })).createdBy).toBeNull();
+		expect((await listedTo(administration, made.id))?.createdBy).toBeNull();
 	});
 
-	it("gives a bot read back its default project, listed or alone", async () => {
+	it("lists a bot with its default project", async () => {
 		const made = await administration.create({
 			workspace: workspaceId,
 			bot: { name: "Triage", model: OFFERED },
@@ -173,7 +178,6 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, made.id)),
 		);
 
-		expect((await administration.get({ botId: made.id })).defaultProjectId).toBe(own?.id);
 		expect(
 			(await administration.list({ workspace: workspaceId })).find((one) => one.id === made.id)
 				?.defaultProjectId,
@@ -230,7 +234,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		await expect(
 			administration.setSystemBotModel({
 				workspace: workspaceId,
-				key: "summarise",
+				key: "compact",
 				model: "unknown-model",
 			}),
 		).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
@@ -238,7 +242,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			(
 				await administration.setSystemBotModel({
 					workspace: workspaceId,
-					key: "summarise",
+					key: "compact",
 					model: OFFERED,
 				})
 			).model,
@@ -273,16 +277,11 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		await expect(
 			administrationAs(viewer.id).setSystemBotModel({
 				workspace: workspaceId,
-				key: "summarise",
+				key: "compact",
 				model: OFFERED,
 			}),
 		).rejects.toBeInstanceOf(ActionForbidden);
-		expect(await administrationAs(viewer.id).get({ botId: made.id })).toMatchObject({
-			id: made.id,
-		});
-		await expect(administrationAs(stranger.id).get({ botId: made.id })).rejects.toBeInstanceOf(
-			ResourceHidden,
-		);
+		expect(await listedTo(administrationAs(viewer.id), made.id)).toMatchObject({ id: made.id });
 		await expect(administrationAs(stranger.id).remove({ botId: made.id })).rejects.toBeInstanceOf(
 			ResourceHidden,
 		);
@@ -349,8 +348,8 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			workspace: workspaceId,
 			bot: { name: "Builder", model: OFFERED },
 		});
-		const [launch] = await onDatabase((db) =>
-			db.insert(project).values({ workspaceId, name: "Launch", slug: "launch" }).returning(),
+		const launch = await onDatabase((db) =>
+			seedProject(db, { workspaceId, name: "Launch", slug: "launch" }),
 		);
 		if (!launch) throw new Error("could not create the project");
 		const choosing = holdTransaction(
@@ -381,7 +380,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		expect(await asMember.setPinned({ botId: made.id, pinned: false })).toMatchObject({
 			pinned: false,
 		});
-		expect(await administration.get({ botId: made.id })).toMatchObject({ pinned: true });
+		expect(await listedTo(administration, made.id)).toMatchObject({ pinned: true });
 	});
 
 	it("takes a bot made private out of every project people made that it was in", async () => {
@@ -389,8 +388,8 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			workspace: workspaceId,
 			bot: { name: "Triage", model: OFFERED },
 		});
-		const [launch] = await onDatabase((db) =>
-			db.insert(project).values({ workspaceId, name: "Launch", slug: "launch" }).returning(),
+		const launch = await onDatabase((db) =>
+			seedProject(db, { workspaceId, name: "Launch", slug: "launch" }),
 		);
 		if (!launch) throw new Error("could not create the project");
 		await onDatabase((db) =>
@@ -519,9 +518,6 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 				workspace: workspaceId,
 			});
 
-			await expect(administration.get({ botId: assistant.id })).rejects.toBeInstanceOf(
-				ResourceHidden,
-			);
 			expect(
 				(await administration.list({ workspace: workspaceId })).map(({ id }) => id),
 			).not.toContain(assistant.id);
@@ -574,7 +570,6 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 					),
 			);
 
-			expect((await administration.get({ botId: made.id })).createdBy).toBeNull();
 			const listed = await administration.list({ workspace: workspaceId });
 			expect(listed.find((one) => one.id === made.id)?.createdBy).toBeNull();
 		});
@@ -585,7 +580,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 				bot: { name: "Diary", model: OFFERED, visibility: "private" },
 			});
 
-			expect(await administration.get({ botId: made.id })).toMatchObject({
+			expect(await listedTo(administration, made.id)).toMatchObject({
 				name: "Diary",
 				permissions: { talk: false, update: true },
 			});
@@ -605,14 +600,14 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 				bot: { name: "Ledger", model: OFFERED, visibility: "private" },
 			});
 
-			expect(await asMember.get({ botId: shared.id })).toMatchObject({
+			expect(await listedTo(asMember, shared.id)).toMatchObject({
 				permissions: { talk: true, update: false },
 			});
 			await expect(
 				asMember.update({ botId: shared.id, changes: { name: "Mine now" } }),
 			).rejects.toBeInstanceOf(ActionForbidden);
 			await expect(asMember.remove({ botId: shared.id })).rejects.toBeInstanceOf(ActionForbidden);
-			await expect(asMember.get({ botId: hidden.id })).rejects.toBeInstanceOf(ResourceHidden);
+			expect(await listedTo(asMember, hidden.id)).toBeUndefined();
 			await expect(
 				asMember.update({ botId: hidden.id, changes: { name: "Mine now" } }),
 			).rejects.toBeInstanceOf(ResourceHidden);

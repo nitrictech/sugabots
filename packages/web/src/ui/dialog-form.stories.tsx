@@ -3,8 +3,14 @@ import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { Button } from "./button.tsx";
 import { Dialog, DialogDescription, DialogTrigger } from "./dialog.tsx";
-import { DialogForm, DialogFormBody, DialogFormFooter, DialogFormHeader } from "./dialog-form.tsx";
-import { SettingsFieldRow, SettingsGroup } from "./settings-page.tsx";
+import {
+	DialogForm,
+	DialogFormBody,
+	DialogFormFooter,
+	DialogFormHeader,
+	DialogFormScroll,
+} from "./dialog-form.tsx";
+import { SettingsFieldRow, SettingsGroup, SettingsRow } from "./settings-page.tsx";
 
 function NewProjectForm({ onSubmit }: { onSubmit: () => void }) {
 	const [name, setName] = useState("");
@@ -81,5 +87,32 @@ export const KeyboardDismissal = meta.story({
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() => expect(trigger).toHaveFocus());
 		await waitFor(() => expect(body.queryByRole("dialog")).not.toBeInTheDocument());
+	},
+});
+
+const apps = Array.from({ length: 30 }, (_, index) => `App ${index + 1}`);
+
+/** A long list scrolls inside the dialog, under the header that stays put. */
+export const LongList = meta.story({
+	render: () => (
+		<Dialog open>
+			<DialogForm width="compact" onSubmit={(event) => event.preventDefault()}>
+				<DialogFormHeader title="Add an app" />
+				<DialogFormBody>
+					<DialogFormScroll height="picker">
+						<SettingsGroup label="Apps">
+							{apps.map((app) => (
+								<SettingsRow key={app} label={app} onClick={fn()} />
+							))}
+						</SettingsGroup>
+					</DialogFormScroll>
+				</DialogFormBody>
+			</DialogForm>
+		</Dialog>
+	),
+	play: async ({ canvasElement }) => {
+		const dialog = await within(canvasElement.ownerDocument.body).findByRole("dialog");
+		const list = within(dialog).getByText("App 1").closest<HTMLElement>(".overflow-y-auto");
+		await expect(list?.scrollHeight).toBeGreaterThan(list?.clientHeight ?? 0);
 	},
 });

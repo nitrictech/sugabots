@@ -9,7 +9,6 @@ import { ExternalLink, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useProviderActions } from "@/lib/model-providers.ts";
-import { Alert } from "@/ui/alert.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { Dialog, DialogDescription } from "@/ui/dialog.tsx";
@@ -19,6 +18,7 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
+import { SettingsRowAlert } from "@/ui/settings-page.tsx";
 import { ProviderFieldRow, valueText } from "./provider-field-row.tsx";
 
 /**
@@ -96,11 +96,7 @@ export function ProviderSignInRow({
 					<span className={valueText}>{provider.signedIn ? "Signed in" : "Not signed in"}</span>
 				</ProviderFieldRow>
 			)}
-			{shownError && (
-				<div className="border-border border-b px-4 py-3 last:border-b-0">
-					<Alert>{shownError}</Alert>
-				</div>
-			)}
+			{shownError && <SettingsRowAlert>{shownError}</SettingsRowAlert>}
 			<Dialog open={warning} onOpenChange={setWarning}>
 				{warning && (
 					<SingleUserWarning

@@ -13,6 +13,7 @@ import addonMsw from "msw-storybook-addon";
 import { useEffect, useState } from "react";
 import { configure } from "storybook/test";
 import { INITIAL_VIEWPORTS } from "storybook/viewport";
+import { applyTheme } from "@/lib/theme.ts";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
 import "../src/app.css";
 
@@ -155,13 +156,7 @@ export default definePreview({
 			return <RouterProvider router={router} />;
 		},
 		function AppTheme(Story, context) {
-			useEffect(() => {
-				if (context.globals.theme === "dark") {
-					delete document.documentElement.dataset.theme;
-				} else {
-					document.documentElement.dataset.theme = context.globals.theme;
-				}
-			}, [context.globals.theme]);
+			useEffect(() => applyTheme(context.globals.theme), [context.globals.theme]);
 			return (
 				<TooltipProvider>
 					<LivelinessContext value={context.globals.liveliness}>

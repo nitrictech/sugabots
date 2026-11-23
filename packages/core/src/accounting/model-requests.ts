@@ -86,7 +86,7 @@ export type Activity =
 	  }
 	| { readonly purpose: "facilitation"; readonly conversationId: string }
 	| {
-			readonly purpose: "summary" | "compaction";
+			readonly purpose: "compaction";
 			readonly conversationId: string;
 			/** The system bot's own turn, in a conversation of its own. */
 			readonly turnId: string;

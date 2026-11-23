@@ -112,16 +112,6 @@ export class AutomationNotFound
 	}
 }
 
-/** The automation's project has no lead bot to do its runs, which a project from before leads may lack. */
-export class AutomationProjectHasNoLead
-	extends Data.TaggedError("AutomationProjectHasNoLead")
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`This project has no lead bot to run its automations. Choose one in the project's settings first.`;
-	}
-}
-
 export class AutomationTriggerConflict
 	extends Data.TaggedError("AutomationTriggerConflict")
 	implements UserFacing

@@ -6,22 +6,19 @@ import type {
 	ConversationContext,
 	ConversationDetails,
 	ConversationHistoryQuery,
-	ConversationSummary,
 	PlacedConversation,
 } from "@sugabots/contracts";
 import { DEFAULT_CONVERSATION_HISTORY_LIMIT } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
-import { and, desc, eq, getColumns, isNull, type SQLWrapper, sql } from "drizzle-orm";
+import { and, eq, type SQLWrapper, sql } from "drizzle-orm";
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import {
-	type AuthorizationDenied,
 	type ConversationStanding,
 	computerProjectStandingFor,
 	mayDecideToolCall,
 	peopleReachingProject,
 	ResourceHidden,
 } from "../authorization/access.ts";
-import { Authorization } from "../authorization/authorization.ts";
 import { CurrentActor } from "../authorization/current-actor.ts";
 import { Visibility } from "../authorization/visibility.ts";
 import { type Executor, query, serviceOperations } from "../database/database.ts";
@@ -29,7 +26,6 @@ import type * as schema from "../database/schema.ts";
 import {
 	automation,
 	conversationCompaction,
-	conversationSummary,
 	placedConversation,
 	turn,
 	user,
@@ -53,14 +49,10 @@ import {
 import { Turns } from "./turns/turns.ts";
 
 /**
- * What the conversation screens show, of the conversations the current actor can see: the
- * conversation list, a conversation with its messages, and its sidebar.
+ * What the conversation screens show, of the conversations the current actor can see: a
+ * conversation with its messages, and its sidebar.
  */
 export interface Interface {
-	/** The conversations in a workspace, by its id or its slug, newest activity first. */
-	readonly list: (
-		workspace: string,
-	) => Effect.Effect<PlacedConversation[], AuthorizationDenied, CurrentActor.Service>;
 	readonly get: (
 		conversationId: string,
 		history?: ConversationHistoryQuery,
@@ -81,43 +73,8 @@ export class Service extends Context.Service<Service, Interface>()(
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ConversationView");
-	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
 	return Service.of({
-		list: (workspace) =>
-			operation(
-				"list",
-				Effect.gen(function* () {
-					const { workspaceId } = yield* authorization.workspace(workspace, "workspace.read");
-					const reachesConversation = yield* visibility.reachesConversation;
-					return yield* query((db) =>
-						Effect.gen(function* () {
-							const rows = yield* db
-								.select({
-									conversation: getColumns(placedConversation),
-									running: Turns.busyIn(sql`${placedConversation.id}`),
-								})
-								.from(placedConversation)
-								// Conversations opened under another, whether a system bot's or a
-								// collaboration's, are reached from the one they hang off rather than
-								// listed beside it.
-								.where(
-									and(
-										eq(placedConversation.workspaceId, workspaceId),
-										isNull(placedConversation.parentConversationId),
-										reachesConversation(placedConversation),
-									),
-								)
-								.orderBy(desc(placedConversation.updatedAt), desc(placedConversation.id));
-
-							return rows.map(({ conversation, running }) =>
-								toPlacedConversation(conversation, running),
-							);
-						}),
-					);
-				}),
-			),
-
 		get: (conversationId, history = { limit: DEFAULT_CONVERSATION_HISTORY_LIMIT }) =>
 			operation(
 				"get",
@@ -167,15 +124,10 @@ export const make = Effect.gen(function* () {
 					const [row] = yield* query((db) =>
 						db
 							.select({
-								summary: conversationSummary,
 								measured: latestMeasurementOf(placedConversation.id),
 								compactedAt: conversationCompaction.updatedAt,
 							})
 							.from(placedConversation)
-							.leftJoin(
-								conversationSummary,
-								eq(conversationSummary.conversationId, placedConversation.id),
-							)
 							.leftJoin(
 								conversationCompaction,
 								eq(conversationCompaction.conversationId, placedConversation.id),
@@ -189,7 +141,6 @@ export const make = Effect.gen(function* () {
 					);
 					if (!row) return yield* new ResourceHidden({ resource: "conversation" });
 					return {
-						summary: row.summary ? toConversationSummary(row.summary) : null,
 						context:
 							row.measured === null ? null : toConversationContext(row.measured, row.compactedAt),
 					};
@@ -200,7 +151,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, Visibility.layer]));
+export const layer = layerNoDeps.pipe(Layer.provide(Visibility.layer));
 
 export class InvalidConversationHistoryCursor
 	extends Data.TaggedError("InvalidConversationHistoryCursor")
@@ -356,8 +307,8 @@ function toConversationDetails(
 
 /**
  * How many tokens the prompt of the conversation's latest measured turn took,
- * the window it was read with, and when. Its own turns only: the Summariser's
- * and the Compaction bot's are in system conversations of their own.
+ * the window it was read with, and when. Its own turns only: the Compaction
+ * bot's are in a system conversation of its own.
  */
 const latestMeasurementOf = (conversationId: SQLWrapper) => sql<Measurement | null>`(
 	select json_build_object('tokens', ${turn.contextTokens}, 'window', ${turn.contextCapacity}, 'at', coalesce(${turn.finishedAt}, ${turn.createdAt}))
@@ -389,13 +340,6 @@ function toConversationContext(
 	};
 }
 
-function toConversationSummary(row: schema.SummaryRow): ConversationSummary {
-	return {
-		content: row.content,
-		updatedAt: row.updatedAt.toISOString(),
-	};
-}
-
 const historyCursor = (cursor: string) => {
 	const point = decodeCursor(cursor);
 	return point ? Effect.succeed(point) : Effect.fail(new InvalidConversationHistoryCursor());
@@ -415,7 +359,6 @@ function toPlacedConversation(
 		title: row.title,
 		status: running ? "running" : "done",
 		parentConversationId: row.parentConversationId,
-		startedById: row.startedById,
 		doneAt: row.doneAt?.toISOString() ?? null,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),

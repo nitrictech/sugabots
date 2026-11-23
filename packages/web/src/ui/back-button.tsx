@@ -25,24 +25,16 @@ export const BACK_ON_PHONE =
 export const BACK_LABEL_ON_PHONE = "max-md:sr-only";
 
 /** The round Back's chevron. */
-export function BackChevron({ className }: { className?: string }) {
-	return <ChevronLeft aria-hidden size={22} strokeWidth={2.25} className={className} />;
+export function BackChevron() {
+	return <ChevronLeft aria-hidden size={22} strokeWidth={2.25} />;
 }
 
 /** The round Back as a button, for a Back that is an action rather than a link. `className` hides it where it isn't wanted. */
-export function BackButton({
-	onClick,
-	label = "Back",
-	className,
-}: {
-	onClick: () => void;
-	label?: string;
-	className?: string;
-}) {
+export function BackButton({ onClick, className }: { onClick: () => void; className?: string }) {
 	return (
 		<button
 			type="button"
-			aria-label={label}
+			aria-label="Back"
 			onClick={onClick}
 			className={cn(BACK_BUTTON, className)}
 		>

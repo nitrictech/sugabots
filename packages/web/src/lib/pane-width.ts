@@ -8,6 +8,9 @@ const STORAGE_KEY_PREFIX = "sugabots-pane-width:";
  */
 export const LIST_MIN_WIDTH_PX = 280;
 
+/** How narrow an open file beside its list may be dragged, in pixels. */
+export const FILE_PANE_MIN_WIDTH_PX = 360;
+
 /**
  * How wide the viewer last dragged a pane, in pixels, remembered by `name` on
  * this device, and the way to change it; undefined until they first do.

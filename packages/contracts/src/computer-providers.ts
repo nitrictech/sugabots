@@ -237,8 +237,8 @@ const byteCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const computerDiskFolderSchema = Schema.Union([
 	/** A bot's home, kept across all its conversations on the computer. */
 	Schema.Struct({ kind: Schema.Literal("home"), botId: uuidSchema, bytes: byteCountSchema }),
-	/** Every conversation's folder together, where the bots clone and build. Named for the folder, `threads/`, as computers keep it. */
-	Schema.Struct({ kind: Schema.Literal("threads"), bytes: byteCountSchema }),
+	/** Every conversation's folder together, where the bots clone and build. */
+	Schema.Struct({ kind: Schema.Literal("conversations"), bytes: byteCountSchema }),
 	/** `/tmp`. */
 	Schema.Struct({ kind: Schema.Literal("temporary"), bytes: byteCountSchema }),
 ]);
@@ -323,8 +323,6 @@ export const projectComputerSchema = Schema.Struct({
 	computer: projectComputerStateSchema,
 	/** Whether the workspace has a computer provider enabled, without which nothing new is made. */
 	providerEnabled: Schema.Boolean,
-	/** Whether the person asking may reset or upgrade it. */
-	canManage: Schema.Boolean,
 });
 
 export type ProjectComputer = typeof projectComputerSchema.Type;

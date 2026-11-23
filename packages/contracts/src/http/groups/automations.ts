@@ -17,10 +17,8 @@ import {
 	newAutomationSchema,
 	runPageQuerySchema,
 	runPageSchema,
-	workspaceAutomationListSchema,
 } from "../../automations.ts";
 import { uuidSchema } from "../../uuid.ts";
-import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, refused, Unauthorized } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
@@ -42,11 +40,6 @@ const webhookAnswers = [
  * others rather than on the group.
  */
 export class AutomationsApi extends HttpApiGroup.make("automations").add(
-	HttpApiEndpoint.get("listInWorkspace", "/workspaces/:workspace/automations", {
-		params: { workspace: workspaceIdOrSlugSchema },
-		success: workspaceAutomationListSchema,
-		error: refused,
-	}).middleware(Session),
 	HttpApiEndpoint.get("list", "/projects/:projectId/automations", {
 		params: inProject,
 		success: Schema.Array(listedAutomationDefinitionSchema),
@@ -57,11 +50,6 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 		payload: newAutomationSchema,
 		success: automationWriteResultSchema.pipe(HttpApiSchema.status(201)),
 		error: [Conflict, ...refused],
-	}).middleware(Session),
-	HttpApiEndpoint.get("get", "/projects/:projectId/automations/:automationId", {
-		params: automation,
-		success: automationSchema,
-		error: refused,
 	}).middleware(Session),
 	HttpApiEndpoint.patch("update", "/projects/:projectId/automations/:automationId", {
 		params: automation,
@@ -122,12 +110,6 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 		success: runPageSchema,
 		error: refused,
 	}).middleware(Session),
-	HttpApiEndpoint.get("runs", "/projects/:projectId/automations/:automationId/runs", {
-		params: automation,
-		query: runPageQuerySchema,
-		success: runPageSchema,
-		error: refused,
-	}).middleware(Session),
 	// Any JSON body, carried to the automation as its trigger's payload. The
 	// caller proves it holds the trigger's secret the way the trigger's auth
 	// says. A delivery id, such as `Idempotency-Key`, makes a retry land on
@@ -135,15 +117,6 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 	// with its challenge, and starts nothing.
 	HttpApiEndpoint.post("webhook", "/hooks/triggers/:triggerId", {
 		params: { triggerId: Schema.String },
-		payload: Schema.Json,
-		success: webhookAnswers,
-		error: [BadRequest, Unauthorized, Conflict],
-	}),
-	// The address a webhook had when an automation had only one trigger: a
-	// trigger moved from then has its automation's id, so it is still reached
-	// here. Other systems call this address, so it keeps the path it was given.
-	HttpApiEndpoint.post("automationWebhook", "/hooks/routines/:automationId", {
-		params: { automationId: Schema.String },
 		payload: Schema.Json,
 		success: webhookAnswers,
 		error: [BadRequest, Unauthorized, Conflict],

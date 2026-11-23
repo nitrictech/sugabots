@@ -10,7 +10,6 @@ import { EventsApi } from "./groups/events.ts";
 import { FilesApi } from "./groups/files.ts";
 import { GitHubConnectionsApi, GitHubWebhooksApi } from "./groups/github.ts";
 import { ModelProvidersApi } from "./groups/model-providers.ts";
-import { ModelTrialsApi } from "./groups/model-trials.ts";
 import { NotificationsApi } from "./groups/notifications.ts";
 import { OnboardingApi } from "./groups/onboarding.ts";
 import { ProjectComputerApi } from "./groups/project-computer.ts";
@@ -40,7 +39,6 @@ export class Api extends HttpApi.make("sugabots")
 	.add(ProjectsApi)
 	.add(OnboardingApi)
 	.add(SystemBotsApi)
-	.add(ModelTrialsApi)
 	.add(ModelProvidersApi)
 	.add(SearchProvidersApi)
 	.add(ComputerProvidersApi)

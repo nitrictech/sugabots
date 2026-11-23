@@ -1,13 +1,13 @@
 export * as AssistantGuide from "./assistant-guide.ts";
 
 import { userText } from "@sugabots/errors";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { reachesProjectFor } from "../../authorization/access.ts";
 import { AuthenticatedUserId, CurrentActor } from "../../authorization/current-actor.ts";
 import { query, serviceOperations } from "../../database/database.ts";
-import { automation, botSummary, project } from "../../database/schema.ts";
+import { automation, project } from "../../database/schema.ts";
 import { Installation } from "../../installation/installation.ts";
 import {
 	approvalPath,
@@ -100,22 +100,6 @@ export const make = Effect.gen(function* () {
 						const workspaceBots = reachedBots.filter((bot) => !bot.assistant);
 						const handleOf = new Map(workspaceBots.map((bot) => [bot.id, `@${bot.handle}`]));
 						const leadHandleOf = (botId: string | null) => (botId && handleOf.get(botId)) ?? null;
-						const talkable = workspaceBots.filter((bot) => bot.permissions.talk);
-						const lately =
-							talkable.length === 0
-								? []
-								: yield* query((db) =>
-										db
-											.select({ botId: botSummary.botId, content: botSummary.content })
-											.from(botSummary)
-											.where(
-												inArray(
-													botSummary.botId,
-													talkable.map((bot) => bot.id),
-												),
-											),
-									);
-						const latelyOf = new Map(lately.map((row) => [row.botId, row.content]));
 						// As things stand, not since the person last looked: reading a
 						// failed run's conversation doesn't mend the automation. By the
 						// project each is in, which the person reaches.
@@ -159,7 +143,6 @@ export const make = Effect.gen(function* () {
 								private: bot.visibility === "private",
 								pinned: bot.pinned,
 								youCanTalkToIt: bot.permissions.talk,
-								lately: latelyOf.get(bot.id) ?? null,
 							})),
 							waitingOnYou: {
 								approvals: approvals.waiting.slice(0, LISTED_ITEMS).map((request) => ({
@@ -335,8 +318,6 @@ export interface Guide {
 		private: boolean;
 		pinned: boolean;
 		youCanTalkToIt: boolean;
-		/** What it has been doing lately, when the person may see into it. */
-		lately: string | null;
 	}>;
 	readonly waitingOnYou: {
 		approvals: ReadonlyArray<{ bot: string; tool: string; link: string }>;

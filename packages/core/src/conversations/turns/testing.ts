@@ -2,20 +2,14 @@ import { handleFromName } from "@sugabots/contracts";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Effect, Layer, Schema } from "effect";
 import { query } from "../../database/database.ts";
-import {
-	bot,
-	connection,
-	project,
-	user,
-	workspace,
-	workspaceMember,
-} from "../../database/schema.ts";
+import { bot, connection, user, workspace, workspaceMember } from "../../database/schema.ts";
 import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
 import { ConversationFiles } from "../../files/conversation-files.ts";
 import { Files } from "../../files/files.ts";
 import { lane, laneRequest } from "../../workflows/sql.ts";
 import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
+import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
 import type { Chats } from "../chats/chats.ts";
 import { startBotThread } from "../chats/testing.ts";
 import { lanesForTests } from "../testing.ts";
@@ -141,16 +135,13 @@ export async function aChatAwaitingReply(
 	await onDatabase((db) =>
 		db.insert(workspaceMember).values({ workspaceId, userId: memberId, role: "admin" }),
 	);
-	const [room] = await onDatabase((db) =>
-		db
-			.insert(project)
-			.values({
-				workspaceId,
-				name: "Room",
-				slug: `room-${suffix}`,
-				createdById: memberId,
-			})
-			.returning(),
+	const room = await onDatabase((db) =>
+		seedProject(db, {
+			workspaceId,
+			name: "Room",
+			slug: `room-${suffix}`,
+			createdById: memberId,
+		}),
 	);
 	if (!room) throw new Error("fixture");
 	const projectId = room.id;

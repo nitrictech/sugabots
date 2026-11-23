@@ -9,8 +9,9 @@ import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
+import { storyBots } from "@/shell/story-fixtures.ts";
 import { SettingsPage } from "@/ui/settings-page.tsx";
-import { storyBots, storyProjects } from "../story-app.tsx";
+import { storyProjects } from "../story-app.tsx";
 import { ProjectComputerSettings } from "./ProjectComputerSettings.tsx";
 
 const project = storyProjects[0] as Project;
@@ -29,7 +30,7 @@ const diskWith = (usedGB: number): ComputerDisk => ({
 	totalBytes: bytes(20),
 	measuredAt: "2026-10-02T05:38:00.000Z",
 	folders: [
-		{ kind: "threads", bytes: bytes(usedGB * 0.45) },
+		{ kind: "conversations", bytes: bytes(usedGB * 0.45) },
 		{ kind: "home", botId: builder?.id ?? "", bytes: bytes(usedGB * 0.25) },
 		{ kind: "temporary", bytes: bytes(usedGB * 0.1) },
 		{ kind: "home", botId: reviewer?.id ?? "", bytes: bytes(usedGB * 0.05) },
@@ -53,7 +54,6 @@ const running: ProjectComputer = {
 		disk: diskWith(6.2),
 	},
 	providerEnabled: true,
-	canManage: true,
 };
 
 const present = (over: Partial<Extract<ProjectComputer["computer"], { kind: "present" }>>) => ({
@@ -155,7 +155,7 @@ export const Disk = meta.story({
 		const disk = await canvas.findByRole("region", { name: "Disk" });
 		await expect(within(disk).getByText("6.2 GB of 20 GB used")).toBeVisible();
 		await expect(within(disk).getByRole("meter", { name: "Disk used" })).toHaveValue(31);
-		await expect(within(disk).getByText("Thread folders")).toBeVisible();
+		await expect(within(disk).getByText("Conversation folders")).toBeVisible();
 		await expect(within(disk).getByText(builder?.name ?? "")).toBeVisible();
 		await expect(within(disk).getByText("Everything else")).toBeVisible();
 		await expect(within(disk).queryByText(/Nearly full|Almost full/)).toBeNull();
@@ -228,7 +228,7 @@ export const Lost = meta.story({
 /** Nothing made yet. */
 export const NoneYet = meta.story({
 	beforeEach({ msw }) {
-		msw.use(answers({ computer: { kind: "none" }, providerEnabled: true, canManage: true }));
+		msw.use(answers({ computer: { kind: "none" }, providerEnabled: true }));
 	},
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("No computer yet")).toBeVisible();
@@ -249,7 +249,7 @@ export const AsAMember = meta.story({
 		},
 	},
 	beforeEach({ msw }) {
-		msw.use(answers({ ...running, canManage: false }));
+		msw.use(answers(running));
 	},
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("OpenSandbox")).toBeVisible();

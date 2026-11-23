@@ -19,11 +19,6 @@ export class BotsApi extends HttpApiGroup.make("bots")
 			success: botSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
 		}),
-		HttpApiEndpoint.get("get", "/bots/:botId", {
-			params: { botId: uuidSchema },
-			success: botSchema,
-			error: refused,
-		}),
 		HttpApiEndpoint.patch("update", "/bots/:botId", {
 			params: { botId: uuidSchema },
 			payload: botUpdateSchema,

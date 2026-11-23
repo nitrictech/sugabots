@@ -22,9 +22,9 @@ export function LoadFailure({
 
 	return (
 		<div className="grid h-full place-items-center bg-list p-6">
-			<EmptyState title={title}>
-				<div className="flex flex-col items-center gap-3">
-					{error != null && <p>{failureMessage(error)}</p>}
+			<EmptyState
+				title={title}
+				actions={
 					<Button
 						variant="secondary"
 						disabled={retrying}
@@ -37,7 +37,9 @@ export function LoadFailure({
 					>
 						{retrying ? "Trying again…" : "Try again"}
 					</Button>
-				</div>
+				}
+			>
+				{error != null ? failureMessage(error) : undefined}
 			</EmptyState>
 		</div>
 	);

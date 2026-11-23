@@ -16,7 +16,7 @@ const KEPT_SHARE = 0.25;
  * summarise. The rest holds its instructions, the previous summary, the
  * summary it writes, and the error in estimating tokens.
  */
-const SUMMARISER_INPUT_SHARE = 0.6;
+const COMPACTOR_INPUT_SHARE = 0.6;
 
 /** Past this many tokens in a turn's prompt, the Compaction bot compacts the conversation. */
 export function compactionLineTokens(windowTokens: number): number {
@@ -55,12 +55,12 @@ interface CompactionPlan<Message> {
 export function planCompaction<Message extends { createdAt: Date; tokens: number }>(
 	history: readonly Message[],
 	previousKeptFrom: Date | undefined,
-	windows: { readerTokens: number; summariserTokens: number },
+	windows: { readerTokens: number; compactorTokens: number },
 ): CompactionPlan<Message> | undefined {
 	const keptTokens = Math.floor(windows.readerTokens * KEPT_SHARE);
 	const summarisedTokens = Math.min(
 		compactionLineTokens(windows.readerTokens) - keptTokens,
-		Math.floor(windows.summariserTokens * SUMMARISER_INPUT_SHARE),
+		Math.floor(windows.compactorTokens * COMPACTOR_INPUT_SHARE),
 	);
 	const kept = Turns.newestWithinLimit(history, (message) => message.tokens, keptTokens);
 	const beforeKept = history

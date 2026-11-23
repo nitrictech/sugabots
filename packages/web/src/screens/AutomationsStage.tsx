@@ -2,6 +2,7 @@ import type { Bot, SessionUser } from "@sugabots/contracts";
 import { Plus, RefreshCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useOpenAutomationFeed } from "@/lib/chats.ts";
+import { API_DID_NOT_ANSWER } from "@/lib/failure.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { AutomationRow, NoAutomations, useListedAutomations } from "@/shell/Automations.tsx";
 import { Stage, StageClose, type StageParent } from "@/shell/Stage.tsx";
@@ -126,11 +127,7 @@ function AutomationList({
 }) {
 	const list = useListedAutomations({ bot });
 	if (list.isError) {
-		return (
-			<EmptyState title="Could not load these automations">
-				The API did not answer. Reload this page to try again.
-			</EmptyState>
-		);
+		return <EmptyState title="Could not load these automations">{API_DID_NOT_ANSWER}</EmptyState>;
 	}
 	if (list.automations?.length === 0) {
 		return (

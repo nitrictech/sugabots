@@ -1,4 +1,4 @@
-import { API_DID_NOT_ANSWER } from "@/routes/conversation.tsx";
+import { API_DID_NOT_ANSWER } from "@/lib/failure.ts";
 import { Panes } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 

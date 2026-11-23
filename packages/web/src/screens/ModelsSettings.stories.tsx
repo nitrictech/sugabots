@@ -77,7 +77,6 @@ function provider(
 		hasApiKey: true,
 		signedIn: false,
 		customHeaders: [],
-		modelCount: models.length,
 		lastTestError: null,
 		connectedBy: null,
 		createdAt: "2026-09-11T00:00:00.000Z",
@@ -147,7 +146,6 @@ const chatgptSignedIn: ModelProvider = {
 	status: "connected",
 	signedIn: true,
 	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "reasoning"])],
-	modelCount: 1,
 };
 const supergrok = provider(6, "supergrok", "SuperGrok", [], {
 	baseUrl: "https://api.x.ai/v1",
@@ -196,9 +194,9 @@ const bots = [
 	{ ...oncall, model: "gpt-5" },
 ];
 
-const systemBots: SystemBot[] = (["summarise", "compact"] as const).map((key) => ({
+const systemBots: SystemBot[] = (["compact"] as const).map((key) => ({
 	key,
-	name: key === "summarise" ? "Summariser" : "Compaction",
+	name: "Compaction",
 	description: null,
 	color: "ice",
 	face: "pill",
@@ -210,7 +208,7 @@ function Preview({
 	providers,
 	bots,
 	defaultModel,
-	summariesModel,
+	systemBotsModel,
 	children,
 }: {
 	providers: readonly ModelProvider[];
@@ -218,7 +216,7 @@ function Preview({
 	/** The model new bots start on. */
 	defaultModel: string;
 	/** The model the system bots use. */
-	summariesModel: string;
+	systemBotsModel: string;
 	children: ReactNode;
 }) {
 	const [queryClient] = useState(() => {
@@ -240,7 +238,7 @@ function Preview({
 		client.setQueryData(["bots", WORKSPACE], bots);
 		client.setQueryData(
 			["system-bots", WORKSPACE],
-			systemBots.map((bot) => ({ ...bot, model: summariesModel })),
+			systemBots.map((bot) => ({ ...bot, model: systemBotsModel })),
 		);
 		client.setQueryData(["models", WORKSPACE], {
 			models: providers.flatMap((provider) =>
@@ -281,7 +279,7 @@ const meta = preview.meta({
 				providers={context.parameters.providers ?? providers}
 				bots={context.parameters.bots ?? bots}
 				defaultModel={context.parameters.defaultModel ?? "claude-sonnet"}
-				summariesModel={context.parameters.summariesModel ?? "claude-haiku"}
+				systemBotsModel={context.parameters.systemBotsModel ?? "claude-haiku"}
 			>
 				<Story />
 			</Preview>
@@ -295,7 +293,9 @@ export const Overview = meta.story({
 		await expect(
 			await canvas.findByRole("link", { name: /Default for new bots/ }),
 		).toHaveTextContent("Claude Sonnet");
-		await expect(canvas.getByRole("link", { name: /Summaries/ })).toHaveTextContent("Claude Haiku");
+		await expect(canvas.getByRole("link", { name: /Compaction/ })).toHaveTextContent(
+			"Claude Haiku",
+		);
 		await expect(canvas.getByRole("link", { name: /Anthropic/ })).toHaveTextContent("Connected");
 		await expect(canvas.getAllByRole("button", { name: "Connect" }).length).toBeGreaterThan(0);
 		await expect(canvas.getByRole("button", { name: /^Add a provider/ })).toBeInTheDocument();
@@ -359,7 +359,7 @@ export const Provider = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Anthropic" })).toBeInTheDocument();
 		await expect(canvas.getByText(/^Default · 3 bots/)).toBeInTheDocument();
-		await expect(canvas.getByText(/^Summaries · 2 bots/)).toBeInTheDocument();
+		await expect(canvas.getByText(/^Compaction · 2 bots/)).toBeInTheDocument();
 		await expect(canvas.getByText("Not used yet")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Opus" })).toHaveAttribute(
 			"aria-checked",
@@ -446,7 +446,7 @@ export const SwitchOffDefaultModel = meta.story({
 });
 
 /**
- * Switching off a provider whose models new bots and summaries use asks where
+ * Switching off a provider whose models new bots and compaction use asks where
  * each of those moves, beside each model's bots.
  */
 export const SwitchOffProviderWithDefaults = meta.story({
@@ -456,11 +456,11 @@ export const SwitchOffProviderWithDefaults = meta.story({
 		const dialog = await screen.findByRole("dialog", { name: "Switch off Anthropic" });
 		await expect(
 			within(dialog).getByText(
-				"5 bots, new bots, and summaries use Anthropic's models. Choose the model each moves to.",
+				"5 bots, new bots, and compaction use Anthropic's models. Choose the model each moves to.",
 			),
 		).toBeInTheDocument();
 		await expect(
-			within(dialog).getByRole("button", { name: "Move summaries to: GPT-5" }),
+			within(dialog).getByRole("button", { name: "Move compaction to: GPT-5" }),
 		).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Move and switch off" })).toBeEnabled();
 	},
@@ -471,7 +471,7 @@ export const SwitchOffProviderWithDefaults = meta.story({
  * the dialog says to switch another on first and cannot go ahead.
  */
 export const SwitchOffLastModel = meta.story({
-	parameters: { providers: [openai], defaultModel: "gpt-5", summariesModel: "gpt-5" },
+	parameters: { providers: [openai], defaultModel: "gpt-5", systemBotsModel: "gpt-5" },
 	render: () => <ProviderSettings providerId={openai.id} />,
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("switch", { name: "Bots can use GPT-5" }));
@@ -663,7 +663,7 @@ export const ChatgptSignedIn = meta.story({
 export const SystemBots = meta.story({
 	render: () => <SystemModelSettings />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "Summaries" })).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Compaction" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Claude Opus" })).toBeNull();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
 	},

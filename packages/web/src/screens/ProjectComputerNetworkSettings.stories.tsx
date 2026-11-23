@@ -4,12 +4,29 @@ import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 import { expect, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
+import { storyBots } from "@/shell/story-fixtures.ts";
 import { SettingsPage } from "@/ui/settings-page.tsx";
-import { storyBots, storyProjects } from "../story-app.tsx";
+import { storyProjects } from "../story-app.tsx";
 import { ProjectComputerNetworkSettings } from "./ProjectComputerNetworkSettings.tsx";
 
 const project = storyProjects[0] as Project;
 const bot = storyBots[0] as Bot;
+/** The project, to someone who may not change its computer. */
+const projectReadOnly: Project = {
+	...project,
+	permissions: {
+		...project.permissions,
+		resources: { ...project.permissions.resources, manageComputer: false },
+	},
+};
+/** The bot, to someone who may not change its computer. */
+const botReadOnly: Bot = {
+	...bot,
+	permissions: {
+		...bot.permissions,
+		resources: { ...bot.permissions.resources, manageComputer: false },
+	},
+};
 const networkUrl = (projectId: string) =>
 	`${import.meta.env.VITE_API_URL}/projects/${projectId}/computer/network`;
 
@@ -63,7 +80,7 @@ const meta = preview.meta({
 	component: ProjectComputerNetworkSettings,
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
-	args: { owner: { project }, canManage: true },
+	args: { owner: { project } },
 	decorators: [
 		(Story, context) => (
 			<Preview key={context.id}>
@@ -117,7 +134,7 @@ export const FromTheWorkspace = meta.story({
 
 /** Someone who may not change the project's hosts sees them, without adding or removing. */
 export const ReadOnly = meta.story({
-	args: { canManage: false },
+	args: { owner: { project: projectReadOnly } },
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("api.stripe.com")).toBeVisible();
 		await expect(canvas.queryByLabelText("Add host")).toBeNull();
@@ -128,7 +145,7 @@ export const ReadOnly = meta.story({
 
 /** A bot's computer, its default project's, is worded as the bot's. */
 export const ABotsComputer = meta.story({
-	args: { owner: { bot }, canManage: false },
+	args: { owner: { bot: botReadOnly } },
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText(/This bot's computer connects/)).toBeVisible();
 		await expect(canvas.getByText(/someone who manages the bot decides/)).toBeVisible();

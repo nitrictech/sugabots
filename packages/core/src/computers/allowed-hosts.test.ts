@@ -3,12 +3,12 @@ import {
 	allowedHost,
 	blockedHost,
 	projectAllowedHost,
-	project as projectTable,
 	user,
 	workspace,
 	workspaceMember,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { allowedHostsOf, reachOf, TRUSTED_HOSTS } from "./allowed-hosts.ts";
 import type { Computers } from "./computers.ts";
 
@@ -44,10 +44,9 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 		workspaceId = space.id;
 		await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId: owner.id }));
 		const aProject = async (name: string) => {
-			const [made] = await onDatabase((db) =>
-				db.insert(projectTable).values({ workspaceId, name, slug: name.toLowerCase() }).returning(),
+			const made = await onDatabase((db) =>
+				seedProject(db, { workspaceId, name, slug: name.toLowerCase() }),
 			);
-			if (!made) throw new Error("fixture");
 			return { workspaceId, projectId: made.id };
 		};
 		builders = await aProject("Builders");

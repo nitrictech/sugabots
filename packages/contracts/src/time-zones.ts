@@ -15,7 +15,7 @@ export const timeZoneSchema = Schema.String.check(
 );
 export type TimeZone = typeof timeZoneSchema.Type;
 
-/** The time zone of a workspace created without one, and of every workspace made before they had one. */
+/** The time zone of a workspace created without one. */
 export const DEFAULT_TIME_ZONE = "UTC";
 
 function isTimeZone(zone: string): boolean {

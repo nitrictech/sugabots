@@ -1,26 +1,19 @@
-import { Plus } from "lucide-react";
-import { useState } from "react";
 import { useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import {
-	ownerName,
-	type ResourceOwner,
-	resourcePermissions,
-	resourceProjectId,
-} from "@/lib/resource-owner.tsx";
+import { ownerName, type ResourceOwner, resourceProjectId } from "@/lib/resource-owner.tsx";
 import { OwnerCrumb, OwnerPageCrumb } from "@/shell/BotCrumb.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 import { SettingsPage } from "@/ui/settings-page.tsx";
 import { ConnectionPage } from "./ConnectionPage.tsx";
-import { ConnectionsSettings } from "./ConnectionsSettings.tsx";
+import { ConnectionsSettings, ProjectBotsConnections } from "./ConnectionsSettings.tsx";
 
 /**
  * A bot's or a project's connections, as one of its own pages beside its
  * threads: the services it is connected to, each with what its tools are set
  * to, and adding another; or, with `connectionId`, that one on its own page.
- * A bot's are its default project's.
+ * A bot's are its default project's. A project's page shows its bots' own
+ * too, which they use there as well.
  */
 export function ConnectionsPage({
 	owner,
@@ -40,41 +33,15 @@ export function ConnectionsPage({
 }
 
 function ConnectionList({ owner, signInError }: { owner: ResourceOwner; signInError?: string }) {
-	const [adding, setAdding] = useState(false);
-	const name = ownerName(owner);
-	const canManage = resourcePermissions(owner).manageConnections;
 	return (
 		<Page
 			title="Connections"
 			parent={<OwnerCrumb owner={owner} />}
 			place={{ kind: "owner", owner }}
-			actions={
-				canManage && (
-					<IconButton
-						label="Add connection"
-						variant="bar"
-						onClick={() => setAdding(true)}
-						className={FLOATING_ON_PHONE}
-					>
-						<Plus size={16} strokeWidth={1.75} />
-					</IconButton>
-				)
-			}
 		>
-			<SettingsPage
-				description={
-					"bot" in owner
-						? `The services ${name} uses, as whoever connected each one.`
-						: `The services the bots in ${name} use there, as whoever connected each one.`
-				}
-			>
-				<ConnectionsSettings
-					owner={owner}
-					canManage={canManage}
-					signInError={signInError}
-					adding={adding}
-					onAddingChange={setAdding}
-				/>
+			<SettingsPage>
+				<ConnectionsSettings owner={owner} signInError={signInError} />
+				{"project" in owner && <ProjectBotsConnections project={owner.project} />}
 			</SettingsPage>
 		</Page>
 	);

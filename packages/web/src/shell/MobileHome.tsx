@@ -24,21 +24,16 @@ const HOME_ROW = sidebarRow({ phone: true });
 function MobilePage({
 	title,
 	action,
-	className,
 	children,
 }: {
 	title: string;
 	action?: ReactNode;
-	className?: string;
 	children: ReactNode;
 }) {
 	return (
 		<section
 			aria-label={title}
-			className={cn(
-				"@container/sidebar flex min-h-0 min-w-0 flex-1 flex-col bg-list pt-safe-or-3",
-				className,
-			)}
+			className="@container/sidebar flex min-h-0 min-w-0 flex-1 flex-col bg-list pt-safe-or-3"
 		>
 			<header className="flex items-center gap-2 pt-4.5 pr-3 pb-3 pl-4.5">
 				<h1 className="m-0 min-w-0 flex-1 truncate font-semibold text-xl text-foreground tracking-tight">
@@ -57,14 +52,14 @@ function MobilePage({
  * Home on a phone: the Personal Assistant, the projects the person is in and
  * the bots they pinned, each opening its threads.
  */
-export function MobileHome({ className }: { className?: string }) {
+export function MobileHome() {
 	const { data: projects } = useProjects();
 	const { bots } = useBots();
 	const assistant = useAssistant();
 	const { markerOf } = useProjectMarkers();
 	const pinned = sidebarBots(bots ?? []);
 	return (
-		<MobilePage title="Home" className={className}>
+		<MobilePage title="Home">
 			{assistant && (
 				<Link {...botLink(assistant)} className={HOME_ROW}>
 					<BotAvatar

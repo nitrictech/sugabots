@@ -8,7 +8,6 @@ import { EventStore } from "../../../database/events/store.ts";
 import {
 	bot,
 	collaboration,
-	conversationSummary,
 	event,
 	message,
 	placedConversation,
@@ -21,7 +20,9 @@ import {
 	workspaceMember,
 } from "../../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../../database/testing.ts";
+import { defaultProjectOf } from "../../../workspaces/projects/project-reads.ts";
 import { onPostgresAs } from "../../../workspaces/testing.ts";
+import { ChatView } from "../../chats/chat-view.ts";
 import { Chats } from "../../chats/chats.ts";
 import { startBotThread } from "../../chats/testing.ts";
 import { ConversationView } from "../../conversation-view.ts";
@@ -56,6 +57,8 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		onPostgresAs(userId)(Context.get(conversations, ConversationView.Service));
 	const chatsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
+	const threadsAs = (userId: string) =>
+		onPostgresAs(userId)(Context.get(conversations, ChatView.Service));
 	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
 	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
 	let workspaceId: string;
@@ -193,8 +196,10 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		]);
 		expect(child?.participants.map(({ id }) => id)).toEqual([host.id, helper.id]);
 		// The collaboration's thread hangs off the asking thread rather than being listed beside it.
-		const visibleIds = (await conversationsAs(memberId).list(workspaceId)).map(({ id }) => id);
-		expect(visibleIds).toEqual([threadId]);
+		const { threads } = await threadsAs(memberId).threads(
+			await runOnPostgres(defaultProjectOf(host.id)),
+		);
+		expect(threads.map(({ conversation }) => conversation.id)).toEqual([threadId]);
 		expect(await runOnPostgres(runningTurns(opened.collaboration.conversationId))).toMatchObject([
 			{ request: { botId: helper.id } },
 		]);
@@ -377,7 +382,7 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		).toHaveLength(0);
 	});
 
-	it("keeps a collaboration in model history when the thread has a summary", async () => {
+	it("keeps a collaboration in model history", async () => {
 		const opened = await collaborations.open({ from: from(6), to: helper.name, brief: "Look" });
 		await collaborations.answer({
 			conversationId: opened.collaboration.conversationId,
@@ -404,13 +409,6 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 				.where(eq(turn.id, reply.turnId)),
 		);
 		await runOnPostgres(releaseTurn(reply.run));
-		await onDatabase((db) =>
-			db.insert(conversationSummary).values({
-				conversationId: threadId,
-				sourceMessageId: reply.messageId,
-				content: "The release was checked.",
-			}),
-		);
 		await chatsAs(memberId).post({
 			conversationId: threadId,
 			messageId: crypto.randomUUID(),
@@ -420,7 +418,6 @@ describe.skipIf(!process.env.DATABASE_URL)("collaboration, against Postgres", as
 		const next = await openReply(threadId, host.id);
 		const covered = next.context.messages.find(({ id }) => id === reply.messageId);
 
-		expect(next.context).not.toHaveProperty("summary");
 		expect(covered?.parts).toEqual([
 			{ type: "text", text: "I asked for help." },
 			expect.objectContaining({

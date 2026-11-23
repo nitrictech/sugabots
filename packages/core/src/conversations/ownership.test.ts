@@ -10,7 +10,6 @@ import { shippedSourceFiles } from "../shipped-source.test-support.ts";
  */
 const OWNERS: Record<string, readonly string[]> = {
 	conversation: ["core/src/conversations/repository/repository.ts"],
-	thread: ["core/src/conversations/repository/repository.ts"],
 	projectThread: ["core/src/conversations/repository/repository.ts"],
 	automationFeed: ["core/src/conversations/repository/repository.ts"],
 	systemConversation: ["core/src/conversations/repository/repository.ts"],
@@ -29,8 +28,6 @@ const OWNERS: Record<string, readonly string[]> = {
 	automation: ["core/src/conversations/automations/repository.ts"],
 	automationTrigger: ["core/src/conversations/automations/repository.ts"],
 	automationRun: ["core/src/conversations/automations/repository.ts"],
-	conversationSummary: ["core/src/conversations/summaries/repository.ts"],
-	botSummary: ["core/src/conversations/summaries/repository.ts"],
 	conversationCompaction: ["core/src/conversations/compaction/repository.ts"],
 	conversationRead: ["core/src/conversations/repository/repository.ts"],
 	turn: ["core/src/conversations/turns/repository.ts"],

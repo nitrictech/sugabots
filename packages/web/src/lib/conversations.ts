@@ -15,7 +15,6 @@ import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { refreshEveryApprovalInbox } from "@/lib/chats.ts";
 import { mergeConversationMessages } from "@/lib/conversation-events.ts";
-import { NotReadyError } from "@/lib/failure.ts";
 
 /**
  * A message fetched while it streams is behind the deltas already applied: the
@@ -99,15 +98,13 @@ export function useConversation(conversationId: string | undefined) {
 	const options = conversationQuery(conversationId);
 	const query = useQuery(options);
 	const older = useMutation({
-		mutationFn: async (cursor: string) => {
-			if (!conversationId) throw new NotReadyError();
-			return Effect.runPromise(
+		mutationFn: ({ loadedId, cursor }: { loadedId: string; cursor: string }) =>
+			Effect.runPromise(
 				client.api.conversations.get({
-					params: { conversationId },
+					params: { conversationId: loadedId },
 					query: { cursor, limit: DEFAULT_CONVERSATION_HISTORY_LIMIT },
 				}),
-			);
-		},
+			),
 		onSuccess: (page) => {
 			queries.setQueryData(options.queryKey, (current) =>
 				current
@@ -126,9 +123,9 @@ export function useConversation(conversationId: string | undefined) {
 		isLoadingOlder: older.isPending,
 		loadOlderError: older.error,
 		loadOlder: async () => {
-			if (query.data?.olderMessagesCursor) {
-				await older.mutateAsync(query.data.olderMessagesCursor);
-			}
+			const cursor = query.data?.olderMessagesCursor;
+			if (!query.data || !cursor) return;
+			await older.mutateAsync({ loadedId: query.data.conversation.id, cursor });
 		},
 	};
 }

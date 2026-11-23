@@ -12,13 +12,6 @@ const ACCESSES = ["allow", "ask", "off"] as const;
 
 const toolOptions = ACCESSES.map((value) => ({ value, label: TOOL_ACCESS_LABELS[value] }));
 
-/** How many of a connection's tools are at each setting, in the order the sentence gives them. */
-const COUNTED: { access: ConnectionAccess; words: string }[] = [
-	{ access: "allow", words: "allowed" },
-	{ access: "ask", words: "ask first" },
-	{ access: "off", words: "off" },
-];
-
 /**
  * What a connection's tools amount to, in a line: the setting they share, or
  * how many are at each when they differ. Undefined while it has no tools.
@@ -34,8 +27,8 @@ export function accessSummaryText(counts: ToolAccessCounts): string | undefined 
 		case "off":
 			return "Off for every bot";
 		case undefined: {
-			const parts = COUNTED.filter(({ access }) => counts[access] > 0).map(
-				({ access, words }) => `${counts[access]} ${words}`,
+			const parts = ACCESSES.filter((access) => counts[access] > 0).map(
+				(access) => `${counts[access]} ${TOOL_ACCESS_LABELS[access].toLowerCase()}`,
 			);
 			return `Custom: ${parts.join(", ")}`;
 		}

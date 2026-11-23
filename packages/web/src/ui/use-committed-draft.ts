@@ -30,7 +30,6 @@ export function useCommittedDraft(
 
 	return {
 		draft,
-		setDraft,
 		fieldProps: {
 			value: draft,
 			onChange: (event: { currentTarget: { value: string } }) =>

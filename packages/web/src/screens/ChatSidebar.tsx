@@ -4,12 +4,13 @@ import { createContext, type ReactNode, type Ref, use, useState } from "react";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import { BackButton } from "@/ui/back-button.tsx";
+import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { SheetHandle } from "@/ui/dialog.tsx";
 
 /**
- * The column beside a chat: Details, or a collaboration or automation run opened
- * from its line. Only a wide screen has room for both side by side; on a
+ * The column beside a chat: its Details, a collaboration opened from its line,
+ * or an automation's panel. Only a wide screen has room for both side by side; on a
  * tablet it slides over the dimmed chat from the right, and on a phone it
  * covers the chat or, as a `sheet`, rises from the bottom over it.
  *
@@ -230,13 +231,14 @@ export function Expandable<Item>({
 /** A small text button under something folded, opening the rest of it or folding it again. */
 export function ShowMore({ open, onToggle }: { open: boolean; onToggle: () => void }) {
 	return (
-		<button
-			type="button"
+		<Button
+			variant="quiet"
+			size="text"
 			aria-expanded={open}
 			onClick={onToggle}
-			className="focus-ring self-start rounded-sm text-muted-foreground text-xs hover:text-foreground"
+			className="self-start rounded-sm"
 		>
 			{open ? "Show less" : "Show more"}
-		</button>
+		</Button>
 	);
 }

@@ -58,7 +58,6 @@ export function NewProjectDialog({
 				description: description.trim() || null,
 				leadBotId,
 			});
-			if (!project) throw new Error("project creation returned no project");
 			await onCreated(project);
 		} catch {
 			return;

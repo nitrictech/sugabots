@@ -2,9 +2,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	conversationUpdateEventSchema,
-	durableEventTypeSchema,
 	EVENT_VERSION,
-	ephemeralEventTypeSchema,
 	eventPayloadSchemas,
 	isDurableEventType,
 	streamEvent,
@@ -17,14 +15,6 @@ describe("durability", () => {
 	it("persists state changes and not progress", () => {
 		expect(isDurableEventType("message.created")).toBe(true);
 		expect(isDurableEventType("message.delta")).toBe(false);
-	});
-
-	it("declares no type both durable and ephemeral", () => {
-		const durable = durableEventTypeSchema.literals;
-		const ephemeral = ephemeralEventTypeSchema.literals;
-
-		expect(ephemeral.some(isDurableEventType)).toBe(false);
-		expect(new Set([...durable, ...ephemeral]).size).toBe(durable.length + ephemeral.length);
 	});
 
 	it("does not declare message-routed events", () => {

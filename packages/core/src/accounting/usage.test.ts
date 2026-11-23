@@ -131,7 +131,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 			{ startedAt: new Date("2026-09-10T02:00:00Z"), botId: accountManagerId, ...priced(2) },
 			{
 				startedAt: new Date("2026-09-10T03:00:00Z"),
-				purpose: "summary",
+				purpose: "compaction",
 				botId: null,
 				...priced(0.25),
 			},
@@ -165,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				unpricedRequests: 0,
 			},
 		]);
-		// The bots' requests and the Summariser's to the same model are one line.
+		// The bots' requests and Compaction's to the same model are one line.
 		expect(usage.models).toEqual([
 			expect.objectContaining({
 				model: "claude-sonnet",

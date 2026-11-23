@@ -1,5 +1,4 @@
 import { Outlet } from "@tanstack/react-router";
-import { cn } from "cn";
 import type { ReactNode } from "react";
 import { useAppBadge } from "@/lib/app-badge.ts";
 import { useEnsuredAssistant } from "@/lib/bots.ts";
@@ -57,10 +56,6 @@ export function Shell() {
 }
 
 /** The conversation column: everything to the right of the sidebar and any list beside it. */
-export function Panes({ children, className }: { children: ReactNode; className?: string }) {
-	return (
-		<main className={cn("relative flex min-w-0 flex-1 flex-col bg-background", className)}>
-			{children}
-		</main>
-	);
+export function Panes({ children }: { children: ReactNode }) {
+	return <main className="relative flex min-w-0 flex-1 flex-col bg-background">{children}</main>;
 }

@@ -90,25 +90,29 @@ function BotRoute() {
 	if (!bot.permissions.talk && !managing) {
 		return (
 			<Panes>
-				<EmptyState title={bot.name}>
-					<span className="flex flex-col items-center gap-3">
-						<span>This is someone else's private bot, so its threads are theirs alone.</span>
-						{bot.permissions.update && (
-							<Link {...botSettingsLink(bot)} className="text-link underline">
-								Open its settings
-							</Link>
-						)}
-						{bot.permissions.resources.manageConnections && (
-							<Link {...botConnectionsLink(bot)} className="text-link underline">
-								Open its connections
-							</Link>
-						)}
-						{bot.permissions.resources.manageAutomations && (
-							<Link {...botAutomationsLink(bot)} className="text-link underline">
-								Open its automations
-							</Link>
-						)}
-					</span>
+				<EmptyState
+					title={bot.name}
+					actions={
+						<>
+							{bot.permissions.update && (
+								<Link {...botSettingsLink(bot)} className="text-link underline">
+									Open its settings
+								</Link>
+							)}
+							{bot.permissions.resources.manageConnections && (
+								<Link {...botConnectionsLink(bot)} className="text-link underline">
+									Open its connections
+								</Link>
+							)}
+							{bot.permissions.resources.manageAutomations && (
+								<Link {...botAutomationsLink(bot)} className="text-link underline">
+									Open its automations
+								</Link>
+							)}
+						</>
+					}
+				>
+					This is someone else's private bot, so its threads are theirs alone.
 				</EmptyState>
 			</Panes>
 		);

@@ -1,6 +1,6 @@
 import type { ApprovalRequest } from "@sugabots/contracts";
 import { useConnectionLooks } from "@/lib/connections.ts";
-import { formatListTime } from "@/lib/list-time.ts";
+import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { useProjects } from "@/lib/projects.ts";
 import { connectionLabel, splitToolKey, stepLabel } from "@/lib/tool-names.ts";
 
@@ -27,7 +27,7 @@ export function useAskedIn(request: ApprovalRequest) {
 	const project = projects?.find((candidate) => candidate.id === request.projectId);
 	const askedIn = [
 		project && `in ${project.name}`,
-		`at ${formatListTime(new Date(request.call.startedAt), new Date())}`,
+		formatTimeAfterVerb(new Date(request.call.startedAt), new Date()),
 	]
 		.filter(Boolean)
 		.join(" ");

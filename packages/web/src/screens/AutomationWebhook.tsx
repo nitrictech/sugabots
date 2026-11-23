@@ -234,7 +234,6 @@ export function WebhookGroups({
 					onChangeAuth={onChangeAuth}
 					deliveryIdHeader={deliveryIdHeader}
 					onChangeDeliveryIdHeader={onChangeDeliveryIdHeader}
-					hasSecret={saved.kind !== "none"}
 					savedSecret={saved.kind === "set" ? saved.secret : ""}
 				/>
 			) : (
@@ -440,8 +439,7 @@ function CommittedFieldRow({
 /**
  * An existing automation's auth and secret, for someone who manages automations.
  * The secret's field starts with the saved secret, hidden until Show, or blank
- * when there is none to show, which an old bearer token kept only as a hash
- * has. What is typed saves when the field is left or Enter is pressed, and
+ * when there is none. What is typed saves when the field is left or Enter is pressed, and
  * Escape puts the saved one back. Leaving it blank removes a shown secret, so
  * the address alone runs the automation.
  */
@@ -451,7 +449,6 @@ function SecretGroup({
 	onChangeAuth,
 	deliveryIdHeader,
 	onChangeDeliveryIdHeader,
-	hasSecret,
 	savedSecret,
 }: {
 	address: TriggerAddress;
@@ -459,8 +456,7 @@ function SecretGroup({
 	onChangeAuth: (auth: WebhookAuth) => void;
 	deliveryIdHeader: string | null | undefined;
 	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
-	hasSecret: boolean;
-	/** Blank when the automation has none, or has only a hash of one. */
+	/** Blank when the automation has none. */
 	savedSecret: string;
 }) {
 	const actions = useAutomationActions();
@@ -475,7 +471,7 @@ function SecretGroup({
 	);
 
 	return (
-		<SettingsGroup note={hasSecret ? authNote(auth) : NO_SECRET_NOTE}>
+		<SettingsGroup note={savedSecret !== "" ? authNote(auth) : NO_SECRET_NOTE}>
 			<AuthRows
 				auth={auth}
 				onChange={onChangeAuth}

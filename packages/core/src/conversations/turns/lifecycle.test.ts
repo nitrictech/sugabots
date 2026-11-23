@@ -169,25 +169,6 @@ describe("ending a run", () => {
 });
 
 describe("cancelling", () => {
-	it("tells a waiting turn's workflow, which records the cancellation", () => {
-		expect(transition(turn({ status: "waiting" }), TurnEvent.RequestCancel())).toEqual({
-			_tag: "Next",
-			state: turn({ status: "waiting", cancelRequested: true }),
-			followUp: FollowUp.SignalOwner({ owner }),
-		});
-	});
-
-	it("asks a running turn's workflow to stop, once", () => {
-		expect(transition(turn(), TurnEvent.RequestCancel())).toEqual({
-			_tag: "Next",
-			state: turn({ cancelRequested: true }),
-			followUp: FollowUp.AnnounceCancelRequest(),
-		});
-		expect(transition(turn({ cancelRequested: true }), TurnEvent.RequestCancel())._tag).toBe(
-			"Refused",
-		);
-	});
-
 	it("records a waiting turn as cancelled when its workflow stops waiting", () => {
 		expect(
 			transition(turn({ status: "waiting", checkpointed: true }), TurnEvent.CancelWaiting()),

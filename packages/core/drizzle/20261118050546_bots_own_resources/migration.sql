@@ -1,13 +1,3 @@
--- Every bot starts with a new computer, so each `pod`'s computer is destroyed at
--- their providers first, by `destroy-pod-computers` run against this database
--- before upgrading. A `sandbox` row is the only way anything finds a machine at
--- its provider, so this stops while any is left rather than lose them.
-DO $$
-BEGIN
-	IF EXISTS (SELECT 1 FROM "sandbox") THEN
-		RAISE EXCEPTION 'The pods'' computers are still recorded in the "sandbox" table. Stop Sugabots and run `node packages/core/src/computers/destroy-pod-computers.ts` (in the Docker image: `docker compose run --rm -e SUGABOTS_SKIP_MIGRATIONS=true sugabots node packages/core/src/computers/destroy-pod-computers.ts`) to destroy them at their providers, then start the new version. For a computer it reports it could not destroy, delete the machine in its provider''s console, then its row with DELETE FROM "sandbox" WHERE "provider_sandbox_id" = ''<id>''.';
-	END IF;
-END $$;--> statement-breakpoint
 CREATE TABLE "sandbox_agent_allowed_host" (
 	"workspace_id" uuid NOT NULL,
 	"agent_id" uuid,

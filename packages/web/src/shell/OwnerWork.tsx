@@ -9,12 +9,14 @@ import {
 	LoaderCircle,
 	MessageSquare,
 	RotateCcw,
+	Zap,
 } from "lucide-react";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { useProjectRuns } from "@/lib/automations.ts";
-import { lastMovedAt, useProjectThreads, useSetDone } from "@/lib/chats.ts";
+import { lastMovedAt, needsViewer, useProjectThreads, useSetDone } from "@/lib/chats.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { countOf } from "@/lib/name-list.ts";
+import { useNow } from "@/lib/now.ts";
 import { OwnerLink, type ResourceOwner, resourceProjectId } from "@/lib/resource-owner.tsx";
 import { useSession } from "@/lib/session.ts";
 import { useHideSidebar } from "@/lib/sidebar-hidden.tsx";
@@ -33,8 +35,9 @@ const ENTRIES_SHOWN = 8;
 
 /**
  * A bot's or a project's work: the threads that need the viewer, then its
- * open threads, its automations' runs and its done threads, each newest first
- * under a heading that folds it away. `search` narrows every part to what has
+ * open threads and its automations' runs, each newest first under a heading
+ * that folds it away, and its done threads at the foot, folded until opened,
+ * with `className` styling the scrolling part above them. `search` narrows every part to what has
  * it in a title or a name, and unfolds everything it finds. `work` is
  * `useOwnerWork(owner)`, read once by the page that shows it.
  */
@@ -57,12 +60,7 @@ export function OwnerWork({
 	// A run open as a page of its automation's, marked in the list.
 	const openRun = useSearch({ strict: false, select: (params) => params.itemPage });
 	const { threads, runs } = work;
-	const needsYou = threads.filter(
-		(row) =>
-			row.conversation.doneAt === null &&
-			(row.needsApproval || row.mentionsYou) &&
-			threadMatches(row, search),
-	);
+	const needsYou = threads.filter((row) => needsViewer(row) && threadMatches(row, search));
 	const open = threads
 		.filter(
 			(row) =>
@@ -81,71 +79,89 @@ export function OwnerWork({
 		shownRuns.length === 0 &&
 		done.length === 0;
 	return (
-		<div className={cn("flex flex-col gap-3", className)}>
-			{needsYou.length > 0 && (
-				<section className="flex flex-col gap-1">
-					<h2 className="m-0 px-2 pb-1 font-normal text-subtle-foreground text-xs">Needs you</h2>
-					<ul className="m-0 flex list-none flex-col gap-px p-0">
-						{needsYou.map((row) => (
+		<div className="flex min-h-0 flex-1 flex-col">
+			<div className={cn("flex flex-col gap-3", className)}>
+				{needsYou.length > 0 && (
+					<section className="flex flex-col gap-1">
+						<h2 className="m-0 px-2 pb-1 font-normal text-subtle-foreground text-xs">Needs you</h2>
+						<ul className="m-0 flex list-none flex-col gap-px p-0">
+							{needsYou.map((row) => (
+								<li key={row.conversation.id}>
+									<NeedsYouRow
+										row={row}
+										owner={owner}
+										selected={row.conversation.id === selectedConversationId}
+									/>
+								</li>
+							))}
+						</ul>
+					</section>
+				)}
+				{/* Sized as a row of the sidebar, as the pages above it are. */}
+				{nothing && (
+					<p className="m-0 flex h-8 items-center gap-2.5 pr-1.5 pl-2 text-sm text-subtle-foreground">
+						<MessageSquare aria-hidden size={15} strokeWidth={1.75} className="shrink-0" />
+						{searching ? "Nothing matches" : "No threads yet"}
+					</p>
+				)}
+				{(open.length > 0 || work.threadsFailed) && (
+					<WorkSection
+						title="Threads"
+						icon={<MessageSquare />}
+						entries={open}
+						searching={searching}
+						note={work.threadsFailed ? "Could not load these threads." : undefined}
+					>
+						{(row) => (
 							<li key={row.conversation.id}>
-								<NeedsYouRow
+								<ThreadEntry
 									row={row}
 									owner={owner}
+									userId={userId}
 									selected={row.conversation.id === selectedConversationId}
 								/>
 							</li>
-						))}
-					</ul>
-				</section>
-			)}
-			{/* Sized as a row of the sidebar, as the pages above it are. */}
-			{nothing && (
-				<p className="m-0 flex h-8 items-center gap-2.5 pr-1.5 pl-2 text-sm text-subtle-foreground">
-					<MessageSquare aria-hidden size={15} strokeWidth={1.75} className="shrink-0" />
-					{searching ? "Nothing matches" : "No threads yet"}
-				</p>
-			)}
-			{(open.length > 0 || work.threadsFailed) && (
-				<WorkSection
-					title="Threads"
-					entries={open}
-					searching={searching}
-					note={work.threadsFailed ? "Could not load these threads." : undefined}
-				>
-					{(row) => (
-						<li key={row.conversation.id}>
-							<ThreadEntry
-								row={row}
-								owner={owner}
-								userId={userId}
-								selected={row.conversation.id === selectedConversationId}
-							/>
-						</li>
-					)}
-				</WorkSection>
-			)}
-			{shownRuns.length > 0 && (
-				<WorkSection title="Automation runs" entries={shownRuns} searching={searching}>
-					{(run) => (
-						<li key={run.id}>
-							<RunEntry run={run} owner={owner} selected={run.conversationId === openRun} />
-						</li>
-					)}
-				</WorkSection>
-			)}
+						)}
+					</WorkSection>
+				)}
+				{shownRuns.length > 0 && (
+					<WorkSection
+						title="Automation runs"
+						icon={<Zap />}
+						entries={shownRuns}
+						searching={searching}
+					>
+						{(run) => (
+							<li key={run.id}>
+								<RunEntry run={run} owner={owner} selected={run.conversationId === openRun} />
+							</li>
+						)}
+					</WorkSection>
+				)}
+			</div>
+			{/* Done threads fold away at the foot, under everything still going. */}
 			{done.length > 0 && (
-				<WorkSection title="Done" entries={done} searching={searching}>
-					{(row) => (
-						<li key={row.conversation.id}>
-							<DoneEntry
-								row={row}
-								owner={owner}
-								userId={userId}
-								selected={row.conversation.id === selectedConversationId}
-							/>
-						</li>
-					)}
-				</WorkSection>
+				<div className="shrink-0 border-border border-t px-3 py-1">
+					<WorkSection
+						title="Done"
+						icon={<Check />}
+						entries={done}
+						searching={searching}
+						startsOpen={false}
+						listClassName="max-h-72 overflow-y-auto"
+					>
+						{(row) => (
+							<li key={row.conversation.id}>
+								<DoneEntry
+									row={row}
+									owner={owner}
+									userId={userId}
+									selected={row.conversation.id === selectedConversationId}
+								/>
+							</li>
+						)}
+					</WorkSection>
+				</div>
 			)}
 		</div>
 	);
@@ -158,19 +174,27 @@ export function OwnerWork({
  */
 function WorkSection<Entry>({
 	title,
+	icon,
 	entries,
 	searching,
 	note,
+	startsOpen = true,
+	listClassName,
 	children,
 }: {
 	title: string;
+	/** The mark before its heading, as the sidebar's pages have. */
+	icon: ReactNode;
+	/** Whether it starts unfolded; folded starts it closed until opened. */
+	startsOpen?: boolean;
+	listClassName?: string;
 	entries: readonly Entry[];
 	searching: boolean;
 	/** Said under the entries, such as why some could not be loaded. */
 	note?: string;
 	children: (entry: Entry) => ReactNode;
 }) {
-	const [open, setOpen] = useState(true);
+	const [open, setOpen] = useState(startsOpen);
 	const [allShown, setAllShown] = useState(false);
 	const unfolded = open || searching;
 	const shown = allShown || searching ? entries : entries.slice(0, ENTRIES_SHOWN);
@@ -180,7 +204,8 @@ function WorkSection<Entry>({
 			<h2 className="m-0 font-normal text-xs">
 				{searching ? (
 					// A search shows everything it found, so there is nothing to fold.
-					<span className="flex h-7 items-center gap-2 px-2 text-subtle-foreground">
+					<span className="flex h-7 items-center gap-2 px-2 text-subtle-foreground [&_svg]:size-3.25">
+						{icon}
 						<span id={labelId} className="flex-1">
 							{title}
 						</span>
@@ -192,8 +217,9 @@ function WorkSection<Entry>({
 						size="text"
 						aria-expanded={open}
 						onClick={() => setOpen(!open)}
-						className="h-7 w-full gap-2 rounded-sm px-2"
+						className="h-7 w-full gap-2 rounded-sm px-2 [&_svg]:size-3.25"
 					>
+						{icon}
 						<span id={labelId} className="flex-1 text-left">
 							{title}
 						</span>
@@ -210,7 +236,7 @@ function WorkSection<Entry>({
 				)}
 			</h2>
 			{unfolded && (
-				<ul className="m-0 flex list-none flex-col gap-px p-0">
+				<ul className={cn("m-0 flex list-none flex-col gap-px p-0", listClassName)}>
 					{shown.map(children)}
 					{note && <li className="px-2 py-1 text-subtle-foreground text-xs">{note}</li>}
 					{!searching && entries.length > ENTRIES_SHOWN && (
@@ -292,8 +318,8 @@ function NeedsYouRow({
 
 /**
  * One of the open threads, on three lines: how many messages it holds, with
- * when it last moved at the end; its title; then what its bots are doing, with
- * the faces of who is talking in it at the end, left out when there is
+ * when it last moved at the end; its title; then the faces of who is talking
+ * in it, with what its bots are doing at the end, left out when there is
  * neither. Pointed at, Done takes the time's place.
  */
 function ThreadEntry({
@@ -353,10 +379,14 @@ function ThreadEntry({
 				<span className="sr-only">{talking}</span>
 				{(row.activity || people.length > 0) && (
 					<span className="order-3 flex h-4 min-w-0 items-center justify-between gap-1.5">
-						{row.activity && <ThreadActivityLabel activity={row.activity} />}
 						{people.length > 0 && (
-							<span aria-hidden className="ml-auto flex shrink-0">
+							<span aria-hidden className="flex shrink-0">
 								<ParticipantFaces participants={people} shown={4} size={16} surface="var(--rail)" />
+							</span>
+						)}
+						{row.activity && (
+							<span className="ml-auto flex min-w-0">
+								<ThreadActivityLabel activity={row.activity} />
 							</span>
 						)}
 					</span>
@@ -493,7 +523,6 @@ function threadMatches(row: ListedThread, search: string): boolean {
 	);
 }
 
-/** How many messages a thread holds, as a quiet count with a speech mark. */
 /**
  * What a thread's bots are doing, as its row says it: "Working 20m" with a
  * spinner while a turn works on a reply, "Waiting 2m" with a clock while one
@@ -533,21 +562,11 @@ function ThreadActivityLabel({ activity }: { activity: ThreadActivity }) {
 
 /** How long since `since`, an ISO time, as "20m", counting up while shown. */
 function Elapsed({ since }: { since: string }) {
-	const now = useMinuteClock();
+	const now = useNow(MINUTE_MS);
 	return <>{formatElapsedMinutes(now - Date.parse(since))}</>;
 }
 
 const MINUTE_MS = 60_000;
-
-/** The time now, in epoch milliseconds, again each minute. */
-function useMinuteClock(): number {
-	const [now, setNow] = useState(Date.now);
-	useEffect(() => {
-		const timer = setInterval(() => setNow(Date.now()), MINUTE_MS);
-		return () => clearInterval(timer);
-	}, []);
-	return now;
-}
 
 const MINUTES_IN_HOUR = 60;
 const HOURS_IN_DAY = 24;
@@ -562,6 +581,7 @@ function formatElapsedMinutes(ms: number): string {
 	return `${Math.floor(hours / HOURS_IN_DAY)}d`;
 }
 
+/** How many messages a thread holds, as a quiet count with a speech mark. */
 function MessageCount({ count }: { count: number }) {
 	return (
 		<span className="flex shrink-0 items-center gap-1 text-subtle-foreground text-xs tabular-nums">

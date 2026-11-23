@@ -4,11 +4,11 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { type AuthApi, createAuthApi } from "./auth.ts";
 import { createEventsApi, type EventsApi } from "./events.ts";
-import { defaultTokenStore, type TokenStore } from "./tokens.ts";
+import { memoryTokenStore, type TokenStore } from "./tokens.ts";
 
 /**
- * The typed API client. Web, Electron and React Native all reach the API
- * through this and nothing else.
+ * The typed API client. The web app reaches the API through this and nothing
+ * else.
  *
  * `api` is derived from the API's definition in `@sugabots/contracts/http`,
  * which the server implements, so an endpoint added there appears here with
@@ -22,12 +22,7 @@ export type { AuthApi } from "./auth.ts";
 export { isEmailUnverified, isResetLinkInvalid } from "./auth.ts";
 export { failureForStatus, failureFromResponse, isApiFailure } from "./errors.ts";
 export type { EventStream, EventStreamOptions, EventsApi } from "./events.ts";
-export {
-	defaultTokenStore,
-	localStorageTokenStore,
-	memoryTokenStore,
-	type TokenStore,
-} from "./tokens.ts";
+export { memoryTokenStore, type TokenStore } from "./tokens.ts";
 
 export type Api = HttpApiClient.ForApi<typeof ApiDefinition>;
 
@@ -60,7 +55,6 @@ export type ClientOptions = ClientBaseOptions &
 
 export interface Client {
 	readonly baseUrl: string;
-	readonly authMode: "bearer" | "cookie";
 	/** The routes, typed from the API. */
 	readonly api: Api;
 	/** Signing up, in and out. Workspaces and invitations are routes in `api`. */
@@ -82,11 +76,10 @@ export function createClient(options: ClientOptions): Client {
 	}
 
 	const root = baseUrl.replace(/\/+$/, "");
-	const bearerTokens = authMode === "bearer" ? (options.tokens ?? defaultTokenStore()) : undefined;
+	const bearerTokens = authMode === "bearer" ? (options.tokens ?? memoryTokenStore()) : undefined;
 
 	return {
 		baseUrl: root,
-		authMode,
 		api: createApi({ baseUrl: root, fetch, tokens: bearerTokens }),
 		auth: createAuthApi({ baseUrl: root, tokens: bearerTokens, fetch, origin }),
 		events: createEventsApi({ baseUrl: root, tokens: bearerTokens, fetch }),

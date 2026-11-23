@@ -28,7 +28,8 @@ export interface Session {
 }
 
 /**
- * How long to keep asking before admitting the API is not there.
+ * How long to wait before each retry, and so how long to keep asking before
+ * admitting the API is not there.
  *
  * A request that never reached the API is not an answer, and the commonest
  * reason for one is that the API is briefly not listening: it restarts on every
@@ -37,7 +38,6 @@ export interface Session {
  * broken app. These retries cover a restart; past them something is actually
  * wrong and is worth saying so.
  */
-const UNREACHABLE_RETRIES = 6;
 const RETRY_DELAYS_MS = [250, 500, 1_000, 2_000, 3_000, 3_000];
 
 /** One of the API's failures is the API answering. Anything else never got there. */
@@ -73,13 +73,11 @@ export function useSessionFromApi(): Session {
 				setError(undefined);
 				return;
 			}
-			if (unreachable(failure) && attempt < UNREACHABLE_RETRIES) {
+			const retryDelayMs = RETRY_DELAYS_MS[attempt];
+			if (unreachable(failure) && retryDelayMs !== undefined) {
 				// Still trying, so the session stays unresolved and the splash
 				// stays up rather than flashing an error the next attempt clears.
-				retry.current = setTimeout(
-					() => void ask(attempt + 1).catch(() => {}),
-					RETRY_DELAYS_MS[attempt] ?? 3_000,
-				);
+				retry.current = setTimeout(() => void ask(attempt + 1).catch(() => {}), retryDelayMs);
 				return;
 			}
 			setError(failure);

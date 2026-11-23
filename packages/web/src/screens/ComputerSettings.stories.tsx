@@ -7,7 +7,8 @@ import type {
 import { HttpResponse, http } from "msw";
 import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyBots, storyProjects, storyWorkspace } from "../story-app.tsx";
+import { storyBots } from "@/shell/story-fixtures.ts";
+import { appHandlers, StoryApp, storyProjects, storyWorkspace } from "../story-app.tsx";
 
 /*
  * Computers, as the app shows them in settings: the switch for whether

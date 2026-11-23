@@ -1,6 +1,6 @@
 import type { EmojiDataset } from "./dataset.ts";
 
-export type { Emoji, EmojiCategory, EmojiDataset, SkinTone } from "./dataset.ts";
+export type { Emoji, EmojiDataset } from "./dataset.ts";
 export { emojiNamed, findByShortcode } from "./shortcodes.ts";
 
 /**

@@ -86,10 +86,7 @@ export function deliveryAuthentic(
 }
 
 /** The secret the caller sent in the place `auth` names. */
-export function presentedSecret(
-	auth: SentSecretAuth,
-	headers: Delivery["headers"],
-): string | undefined {
+function presentedSecret(auth: SentSecretAuth, headers: Delivery["headers"]): string | undefined {
 	switch (auth.kind) {
 		case "api_key":
 			return nonEmpty(headers[auth.header.toLowerCase()]?.trim());

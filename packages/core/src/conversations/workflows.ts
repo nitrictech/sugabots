@@ -6,17 +6,10 @@ import { automationWorkflow } from "./automations/automation.workflow.ts";
 import { Automations } from "./automations/automations.ts";
 import { compactionStepsLayer } from "./compaction/compaction.steps.ts";
 import { compactionWorkflow } from "./compaction/compaction.workflow.ts";
-import { summaryStepsLayer } from "./summaries/summary.steps.ts";
-import { summaryWorkflow } from "./summaries/summary.workflow.ts";
 import { Turns } from "./turns/turns.ts";
 
-/** Every durable workflow: summaries, compactions, turns and automation runs. */
-export const all = [
-	summaryWorkflow,
-	compactionWorkflow,
-	Turns.workflow,
-	automationWorkflow,
-] as const;
+/** Every durable workflow: compactions, turns and automation runs. */
+export const all = [compactionWorkflow, Turns.workflow, automationWorkflow] as const;
 
 /** The definitions of the workflows in {@link all}. */
 export const definitions = all.map((workflow) => workflow.definition);
@@ -33,12 +26,5 @@ export const layer = Layer.mergeAll(
 	Turns.cancelSweepLayer,
 	...all.map((workflow) => workflow.layer),
 ).pipe(
-	Layer.provide(
-		Layer.mergeAll(
-			summaryStepsLayer,
-			compactionStepsLayer,
-			Turns.stepsLayer,
-			Automations.stepsLayer,
-		),
-	),
+	Layer.provide(Layer.mergeAll(compactionStepsLayer, Turns.stepsLayer, Automations.stepsLayer)),
 );

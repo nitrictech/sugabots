@@ -40,11 +40,8 @@ export type ComposerAttachments = {
 	items: readonly ComposerAttachment[];
 	/** How many files the latest attach left out, for going over `MAX_ATTACHMENTS_PER_MESSAGE`. */
 	leftOut: number;
-	/**
-	 * Adds files in order, each uploading straight away, up to the limit.
-	 * Absent until the chat exists, since that is where they upload to.
-	 */
-	attach: ((files: readonly File[]) => void) | undefined;
+	/** Adds files in order, each uploading straight away, up to the limit. */
+	attach: (files: readonly File[]) => void;
 	/** Drops a chip, stopping its upload or removing the file it uploaded. */
 	remove: (key: string) => void;
 	/** Uploads a file whose failure is retryable again, on the same chip. */
@@ -95,7 +92,7 @@ export function canSend(draftText: string, items: readonly ComposerAttachment[])
  * would otherwise count toward the files a person can have waiting, and
  * empties the composer for the next chat.
  */
-export function useComposerAttachments(conversationId: string | undefined): ComposerAttachments {
+export function useComposerAttachments(conversationId: string): ComposerAttachments {
 	const [items, setItems] = useState<readonly ComposerAttachment[]>([]);
 	const [leftOut, setLeftOut] = useState(0);
 	// The source of truth, so a handler reads what the last one wrote without waiting for a render.
@@ -117,7 +114,6 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 	}
 
 	function startUpload(key: string, file: File): void {
-		if (!conversationId) return;
 		const controller = new AbortController();
 		inFlight.current.set(key, controller);
 		setUpload(key, { state: "uploading", progress: 0 });
@@ -168,7 +164,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 		if (!item) return;
 		inFlight.current.get(key)?.abort();
 		inFlight.current.delete(key);
-		if (conversationId && item.upload.state === "uploaded") {
+		if (item.upload.state === "uploaded") {
 			removeConversationFile(conversationId, item.upload.attachment.id);
 		}
 		setLeftOut(0);
@@ -183,7 +179,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 
 	function takeForSending(draftText: string): FilesForSending | undefined {
 		const taken = current.current;
-		if (!conversationId || !canSend(draftText, taken)) return undefined;
+		if (!canSend(draftText, taken)) return undefined;
 		const takenFrom = conversationId;
 		const fileIds = uploadedFileIds(taken);
 		setLeftOut(0);
@@ -223,9 +219,8 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 			openChatId.current = undefined;
 			for (const controller of uploads.values()) controller.abort();
 			uploads.clear();
-			if (conversationId) {
-				for (const fileId of uploadedFileIds(current.current))
-					removeConversationFile(conversationId, fileId);
+			for (const fileId of uploadedFileIds(current.current)) {
+				removeConversationFile(conversationId, fileId);
 			}
 			current.current = [];
 			setItems([]);
@@ -236,7 +231,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 	return {
 		items,
 		leftOut,
-		attach: conversationId === undefined ? undefined : attach,
+		attach,
 		remove,
 		retry,
 		takeForSending,

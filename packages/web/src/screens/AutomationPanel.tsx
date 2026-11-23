@@ -33,7 +33,8 @@ import {
 import { DropdownMenuItem } from "@/ui/dropdown-menu.tsx";
 import { InstructionsField } from "@/ui/instructions-field.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
-import { SETTINGS_CARD, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
+import { NameDialog } from "@/ui/name-dialog.tsx";
+import { SETTINGS_CARD, SettingsGroup } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import {
@@ -247,8 +248,11 @@ export function AutomationPanel({
 				<>
 					<Dialog open={dialog?.kind === "rename"} onOpenChange={(opened) => !opened && close()}>
 						{dialog?.kind === "rename" && (
-							<RenameDialog
+							<NameDialog
+								title="Rename automation"
 								name={automation.name}
+								maxLength={MAX_AUTOMATION_NAME_CHARACTERS}
+								placeholder="e.g. Friday pipeline review"
 								onSave={async (name) => {
 									await controls.rename(name);
 									close();
@@ -538,39 +542,6 @@ function useSubmit(onSave: () => Promise<unknown>) {
 		void save(onSave);
 	}
 	return { saving: pending, failure, submit };
-}
-
-function RenameDialog({
-	name: initialName,
-	onSave,
-}: {
-	name: string;
-	onSave: (name: string) => Promise<unknown>;
-}) {
-	const [name, setName] = useState(initialName);
-	const next = name.trim();
-	const { saving, failure, submit } = useSubmit(() => onSave(next));
-	return (
-		<DialogForm onSubmit={submit}>
-			<DialogFormHeader title="Rename automation" />
-			<DialogFormBody gap="compact">
-				<SettingsGroup>
-					<SettingsFieldRow
-						label="Name"
-						value={name}
-						onChange={setName}
-						placeholder="e.g. Friday pipeline review"
-						maxLength={MAX_AUTOMATION_NAME_CHARACTERS}
-					/>
-				</SettingsGroup>
-				{failure !== undefined && <Alert>{failureMessage(failure)}</Alert>}
-			</DialogFormBody>
-			<DialogFormFooter
-				action="Save"
-				actionDisabled={saving || next === "" || next === initialName}
-			/>
-		</DialogForm>
-	);
 }
 
 /** What the automation tells its bot each time it runs, with room to write. */

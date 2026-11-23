@@ -5,12 +5,9 @@ import { startsNewDay } from "./conversation-layout.ts";
 /** An automation's run, or its pausing itself, which a chat draws as a row of its own. */
 type AutomationItem = Extract<ChatMessageItem, { kind: "run" | "automation_paused" }>;
 
-/** A message in a chat, as its items carry it. */
-export type ChatMessage = Extract<ChatMessageItem, { kind: "message" }>["message"];
-
 /** A stretch of a chat as it is drawn; see `chatGroupsOf`. */
 type ChatGroup = { key: string; at: string; separated: boolean } & (
-	| { kind: "messages"; messages: ChatMessage[] }
+	| { kind: "messages"; messages: Message[] }
 	| { kind: "run"; item: AutomationItem }
 );
 
@@ -53,7 +50,7 @@ export function sendingIds(
 }
 
 /** The messages among `items`, leaving out automation runs and pauses. */
-export function messagesIn(items: readonly ChatMessageItem[]): ChatMessage[] {
+export function messagesIn(items: readonly ChatMessageItem[]): Message[] {
 	return items.flatMap((item) => (item.kind === "message" ? [item.message] : []));
 }
 

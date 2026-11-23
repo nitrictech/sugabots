@@ -89,6 +89,7 @@ describe.skipIf(!process.env.DATABASE_URL)("workspace_access, against Postgres",
 				kind: "project_thread",
 				botId: host.id,
 				title: "Access",
+				startedById: owner.id,
 			}),
 		);
 		threadId = created.id;

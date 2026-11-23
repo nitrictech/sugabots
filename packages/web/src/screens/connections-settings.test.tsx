@@ -618,8 +618,9 @@ describe("coming back from a connection sign-in", () => {
 			params: { workspace: "suga", bot: triager.handle },
 		});
 		expect(
-			await screen.findByText(`The services ${triager.name} uses, as whoever connected each one.`),
+			await screen.findByRole("navigation", { name: `${triager.name}'s pages` }),
 		).toBeDefined();
+		expect(await screen.findByRole("button", { name: "Add connection" })).toBeDefined();
 		expect(screen.queryByText(/Signing in did not finish/)).toBeNull();
 	});
 

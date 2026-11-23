@@ -54,16 +54,8 @@ import {
 } from "./routes/projects.tsx";
 import { type RouterContext, rootRoute } from "./routes/root.tsx";
 import {
-	settingsBotConnectionRoute,
-	settingsBotPageRoute,
-	settingsBotRoute,
-	settingsBotsRoute,
 	settingsDefaultModelRoute,
 	settingsMemberRoute,
-	settingsProjectConnectionRoute,
-	settingsProjectPageRoute,
-	settingsProjectRoute,
-	settingsProjectsRoute,
 	settingsProviderRoute,
 	settingsRoute,
 	settingsSectionRoute,
@@ -121,14 +113,14 @@ import {
  *   /$workspace/bots/$bot/automations[/new|/$automation]   its automations
  *   /$workspace/threads/$conversation   a thread by its id alone, which goes on to its bot's address
  *   /$workspace/settings/members/$member   one person, by membership id
- *   /$workspace/settings/{projects,bots}[/…]   from before, on to the owner's own pages
  *   /$workspace/settings/providers/$provider   one model provider
  *   /$workspace/settings/providers/default  the model new bots start on
  *   /$workspace/settings/providers/system   the model the system bots use
  *
  * A bot's address uses its handle, unique in its workspace, rather than its
  * name, so renaming a bot keeps its links. A collaboration or automation run
- * has no address of its own: it opens beside its conversation, as `?item=`.
+ * has no address of its own: it opens beside its conversation, as `?item=`,
+ * or, from an automation's page, as that page, as `?itemPage=`.
  *
  * Each area's routes and their pages are declared in a module of its own under
  * `routes/`; the tree below puts them together.
@@ -148,14 +140,6 @@ const routeTree = rootRoute.addChildren([
 		settingsRoute,
 		settingsSectionRoute,
 		settingsMemberRoute,
-		settingsProjectsRoute,
-		settingsProjectRoute,
-		settingsProjectPageRoute,
-		settingsProjectConnectionRoute,
-		settingsBotsRoute,
-		settingsBotRoute,
-		settingsBotPageRoute,
-		settingsBotConnectionRoute,
 		settingsSystemModelRoute,
 		settingsDefaultModelRoute,
 		settingsProviderRoute,

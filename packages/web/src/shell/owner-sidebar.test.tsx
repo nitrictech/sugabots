@@ -1,9 +1,10 @@
 import type { ProjectThread } from "@sugabots/contracts";
+import { listedThread } from "@sugabots/contracts/testing";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chooseWorkspace } from "@/lib/workspace.ts";
-import { apiAnswers, listedThread, mount, onWideScreen, projects, workspace } from "@/test-api.tsx";
+import { apiAnswers, mount, onWideScreen, projects, workspace } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -34,7 +35,7 @@ describe("a project's own sidebar", () => {
 		updatedAt: "2026-09-18T08:00:00.000Z",
 	};
 
-	it("moves a thread marked done under Done", async () => {
+	it("moves a thread marked done under Done, which opens to show it", async () => {
 		onWideScreen();
 		let doneAt: string | null = null;
 		client.api.chats.threads.mockImplementation(() =>
@@ -49,6 +50,7 @@ describe("a project's own sidebar", () => {
 		const work = await screen.findByRole("region", { name: "Threads" });
 		fireEvent.click(await within(work).findByRole("button", { name: `Done: ${thread.title}` }));
 
+		fireEvent.click(await screen.findByRole("button", { name: /^Done\s*1$/, expanded: false }));
 		const done = await screen.findByRole("region", { name: "Done" });
 		expect(within(done).getByRole("button", { name: `Reopen: ${thread.title}` })).toBeDefined();
 		// Threads holds only what is still open, so with none it is gone.

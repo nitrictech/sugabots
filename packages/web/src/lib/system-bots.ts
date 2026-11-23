@@ -4,18 +4,15 @@ import { Effect } from "effect";
 import { client } from "@/api.ts";
 import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
-/**
- * The system bots, the Summariser and Compaction: the workspace's own bots that
- * serve every project, sharing one model chosen on the Models page.
+/*
+ * The system bots, such as Compaction: the workspace's own bots that serve
+ * every project, sharing one model chosen on the Models page.
  */
 
 /** The order they are shown in, and the only ones there are. */
-export const SYSTEM_BOT_KEYS: readonly SystemBotKey[] = ["summarise", "compact"];
+export const SYSTEM_BOT_KEYS: readonly SystemBotKey[] = ["compact"];
 
-/**
- * The workspace's system bots. Read by everyone: a thread's summary has to
- * say why there is none when the Summariser has no model.
- */
+/** The workspace's system bots. */
 export function useSystemBots() {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({

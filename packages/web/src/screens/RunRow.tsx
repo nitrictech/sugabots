@@ -1,10 +1,9 @@
 import type { RunTriggerKind } from "@sugabots/contracts";
 import { Clock, GitBranch, type LucideProps, RefreshCw, Webhook } from "lucide-react";
-import { formatClockTime } from "@/lib/list-time.ts";
+import { formatClockTime, formatFullTimestamp } from "@/lib/list-time.ts";
 import { automationText, type WorkState } from "@/lib/work-state.ts";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { TypingDots } from "@/ui/typing-dots.tsx";
-import { formatFullTimestamp } from "./ConversationMessages.tsx";
 
 /**
  * A quiet row for an automation's run among a thread's messages. It lines up

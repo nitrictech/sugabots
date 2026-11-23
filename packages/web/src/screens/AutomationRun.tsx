@@ -11,7 +11,7 @@ import { useState } from "react";
 import { nextRunWords, useAutomations } from "@/lib/automations.ts";
 import { useAutomationControls } from "@/lib/chats.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { formatClockTime } from "@/lib/list-time.ts";
+import { formatClockTime, formatDay } from "@/lib/list-time.ts";
 import { useOwnerOfProject } from "@/lib/owner-of-project.ts";
 import { ownerLinkOptions, resourcePermissions } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
@@ -20,7 +20,6 @@ import { Button, buttonStyles } from "@/ui/button.tsx";
 import { LabelledRule } from "@/ui/labelled-rule.tsx";
 import { TitleTag } from "@/ui/title-tag.tsx";
 import { TypingDots } from "@/ui/typing-dots.tsx";
-import { formatDay } from "./conversation-layout.ts";
 import { MessageMarkdown } from "./MessageMarkdown.tsx";
 
 /*

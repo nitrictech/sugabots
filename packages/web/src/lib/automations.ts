@@ -17,7 +17,7 @@ import {
 } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
-import { formatClockTime } from "@/lib/list-time.ts";
+import { formatTimeAhead } from "@/lib/list-time.ts";
 import { automationStartsLabel } from "@/lib/routine-schedule.ts";
 
 /** Every automation query starts with this, so one change refreshes each project's automations and runs. */
@@ -83,15 +83,13 @@ export function useProjectRuns(projectId: string): Run[] {
 /**
  * The project `projectId`'s automations in full, as a bot's default project
  * holds its own, with how each stands for whoever may read its runs, read
- * again while one runs. Nothing is asked while it is undefined.
+ * again while one runs.
  */
-export function useAutomations(projectId: string | undefined) {
+export function useAutomations(projectId: string) {
 	return useQuery({
 		queryKey: [AUTOMATIONS_KEY, "project", projectId],
-		queryFn: projectId
-			? ({ signal }) =>
-					Effect.runPromise(client.api.automations.list({ params: { projectId } }), { signal })
-			: skipToken,
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.automations.list({ params: { projectId } }), { signal }),
 		refetchInterval: (query) => pollWhileAutomationsRun(query.state.data),
 	});
 }
@@ -241,19 +239,7 @@ function nextRunAt(automation: Automation): string | undefined {
 		)
 		.sort();
 	if (!next) return undefined;
-	const at = new Date(next);
-	const daysAhead = Math.round(
-		(new Date(at).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86_400_000,
-	);
-	const day =
-		daysAhead <= 0
-			? "Today"
-			: daysAhead === 1
-				? "Tomorrow"
-				: daysAhead < 7
-					? at.toLocaleDateString(undefined, { weekday: "short" })
-					: at.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-	return `${day} at ${formatClockTime(at)}`;
+	return formatTimeAhead(new Date(next), new Date());
 }
 
 /** When the automation runs next, in words: its routines' soonest time, or what starts it, if anything does. */

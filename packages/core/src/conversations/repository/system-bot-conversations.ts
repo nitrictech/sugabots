@@ -14,10 +14,10 @@ import {
 import { loadPlacedParts } from "./placed-parts.ts";
 
 /**
- * What the system bots that work on a conversation after a reply (the
- * Summariser and the Compaction bot) read: the conversation they work on, and
- * its transcript. Each keeps its own turns in a system conversation that
- * `ConversationRepository` opens.
+ * What a system bot that works on a conversation after a reply, such as the
+ * Compaction bot, reads: the conversation it works on, and its transcript. It
+ * keeps its own turns in a system conversation that `ConversationRepository`
+ * opens.
  */
 
 /** The conversation a system bot works on, as much of it as preparing that work needs. */

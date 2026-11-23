@@ -8,7 +8,12 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { keepFootInView, useFollowContentGrowth, useSettledAtLatest } from "@/lib/follow-latest.ts";
+import {
+	keepFootInView,
+	loadOlderKeepingPlace,
+	useFollowContentGrowth,
+	useSettledAtLatest,
+} from "@/lib/follow-latest.ts";
 
 /**
  * How close to the foot of the log still counts as at the latest message, both
@@ -91,15 +96,7 @@ export function useChatLogPosition({
 		}
 	}, [latestItemRevision]);
 
-	async function loadOlder() {
-		const element = viewport.current;
-		const height = element?.scrollHeight ?? 0;
-		const top = element?.scrollTop ?? 0;
-		await messages.fetchNextPage();
-		requestAnimationFrame(() => {
-			if (element) element.scrollTop = top + element.scrollHeight - height;
-		});
-	}
+	const loadOlder = () => loadOlderKeepingPlace(viewport.current, messages.fetchNextPage);
 
 	const [jumpTarget, jumpTo] = useJumpTarget(focusMessageId);
 	const jump = useJumpToMessage({

@@ -1,8 +1,8 @@
-import type { ChatHistoryEntry, ChatMessageItem } from "@sugabots/contracts";
+import type { ChatHistoryEntry, ChatMessageItem, Message } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useLayoutEffect, useRef } from "react";
 import { ownerLinkOptions, type ResourceOwner } from "@/lib/resource-owner.tsx";
-import { type ChatMessage, messagesIn } from "./chat-items.ts";
+import { messagesIn } from "./chat-items.ts";
 
 /**
  * Opens a collaboration beside a chat, and gives the focus back to whatever
@@ -73,7 +73,7 @@ export function opensBeside(
 	);
 }
 
-type RunResulting = NonNullable<ChatMessage["automationResultOf"]>;
+type RunResulting = NonNullable<Message["automationResultOf"]>;
 
 /**
  * The automation runs `items` shows, by the run's conversation: those whose

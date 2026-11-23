@@ -46,8 +46,8 @@ import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
 import { modelName, useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { searchModels } from "@/lib/model-search.ts";
-import { countOf } from "@/lib/name-list.ts";
-import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
+import { capitalise, countOf } from "@/lib/name-list.ts";
+import { NOT_A_SERVER_ADDRESS, parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
 import { useBackTarget } from "@/lib/settings-back.tsx";
 import { useSystemBots } from "@/lib/system-bots.ts";
@@ -62,6 +62,7 @@ import {
 	DialogFormBody,
 	DialogFormFooter,
 	DialogFormHeader,
+	DialogFormScroll,
 } from "@/ui/dialog-form.tsx";
 import {
 	DropdownMenu,
@@ -82,6 +83,7 @@ import {
 	SettingsGroup,
 	SettingsPage,
 	SettingsRow,
+	SettingsRowAlert,
 	SettingsRowIcon,
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
@@ -325,7 +327,7 @@ function heldReason({ newBots, systemBots }: ModelHolders, subject: string): str
 			: newBots
 				? "New bots use"
 				: "System bots use";
-	return `${holders} ${subject}. Choose another model for them under Models → Default first.`;
+	return `${holders} ${subject}. Choose another model for them under Models → Defaults first.`;
 }
 
 export function ProviderSettings({ providerId }: { providerId: string }) {
@@ -581,11 +583,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 					value={provider.baseUrl}
 					placeholder={local ? "http://localhost:11434" : "https://llm.example.com/v1"}
 					pending={actions.update.isPending}
-					problemWith={(typed) =>
-						parseProviderBaseUrl(typed)
-							? undefined
-							: "That is not a server address. A host and port, like 192.168.1.10:11434, is enough."
-					}
+					problemWith={(typed) => (parseProviderBaseUrl(typed) ? undefined : NOT_A_SERVER_ADDRESS)}
 					onSave={async (typed) => {
 						await actions.update.mutateAsync({
 							providerId: provider.id,
@@ -618,11 +616,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 			) : (
 				<KeyRow provider={provider} optional={local || custom} />
 			)}
-			{error && (
-				<div className="border-border border-t px-4 py-3">
-					<Alert>{failureMessage(error)}</Alert>
-				</div>
-			)}
+			{error && <SettingsRowAlert>{failureMessage(error)}</SettingsRowAlert>}
 		</SettingsGroup>
 	);
 }
@@ -807,7 +801,7 @@ function useModelUsage() {
 
 type OfferedModel = WorkspaceModelsResponse["models"][number];
 
-type SettingMoves = Pick<ProviderSwitchOff, "newBotsTo" | "summariesTo">;
+type SettingMoves = Pick<ProviderSwitchOff, "newBotsTo" | "systemBotsTo">;
 
 /**
  * Where what runs on models going off can move: `candidates`, the switched-on
@@ -831,7 +825,7 @@ function useMoveChoices(
 	const [chosenSettings, setChosenSettings] = useState<SettingMoves>({});
 	const settingMoves: SettingMoves = {
 		newBotsTo: held?.newBots ? offeredOr(chosenSettings.newBotsTo) : undefined,
-		summariesTo: held?.systemBots ? offeredOr(chosenSettings.summariesTo) : undefined,
+		systemBotsTo: held?.systemBots ? offeredOr(chosenSettings.systemBotsTo) : undefined,
 	};
 	return {
 		candidates,
@@ -842,13 +836,9 @@ function useMoveChoices(
 	};
 }
 
-/** What `held` names, as a sentence would: new bots, summaries, or both. */
+/** What `held` names, as a sentence would: new bots, compaction, or both. */
 function holderNames({ newBots, systemBots }: ModelHolders): string[] {
-	return [...(newBots ? ["new bots"] : []), ...(systemBots ? ["summaries"] : [])];
-}
-
-function capitalised(text: string): string {
-	return text.charAt(0).toUpperCase() + text.slice(1);
+	return [...(newBots ? ["new bots"] : []), ...(systemBots ? ["compaction"] : [])];
 }
 
 /** A model to move something to, picked from `candidates` in a menu. */
@@ -924,14 +914,14 @@ function SettingMoveRows({
 			)}
 			{held.systemBots && (
 				<SettingsRow
-					label="Summaries"
-					sub="Summaries, thread titles and compacting"
+					label="Compaction"
+					sub="Compacting long conversations"
 					trailing={
 						<MoveToMenu
-							label="Move summaries to"
+							label="Move compaction to"
 							candidates={candidates}
-							value={moves.summariesTo}
-							onChange={(summariesTo) => onChange({ summariesTo })}
+							value={moves.systemBotsTo}
+							onChange={(systemBotsTo) => onChange({ systemBotsTo })}
 						/>
 					}
 				/>
@@ -955,7 +945,7 @@ function strandedModelsOf(provider: ModelProvider, workspaceBots: readonly Bot[]
 
 /**
  * Switching off or disconnecting a provider whose models bots, new bots or
- * summaries still run on: where each moves, from the models other providers
+ * compaction still run on: where each moves, from the models other providers
  * offer, starting on the one new bots use. They move and the provider goes off
  * together, so nothing is left on a model that is off.
  */
@@ -1022,7 +1012,7 @@ function MoveBotsOffProviderDialog({
 			/>
 			<DialogFormBody>
 				<DialogDescription>
-					{capitalised(LIST.format(users))} {uses} {provider.name}'s models. Choose the model each
+					{capitalise(LIST.format(users))} {uses} {provider.name}'s models. Choose the model each
 					moves to.
 				</DialogDescription>
 				{warning && <DialogDescription>{warning}</DialogDescription>}
@@ -1235,7 +1225,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const custom = provider.preset === null;
 
 	/**
-	 * Switches the model off, or asks where its bots, new bots or summaries go
+	 * Switches the model off, or asks where its bots, new bots or compaction go
 	 * first. Decided on fresh bots and models, as the cached ones may predate
 	 * another tab's changes.
 	 */
@@ -1295,7 +1285,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 							label={modelName(model)}
 							sub={
 								<span className="flex items-center gap-1.5">
-									{held ? `${held.newBots ? "Default" : "Summaries"} · ${who}` : who}
+									{held ? `${held.newBots ? "Default" : "Compaction"} · ${who}` : who}
 									<CapabilityIcons model={model} />
 								</span>
 							}
@@ -1349,17 +1339,13 @@ function Models({ provider }: { provider: ModelProvider }) {
 				) : (
 					<SettingsAddRow label="Add model" onClick={() => setAdding(true)} />
 				))}
-			{error && (
-				<div className="border-border border-t px-4 py-3">
-					<Alert>{failureMessage(error)}</Alert>
-				</div>
-			)}
+			{error && <SettingsRowAlert>{failureMessage(error)}</SettingsRowAlert>}
 		</SettingsGroup>
 	);
 }
 
 /**
- * Switching off a model bots, new bots or summaries still run on: which of the
+ * Switching off a model bots, new bots or compaction still run on: which of the
  * other switched-on models each moves to, starting on the one new bots use.
  * They move and the model goes off together, so nothing is left on a model
  * that is off.
@@ -1414,7 +1400,7 @@ function MoveBotsDialog({
 				<DialogDescription>
 					{hasBots
 						? `${bots.length === 1 ? "This bot uses" : "These bots use"} ${name}${held ? `, and so do ${LIST.format(holderNames(held))}` : ""}.`
-						: `${capitalised(LIST.format(held ? holderNames(held) : []))} use ${name}.`}
+						: `${capitalise(LIST.format(held ? holderNames(held) : []))} use ${name}.`}
 					{candidates.length > 0 &&
 						(hasBots
 							? ` Choose the model to move ${bots.length === 1 && !held ? "it" : "them"} to.`
@@ -1438,14 +1424,14 @@ function MoveBotsDialog({
 							/>
 						)}
 						{hasBots && (
-							<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+							<DialogFormScroll height="picker-tall">
 								<ModelChoiceList
 									models={shown}
 									chosen={chosen}
 									onChoose={setPicked}
 									empty="No models match."
 								/>
-							</div>
+							</DialogFormScroll>
 						)}
 						{held && (
 							<SettingsGroup>

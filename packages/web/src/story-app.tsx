@@ -1,22 +1,22 @@
-import type {
-	Bot,
-	ChatMessageItem,
-	ConversationActivity,
-	ConversationDetails,
-	ListedThread,
-	Message,
-	ModelProvider,
-	NotificationSettings,
-	Project,
-	ProjectThread,
-	SessionUser,
-	SystemBot,
-	WorkspacePermissions,
-	WorkspaceRole,
+import {
+	type Bot,
+	botParticipantOf,
+	type ChatMessageItem,
+	type ConversationActivity,
+	type ConversationDetails,
+	type Message,
+	type NotificationSettings,
+	type Project,
+	type ProjectThread,
+	type SessionUser,
+	type SystemBot,
+	type WorkspacePermissions,
+	type WorkspaceRole,
 } from "@sugabots/contracts";
 import {
 	connectionWithTools,
 	listedConnection,
+	listedThread,
 	type TestConnection,
 	testPerson,
 } from "@sugabots/contracts/testing";
@@ -27,7 +27,7 @@ import { useEffect, useState } from "react";
 import { chatItemCreatedAt } from "@/lib/chats.ts";
 import { createQueryClient } from "@/lib/query.ts";
 import { AppRouterProvider, createAppRouter } from "@/router.tsx";
-import { storyBots as fixtureBots, projectsWithBots } from "@/shell/story-fixtures.ts";
+import { projectsWithBots, storyBots } from "@/shell/story-fixtures.ts";
 
 /*
  * The whole app, for a story: the real routes at an address, answered by
@@ -58,9 +58,8 @@ export const storyWorkspace = {
 	setupCompletedAt: "2026-09-01T00:00:00.000Z",
 };
 
-/** Every project, and every bot. */
+/** Every project. */
 export const storyProjects: Project[] = projectsWithBots.map(({ project }) => project);
-export const storyBots: Bot[] = [...fixtureBots];
 
 /** The bots added to each project, by the project's id. */
 const botsInProject = new Map(projectsWithBots.map(({ project, bots }) => [project.id, bots]));
@@ -92,20 +91,6 @@ export function storyConversationFor(bot: Bot): ProjectThread {
 	};
 }
 
-/** A project's thread as its list shows it, with nothing new in it. */
-export function storyListedThread(thread: ProjectThread): ListedThread {
-	return {
-		conversation: thread,
-		lastMessage: null,
-		participants: [],
-		messageCount: 1,
-		unreadMessages: 0,
-		needsApproval: false,
-		mentionsYou: false,
-		activity: null,
-	};
-}
-
 export const storyModel = {
 	providerId: "0199a3a0-0000-7000-8000-000000000201",
 	providerName: "Anthropic",
@@ -115,9 +100,9 @@ export const storyModel = {
 	capabilities: ["tools", "vision", "reasoning"],
 };
 
-const systemBots: SystemBot[] = (["summarise", "compact"] as const).map((key) => ({
+const systemBots: SystemBot[] = (["compact"] as const).map((key) => ({
 	key,
-	name: key === "summarise" ? "Summariser" : "Compaction",
+	name: "Compaction",
 	description: null,
 	color: "ice",
 	face: "pill",
@@ -171,15 +156,7 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 /** What a bot's first thread holds: its messages, and who is in it. */
 export function storyChatDetails(bot: Bot, messages: Message[] = []): ConversationDetails {
 	const chat = storyThreadFor(bot);
-	const participant = {
-		kind: "bot" as const,
-		id: bot.id,
-		name: bot.name,
-		handle: bot.handle,
-		color: bot.color,
-		face: bot.face,
-		shape: bot.shape,
-	};
+	const participant = botParticipantOf(bot);
 	const person = testPerson({ id: storyUser.id, name: storyUser.name });
 	return {
 		conversation: {
@@ -192,7 +169,6 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): Conversati
 			title: chat.title,
 			status: "done",
 			parentConversationId: null,
-			startedById: storyUser.id,
 			doneAt: null,
 			createdAt: chat.createdAt,
 			updatedAt: chat.updatedAt,
@@ -229,7 +205,7 @@ export function storyProjectThreadFor(project: Project): ProjectThread {
 /** What a project's thread holds: its messages, and the project's people and bots to mention. */
 export function storyProjectThreadDetails(
 	project: Project,
-	bots: Bot[],
+	bots: readonly Bot[],
 	messages: Message[] = [],
 ): ConversationDetails {
 	const chat = storyProjectThreadFor(project);
@@ -247,7 +223,6 @@ export function storyProjectThreadDetails(
 			kind: "project_thread",
 			status: "done",
 			parentConversationId: null,
-			startedById: storyUser.id,
 			doneAt: null,
 		},
 		capabilities: { approveToolCalls: true },
@@ -255,15 +230,7 @@ export function storyProjectThreadDetails(
 		participants: [person],
 		projectBots: bots
 			.filter((bot) => botsInProject.get(project.id)?.some((one) => one.id === bot.id))
-			.map((bot) => ({
-				kind: "bot" as const,
-				id: bot.id,
-				name: bot.name,
-				handle: bot.handle,
-				color: bot.color,
-				face: bot.face,
-				shape: bot.shape,
-			})),
+			.map(botParticipantOf),
 		peopleReachingProject: [person],
 		olderMessagesCursor: null,
 		queuedSince: null,
@@ -272,17 +239,8 @@ export function storyProjectThreadDetails(
 	};
 }
 
-/** What a chat's sidebar shows: a summary. */
-export function storyChatActivity(bot: Bot): ConversationActivity {
-	const chat = storyThreadFor(bot);
-	return {
-		summary: {
-			content: `${bot.name} has been keeping things moving.`,
-			updatedAt: chat.updatedAt,
-		},
-		context: null,
-	};
-}
+/** What a chat's sidebar shows: nothing measured yet. */
+export const storyChatActivity: ConversationActivity = { context: null };
 
 /** A stream that stays open and says nothing, as a quiet conversation's does. */
 function quietStream() {
@@ -299,14 +257,12 @@ interface StoryAppData {
 	messages?: Record<string, Message[]>;
 	/** Messages in each project's thread, by the project's id. */
 	projectThreadMessages?: Record<string, Message[]>;
-	providers?: ModelProvider[];
 	models?: (typeof storyModel)[];
 	/** The viewer's referral link, where the installation signs people up by referral. */
 	referralLink?: string;
-	/** What the person chose to be notified about; nothing chosen when absent. */
-	notifications?: NotificationSettings;
 }
 
+/** What the person chose to be notified about: nothing. */
 const noNotificationChoices: NotificationSettings = {
 	level: "mentions",
 	pausedUntil: null,
@@ -346,9 +302,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		),
 		http.get(api("/workspaces/:workspace/invitations"), () => HttpResponse.json([])),
 		http.get(api("/referral-link"), () => HttpResponse.json({ url: data.referralLink ?? null })),
-		http.get(api("/notifications"), () =>
-			HttpResponse.json(data.notifications ?? noNotificationChoices),
-		),
+		http.get(api("/notifications"), () => HttpResponse.json(noNotificationChoices)),
 		http.put(api("/notifications/presence"), () => new HttpResponse(null, { status: 204 })),
 		http.put(
 			api("/notifications/:kind/:id/:choice"),
@@ -366,9 +320,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			const models = data.models ?? [storyModel];
 			return HttpResponse.json({ models, defaultModel: models[0]?.modelId ?? null });
 		}),
-		http.get(api("/workspaces/:workspace/model-providers"), () =>
-			HttpResponse.json(data.providers ?? []),
-		),
+		http.get(api("/workspaces/:workspace/model-providers"), () => HttpResponse.json([])),
 		http.get(api("/workspaces/:workspace/system-bots"), () => HttpResponse.json(systemBots)),
 		http.get(api("/workspaces/:workspace/search-provider"), () => HttpResponse.json(null)),
 		http.get(api("/workspaces/:workspace/events"), quietStream),
@@ -402,7 +354,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 					? storyThreadFor(bot)
 					: undefined;
 			if (!thread) return new HttpResponse(null, { status: 404 });
-			return HttpResponse.json({ threads: [storyListedThread(thread)], automations: [] });
+			return HttpResponse.json({ threads: [listedThread(thread)], automations: [] });
 		}),
 		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
 			const bot = botForConversation(String(params.conversationId));
@@ -429,9 +381,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		),
 		http.get(api("/conversations/:conversationId/activity"), ({ params }) => {
 			const bot = botForConversation(String(params.conversationId));
-			return bot
-				? HttpResponse.json(storyChatActivity(bot))
-				: new HttpResponse(null, { status: 404 });
+			return bot ? HttpResponse.json(storyChatActivity) : new HttpResponse(null, { status: 404 });
 		}),
 		http.get(api("/conversations/:conversationId"), ({ params }) => {
 			const project = projectForChat(String(params.conversationId));
@@ -453,7 +403,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/projects/:projectId/connections"), () => HttpResponse.json([])),
 		// No computers in the example workspace.
 		http.get(api("/projects/:projectId/computer"), () =>
-			HttpResponse.json({ computer: { kind: "none" }, providerEnabled: false, canManage: false }),
+			HttpResponse.json({ computer: { kind: "none" }, providerEnabled: false }),
 		),
 		// The viewer alone reaches each project, as its members list answers.
 		http.get(api("/projects/:projectId/people"), () =>
@@ -477,9 +427,6 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		),
 		http.get(api("/projects/:projectId/automations/:automationId/triggers/:triggerId/secret"), () =>
 			HttpResponse.json({ kind: "set", secret: "whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u" }),
-		),
-		http.get(api("/projects/:projectId/automations/:automationId/runs"), () =>
-			HttpResponse.json({ items: [], nextCursor: null }),
 		),
 		http.get(api("/projects/:projectId/runs"), () =>
 			HttpResponse.json({ items: [], nextCursor: null }),
@@ -511,7 +458,7 @@ export function connectionHandlers(connections: readonly TestConnection[]): Requ
 }
 
 /** The app at `path`, signed in as `storyUser`, with a cache of its own. */
-export function StoryApp({ path, user = storyUser }: { path: string; user?: SessionUser }) {
+export function StoryApp({ path }: { path: string }) {
 	const [queryClient] = useState(() => createQueryClient());
 	const [router] = useState(() =>
 		createAppRouter({
@@ -520,7 +467,7 @@ export function StoryApp({ path, user = storyUser }: { path: string; user?: Sess
 		}),
 	);
 	useEffect(() => () => queryClient.clear(), [queryClient]);
-	const session = { user, error: undefined, refresh: async () => {} };
+	const session = { user: storyUser, error: undefined, refresh: async () => {} };
 	return (
 		<QueryClientProvider client={queryClient}>
 			<div className="h-screen">

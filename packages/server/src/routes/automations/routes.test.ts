@@ -1,5 +1,5 @@
 import type { Automation } from "@sugabots/contracts";
-import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
+import { ActionForbidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import {
 	AutomationDeliveryIdTooLong,
@@ -81,26 +81,12 @@ describe("Automation webhooks", () => {
 		const response = await deliver(app, { authorization: GOOD_AUTHORIZATION, body });
 
 		expect(response.status).toBe(202);
-		expect(await response.json()).toEqual({ executionId: RUN_ID, duplicate: false });
+		expect(await response.json()).toEqual({ runId: RUN_ID, duplicate: false });
 		const [input] = accept.mock.calls[0] ?? [];
 		expect(input?.triggerId).toBe(TRIGGER_ID);
 		expect(input?.delivery.headers.authorization).toBe(GOOD_AUTHORIZATION);
 		expect(new TextDecoder().decode(input?.delivery.body)).toBe(body);
 		expect(input?.delivery.payload).toEqual({ orderId: 42 });
-	});
-
-	// An automation's single webhook became a trigger with the automation's id, so its
-	// callers' old address still reaches it.
-	it("reaches a trigger with the automation's id at the automation's old address", async () => {
-		const { app, accept } = webhookApp();
-
-		const response = await deliver(app, {
-			authorization: GOOD_AUTHORIZATION,
-			path: `/hooks/routines/${TRIGGER_ID}`,
-		});
-
-		expect(response.status).toBe(202);
-		expect(accept.mock.calls[0]?.[0].triggerId).toBe(TRIGGER_ID);
 	});
 
 	it("answers Slack's URL check with its challenge", async () => {
@@ -185,13 +171,8 @@ describe("Automation webhooks", () => {
 	});
 });
 
-/** The app as Ada, with `automations` and `view` as the only automation methods it has; both are `Automations.Service`. */
-function appAs(
-	services: {
-		automations?: Partial<Automations.Interface>;
-		view?: Partial<Automations.Interface>;
-	} = {},
-) {
+/** The app as Ada, with `automations` as the only automation methods it has. */
+function appAs(services: { automations?: Partial<Automations.Interface> } = {}) {
 	return createTestApp(
 		Layer.mergeAll(
 			identifiedBy(async () => ({
@@ -200,7 +181,7 @@ function appAs(
 				email: "ada@example.com",
 				image: null,
 			})),
-			unimplemented(Automations.Service, { ...services.automations, ...services.view }),
+			unimplemented(Automations.Service, { ...services.automations }),
 		),
 	);
 }
@@ -214,29 +195,6 @@ const asked = <Input>(calls: Array<{ input: Input; userId: string }>, input: Inp
 	});
 
 describe("an automation's runs", () => {
-	it("reads the history of the automation in the path, as the person asking", async () => {
-		const calls: Array<{ input: unknown; userId: string }> = [];
-		const response = await appAs({
-			view: {
-				listRuns: (automation) =>
-					Effect.as(asked(calls, automation), { items: [], nextCursor: null }),
-			},
-		}).request(`/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/runs`, { headers: session });
-
-		expect(response.status).toBe(200);
-		expect(calls).toEqual([
-			{ input: { projectId: PROJECT_ID, automationId: AUTOMATION_ID }, userId: USER_ID },
-		]);
-	});
-
-	it("answers an automation hidden from the caller as not found", async () => {
-		const response = await appAs({
-			view: { listRuns: () => Effect.fail(new ResourceHidden({ resource: "bot" })) },
-		}).request(`/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/runs`, { headers: session });
-
-		expect(response.status).toBe(404);
-	});
-
 	it("starts a run by hand as the person asking", async () => {
 		const calls: Array<{ input: unknown; userId: string }> = [];
 		const requestId = "0199a3a0-0000-7000-8000-0000000000c1";
@@ -273,23 +231,6 @@ describe("an automation's runs", () => {
 		});
 
 		expect(response.status).toBe(403);
-	});
-});
-
-describe("the workspace's automations", () => {
-	it("lists what the view finds in the workspace in the path", async () => {
-		const listInWorkspace = vi.fn<Automations.Interface["listInWorkspace"]>(() =>
-			Effect.succeed([]),
-		);
-
-		const response = await appAs({ view: { listInWorkspace } }).request(
-			`/workspaces/${WORKSPACE_ID}/automations`,
-			{ headers: session },
-		);
-
-		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({ items: [] });
-		expect(listInWorkspace).toHaveBeenCalledWith(WORKSPACE_ID);
 	});
 });
 

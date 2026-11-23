@@ -4,6 +4,7 @@ import { cn } from "cn";
 import { type FormEvent, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { PASSWORD_MIN_LENGTH, PASSWORD_PLACEHOLDER } from "@/lib/passwords.ts";
 import { AuthLayout, FormRow, fieldClass, QuietLink } from "@/screens/AuthLayout.tsx";
 import { ForgotPassword } from "@/screens/ResetPassword.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
@@ -173,8 +174,8 @@ export function Login({
 							value={password}
 							onChange={(event) => setPassword(event.target.value)}
 							autoComplete={isNew ? "new-password" : "current-password"}
-							placeholder={isNew ? "8 characters or more" : undefined}
-							minLength={8}
+							placeholder={isNew ? PASSWORD_PLACEHOLDER : undefined}
+							minLength={PASSWORD_MIN_LENGTH}
 							required
 							className={fieldClass}
 						/>
@@ -210,7 +211,7 @@ const crowd: readonly { color: BotColor; face: BotFace; drop: string }[] = [
 	{ color: "teal", face: "dot", drop: "translate-y-2" },
 ];
 
-/** The first thing somebody new sees. Email is the only way in until Google sign-in exists. */
+/** The first thing somebody new sees. Email is the only way in. */
 function Welcome({ onContinue }: { onContinue: () => void }) {
 	return (
 		<main className="grid h-full place-items-center overflow-x-hidden bg-background px-4 text-foreground">

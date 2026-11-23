@@ -15,7 +15,6 @@ import { createTestApp, identifiedBy } from "./app.test-support.ts";
 /** Public by intent. Anything else reaching here without credentials is a bug. */
 const OPEN_ENDPOINTS = new Set([
 	"GET /health",
-	"POST /hooks/routines/:automationId",
 	"POST /hooks/triggers/:triggerId",
 	"POST /hooks/connections/:connectionId",
 ]);
@@ -34,7 +33,7 @@ const PLACEHOLDERS: Record<string, string> = {
 	toolCallId: "0199a3a0-0000-7000-8000-00000000000a",
 	ruleId: "0199a3a0-0000-7000-8000-00000000000b",
 	// A system bot is addressed by its key, not by an id.
-	key: "summarise",
+	key: "compact",
 	id: "0199a3a0-0000-7000-8000-000000000008",
 	memberId: "0199a3a0-0000-7000-8000-00000000000c",
 	invitationId: "0199a3a0-0000-7000-8000-00000000000d",

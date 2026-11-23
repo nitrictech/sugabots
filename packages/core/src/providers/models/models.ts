@@ -1,6 +1,6 @@
 /**
  * The one client every part of the workspace asks a model through: turns,
- * summaries, compaction, model trials and provider settings.
+ * compaction, model trials and provider settings.
  * It resolves the workspace's provider for a model, signs in where the
  * provider needs it, and either streams the response or collects a whole
  * answer.
@@ -636,7 +636,7 @@ export class UnusableAnswer
 /** The model did not finish answering within the time allowed. */
 export class AnswerTimedOut
 	extends Schema.TaggedError<AnswerTimedOut>()("AnswerTimedOut", {
-		/** What the answer was for, such as a summary. */
+		/** What the answer was for, such as a compaction. */
 		purpose: Schema.String,
 	})
 	implements DomainError

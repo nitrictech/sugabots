@@ -109,7 +109,6 @@ export const offeredModels = (workspaceId: string) =>
 		),
 	);
 
-/** A default seeded into an older workspace is still one of the defaults. */
 function inListOrder<Row extends { provider: ModelProviderRow }>(rows: Row[]): Row[] {
 	const rank = ({ provider: row }: Row) => {
 		const seeded = row.preset ? seededPresets.indexOf(row.preset) : -1;
@@ -165,7 +164,6 @@ function toProvider(
 		hasApiKey,
 		signedIn,
 		customHeaders: row.customHeadersEncrypted.map(({ name }) => ({ name })),
-		modelCount: models.length,
 		lastTestError: row.lastTestError,
 		connectedBy: connected ? connectedBy : null,
 		createdAt: row.createdAt.toISOString(),

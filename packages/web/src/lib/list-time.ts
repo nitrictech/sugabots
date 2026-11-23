@@ -83,6 +83,55 @@ export function formatClockTime(at: Date, locale?: string): string {
 		.trim();
 }
 
+/**
+ * The day `at` falls on, as a chat's day marker says it: "Today",
+ * "Yesterday", or the month and day, with the year only for another year.
+ */
+export function formatDay(at: Date): string {
+	const now = new Date();
+	const daysAgo = Math.round((startOfDay(now) - startOfDay(at)) / DAY_MS);
+	if (daysAgo === 0) return "Today";
+	if (daysAgo === 1) return YESTERDAY;
+	return at.toLocaleDateString(undefined, {
+		month: "short",
+		day: "numeric",
+		year: at.getFullYear() === now.getFullYear() ? undefined : "numeric",
+	});
+}
+
+/** A date in full, as a profile says when something began: "14 Sep 2026". */
+export function formatDate(at: Date): string {
+	return at.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+/**
+ * When something will happen, by `now`: "Today at 14:00", "Tomorrow at 7:00",
+ * "Mon at 9:00" within the week, then "14 Sep at 9:00".
+ */
+export function formatTimeAhead(at: Date, now: Date): string {
+	const daysAhead = Math.round((startOfDay(at) - startOfDay(now)) / DAY_MS);
+	const day =
+		daysAhead <= 0
+			? "Today"
+			: daysAhead === 1
+				? "Tomorrow"
+				: daysAhead < WEEK_DAYS
+					? at.toLocaleDateString(undefined, { weekday: "short" })
+					: at.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+	return `${day} at ${formatClockTime(at)}`;
+}
+
+/** When something happened, to the second, as a time's tooltip gives it: "Today at 9:14:05 AM". */
+export function formatFullTimestamp(at: string): string {
+	const date = new Date(at);
+	const time = date.toLocaleTimeString(undefined, {
+		hour: "numeric",
+		minute: "2-digit",
+		second: "2-digit",
+	});
+	return `${formatDay(date)} at ${time}`;
+}
+
 function startOfDay(date: Date): number {
 	return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }

@@ -259,13 +259,11 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 8 }),
 		);
 
-		const stream = events(fetch).conversation("c1");
-		const seen = await take(stream, 2);
+		const seen = await take(events(fetch).conversation("c1"), 2);
 
 		expect(seen.map((event) => event.type)).toEqual(["message.created", "message.completed"]);
 		expect(calls[0]?.headers.get("last-event-id")).toBeNull();
 		expect(calls[1]?.headers.get("last-event-id")).toBe("7");
-		expect(stream.lastEventId).toBe("8");
 	});
 
 	it("does not let a delta move the resume point", async () => {
@@ -280,13 +278,6 @@ describe("resume", () => {
 		await take(events(fetch).conversation("c1"), 3);
 
 		expect(calls[1]?.headers.get("last-event-id")).toBe("7");
-	});
-
-	it("starts from a remembered id", async () => {
-		const { fetch, calls } = scripted(frame({ event: "message.created", id: 12 }));
-		await take(events(fetch).conversation("c1", { lastEventId: "11" }), 1);
-
-		expect(calls[0]?.headers.get("last-event-id")).toBe("11");
 	});
 
 	it("preserves an empty id as a cleared checkpoint", async () => {

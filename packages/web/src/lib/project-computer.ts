@@ -1,18 +1,15 @@
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 
 /**
- * How the project's computer stands, and whether the person may reset or
- * upgrade it. A bot's computer is its default project's.
+ * How the project's computer stands. A bot's computer is its default project's.
  */
-export function useProjectComputer(projectId: string | undefined) {
+export function useProjectComputer(projectId: string) {
 	return useQuery({
 		queryKey: ["project-computer", projectId],
-		queryFn: projectId
-			? ({ signal }) =>
-					Effect.runPromise(client.api.projectComputer.get({ params: { projectId } }), { signal })
-			: skipToken,
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.projectComputer.get({ params: { projectId } }), { signal }),
 		// Turns and viewers come and go; the panel keeps up without a page reload.
 		refetchInterval: 15_000,
 	});

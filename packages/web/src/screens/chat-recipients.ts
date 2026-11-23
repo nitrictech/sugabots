@@ -116,10 +116,9 @@ export function choosesBotsIn(
  * - `leadMayReply`: in a thread, the draft mentions only people, so the lead reads
  *   it and either replies or reacts 👀.
  * - `leadWontReply`: in an automation's feed, the draft mentions only people.
- * - `nobody`: no bot answers. In a feed, because the project has no lead; in a
- *   thread, because it has no lead and the draft mentions and replies to none of
- *   its bots, or because the draft mentions only people and the lead has no model
- *   to reply with; and in any other conversation.
+ * - `nobody`: no bot answers. In a thread, because the draft mentions only
+ *   people and the lead has no model to reply with; and in any other
+ *   conversation.
  */
 export type DraftFloor =
 	| { kind: "bots"; bots: BotParticipant[] }

@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useProjectComputerNetwork } from "@/lib/project-computer.ts";
-import { type ResourceOwner, resourceProjectId } from "@/lib/resource-owner.tsx";
+import {
+	type ResourceOwner,
+	resourcePermissions,
+	resourceProjectId,
+} from "@/lib/resource-owner.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 import { AddedHostRow, AddHostRow } from "./ComputerNetworkSettings.tsx";
@@ -9,16 +13,11 @@ import { AddedHostRow, AddHostRow } from "./ComputerNetworkSettings.tsx";
 /**
  * What the owner's computer may connect to: the hosts the workspace allows
  * every computer, and the project's own, added here or by allowing a bot's
- * request in a thread. `canManage` is whether the person may change the
- * project's own.
+ * request in a thread, which only someone who manages the owner's computer
+ * may change.
  */
-export function ProjectComputerNetworkSettings({
-	owner,
-	canManage,
-}: {
-	owner: ResourceOwner;
-	canManage: boolean;
-}) {
+export function ProjectComputerNetworkSettings({ owner }: { owner: ResourceOwner }) {
+	const canManage = resourcePermissions(owner).manageComputer;
 	const { network, addHost, removeHost } = useProjectComputerNetwork(resourceProjectId(owner));
 	const [showingWorkspace, setShowingWorkspace] = useState(false);
 	if (network.isPending) return null;

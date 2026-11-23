@@ -193,13 +193,18 @@ export function ChatComposer({
 		/** Takes off the bots inherited from the last message, leaving those the draft names. */
 		onClearInherited: () => void;
 	};
-	/** The files attached to the message, and what attaches, removes and retries them. */
-	attachments: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
+	/**
+	 * The files attached to the message, and what attaches, removes and
+	 * retries them. Without them nothing can be attached, as before a thread
+	 * starts, since a file uploads to its conversation.
+	 */
+	attachments?: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
 	/** A strip over everything else in the box, of what the person should know before sending, such as a connection bots can't use. */
 	notice?: ReactNode;
 	/** Send is off, as while a bot the message must go to has no model; `notice` says why. */
 	held?: boolean;
 }) {
+	const attachedFiles = attachments?.items ?? [];
 	const id = useId();
 	const menuId = `${id}-suggestions`;
 	const editor = useRef<MentionEditorHandle>(null);
@@ -374,13 +379,17 @@ export function ChatComposer({
 					{addressed && addressed.bots.length > 0 && (
 						<AddressedStrip bots={addressed.bots} onRemove={addressed.onRemove} />
 					)}
-					<AttachmentTray
-						items={attachments.items}
-						onRemove={attachments.remove}
-						onRetry={attachments.retry}
-						focusDraft={() => editor.current?.focus()}
-					/>
-					<LeftOutNote count={attachments.leftOut} />
+					{attachments && (
+						<>
+							<AttachmentTray
+								items={attachments.items}
+								onRemove={attachments.remove}
+								onRetry={attachments.retry}
+								focusDraft={() => editor.current?.focus()}
+							/>
+							<LeftOutNote count={attachments.leftOut} />
+						</>
+					)}
 				</div>
 				<div
 					ref={draftBox}
@@ -414,7 +423,7 @@ export function ChatComposer({
 						onPaste={(event) => {
 							const { files, types } = event.clipboardData;
 							// Office apps put a picture of what was copied beside its text, which is what was meant.
-							if (!attachments.attach || files.length === 0 || types.includes("text/plain")) return;
+							if (!attachments || files.length === 0 || types.includes("text/plain")) return;
 							event.preventDefault();
 							attachments.attach([...files]);
 						}}
@@ -423,16 +432,15 @@ export function ChatComposer({
 					/>
 				</div>
 				<AttachButton
-					full={attachments.items.length >= MAX_ATTACHMENTS_PER_MESSAGE}
-					onAttach={attachments.attach}
+					full={attachedFiles.length >= MAX_ATTACHMENTS_PER_MESSAGE}
+					onAttach={attachments?.attach}
 					onMention={startMention}
 				/>
-				{/* Send shows once there is something to send. */}
-				{(value.trim() !== "" || attachments.items.length > 0) && (
+				{(value.trim() !== "" || attachedFiles.length > 0) && (
 					<button
 						type="submit"
 						aria-label={submitLabel}
-						disabled={held || sending || !canSend(value, attachments.items)}
+						disabled={held || sending || !canSend(value, attachedFiles)}
 						className="focus-ring order-4 ml-auto grid size-7.5 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary-hover disabled:bg-chip-strong max-md:order-3 max-md:size-9 max-md:rounded-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-90"
 					>
 						<ArrowUp size={16} strokeWidth={2.25} className="max-md:size-4.5" />
@@ -443,9 +451,7 @@ export function ChatComposer({
 				<div aria-live="polite" className="min-w-0 flex-1 text-destructive-text empty:hidden">
 					{error}
 				</div>
-				<SendNote className="ml-auto">
-					{filesNote(attachments.items) ?? model ?? "Enter to send"}
-				</SendNote>
+				<SendNote>{filesNote(attachedFiles) ?? model ?? "Enter to send"}</SendNote>
 			</div>
 		</form>
 	);
@@ -455,14 +461,9 @@ export function ChatComposer({
  * By Send: what holds the message back, else the model that answers, else how
  * to send it. A phone, with its own Send key, has none.
  */
-function SendNote({ className, children }: { className: string; children: ReactNode }) {
+function SendNote({ children }: { children: ReactNode }) {
 	return (
-		<span
-			className={cn(
-				"min-w-0 truncate text-subtle-foreground text-xs max-md:hidden [@media(hover:none)]:hidden",
-				className,
-			)}
-		>
+		<span className="ml-auto min-w-0 truncate text-subtle-foreground text-xs max-md:hidden [@media(hover:none)]:hidden">
 			{children}
 		</span>
 	);

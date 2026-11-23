@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import { client } from "@/api.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { requestPasswordReset } from "@/lib/password-reset.ts";
+import { PASSWORD_MIN_LENGTH, PASSWORD_PLACEHOLDER } from "@/lib/passwords.ts";
 import { AuthLayout, FormRow, fieldClass } from "@/screens/AuthLayout.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -142,8 +143,8 @@ export function ResetPassword({
 							value={password}
 							onChange={(event) => setPassword(event.target.value)}
 							autoComplete="new-password"
-							placeholder="8 characters or more"
-							minLength={8}
+							placeholder={PASSWORD_PLACEHOLDER}
+							minLength={PASSWORD_MIN_LENGTH}
 							required
 							className={fieldClass}
 						/>

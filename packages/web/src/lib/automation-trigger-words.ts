@@ -11,8 +11,7 @@ import type {
 /*
  * What an automation's triggers are called where they are set up: the kinds of
  * trigger, a webhook's senders and how it checks them, and the events at a
- * repository. Plain data, which the native apps' copies are generated from.
- * apps/codegen loads this module with Node, so it imports nothing but types.
+ * repository.
  */
 
 export type TriggerKind = AutomationTrigger["kind"];

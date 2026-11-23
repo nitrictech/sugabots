@@ -17,20 +17,12 @@ export function ScrollArea({ className, children, ...props }: ScrollAreaPrimitiv
 	);
 }
 
-function Scrollbar({
-	orientation = "vertical",
-	className,
-	...props
-}: ScrollAreaPrimitive.Scrollbar.Props) {
+/** The vertical scrollbar, the only one a `ScrollArea` has. */
+function Scrollbar() {
 	return (
 		<ScrollAreaPrimitive.Scrollbar
-			orientation={orientation}
-			className={cn(
-				"flex touch-none select-none p-px transition-colors",
-				orientation === "vertical" ? "h-full w-2" : "h-2 flex-col",
-				className,
-			)}
-			{...props}
+			orientation="vertical"
+			className="flex h-full w-2 touch-none select-none p-px transition-colors"
 		>
 			<ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-border-strong" />
 		</ScrollAreaPrimitive.Scrollbar>

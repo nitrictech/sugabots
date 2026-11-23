@@ -4,7 +4,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	computer,
 	computerProvider,
-	project,
 	user,
 	workspace,
 	workspaceMember,
@@ -15,6 +14,7 @@ import {
 	type Promised,
 	waitUntilWaitingOnLocks,
 } from "../database/testing.ts";
+import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { servedOnPostgresAs } from "../workspaces/testing.ts";
 import { ComputerProviderSetup } from "./computer-provider-setup.ts";
 import { ProjectComputers } from "./project-computers.ts";
@@ -51,11 +51,8 @@ describe.skipIf(!process.env.DATABASE_URL)("removing a computer provider, agains
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId: space.id, userId: owner.id, role: "owner" }),
 		);
-		const [launch] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({ workspaceId: space.id, name: "Launch", slug: "launch" })
-				.returning(),
+		const launch = await onDatabase((db) =>
+			seedProject(db, { workspaceId: space.id, name: "Launch", slug: "launch" }),
 		);
 		const [provider] = await onDatabase((db) =>
 			db

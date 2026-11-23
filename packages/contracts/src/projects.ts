@@ -68,7 +68,7 @@ export type ProjectColor = typeof projectColorSchema.Type;
  * workspace's projects go through every colour before any repeats. What a new project
  * is given when it names no colour, and what a form offers it first.
  */
-export function leastUsedProjectColor(taken: readonly (ProjectColor | null)[]): ProjectColor {
+export function leastUsedProjectColor(taken: readonly ProjectColor[]): ProjectColor {
 	const uses = (color: ProjectColor) => taken.filter((one) => one === color).length;
 	return projectColors.reduce((best, color) => (uses(color) < uses(best) ? color : best));
 }
@@ -138,16 +138,14 @@ export const projectSchema = Schema.Struct({
 	workspaceId: uuidSchema,
 	name: Schema.String,
 	slug: slugSchema,
-	/** `null` for the default colour. */
-	color: Schema.NullOr(projectColorSchema),
+	color: projectColorSchema,
 	description: Schema.NullOr(Schema.String),
 	visibility: projectVisibilitySchema,
 	/**
 	 * The bot that works on the project and answers its threads unless another
-	 * is asked: one of its bots. Null only on a project made before projects
-	 * had leads, which had no bots then, until somebody chooses one.
+	 * is asked: one of its bots.
 	 */
-	leadBotId: Schema.NullOr(uuidSchema),
+	leadBotId: uuidSchema,
 	/** Whether the person asking is in it, rather than seeing it in the directory. */
 	isMember: Schema.Boolean,
 	/**

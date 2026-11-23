@@ -1,15 +1,15 @@
-import type { Project } from "@sugabots/contracts";
+import { type Project, THREAD_NAME_MAX_LENGTH } from "@sugabots/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { Archive, Pencil } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useArchiveThread, useRenameThread } from "@/lib/chats.ts";
 import { projectLink } from "@/lib/links.ts";
-import { ChatNameDialog } from "@/shell/ChatNameDialog.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import { DropdownMenuItem } from "@/ui/dropdown-menu.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
+import { NameDialog } from "@/ui/name-dialog.tsx";
 
 /** A project's thread as changing it needs it. */
 export interface ProjectThreadToChange {
@@ -79,10 +79,11 @@ export function ProjectThreadActions({
 				archive: () => setArchiving(true),
 			})}
 			<Dialog open={renaming} onOpenChange={setRenaming}>
-				<ChatNameDialog
+				<NameDialog
 					title="Rename thread"
 					name={name}
-					action="Save"
+					maxLength={THREAD_NAME_MAX_LENGTH}
+					placeholder="e.g. Pricing"
 					onSave={async (renamed) => {
 						await rename.mutateAsync(renamed);
 						setRenaming(false);

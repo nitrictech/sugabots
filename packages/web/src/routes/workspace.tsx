@@ -1,15 +1,17 @@
 import type { Workspace, WorkspacePermissions } from "@sugabots/contracts";
 import { createRoute, Navigate } from "@tanstack/react-router";
 import { useAssistant, useBots, useEnsuringAssistantFailed } from "@/lib/bots.ts";
+import { API_DID_NOT_ANSWER } from "@/lib/failure.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { loadFailure } from "@/lib/query.ts";
 import { useWorkspace, useWorkspaceStanding, useWorkspaces } from "@/lib/workspace.ts";
 import { LoadFailure } from "@/shell/LoadFailure.tsx";
 import { MobileHome } from "@/shell/MobileHome.tsx";
 import { Panes, Shell } from "@/shell/Shell.tsx";
+import { Splash } from "@/shell/Splash.tsx";
 import { You } from "@/shell/You.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { API_DID_NOT_ANSWER, preloadChatScreenForWideLayout } from "./conversation.tsx";
+import { preloadChatScreenForWideLayout } from "./conversation.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { requireUser, rootRoute } from "./root.tsx";
 
@@ -37,10 +39,10 @@ function LandingRoute() {
 			<LoadFailure title="Could not load your workspace" error={failure.error} retry={refetch} />
 		);
 	}
-	if (isPending) return <div className="h-full bg-list" />;
+	if (isPending) return <Splash />;
 	if (!chosen) return <Navigate to="/onboarding" replace />;
 	if (chosen.setupCompletedAt === null && standing.isPending) {
-		return <div className="h-full bg-list" />;
+		return <Splash />;
 	}
 	const setUp = workspaces.data?.find((one) => one.setupCompletedAt !== null);
 	const landing = setUp && opensIntoSetup(chosen, standing.data?.permissions) ? setUp : chosen;
@@ -104,7 +106,7 @@ function ShellRoute() {
 			/>
 		);
 	}
-	if (workspace.isPending) return <div className="h-full bg-list" />;
+	if (workspace.isPending) return <Splash />;
 	if (!workspace.workspace) {
 		// Somebody in no workspace at all has one to make, not a wrong address.
 		return workspaces.data?.length === 0 ? (
@@ -126,7 +128,7 @@ function ShellRoute() {
 				/>
 			);
 		}
-		if (standing.isPending) return <div className="h-full bg-list" />;
+		if (standing.isPending) return <Splash />;
 		if (opensIntoSetup(workspace.workspace, standing.data?.permissions)) {
 			return <Navigate to="/onboarding" search={{ workspace: workspace.workspace.slug }} replace />;
 		}

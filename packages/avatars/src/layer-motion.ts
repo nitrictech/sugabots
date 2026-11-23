@@ -159,7 +159,6 @@ export class LayerMotion {
 	/** The face's width in device pixels, read when a path starts. */
 	private readonly facePixels: () => number;
 
-	// Fields set by hand rather than as parameter properties, so Node can load this file as it is, as the native apps' generator does.
 	constructor(layer: RefObject<HTMLElement | null>, kind: LayerKind, facePixels: () => number) {
 		this.layer = layer;
 		this.kind = kind;
@@ -341,7 +340,7 @@ function isPathList(paths: Path | readonly Path[]): paths is readonly Path[] {
  * Paths one after another, each from where the last ends, as one function of
  * time; the first starts at `velocity`, where it's a spring.
  */
-export function sequence(
+function sequence(
 	from: Values,
 	paths: readonly Path[],
 	velocity?: Values,

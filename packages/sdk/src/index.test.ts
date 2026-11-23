@@ -79,7 +79,6 @@ describe("createClient", () => {
 
 		await settle(client.api.me());
 
-		expect(client.authMode).toBe("bearer");
 		expect(requests(fetch)[0]?.credentials).toBe("omit");
 		expect(requests(fetch)[0]?.headers.get("authorization")).toBe("Bearer renderer-token");
 	});

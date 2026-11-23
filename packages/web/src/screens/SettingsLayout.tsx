@@ -79,7 +79,7 @@ export function SettingsLayout({
 				<SettingsNavigation />
 				{index && <CompactSettingsList />}
 				<div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", index && "max-lg:hidden")}>
-					<SettingsTrail className="max-lg:hidden" />
+					<SettingsTrail />
 					{/*
 					 * The scrollbar's room is kept whether or not the page is long enough
 					 * to need one, so a long page, such as Usage, centres its column where
@@ -212,7 +212,7 @@ function useWorkspaceSections() {
 	const may = useWorkspacePermissions();
 	const { workspace } = useWorkspace();
 	const { data: members } = useWorkspaceMembers(workspace?.id);
-	// The one member a workspace always has is you, so the roster starts at two.
+	// The one person a workspace always has is you, so the roster starts at two.
 	const people = members?.length;
 	const counts: Partial<Record<SettingSection["id"], number | undefined>> = {
 		members: people === 1 ? undefined : people,
@@ -447,12 +447,12 @@ export function SettingsListGroups({
  * settings these are, then each page on the way down to this one, each a
  * link back up but the last.
  */
-function SettingsTrail({ className }: { className: string }) {
+function SettingsTrail() {
 	const crumbs = useSettingsCrumbs();
 	return (
 		<nav
 			aria-label="Breadcrumb"
-			className={cn("flex h-13 shrink-0 items-center border-border border-b pr-14 pl-6", className)}
+			className="flex h-13 shrink-0 items-center border-border border-b pr-14 pl-6 max-lg:hidden"
 		>
 			<ol className="m-0 flex min-w-0 list-none items-center gap-2.5 p-0 text-xs">
 				{crumbs.map((crumb, index) => {
@@ -546,7 +546,7 @@ function MemberName({ membershipId }: { membershipId: string }) {
 function ProviderPageName({ id }: { id: string }) {
 	const { data: providers } = useModelProviders();
 	if (id === "default") return "Default for new bots";
-	if (id === "system") return "Summaries";
+	if (id === "system") return "Compaction";
 	return providers?.find((provider) => provider.id === id)?.name ?? null;
 }
 

@@ -1,12 +1,12 @@
 import { MAX_ATTACHMENTS_PER_MESSAGE } from "@sugabots/contracts";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { ConfigProvider, Duration, Effect, Layer, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { BlobDeletions } from "../blob-store/deletions.ts";
 import { anAutomationOwner } from "../conversations/automations/testing.ts";
 import { seedConversation } from "../conversations/seed.test-support.ts";
-import { blobDeletion, bot, file, message, toolCall, turn } from "../database/schema.ts";
+import { blobDeletion, bot, file, message, project, toolCall, turn } from "../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -36,6 +36,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 				kind: "project_thread",
 				botId: owner.botId,
 				title: "Files",
+				startedById: owner.userId,
 			}),
 		);
 		return {
@@ -445,6 +446,10 @@ describe.skipIf(!process.env.DATABASE_URL)("conversation files, against Postgres
 		const blobsUnder = () =>
 			runOnPostgres(Effect.flatMap(BlobStore.Service, (blobs) => blobs.list(folder)));
 
+		// It leads a project people made, which goes first, as the bot can't be deleted while it leads one.
+		await onDatabase((db) =>
+			db.delete(project).where(and(eq(project.leadBotId, botId), isNull(project.defaultOfBotId))),
+		);
 		await onDatabase((db) => db.delete(bot).where(eq(bot.id, botId)));
 
 		expect(await onDatabase((db) => db.select().from(file).where(eq(file.id, written.id)))).toEqual(

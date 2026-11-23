@@ -40,7 +40,6 @@ export const client = {
 		bots: {
 			list: vi.fn(),
 			create: vi.fn(),
-			get: vi.fn(),
 			update: vi.fn(),
 			remove: vi.fn(),
 			pin: vi.fn(),
@@ -50,7 +49,6 @@ export const client = {
 		projects: {
 			list: vi.fn(),
 			create: vi.fn(),
-			get: vi.fn(),
 			update: vi.fn(),
 			remove: vi.fn(),
 			listMembers: vi.fn(),
@@ -82,20 +80,15 @@ export const client = {
 			list: vi.fn(),
 			update: vi.fn(),
 		},
-		modelTrials: {
-			run: vi.fn(),
-		},
 		modelProviders: {
 			list: vi.fn(),
 			listEnabledModels: vi.fn(),
 			create: vi.fn(),
-			get: vi.fn(),
 			update: vi.fn(),
 			remove: vi.fn(),
 			test: vi.fn(),
 			fetchModels: vi.fn(),
 			addModel: vi.fn(),
-			setModelsEnabled: vi.fn(),
 			updateModel: vi.fn(),
 			switchOffModel: vi.fn(),
 			switchOff: vi.fn(),
@@ -147,12 +140,10 @@ export const client = {
 			typing: vi.fn(),
 		},
 		conversations: {
-			list: vi.fn(),
 			get: vi.fn(),
 			react: vi.fn(),
 			unreact: vi.fn(),
 			activity: vi.fn(),
-			cancelTurn: vi.fn(),
 		},
 		approvals: {
 			decide: vi.fn(),
@@ -166,10 +157,8 @@ export const client = {
 			remove: vi.fn(),
 		},
 		automations: {
-			listInWorkspace: vi.fn(),
 			list: vi.fn(),
 			create: vi.fn(),
-			get: vi.fn(),
 			update: vi.fn(),
 			remove: vi.fn(),
 			run: vi.fn(),
@@ -178,12 +167,10 @@ export const client = {
 			removeTrigger: vi.fn(),
 			getSecret: vi.fn(),
 			rotateSecret: vi.fn(),
-			runs: vi.fn(),
 			projectRuns: vi.fn(),
 		},
 	},
 	events: { conversation: vi.fn(), workspace: vi.fn(), me: vi.fn() },
-	tokens: { get: vi.fn(), set: vi.fn() },
 	auth: {
 		signIn: vi.fn(),
 		signUp: vi.fn(),

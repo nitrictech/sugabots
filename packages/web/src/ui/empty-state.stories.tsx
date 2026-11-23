@@ -1,5 +1,6 @@
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
+import { Button } from "./button.tsx";
 import { EmptyState } from "./empty-state.tsx";
 
 const meta = preview.meta({
@@ -30,5 +31,23 @@ export const TitleOnly = meta.story({
 	args: { title: "No such workspace here", children: undefined },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText("No such workspace here")).toBeInTheDocument();
+	},
+});
+
+/** The ways to fill it, under the line that names them, each on a line of its own. */
+export const WithActions = meta.story({
+	args: {
+		title: "This page could not load",
+		children: "Reload the page to try again.",
+		actions: (
+			<>
+				<Button variant="secondary">Reload</Button>
+				<span>Or ask an admin to look into it.</span>
+			</>
+		),
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("button", { name: "Reload" })).toBeVisible();
+		await expect(canvas.getByText("Or ask an admin to look into it.")).toBeVisible();
 	},
 });

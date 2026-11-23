@@ -136,6 +136,6 @@ export const PhoneSection = meta.story({
 	play: async ({ canvas }) => {
 		const page = await canvas.findByRole("main");
 		await expect(await within(page).findByRole("link", { name: "Settings" })).toBeInTheDocument();
-		await expect(await within(page).findByRole("heading", { name: "Members" })).toBeInTheDocument();
+		await expect(await within(page).findByRole("heading", { name: "People" })).toBeInTheDocument();
 	},
 });

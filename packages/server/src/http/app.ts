@@ -27,7 +27,6 @@ import { eventRoutes } from "../routes/events/routes.ts";
 import { fileRoutes } from "../routes/files/routes.ts";
 import { gitHubConnectionRoutes, gitHubWebhookRoutes } from "../routes/github/routes.ts";
 import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
-import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
 import { notificationRoutes } from "../routes/notifications/routes.ts";
 import { onboardingRoutes } from "../routes/onboarding/routes.ts";
 import { projectComputerRoutes } from "../routes/project-computer/routes.ts";
@@ -85,7 +84,6 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				onboardingRoutes,
 				projectRoutes,
 				systemBotRoutes,
-				modelTrialRoutes,
 				modelProviderRoutes,
 				searchProviderRoutes,
 				computerProviderRoutes,

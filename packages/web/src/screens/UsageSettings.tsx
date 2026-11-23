@@ -254,7 +254,7 @@ interface Line {
 	unpricedRequests: number;
 }
 
-const SYSTEM_BOTS_WORK = "Summaries, titles, compaction, model tests";
+const SYSTEM_BOTS_WORK = "Routing, compaction, model tests";
 
 const PERSONAL_ASSISTANTS_WORK = "Everyone's, together";
 

@@ -47,8 +47,6 @@ export const makeConnectionEvents = Effect.gen(function* () {
 								AutomationNotFound: () => Effect.succeed([]),
 								AutomationTriggerRejected: () => Effect.succeed([]),
 								AutomationTriggerConflict: () => Effect.succeed([]),
-								// Nobody leads its project to run it.
-								AutomationProjectHasNoLead: () => Effect.succeed([]),
 							}),
 						),
 					);

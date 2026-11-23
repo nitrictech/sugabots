@@ -22,7 +22,7 @@ import {
 	useModelProviders,
 	useProviderActions,
 } from "@/lib/model-providers.ts";
-import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
+import { NOT_A_SERVER_ADDRESS, parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { SYSTEM_BOT_KEYS, useChooseSystemBotModel, useSystemBots } from "@/lib/system-bots.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
@@ -33,6 +33,7 @@ import {
 	DialogFormFooter,
 	DialogFormFrame,
 	DialogFormHeader,
+	DialogFormScroll,
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import {
@@ -42,6 +43,7 @@ import {
 	SettingsGroup,
 	SettingsPage,
 	SettingsRow,
+	SettingsRowAlert,
 	SettingsRowButton,
 	SettingsRowIcon,
 	SettingsStatusBadge,
@@ -116,11 +118,7 @@ export function ModelsSettings() {
 				{may.configureBuiltInBots && <SystemModelRow providers={all} />}
 			</SettingsGroup>
 			<SettingsGroup label="Providers">
-				{providers.error && (
-					<div className="px-4 py-3">
-						<Alert>{failureMessage(providers.error)}</Alert>
-					</div>
-				)}
+				{providers.error && <SettingsRowAlert>{failureMessage(providers.error)}</SettingsRowAlert>}
 				{connected.map((provider) => (
 					<ProviderRow key={provider.id} provider={provider} render={providerLink(provider)} />
 				))}
@@ -293,15 +291,15 @@ function DefaultRow({
 	);
 }
 
-/** The Summariser's model stands for the system bots', since choosing one sets them all. */
+/** Compaction's model stands for the system bots', since choosing one sets them all. */
 function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) {
 	const backToModels = useBackToHere("Models");
 	const systemBots = useSystemBots();
-	const current = systemBots.data?.find((bot) => bot.key === "summarise")?.model ?? null;
+	const current = systemBots.data?.find((bot) => bot.key === "compact")?.model ?? null;
 	return (
 		<DefaultRow
-			label="Summaries"
-			description="Used for conversation summaries, thread titles and compacting long conversations"
+			label="Compaction"
+			description="Used to compact long conversations for a bot with no model of its own"
 			model={chosenModelName(providers, current)}
 			render={<Link from="/$workspace" to="./settings/providers/system" state={backToModels} />}
 		/>
@@ -336,21 +334,20 @@ export function DefaultModelSettings() {
 }
 
 /**
- * One model for everything Sugabots does behind the scenes: conversation summaries,
- * thread titles and compacting long conversations. Choosing it sets it for every system
- * bot at once.
+ * One model for everything Sugabots does behind the scenes, which is
+ * compacting long conversations for a bot with no model of its own. Choosing
+ * it sets it for every system bot at once.
  */
 export function SystemModelSettings() {
 	const systemBots = useSystemBots();
-	const summarise = useChooseSystemBotModel("summarise");
 	const compact = useChooseSystemBotModel("compact");
-	const choosers = { summarise, compact };
+	const choosers = { compact };
 	return (
 		<ModelChoicePage
-			title="Summaries"
-			description="The model Sugabots uses behind the scenes: summaries, thread titles and compacting long conversations. A fast, cheap model works best."
-			current={systemBots.data?.find((bot) => bot.key === "summarise")?.model ?? null}
-			pending={summarise.isPending || compact.isPending}
+			title="Compaction"
+			description="The model Sugabots uses behind the scenes to compact long conversations, for a bot with no model of its own. A fast, cheap model works best."
+			current={systemBots.data?.find((bot) => bot.key === "compact")?.model ?? null}
+			pending={compact.isPending}
 			choose={(modelId) =>
 				Promise.all(SYSTEM_BOT_KEYS.map((key) => choosers[key].mutateAsync(modelId)))
 			}
@@ -411,7 +408,7 @@ type Choice = { preset: ProviderPreset; existing?: ModelProvider } | "custom";
 
 /**
  * Adding a provider, in two steps inside one dialog: which one, then what it
- * needs. The three every workspace starts with already exist, so adding one
+ * needs. The ones every workspace starts with (`seededPresets`) already exist, so adding one
  * of them gives the existing record its key rather than making another.
  */
 export function AddProviderDialog(props: {
@@ -483,7 +480,7 @@ function AddProviderSteps({
 			<DialogFormHeader title="Add provider" />
 			<DialogFormBody>
 				{/* The catalog runs longer than a short window, so the list scrolls inside the dialog. */}
-				<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+				<DialogFormScroll height="picker-tall">
 					{groups.map((group) => (
 						<SettingsGroup key={group.label} label={group.label}>
 							{group.presets.map((preset) => (
@@ -511,7 +508,7 @@ function AddProviderSteps({
 							onClick={() => setChoice("custom")}
 						/>
 					</SettingsGroup>
-				</div>
+				</DialogFormScroll>
 			</DialogFormBody>
 			<DialogFormFooter onCancel={done} />
 		</DialogFormStep>
@@ -566,7 +563,6 @@ function PresetStep({
 						apiKey: apiKey || undefined,
 						...(local && typedBaseUrl !== preset.baseUrl ? { baseUrl: typedBaseUrl } : {}),
 					});
-			if (!added) throw new Error("The provider could not be loaded");
 			await onAdded(added);
 		} catch (cause) {
 			setError(cause);
@@ -605,9 +601,7 @@ function PresetStep({
 					)}
 				</SettingsGroup>
 				{local && baseUrl.trim() !== "" && typedBaseUrl === undefined && (
-					<Alert>
-						That is not a server address. A host and port, like 192.168.1.10:11434, is enough.
-					</Alert>
+					<Alert>{NOT_A_SERVER_ADDRESS}</Alert>
 				)}
 				{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 			</DialogFormBody>
@@ -648,7 +642,6 @@ function CustomProviderStep({
 				apiKey: apiKey || undefined,
 				customHeaders: [],
 			});
-			if (!added) throw new Error("The provider could not be loaded");
 			await onAdded(added);
 		} catch (cause) {
 			setError(cause);

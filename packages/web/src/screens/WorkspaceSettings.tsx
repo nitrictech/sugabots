@@ -11,6 +11,7 @@ import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useLivelinessChoice } from "@/lib/liveliness.tsx";
 import { SETTINGS_BESIDE, useMediaQuery } from "@/lib/media.ts";
+import { countOf } from "@/lib/name-list.ts";
 import { useProjects } from "@/lib/projects.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
@@ -154,8 +155,7 @@ function workspaceSummary(
 	projects: number | undefined,
 ): string | undefined {
 	if (people === undefined || projects === undefined) return undefined;
-	const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
-	return `Workspace with ${plural(people, "member")} and ${plural(projects, "project")}`;
+	return `Workspace with ${countOf(people, "person", "people")} and ${countOf(projects, "project", "projects")}`;
 }
 
 function GeneralSettings({

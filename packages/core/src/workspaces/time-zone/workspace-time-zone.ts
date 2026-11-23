@@ -69,7 +69,6 @@ export const make = Effect.gen(function* () {
 							{
 								settings,
 								secretEncrypted: null,
-								secretDigest: null,
 								nextScheduledAt:
 									state === "enabled" ? yield* nextOccurrence(settings.schedule, to, now) : null,
 							},

@@ -15,13 +15,15 @@ export function PageFailure() {
 	return (
 		// Fills whichever parent the failed page had: the shell's row, a pane's column, or the whole page.
 		<div className="flex h-full min-w-0 flex-1 bg-background">
-			<EmptyState title="This page could not load">
-				<div className="flex flex-col items-center gap-3">
-					<p>Reload the page to try again.</p>
+			<EmptyState
+				title="This page could not load"
+				actions={
 					<Button variant="secondary" onClick={() => window.location.reload()}>
 						Reload
 					</Button>
-				</div>
+				}
+			>
+				Reload the page to try again.
 			</EmptyState>
 		</div>
 	);

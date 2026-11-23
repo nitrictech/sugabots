@@ -77,32 +77,29 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 	it("gives a workspace one of each, with no model", async () => {
 		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
 
-		expect(await placed()).toEqual([
-			{ key: "compact", model: null },
-			{ key: "summarise", model: null },
-		]);
+		expect(await placed()).toEqual([{ key: "compact", model: null }]);
 	});
 
 	it("creates nothing more when run again", async () => {
 		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
 		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
 
-		expect(await placed()).toHaveLength(2);
+		expect(await placed()).toHaveLength(1);
 	});
 
 	it("does not put a chosen model back to unset when run again", async () => {
 		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
-		await bots.setSystemBotModel(workspaceId, "summarise", "chosen-model");
+		await bots.setSystemBotModel(workspaceId, "compact", "chosen-model");
 
 		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
 
-		const [summariser] = await onDatabase((db) =>
+		const [compaction] = await onDatabase((db) =>
 			db
 				.select({ model: bot.model })
 				.from(bot)
-				.where(and(eq(bot.workspaceId, workspaceId), eq(bot.systemBotKey, "summarise"))),
+				.where(and(eq(bot.workspaceId, workspaceId), eq(bot.systemBotKey, "compact"))),
 		);
-		expect(summariser?.model).toBe("chosen-model");
+		expect(compaction?.model).toBe("chosen-model");
 	});
 
 	it("gives each workspace its own set", async () => {
@@ -112,7 +109,6 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 
 		const listed = await administration.systemBots({ workspace: otherWorkspaceId });
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
-			{ key: "summarise", model: null },
 			{ key: "compact", model: null },
 		]);
 	});
@@ -121,23 +117,22 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 		const listed = await administration.systemBots({ workspace: workspaceId });
 
 		expect(listed.map(({ key, model }) => ({ key, model }))).toEqual([
-			{ key: "summarise", model: null },
 			{ key: "compact", model: null },
 		]);
 	});
 
-	it("refuses a second Summariser in the same workspace", async () => {
+	it("refuses a second Compaction bot in the same workspace", async () => {
 		await bots.ensureSystemBots({ workspaceId, createdById: creatorId });
 
 		await expect(
 			onDatabase((db) =>
 				db.insert(bot).values({
 					workspaceId,
-					name: "Second Summariser",
-					handle: "second-summariser",
-					systemBotKey: "summarise",
-					color: "orange",
-					face: "arc",
+					name: "Second Compaction",
+					handle: "second-compaction",
+					systemBotKey: "compact",
+					color: "purple",
+					face: "square",
 					model: null,
 				}),
 			),

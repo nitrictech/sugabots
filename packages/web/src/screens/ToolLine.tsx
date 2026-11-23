@@ -1,8 +1,9 @@
 import type { Message, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Wrench } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import type { ConnectionLook } from "@/lib/connections.ts";
+import { useNow } from "@/lib/now.ts";
 import { BUILT_IN_HANDLE, splitToolKey } from "@/lib/tool-names.ts";
 import { Button } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
@@ -33,14 +34,11 @@ function DetailBlock({
 	value,
 	otherArguments,
 	failed,
-	footnote,
 }: {
 	label: string;
 	value: unknown;
 	otherArguments?: unknown;
 	failed?: boolean;
-	/** What a reader should know about the value, under it: that it is not all of it. */
-	footnote?: string;
 }) {
 	const labelId = useId();
 	return (
@@ -49,7 +47,6 @@ function DetailBlock({
 				{label}
 			</figcaption>
 			<ToolCallValue value={value} otherArguments={otherArguments} failed={failed} />
-			{footnote && <p className="m-0 text-2xs text-subtle-foreground">{footnote}</p>}
 		</figure>
 	);
 }
@@ -78,7 +75,7 @@ export function WorkedFor({
 	// A reply stopped on a call someone has to approve isn't being worked on.
 	const waiting = message.parts.some((part) => part.type === "tool_call" && awaitsApproval(part));
 	const working = message.status === "streaming" && !waiting;
-	const now = useNow(working);
+	const now = useNow(SECOND_MS, working);
 	const runs = toolStepRuns(message.parts);
 	const calls = runs.flatMap((run) => run.calls);
 	const label = waiting ? "Waiting for approval" : workedForText(message, now, calls, looks);
@@ -151,18 +148,6 @@ function workedForText(
 }
 
 const SECOND_MS = 1_000;
-
-/** The time now, a second at a time while `ticking`; while not, the time it stopped. */
-function useNow(ticking: boolean): number {
-	const [now, setNow] = useState(Date.now);
-	useEffect(() => {
-		if (!ticking) return;
-		setNow(Date.now());
-		const timer = setInterval(() => setNow(Date.now()), SECOND_MS);
-		return () => clearInterval(timer);
-	}, [ticking]);
-	return now;
-}
 
 /**
  * Calls made one after another, split wherever the app changes, so each

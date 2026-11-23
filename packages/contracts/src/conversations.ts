@@ -12,7 +12,7 @@ import {
 	automationTriggerAuthorSchema,
 	runSchema,
 } from "./automations.ts";
-import { botColorSchema, botFaceSchema, botShapeSchema } from "./bots.ts";
+import { type Bot, botColorSchema, botFaceSchema, botShapeSchema } from "./bots.ts";
 import { emailSchema } from "./email.ts";
 import { FILE_WRITING_TOOLS, fileWrittenSchema } from "./files.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
@@ -92,8 +92,6 @@ export const placedConversationSchema = Schema.Struct({
 	parentConversationId: Schema.NullOr(uuidSchema),
 	/** When somebody marked the thread done; null while it is open, and on any other kind. */
 	doneAt: Schema.NullOr(isoTimestampSchema),
-	/** Who started a bot's thread or a project's thread. */
-	startedById: Schema.NullOr(uuidSchema),
 	createdAt: isoTimestampSchema,
 	updatedAt: isoTimestampSchema,
 });
@@ -123,6 +121,19 @@ export const botParticipantSchema = Schema.Struct({
 });
 
 export type BotParticipant = typeof botParticipantSchema.Type;
+
+/** A bot as a conversation's participants and mentions name it. */
+export function botParticipantOf(bot: Bot): BotParticipant {
+	return {
+		kind: "bot",
+		id: bot.id,
+		name: bot.name,
+		handle: bot.handle,
+		color: bot.color,
+		face: bot.face,
+		shape: bot.shape,
+	};
+}
 
 export const participantSchema = Schema.Union([personParticipantSchema, botParticipantSchema]);
 
@@ -617,7 +628,7 @@ export const messageSchema = Schema.Struct({
 	content: Schema.String,
 	/** Why a `failed` reply failed, in the provider's words where it had any. */
 	error: Schema.optional(Schema.String),
-	/** Set on an automation run's result, posted in the bot's conversation when the run completed. */
+	/** Set on an automation run's result, posted in the automation's feed when the run completed. */
 	automationResultOf: Schema.optional(automationResultOfSchema),
 	/** The message this one quotes and answers, in the same conversation. */
 	replyTo: Schema.optional(messageReplyToSchema),
@@ -637,18 +648,6 @@ export const messageSchema = Schema.Struct({
 	.annotate({ identifier: "Message" });
 
 export type Message = typeof messageSchema.Type;
-
-export const MAX_SUMMARY_CHARACTERS = 4_000;
-
-/** The most a bot's summary of what it has been doing may say. */
-export const MAX_BOT_SUMMARY_CHARACTERS = 1_000;
-
-export const conversationSummarySchema = Schema.Struct({
-	content: Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_SUMMARY_CHARACTERS)),
-	updatedAt: isoTimestampSchema,
-});
-
-export type ConversationSummary = typeof conversationSummarySchema.Type;
 
 /**
  * How far a person has read a conversation: every message created at or before
@@ -734,7 +733,6 @@ export type ConversationContext = typeof conversationContextSchema.Type;
 
 /** What a conversation's details show about it. */
 export const conversationActivitySchema = Schema.Struct({
-	summary: Schema.NullOr(conversationSummarySchema),
 	/** Null until a reply in the conversation has been measured. */
 	context: Schema.NullOr(conversationContextSchema),
 });

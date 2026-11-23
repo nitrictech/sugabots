@@ -9,6 +9,7 @@ import {
 	DEFAULT_QUIET_HOURS,
 	NOTIFICATION_LEVEL_LABELS,
 	NOTIFICATION_LEVEL_NOTES,
+	NOTIFICATION_LEVELS,
 } from "@/lib/notification-choices.ts";
 import {
 	formatUntil,
@@ -111,7 +112,7 @@ function ThisBrowser() {
 	);
 }
 
-const LEVEL_OPTIONS = (["all", "mentions", "nothing"] as const).map((value) => ({
+const LEVEL_OPTIONS = NOTIFICATION_LEVELS.map((value) => ({
 	value,
 	label: NOTIFICATION_LEVEL_LABELS[value],
 }));

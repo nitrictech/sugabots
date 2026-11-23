@@ -47,8 +47,7 @@ import { ProjectRepository } from "./project-repository.ts";
  *
  * The joins behind `Authorization.project`, the query a list is scoped by, and the
  * create-plus-membership transaction are exactly the parts a fake cannot
- * check. Needs a migrated database and skips without one, as
- * `db/schema.test.ts` does; CI always has one.
+ * check.
  */
 describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 	let repository: Promised<ProjectRepository.Interface>;

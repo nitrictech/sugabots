@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { Button } from "@/ui/button.tsx";
+import { SettingsControlRow } from "@/ui/settings-page.tsx";
 import { savedKeyMask } from "./provider-field-row.tsx";
 
 /**
@@ -52,10 +53,7 @@ export function TextEntryRow({
 	}
 
 	return (
-		<div className="flex min-h-12 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<label htmlFor={id} className="w-20.5 shrink-0 text-xs text-foreground">
-				{label}
-			</label>
+		<SettingsControlRow label={label} htmlFor={id}>
 			{showingSecret ? (
 				<>
 					<span id={id} className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
@@ -91,6 +89,6 @@ export function TextEntryRow({
 					className="focus-ring min-w-0 flex-1 rounded-md bg-transparent font-mono text-xs text-foreground placeholder:text-subtle-foreground"
 				/>
 			)}
-		</div>
+		</SettingsControlRow>
 	);
 }

@@ -7,6 +7,7 @@ import {
 	streamEvent,
 } from "@sugabots/contracts";
 import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
+import { listedThread } from "@sugabots/contracts/testing";
 import { UserText, userText } from "@sugabots/errors";
 import { failureForStatus } from "@sugabots/sdk";
 import { createMemoryHistory } from "@tanstack/react-router";
@@ -19,12 +20,10 @@ import { createAppRouter } from "@/router.tsx";
 import {
 	apiAnswers,
 	bots,
-	builtInBots,
 	compaction,
 	controlledEventStream,
 	juno,
 	linear,
-	listedThread,
 	MODELS,
 	modelProviders,
 	mount,
@@ -34,6 +33,7 @@ import {
 	personalAssistant,
 	projects,
 	sam,
+	systemBots,
 	TestApp,
 	threadWith,
 	triager,
@@ -799,27 +799,6 @@ describe("a project's threads", () => {
 		expect(await screen.findByText(run.automationName)).toBeDefined();
 	});
 
-	it("asks whoever may change a project with no lead bot yet to choose one", async () => {
-		onWideScreen();
-		const leaderless = { ...sales, leadBotId: null };
-		client.api.projects.list.mockReturnValue(
-			Effect.succeed(projects.map((one) => (one.id === sales.id ? leaderless : one))),
-		);
-		client.api.projects.update.mockReturnValue(Effect.succeed(sales));
-		mount(`/suga/projects/${sales.slug}`);
-
-		await screen.findByText(`Choose a lead bot for ${sales.name}`);
-		fireEvent.click(screen.getByRole("button", { name: "Choose a lead bot" }));
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Customer Research" }));
-
-		await waitFor(() =>
-			expect(client.api.projects.update).toHaveBeenCalledWith({
-				params: { projectId: sales.id },
-				payload: { leadBotId: "0199a3a0-0000-7000-8000-0000000000b1" },
-			}),
-		);
-	});
-
 	it("starts the first thread of a project with none from its first message, as a bot's page does", async () => {
 		onWideScreen();
 		const started = threadIn("0199a3a0-0000-7000-8000-0000000000f3", "Plan the kickoff");
@@ -1041,7 +1020,7 @@ describe("the settings navigation", () => {
 		mount("/suga/settings");
 
 		// General counts the members too, so once it does the roster has answered.
-		await screen.findByText("Workspace with 1 member and 2 projects");
+		await screen.findByText("Workspace with 1 person and 2 projects");
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
 
 		// The one member is you. "1" tells nobody anything they did not know.
@@ -1124,24 +1103,6 @@ describe("routes", () => {
 
 		expect(await screen.findByRole("link", { name: /^Automations/ })).toBeDefined();
 		expect(router.state.location.href).toBe(destination);
-	});
-
-	it("sends a bot's and a project's old settings addresses on to their own pages", async () => {
-		const moves = [
-			[`/suga/settings/bots/${linear.handle}`, `/suga/bots/${linear.handle}/settings`],
-			[`/suga/settings/bots/${linear.handle}/computer`, `/suga/bots/${linear.handle}/computer`],
-			["/suga/settings/bots", "/suga/bots"],
-			["/suga/settings/projects/suga-team", "/suga/projects/suga-team/settings"],
-			["/suga/settings/projects/suga-team/people", "/suga/projects/suga-team/settings/people"],
-			["/suga/settings/projects/suga-team/bots", "/suga/projects/suga-team/settings/bots"],
-			["/suga/settings/projects/suga-team/computer", "/suga/projects/suga-team/computer"],
-			["/suga/settings/projects", "/suga/projects"],
-		] as const;
-		for (const [from, to] of moves) {
-			const { router } = mount(from);
-			await waitFor(() => expect(router.state.location.pathname).toBe(to));
-			cleanup();
-		}
 	});
 
 	it("will not return from the login page to another site", async () => {
@@ -1302,7 +1263,6 @@ describe("routes", () => {
 			params: { workspace: workspace.id, providerId: openrouter.id, modelId: large?.id },
 			payload: { enabled: true },
 		});
-		expect(client.api.modelProviders.setModelsEnabled).not.toHaveBeenCalled();
 		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
 	});
 
@@ -1799,17 +1759,17 @@ describe("workspace settings", () => {
 	});
 
 	it("shows the system bots' model, and sets it for all of them at once", async () => {
-		client.api.systemBots.update.mockReturnValue(Effect.succeed(builtInBots[0]));
+		client.api.systemBots.update.mockReturnValue(Effect.succeed(systemBots[0]));
 		const { router } = mount("/suga/settings/providers");
 
-		fireEvent.click(await screen.findByRole("link", { name: /Summaries/ }));
+		fireEvent.click(await screen.findByRole("link", { name: /Compaction/ }));
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/suga/settings/providers/system"),
 		);
 		fireEvent.click(await screen.findByRole("button", { name: "gpt-5" }));
 
 		await waitFor(() => {
-			for (const key of ["summarise", "compact"]) {
+			for (const key of ["compact"]) {
 				expect(client.api.systemBots.update).toHaveBeenCalledWith({
 					params: { workspace: workspace.id, key },
 					payload: { model: "gpt-5" },
@@ -1827,7 +1787,6 @@ describe("workspace settings", () => {
 		hasApiKey: false,
 		status: "untested" as const,
 		models: [],
-		modelCount: 0,
 	};
 
 	function mountOllama(provider: typeof ollama = ollama) {
@@ -1901,7 +1860,6 @@ describe("workspace settings", () => {
 			hasApiKey: false,
 			status: "missing_key" as const,
 			models: [],
-			modelCount: 0,
 		};
 		client.api.modelProviders.create.mockReturnValue(Effect.succeed(provider));
 		const { router } = mount("/suga/settings/providers");
@@ -1940,7 +1898,6 @@ describe("workspace settings", () => {
 			name: "Groq",
 			baseUrl: "https://api.groq.com/openai/v1",
 			models: [],
-			modelCount: 0,
 		};
 		client.api.modelProviders.create.mockReturnValue(Effect.succeed(groq));
 		mount("/suga/settings/providers");
@@ -2066,7 +2023,6 @@ describe("workspace settings", () => {
 			name: "Local gateway",
 			baseUrl: "http://localhost:11434/v1",
 			models: [],
-			modelCount: 0,
 		};
 		client.api.modelProviders.list.mockReturnValue(Effect.succeed([custom]));
 		client.api.modelProviders.addModel.mockReturnValue(
@@ -2503,7 +2459,7 @@ describe("project settings", () => {
 		email: juno.email,
 		removable: true,
 	};
-	it("lists only the project's own bots, with nothing to say about built-in bots", async () => {
+	it("lists only the project's own bots, with nothing to say about system bots", async () => {
 		mount(botsPage);
 
 		// The sidebar names each bot too, by a link to its project.

@@ -1,5 +1,4 @@
 import { splitAroundMentions } from "@sugabots/contracts";
-import { cn } from "cn";
 import {
 	type ClipboardEvent,
 	type FocusEvent,
@@ -79,7 +78,6 @@ export function MentionEditor({
 	onPaste,
 	onFocus,
 	onBlur,
-	className,
 	...aria
 }: {
 	ref?: Ref<MentionEditorHandle>;
@@ -103,7 +101,6 @@ export function MentionEditor({
 	onBlur: (event: FocusEvent<HTMLDivElement>) => void;
 	"aria-controls"?: string;
 	"aria-activedescendant"?: string;
-	className?: string;
 }) {
 	const box = useRef<HTMLDivElement>(null);
 	// Chips are drawn here, off the page, and copied into the box: React cannot draw into a box the browser edits.
@@ -357,10 +354,7 @@ export function MentionEditor({
 				onBlur={(event) => {
 					if (event.target === event.currentTarget) onBlur(event);
 				}}
-				className={cn(
-					"block max-h-40 min-h-7 overflow-y-auto whitespace-pre-wrap break-words py-0.75 text-sm text-foreground leading-5.5 outline-none",
-					className,
-				)}
+				className="block max-h-40 min-h-7 overflow-y-auto whitespace-pre-wrap break-words py-0.75 text-sm text-foreground leading-5.5 outline-none"
 			/>
 			{createPortal(
 				mentionable.map((target) => (

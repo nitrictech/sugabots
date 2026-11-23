@@ -142,17 +142,6 @@ bun run dev
 Back up your PostgreSQL volume and `.env` before updating an installation that
 contains data you care about.
 
-Updating from a version where bots shared computers, destroy those computers
-before migrating, while the database still records where they are. Run this
-after `docker compose up -d` and before `bun run db:migrate`:
-
-```sh
-bun run --cwd packages/core destroy-pod-computers
-```
-
-Until every shared computer is destroyed, `bun run db:migrate` stops before
-changing the database and says so.
-
 ### Reset everything
 
 The following removes the database volume and all Sugabots data:

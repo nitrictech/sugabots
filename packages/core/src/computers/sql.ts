@@ -89,9 +89,9 @@ export const computer = pgTable(
 		/**
 		 * What it was made from, as Sugabots asked its provider: an image the
 		 * provider takes as it is pinned to its digest where the registry said
-		 * one, or a template's name. Null for one made before this was recorded.
+		 * one, or a template's name.
 		 */
-		image: text("image"),
+		image: text("image").notNull(),
 		/** When it was paused for sitting idle; null while it runs. */
 		pausedAt: timestamp("paused_at", { withTimezone: true }),
 		/** When it was last opened or let go of, which is when its idle time starts. */

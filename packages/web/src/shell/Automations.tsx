@@ -193,17 +193,22 @@ export function NoAutomations({
 		props: { className: buttonStyles({ size: "sm" }), children: "New automation" },
 	});
 	return (
-		<EmptyState title={title} page={page} icon={<RefreshCcw strokeWidth={1.75} />}>
+		<EmptyState
+			title={title}
+			page={page}
+			icon={<RefreshCcw strokeWidth={1.75} />}
+			actions={
+				create && (
+					<>
+						{newAutomation}
+						{create.whoToAsk && <span>Or ask {create.whoToAsk} to set one up.</span>}
+					</>
+				)
+			}
+		>
 			An automation runs on a timetable, or when a webhook or a GitHub event arrives, and posts what
-			it did to its own feed.{" "}
-			{create ? (
-				<span className="mt-4 flex flex-col items-center gap-3">
-					{newAutomation}
-					{create.whoToAsk && <span>Or ask {create.whoToAsk} to set one up.</span>}
-				</span>
-			) : (
-				<>Ask someone who manages {ownerName} to set one up.</>
-			)}
+			it did to its own feed.
+			{!create && <> Ask someone who manages {ownerName} to set one up.</>}
 		</EmptyState>
 	);
 }

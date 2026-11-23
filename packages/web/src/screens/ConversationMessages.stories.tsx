@@ -83,8 +83,7 @@ const meta = preview.meta({
 	title: "Product/ConversationMessages",
 	component: ConversationMessages,
 	args: {
-		host,
-		isRunning: false,
+		typing: { host, isRunning: false },
 		participants: [host, person],
 		peopleReachingProject: [person, jay],
 		conversationKind: "project_thread",
@@ -205,34 +204,6 @@ export const FilesWhileSending = meta.story({
 	},
 });
 
-/**
- * An automation run's result, posted in the automation's thread when the run completed,
- * with a link under it to the run and the work behind it.
- */
-export const AutomationResult = meta.story({
-	args: {
-		messages: [
-			{
-				...message(
-					"0199a3a0-0000-7000-8000-000000000a01",
-					host,
-					"Morning! Yesterday two PRs merged and the release branch is green. @sam-rivera you're on review today.",
-				),
-				automationResultOf: {
-					runId: "0199a3a0-0000-7000-8000-000000000a02",
-					conversationId: "0199a3a0-0000-7000-8000-000000000a03",
-					automationId: "0199a3a0-0000-7000-8000-000000000a04",
-					automationName: "Morning standup",
-				},
-			},
-		],
-	},
-	play: async ({ args, canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "From Morning standup" }));
-		await expect(args.onOpenItem).toHaveBeenCalledWith("0199a3a0-0000-7000-8000-000000000a03");
-	},
-});
-
 const tractionReport: WrittenFile = {
 	id: "0199a3a0-0000-7000-8000-000000000a15",
 	conversationId: PROJECT,
@@ -272,8 +243,9 @@ function tractionResult(parts: MessagePart[]): Message {
 }
 
 /**
- * An automation run's result with the file the run wrote, as a card under its
- * words, the same as under the reply in the run's own conversation.
+ * An automation run's result, posted in the automation's feed, with the file
+ * the run wrote as a card under its words, the same as under the reply in the
+ * run's own conversation.
  */
 export const AutomationResultWithFile = meta.story({
 	beforeEach({ msw }) {
@@ -305,7 +277,7 @@ export const AutomationResultOnlyFile = meta.story({
 	args: { onOpenFile: fn(), messages: [tractionResult([tractionCard])] },
 	play: async ({ canvas }) => {
 		await waitFor(() => expect(canvas.getByText("Document by Issue Triager")).toBeVisible());
-		await expect(canvas.getByRole("button", { name: "From Weekly traction" })).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Open Weekly traction" })).toBeVisible();
 	},
 });
 
@@ -883,46 +855,6 @@ function ArrivingReply(props: ComponentProps<typeof ConversationMessages>) {
 export const AReplyArriving = meta.story({
 	args: { messages: [] },
 	render: (args) => <ArrivingReply {...args} />,
-});
-
-/** SomeoneTyping is another person writing in the composer after the conversation's last message. */
-export const SomeoneTyping = meta.story({
-	args: {
-		participants: [host, person, jay],
-		messages: [
-			message(
-				"0199a3a0-0000-7000-8000-000000000601",
-				host,
-				"Checkout timeouts are tracked as BILL-212, and Jay is on call.",
-			),
-		],
-		peopleTyping: [jay],
-	},
-	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("status", { name: "Jay Park is typing" })).toBeVisible();
-	},
-});
-
-/** TypingWithTheBot is a person typing while the bot writes its reply: both names share one line. */
-export const TypingWithTheBot = meta.story({
-	args: {
-		participants: [host, person, jay],
-		messages: [
-			message("0199a3a0-0000-7000-8000-000000000701", person, "Is checkout still timing out?"),
-			{
-				...message("0199a3a0-0000-7000-8000-000000000702", host, ""),
-				status: "streaming",
-				parts: [],
-			},
-		],
-		peopleTyping: [jay],
-	},
-	play: async ({ canvas }) => {
-		await expect(
-			canvas.getByRole("status", { name: "Issue Triager and Jay Park are typing" }),
-		).toBeVisible();
-		await expect(canvas.getAllByRole("status")).toHaveLength(1);
-	},
 });
 
 /**

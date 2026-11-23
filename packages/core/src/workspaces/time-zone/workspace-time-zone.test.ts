@@ -75,25 +75,23 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				timeZone: "Asia/Tokyo",
 				automationsWithRoutines: 2,
 			});
-			const moved = await automations.get({
-				projectId: ownProjectId,
-				automationId: local.automation.id,
-			});
-			expect(moved.triggers).toEqual([
+			const listed = await automations.list({ projectId: ownProjectId });
+			const triggersOf = (automationId: string) =>
+				listed.find((automation) => automation.id === automationId)?.triggers;
+			const moved = triggersOf(local.automation.id);
+			expect(moved).toEqual([
 				expect.objectContaining({ timezone: "Asia/Tokyo", nextScheduledAt: expect.any(String) }),
 			]);
 			// Nine in Tokyo is midnight UTC.
-			const [trigger] = moved.triggers;
+			const [trigger] = moved ?? [];
 			const nextScheduledAt = trigger?.kind === "routine" ? trigger.nextScheduledAt : null;
 			expect(nextScheduledAt && new Date(nextScheduledAt).getUTCHours()).toBe(0);
-			expect(
-				(await automations.get({ projectId: ownProjectId, automationId: paused.automation.id }))
-					.triggers,
-			).toEqual([expect.objectContaining({ timezone: "Asia/Tokyo", nextScheduledAt: null })]);
-			expect(
-				(await automations.get({ projectId: ownProjectId, automationId: elsewhere.automation.id }))
-					.triggers,
-			).toEqual([expect.objectContaining({ timezone: "Europe/London" })]);
+			expect(triggersOf(paused.automation.id)).toEqual([
+				expect.objectContaining({ timezone: "Asia/Tokyo", nextScheduledAt: null }),
+			]);
+			expect(triggersOf(elsewhere.automation.id)).toEqual([
+				expect.objectContaining({ timezone: "Europe/London" }),
+			]);
 		});
 
 		it("refuses a zone the database does not know, and stays where it was", async () => {

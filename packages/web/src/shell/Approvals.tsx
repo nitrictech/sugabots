@@ -88,9 +88,7 @@ function NothingWaiting() {
 				<ShieldCheck size={20} strokeWidth={1.75} />
 			</span>
 			<div className="flex min-w-0 flex-col gap-0.5">
-				<p className="m-0 font-medium text-sm text-foreground max-md:text-sm">
-					Nothing waiting on you
-				</p>
+				<p className="m-0 font-medium text-sm text-foreground">Nothing waiting on you</p>
 				<p className="m-0 text-xs text-muted-foreground max-md:text-sm">
 					Bots ask here before they do anything you need to allow.
 				</p>
@@ -106,7 +104,7 @@ function NothingWaiting() {
  */
 function SectionHeading({ children }: { children: string }) {
 	return (
-		<h2 className="m-0 px-1 font-medium text-subtle-foreground text-xs max-md:-mb-0.5 max-md:px-0.5 max-md:text-xs max-md:text-muted-foreground max-md:leading-normal">
+		<h2 className="m-0 px-1 font-medium text-subtle-foreground text-xs max-md:-mb-0.5 max-md:px-0.5 max-md:text-muted-foreground max-md:leading-normal">
 			{children}
 		</h2>
 	);
@@ -145,7 +143,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 					<h3 className="m-0 font-semibold text-sm text-foreground max-md:font-medium max-md:text-base">
 						{action}
 					</h3>
-					<span className="text-subtle-foreground text-xs max-md:text-xs">
+					<span className="text-subtle-foreground text-xs">
 						{bot.name} asked {asked}
 					</span>
 				</div>

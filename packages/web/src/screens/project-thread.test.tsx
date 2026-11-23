@@ -1,6 +1,12 @@
-import type { ConversationDetails, Message, ProjectThread, Run } from "@sugabots/contracts";
+import {
+	botParticipantOf,
+	type ConversationDetails,
+	type Message,
+	type ProjectThread,
+	type Run,
+} from "@sugabots/contracts";
 import { Conflict } from "@sugabots/contracts/http";
-import { type TestConnection, testPerson } from "@sugabots/contracts/testing";
+import { listedThread, type TestConnection, testPerson } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -8,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	apiAnswers,
 	bots,
-	listedThread,
 	mount,
 	projects,
 	sam,
@@ -27,26 +32,10 @@ vi.mock("@/api.ts", () => import("@/test-client.ts"));
 const project = projects[1] as (typeof projects)[number];
 /** The project's lead bot, which uses no computer of its own. */
 const lead = bots.find((bot) => bot.id === project.leadBotId) as (typeof bots)[number];
-const leadParticipant = {
-	kind: "bot" as const,
-	id: lead.id,
-	name: lead.name,
-	handle: lead.handle,
-	color: lead.color,
-	face: lead.face,
-	shape: lead.shape,
-};
+const leadParticipant = botParticipantOf(lead);
 /** Another of the project's bots. */
 const other = bots.find((bot) => bot.id !== lead.id) as (typeof bots)[number];
-const otherParticipant = {
-	kind: "bot" as const,
-	id: other.id,
-	name: other.name,
-	handle: other.handle,
-	color: other.color,
-	face: other.face,
-	shape: other.shape,
-};
+const otherParticipant = botParticipantOf(other);
 /** One of the project's people. */
 const robin = testPerson({ id: "0199a3a0-0000-7000-8000-0000000003d1", name: "Robin Vale" });
 const threadId = "0199a3a0-0000-7000-8000-0000000003e1";
@@ -84,7 +73,7 @@ const run: Run = {
 	startedAt: at,
 	finishedAt: at,
 };
-/** The run's result, posted in the project's thread. */
+/** The lead bot's reply in the project's thread. */
 const result: Message = {
 	id: "0199a3a0-0000-7000-8000-0000000003f1",
 	conversationId: threadId,
@@ -94,12 +83,6 @@ const result: Message = {
 	parts: [{ type: "text", text: "Prices are unchanged." }],
 	content: "Prices are unchanged.",
 	createdAt: at,
-	automationResultOf: {
-		runId: run.id,
-		conversationId: runConversationId,
-		automationId,
-		automationName: run.automationName,
-	},
 };
 
 /**
@@ -146,7 +129,6 @@ function details(
 			title: kind === "run" ? run.automationName : thread.title,
 			status: "done",
 			parentConversationId: kind === "run" ? feedId : null,
-			startedById: sam.id,
 			doneAt: null,
 			createdAt: at,
 			updatedAt: at,
@@ -207,14 +189,6 @@ afterEach(() => {
 });
 
 describe("a project's thread", () => {
-	it("opens the automation a result came from among the project's automations", async () => {
-		const { router } = mount(`/suga/projects/${project.slug}/${threadId}`);
-
-		fireEvent.click(await screen.findByRole("button", { name: `From ${run.automationName}` }));
-
-		await waitFor(() => expect(router.state.location.pathname).toBe(automationPage));
-	});
-
 	it("shows the project's computer, which its lead bot works on whether or not it has one of its own", async () => {
 		client.api.computerProviders.access.mockReturnValue(Effect.succeed({ enabled: true }));
 		mount(`/suga/projects/${project.slug}/${threadId}`);
@@ -224,10 +198,10 @@ describe("a project's thread", () => {
 		expect(await within(sidebar).findByRole("button", { name: "Not running" })).toBeDefined();
 	});
 
-	it("says who will answer a draft: the bots it mentions, else the lead, which may let one for people pass", async () => {
+	it("says who will answer a draft that mentions someone: the bots it mentions, else the lead, which may let one for people pass", async () => {
 		mount(`/suga/projects/${project.slug}/${threadId}`);
 		const composer = await screen.findByLabelText(`Message ${thread.title}`);
-		expect(screen.getByText(`${lead.name} will reply here.`)).toBeDefined();
+		expect(screen.queryByText(/will reply here/)).toBeNull();
 
 		writeDraft(composer, `@${other.handle} can you check?`);
 		expect(await screen.findByText(`${other.name} will reply here.`)).toBeDefined();
@@ -266,9 +240,8 @@ describe("a project's thread", () => {
 		expect(screen.queryByText(`${other.name} will reply here.`)).toBeNull();
 
 		writeDraft(composer, "Can you check?");
-		expect(await screen.findByText(`${lead.name} will reply here.`)).toBeDefined();
+		await waitFor(() => expect(send.disabled).toBe(false));
 		expect(screen.queryByText(/has no model yet/)).toBeNull();
-		expect(send.disabled).toBe(false);
 	});
 
 	it("names a bot once when the draft both replies to it and mentions it", async () => {
@@ -453,7 +426,6 @@ describe("a project's automation from Inbox", () => {
 			...result,
 			id: "0199a3a0-0000-7000-8000-0000000003f3",
 			conversationId: runConversationId,
-			automationResultOf: undefined,
 			parts: [
 				{ type: "text", text: "Prices are unchanged." },
 				{ type: "file", id: fileId, name: "prices.csv", contentType: "text/csv", size: 512 },
@@ -532,7 +504,7 @@ function serveFailedRun() {
 		error: "The connection refused the request.",
 		posted: false,
 	};
-	client.api.automations.runs.mockReturnValue(
+	client.api.automations.projectRuns.mockReturnValue(
 		Effect.succeed({ items: [failed], nextCursor: null }),
 	);
 	// Fix connection is offered on the automation's latest run only.

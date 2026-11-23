@@ -5,12 +5,7 @@ import * as schema from "./schema.ts";
 import { workspace } from "./schema.ts";
 import { closeDatabase, onDatabase } from "./testing.ts";
 
-/**
- * Proves the migrations under drizzle/ have been applied and describe the
- * schema this code expects. Needs a migrated database: `docker compose up -d`
- * then `bun run db:migrate`. Without DATABASE_URL it skips, so `bun run check`
- * still passes on a machine with no Postgres. CI always provides one.
- */
+/** Proves the migrations under drizzle/ describe the schema this code expects. */
 describe.skipIf(!process.env.DATABASE_URL)("schema", () => {
 	afterAll(closeDatabase);
 

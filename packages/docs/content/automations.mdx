@@ -30,9 +30,7 @@ admin.
 ## Who runs it
 
 Each run is done by the project's lead bot when it starts. Choose another lead,
-and the next run is that bot's. A project from before projects had leads may
-have none yet: until someone chooses one, its automations don't run, **Run now**
-says so, and a routine that falls due is skipped to its next time.
+and the next run is that bot's.
 
 ## Make an automation
 
@@ -175,7 +173,7 @@ Paths and values can each be at most 200 characters. Remove every condition to
 stop filtering calls. Changing authentication or the delivery ID header keeps
 the filter, and a copied automation keeps its filter too.
 
-A call is answered with `202` and an `executionId` as soon as the run is queued,
+A call is answered with `202` and the run's `runId` as soon as the run is queued,
 without waiting for the bot. Otherwise:
 
 - `401` if the secret or signature is wrong, or the webhook is off or gone.

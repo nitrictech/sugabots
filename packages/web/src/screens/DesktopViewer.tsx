@@ -7,6 +7,7 @@ import { type FormEvent, type Ref, type RefObject, useEffect, useRef, useState }
 import { apiBaseUrl } from "@/lib/api-url.ts";
 import { useComputerAccess, useComputerGap } from "@/lib/computer-providers.ts";
 import { useDesktopInUse } from "@/lib/desktop.ts";
+import { API_DID_NOT_ANSWER } from "@/lib/failure.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
 import {
@@ -30,7 +31,7 @@ import { LiveDot } from "@/ui/live-dot.tsx";
  * where the browser `bot` drives is shown. Opening it starts the desktop, and
  * the computer if it was paused, so the first connection can take a few
  * seconds; it comes over a WebSocket the API relays from the computer. The
- * person watches until they take over, if they may use the desktop, and can
+ * person watches until they take over, if the owner's permissions let them use the desktop, and can
  * hand control back. Without a computer, because the workspace has none set
  * up or the bot does not use one, it says so and where to change that.
  */
@@ -38,7 +39,6 @@ export function DesktopStage({
 	conversationId,
 	owner,
 	bot,
-	mayUse,
 	onClose,
 }: {
 	conversationId: string;
@@ -46,8 +46,6 @@ export function DesktopStage({
 	owner: ResourceOwner;
 	/** The bot at work on it: the bot itself, or a project's lead bot. */
 	bot: Bot;
-	/** Whether the person may use the desktop, and so may take over. */
-	mayUse: boolean;
 	onClose: () => void;
 }) {
 	const access = useComputerAccess();
@@ -88,19 +86,21 @@ export function DesktopStage({
 					icon={<Monitor strokeWidth={1.75} />}
 					title={`${ownerName(owner)} has no computer`}
 				>
-					Give it one in its settings, so it can run commands, open websites and edit files.{" "}
+					Give it one on its Computer page, so it can run commands, open websites and edit files.{" "}
 					{resourcePermissions(owner).openSettings && (
 						<OwnerLink owner={owner} to={{ page: "computer" }} className="text-link underline">
-							Open {ownerName(owner)}'s computer settings.
+							Open {ownerName(owner)}'s Computer page.
 						</OwnerLink>
 					)}
 				</EmptyState>
 			) : missing === null ? (
-				<ComputerScreen conversationId={conversationId} bot={bot} mayUse={mayUse} />
+				<ComputerScreen
+					conversationId={conversationId}
+					bot={bot}
+					mayUse={resourcePermissions(owner).useDesktop}
+				/>
 			) : access.isError ? (
-				<EmptyState title="Could not check for a computer">
-					The API did not answer. Reload this page to try again.
-				</EmptyState>
+				<EmptyState title="Could not check for a computer">{API_DID_NOT_ANSWER}</EmptyState>
 			) : null}
 		</>
 	);

@@ -24,7 +24,6 @@ export function Page({
 	parent,
 	place,
 	actions,
-	className,
 	children,
 }: {
 	title: string;
@@ -37,11 +36,10 @@ export function Page({
 	parent?: ReactNode;
 	place: PagePlace;
 	actions?: ReactNode;
-	className?: string;
 	children: ReactNode;
 }) {
 	return (
-		<section aria-label={label} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
+		<section aria-label={label} className="flex min-h-0 min-w-0 flex-1 flex-col">
 			<PageHeader title={title} parent={parent} place={place} actions={actions} />
 			<div className="tab-bar-clearance min-h-0 flex-1 overflow-y-auto">{children}</div>
 		</section>

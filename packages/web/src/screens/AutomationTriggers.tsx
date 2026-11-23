@@ -20,6 +20,7 @@ import {
 	DialogFormFooter,
 	DialogFormFrame,
 	DialogFormHeader,
+	DialogFormScroll,
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import { SettingsAddRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
@@ -325,7 +326,7 @@ export function TriggerDialog({
 					backDisabled={pending}
 				/>
 				<DialogFormBody>
-					<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+					<DialogFormScroll height="picker-tall">
 						{settings ?? (
 							<DraftGroups
 								owner={owner}
@@ -334,7 +335,7 @@ export function TriggerDialog({
 								onFilterEditingChange={setFilterEditing}
 							/>
 						)}
-					</div>
+					</DialogFormScroll>
 					{failure !== undefined && <Alert>{failureMessage(failure)}</Alert>}
 				</DialogFormBody>
 				<DialogFormFooter

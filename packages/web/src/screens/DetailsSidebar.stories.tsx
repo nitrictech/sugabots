@@ -4,7 +4,6 @@ import type {
 	ConversationActivity,
 	Participant,
 	SessionUser,
-	SystemBot,
 } from "@sugabots/contracts";
 import { automationTriggers, testPerson } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -35,11 +34,6 @@ const people: Participant[] = [
 const conversationId = "0199a3a0-0000-7000-8000-000000000510";
 
 const activity: ConversationActivity = {
-	summary: {
-		content:
-			"Overnight outbound queued 38 leads and six have replied, including both Northwind accounts asking about pricing. Jay wants short replies drafted. Checkout timeouts are back; Linear Handler found 41 events and is waiting on approval to open an issue. Nothing else is outstanding from this week.",
-		updatedAt: "2026-09-25T06:12:00.000Z",
-	},
 	context: {
 		usedTokens: 48_200,
 		measuredAt: "2026-09-25T06:12:00.000Z",
@@ -48,15 +42,6 @@ const activity: ConversationActivity = {
 		compactedAt: null,
 	},
 };
-
-const summariser: SystemBot = {
-	key: "summarise",
-	name: "Summariser",
-	description: null,
-	color: "orange",
-	face: "arc",
-	model: "claude-sonnet-4-5",
-} as SystemBot;
 
 function automation(id: string, name: string, expression: string): Automation {
 	return {
@@ -141,7 +126,6 @@ const meta = preview.meta({
 	},
 	decorators: [
 		function WithQueries(Story, context) {
-			const summariserHasModel = context.parameters.summariserHasModel !== false;
 			const [queryClient] = useState(() => {
 				const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
 				client.setQueryData(["automations", "project", growthDesk.defaultProjectId], automations);
@@ -162,14 +146,7 @@ const meta = preview.meta({
 						},
 					],
 				);
-				client.setQueryData(
-					["system-bots", WORKSPACE],
-					[summariserHasModel ? summariser : { ...summariser, model: null }],
-				);
-				client.setQueryData(
-					["conversation-activity", conversationId],
-					summariserHasModel ? activity : { ...activity, summary: null },
-				);
+				client.setQueryData(["conversation-activity", conversationId], activity);
 				return client;
 			});
 			useEffect(() => () => queryClient.clear(), [queryClient]);
@@ -210,13 +187,13 @@ export const CardFolded = meta.story({
 	},
 });
 
-/** On a phone, the bot heads them, its name and model, with what the thread is about under it. */
+/** On a phone, the bot heads them, its name and model, with the way to its settings and automations. */
 export const OnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("heading", { name: "Growth Desk" })).toBeVisible();
 		await expect(canvas.getByText(storyModel.displayName)).toBeVisible();
-		await expect(canvas.getByRole("heading", { name: "Summary" })).toBeVisible();
+		await expect(canvas.getByText("Settings")).toBeVisible();
 	},
 });
 
@@ -226,15 +203,6 @@ export const CloseOnAPhone = meta.story({
 	play: async ({ args, canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Back" }));
 		await expect(args.onClose).toHaveBeenCalled();
-	},
-});
-
-/** Before the system bots have a model there is no summary, and it says so rather than staying blank. */
-export const SystemBotsNotSetUp = meta.story({
-	globals: { viewport: { value: "iphone12", isRotated: false } },
-	parameters: { summariserHasModel: false },
-	play: async ({ canvas }) => {
-		await expect(canvas.getByText(/The system bots write these/)).toBeVisible();
 	},
 });
 

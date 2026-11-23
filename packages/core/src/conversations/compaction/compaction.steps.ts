@@ -10,7 +10,7 @@ import {
 import { Compactions, type PreparedCompaction } from "./compactions.ts";
 import { compactionPrompt, MAX_COMPACTION_SUMMARY_CHARACTERS } from "./prompt.ts";
 
-/** Longer than the Summariser's: the Compaction bot reads far more of the conversation. */
+/** Long: the Compaction bot reads much of the conversation. */
 const COMPACTION_TIMEOUT = Duration.minutes(5);
 
 /** The compaction workflow's step, which its activity reaches through `CompactionSteps`. */

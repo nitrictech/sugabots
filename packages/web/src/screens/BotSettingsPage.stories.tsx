@@ -4,8 +4,8 @@ import { automationTriggers, type TestAutomationTrigger } from "@sugabots/contra
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, connectionHandlers, StoryApp, storyBots, storyModel } from "../story-app.tsx";
+import { growthDesk, revenue, storyBots } from "@/shell/story-fixtures.ts";
+import { appHandlers, connectionHandlers, StoryApp, storyModel } from "../story-app.tsx";
 
 /*
  * A bot's settings, a page of its own beside its threads: its contact card,

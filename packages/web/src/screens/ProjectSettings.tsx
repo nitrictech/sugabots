@@ -49,6 +49,7 @@ import {
 	SettingsNameRow,
 	SettingsPage,
 	SettingsRow,
+	SettingsRowAlert,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
@@ -115,7 +116,7 @@ function ProjectSettingsSectionContent({
 					description={`Who is in ${project.name}.`}
 					headerAction={project.permissions.manageMembers && <AddPeopleButton project={project} />}
 				>
-					<Members project={project} canManageMembers={project.permissions.manageMembers} />
+					<Members project={project} />
 				</SettingsPage>
 			);
 		case "bots":
@@ -157,13 +158,6 @@ function ProjectDetails({ project }: { project: Project }) {
 		>
 			{updateDetails.error && <Alert>{failureMessage(updateDetails.error)}</Alert>}
 			{relead.error && <Alert>{failureMessage(relead.error)}</Alert>}
-			{project.leadBotId === null && (
-				<Alert>
-					{may.rename
-						? "Choose a lead bot: it answers this project's threads unless people mention another."
-						: "This project has no lead bot yet, so only the bots people mention answer. Ask an admin to choose one."}
-				</Alert>
-			)}
 			{may.rename && (
 				<SettingsGroup
 					label="Lead bot"
@@ -233,7 +227,7 @@ function ProjectDetails({ project }: { project: Project }) {
 					/>
 				</SettingsGroup>
 			)}
-			{may.rename && project.color !== null && (
+			{may.rename && (
 				<SettingsGroup label="Look" note="Shown on the project's icon in the sidebar.">
 					<SettingsControlRow label="Colour">
 						<ProjectColourPicker
@@ -354,7 +348,7 @@ function ProjectBots({ project }: { project: Project }) {
  * roles of its own. Administrators are in every project, so who can be taken
  * out, and whether you may leave, is the API's answer.
  */
-function Members({ project, canManageMembers }: { project: Project; canManageMembers: boolean }) {
+function Members({ project }: { project: Project }) {
 	const members = useProjectMembers(project.id);
 	const workspaceMembers = useWorkspaceMembers(project.workspaceId);
 	const remove = usePlaceProjectMember(project.id);
@@ -366,7 +360,9 @@ function Members({ project, canManageMembers }: { project: Project; canManageMem
 		workspaceMembers.data?.find((member) => member.user.id === userId)?.role;
 	const isYou = (userId: string) => userId === session.user?.id;
 	const mayTakeOut = (member: ProjectMember) =>
-		isYou(member.userId) ? project.permissions.leave : canManageMembers && member.removable;
+		isYou(member.userId)
+			? project.permissions.leave
+			: project.permissions.manageMembers && member.removable;
 	const leaving = removing !== undefined && isYou(removing.userId);
 	const pending = leaving ? leave : remove;
 
@@ -387,11 +383,7 @@ function Members({ project, canManageMembers }: { project: Project; canManageMem
 
 	let rows: ReactNode;
 	if (members.isError) {
-		rows = (
-			<div className="px-4 py-3">
-				<Alert>{failureMessage(members.error)}</Alert>
-			</div>
-		);
+		rows = <SettingsRowAlert>{failureMessage(members.error)}</SettingsRowAlert>;
 	} else if (members.data?.length === 0) {
 		rows = <SettingsRow label="Nobody is in this project yet" />;
 	} else {

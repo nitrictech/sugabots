@@ -101,11 +101,6 @@ export const automationTrigger = pgTable(
 		settings: jsonb("settings").$type<AutomationTriggerSettings>().notNull(),
 		/** A webhook's secret, sealed with `Credentials`: checking a signature needs the secret itself. */
 		secretEncrypted: text("secret_encrypted"),
-		/**
-		 * The scrypt hash of a webhook's bearer secret made before secrets were
-		 * kept sealed. It still admits callers until the secret is replaced.
-		 */
-		secretDigest: text("secret_digest"),
 		/** When a routine next runs its automation; null while the automation is paused. */
 		nextScheduledAt: timestamp("next_scheduled_at", { withTimezone: true }),
 		createdAt: stamp("created_at"),
@@ -119,12 +114,7 @@ export const automationTrigger = pgTable(
 		}).onDelete("cascade"),
 		check(
 			"automation_trigger_secret_valid",
-			sql`(${table.secretEncrypted} is null and ${table.secretDigest} is null)
-				or (${table.kind} = 'webhook' and (${table.secretEncrypted} is null or ${table.secretDigest} is null))`,
-		),
-		check(
-			"automation_trigger_digest_valid",
-			sql`${table.secretDigest} is null or ${table.settings}->'auth'->>'kind' = 'bearer'`,
+			sql`${table.secretEncrypted} is null or ${table.kind} = 'webhook'`,
 		),
 		check(
 			"automation_trigger_routine_valid",
@@ -220,8 +210,10 @@ export const projectThread = pgTable(
 		archivedAt: timestamp("archived_at", { withTimezone: true }),
 		/** When somebody marked the thread done, until something new is posted in it or it is reopened. */
 		doneAt: timestamp("done_at", { withTimezone: true }),
-		/** Who started it; null on a thread from before every thread was started by a person. */
-		startedById: uuid("started_by_id").references(() => user.id, { onDelete: "restrict" }),
+		/** The person who started it. */
+		startedById: uuid("started_by_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "restrict" }),
 	},
 	(table) => [
 		conversationOfKind(table, "project_thread_conversation_fkey"),
@@ -707,38 +699,6 @@ export const toolCall = pgTable(
 
 export type ToolCallRow = typeof toolCall.$inferSelect;
 
-/** The Summariser's short account of one conversation, written from its messages up to `sourceMessageId`. */
-export const conversationSummary = pgTable("summary", {
-	conversationId: uuid("conversation_id")
-		.primaryKey()
-		.references(() => conversation.id, { onDelete: "cascade" }),
-	content: text("content").notNull(),
-	sourceMessageId: uuid("source_message_id")
-		.notNull()
-		.references(() => message.id, { onDelete: "cascade" }),
-	updatedAt: updatedStamp("updated_at"),
-});
-
-/**
- * What a bot has been doing lately, at a glance: written by the Summariser
- * from the summaries of the bot's newest threads and automation feeds, each
- * time one of them is summarised. People who reach the bot read it on its
- * page, and their Personal Assistant reads it to know what the bot is up to.
- */
-export const botSummary = pgTable("bot_summary", {
-	botId: uuid("bot_id")
-		.primaryKey()
-		.references(() => bot.id, { onDelete: "cascade" }),
-	content: text("content").notNull(),
-	/**
-	 * When the newest conversation summary it was written from was written. A
-	 * summary written from older ones never replaces it, however late it
-	 * arrives.
-	 */
-	coversThrough: timestamp("covers_through", { withTimezone: true }).notNull(),
-	updatedAt: updatedStamp("updated_at"),
-});
-
 /**
  * What a bot reads in place of a long conversation's older messages, written by the
  * Compaction bot. The bot reads `summary`, then every message from `keptFrom` on word
@@ -857,4 +817,3 @@ export type AutomationTriggerSettings = AutomationTrigger extends infer T
 export type RunRow = typeof automationRun.$inferSelect;
 export type MessageRow = typeof message.$inferSelect;
 export type TurnRow = typeof turn.$inferSelect;
-export type SummaryRow = typeof conversationSummary.$inferSelect;

@@ -20,8 +20,10 @@ import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnections } from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { botComputerLink, botConnectionsLink, botsLink } from "@/lib/links.ts";
+import { formatDate } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { modelLogoOf } from "@/lib/model-logo.ts";
+import { modelName } from "@/lib/model-providers.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useWebAccess } from "@/lib/search-provider.ts";
 import { useSession } from "@/lib/session.ts";
@@ -47,10 +49,12 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { InstructionsField } from "@/ui/instructions-field.tsx";
 import {
+	SettingsControlRow,
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
 	SettingsRow,
+	SettingsRowAlert,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
@@ -351,11 +355,7 @@ function LookEditor({
  */
 function AddedByRow({ bot }: { bot: Bot }) {
 	const adder = bot.createdBy;
-	const when = new Date(bot.createdAt).toLocaleDateString(undefined, {
-		day: "numeric",
-		month: "short",
-		year: "numeric",
-	});
+	const when = formatDate(new Date(bot.createdAt));
 	return (
 		<SettingsRow
 			label="Added by"
@@ -402,10 +402,7 @@ function ProfileField({
 	const id = useId();
 
 	return (
-		<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5 last:border-b-0">
-			<label htmlFor={id} className="w-24 shrink-0 text-sm text-foreground">
-				{label}
-			</label>
+		<SettingsControlRow label={label} htmlFor={id}>
 			{editable ? (
 				// In a box of its own, so anything put beside the field, as some browser extensions do, can't take room from the row.
 				<div className="min-w-0 flex-1">
@@ -422,7 +419,7 @@ function ProfileField({
 					{value || "None yet"}
 				</span>
 			)}
-		</div>
+		</SettingsControlRow>
 	);
 }
 
@@ -485,20 +482,18 @@ function ModelRow({
 	const current = offered.find((candidate) => candidate.modelId === model);
 	const switchedOff = model !== null && data !== undefined && current === undefined;
 	const logo = modelLogoOf(model, current?.providerPreset ?? null);
+	const shownName = current ? modelName(current) : (model ?? "None chosen");
 	return (
-		<div className="flex min-h-14 items-center gap-3.5 border-border border-b px-4 py-2.5 last:border-b-0">
-			<span className="w-24 shrink-0 text-sm text-foreground">Model</span>
+		<SettingsControlRow label="Model">
 			<div className="flex min-w-0 flex-1 flex-col gap-1">
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						disabled={!canChoose}
-						aria-label={`Model: ${current?.displayName ?? model ?? "None chosen"}`}
+						aria-label={`Model: ${shownName}`}
 						className="focus-ring flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-border-strong bg-settings-row-hover px-2.5 text-left text-xs text-foreground disabled:cursor-default"
 					>
 						{logo && <ProviderLogo preset={logo} className="size-3.5" />}
-						<span className="min-w-0 flex-1 truncate">
-							{current?.displayName ?? model ?? "None chosen"}
-						</span>
+						<span className="min-w-0 flex-1 truncate">{shownName}</span>
 						{canChoose && (
 							<ChevronDown aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
 						)}
@@ -518,9 +513,7 @@ function ModelRow({
 									return (
 										<DropdownMenuRadioItem key={candidate.modelId} value={candidate.modelId}>
 											{mark && <ProviderLogo preset={mark} className="size-3.5" />}
-											<span className="min-w-0 flex-1 truncate">
-												{candidate.displayName ?? candidate.modelId}
-											</span>
+											<span className="min-w-0 flex-1 truncate">{modelName(candidate)}</span>
 											<span className="shrink-0 text-subtle-foreground text-xs">
 												{candidate.providerName}
 											</span>
@@ -537,7 +530,7 @@ function ModelRow({
 					</p>
 				)}
 			</div>
-		</div>
+		</SettingsControlRow>
 	);
 }
 
@@ -563,9 +556,7 @@ function BotConnections({ bot }: { bot: Bot }) {
 			}
 		>
 			{connections.isError && (
-				<div className="px-4 py-3">
-					<Alert>{failureMessage(connections.error)}</Alert>
-				</div>
+				<SettingsRowAlert>{failureMessage(connections.error)}</SettingsRowAlert>
 			)}
 			{reachable?.length === 0 && (
 				<SettingsRow label={<span className="text-muted-foreground">No connections yet</span>} />

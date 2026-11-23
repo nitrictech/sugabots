@@ -1,0 +1,134 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "a3e97859-f9cf-4dd4-adf8-cd0d30a62bcc",
+  "prevIds": [
+    "9955b3e4-c35a-47b5-a8b8-55e4f6f58099"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "summary"
+      ],
+      "writes": [
+        "s|tbl|public.summary",
+        "n|tbl|public.summary",
+        "e|tbl|public.summary",
+        "n|rel|public.summary",
+        "n|type|public.summary"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "bot_summary"
+      ],
+      "writes": [
+        "s|tbl|public.bot_summary",
+        "n|tbl|public.bot_summary",
+        "e|tbl|public.bot_summary",
+        "n|rel|public.bot_summary",
+        "n|type|public.bot_summary"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "model_request"
+      ],
+      "writes": [
+        "s|ck|public.model_request.model_request_purpose_valid"
+      ],
+      "reads": [
+        "n|tbl|public.model_request",
+        "n|sch|public",
+        "n|col|public.model_request.purpose",
+        "e|col|public.model_request.purpose"
+      ],
+      "sqlHash": "b6bee2c456422f6b"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"summary\"]"
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"bot_summary\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"summary\",\"conversation_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"summary\",\"content\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"summary\",\"source_message_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"summary\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"bot_summary\",\"bot_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"bot_summary\",\"content\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"bot_summary\",\"covers_through\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"bot_summary\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"summary\",\"thread_summary_thread_id_thread_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"summary\",\"thread_summary_source_message_id_message_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"bot_summary\",\"agent_summary_agent_id_agent_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"summary\",\"thread_summary_pkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"bot_summary\",\"agent_summary_pkey\"]"
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"model_request\",\"model_request_purpose_valid\"]",
+      "set": {
+        "value": "\"purpose\" in ('bot-turn', 'facilitation', 'compaction', 'trial', 'provider-check')"
+      }
+    }
+  ]
+}

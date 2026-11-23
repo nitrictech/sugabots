@@ -3,11 +3,10 @@ import type { Bot, NotificationSettings, ProjectMarker } from "@sugabots/contrac
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { useRef } from "react";
-import { useModels } from "@/lib/bots.ts";
 import { botLink } from "@/lib/links.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { OWNER_MARK_SIZE_PX, ownerMarkTransition } from "@/lib/owner-mark.ts";
-import { ownerProblems } from "@/lib/owner-pages.ts";
+import { useOwnerProblems } from "@/lib/owner-pages.ts";
 import { useHideSidebar } from "@/lib/sidebar-hidden.tsx";
 import { MutedMark, NotificationsContextMenu } from "@/screens/NotificationLevelMenu.tsx";
 import { TurnTakingAvatar } from "@/shell/Bot.tsx";
@@ -36,11 +35,7 @@ export function SidebarBot({
 	const { bot, unreadMessages, needsApproval, failedAutomations } = standing;
 	const face = useRef<LivelyFace>(null);
 	const hideSidebar = useHideSidebar();
-	const enabledModels = useModels().data?.models;
-	const problems = ownerProblems(
-		{ bot },
-		{ lead: bot, enabledModels, automationFailed: failedAutomations > 0 },
-	);
+	const problems = useOwnerProblems({ bot }, failedAutomations > 0);
 	const problem = problems.settings ?? problems.automations;
 	const attention = hasNews(standing);
 	const notificationPlace = { kind: "bot", id: bot.id } as const;

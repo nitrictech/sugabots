@@ -210,26 +210,6 @@ export function useProviderActions() {
 			},
 			onSuccess: refresh,
 		}),
-		setModels: useMutation({
-			mutationFn: ({
-				providerId,
-				modelIds,
-				enabled,
-			}: {
-				providerId: string;
-				modelIds: string[];
-				enabled: boolean;
-			}) => {
-				const workspaceId = requiredWorkspaceId();
-				return Effect.runPromise(
-					client.api.modelProviders.setModelsEnabled({
-						params: { workspace: workspaceId, providerId },
-						payload: { modelIds, enabled },
-					}),
-				);
-			},
-			onSuccess: refresh,
-		}),
 	};
 }
 

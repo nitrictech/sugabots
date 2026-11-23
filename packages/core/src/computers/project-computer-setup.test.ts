@@ -115,6 +115,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against 
 					projectId: measured.id,
 					computerProviderId: provider.id,
 					providerComputerId: `computer-${measured.id}` as Computers.ComputerId,
+					image: "debian",
 					diskUsage: { usedBytes: 1_000, totalBytes: 10_000, folders: [] },
 					diskMeasuredAt: new Date(),
 				})),

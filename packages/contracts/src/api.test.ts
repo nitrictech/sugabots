@@ -1,13 +1,6 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import {
-	healthResponseSchema,
-	isoTimestampSchema,
-	sessionUserSchema,
-	trialAccuracySchema,
-	trialCaseResultSchema,
-	trialSpeedSchema,
-} from "./index.ts";
+import { healthResponseSchema, isoTimestampSchema, sessionUserSchema } from "./index.ts";
 
 describe("healthResponseSchema", () => {
 	it("accepts a healthy response", () => {
@@ -98,51 +91,5 @@ describe("timestamp format", () => {
 		"2026-01-01t00:00:00z",
 	])("rejects timestamp %s", (timestamp) => {
 		expect(Result.isFailure(Schema.decodeResult(isoTimestampSchema)(timestamp))).toBe(true);
-	});
-});
-
-describe("model trial numbers", () => {
-	const speed = { typicalMs: 0, slowestMs: 1.5, budgetMs: 2, rating: "good" };
-	const accuracy = { passed: 0, attempts: 1, share: 0, needed: 1, rating: "good" };
-	it("accepts finite boundaries and optional examples, stripping unknown fields", () => {
-		expect(Schema.decodeUnknownSync(trialSpeedSchema)({ ...speed, extra: true })).toEqual(speed);
-		expect(Schema.decodeUnknownSync(trialAccuracySchema)(accuracy)).toEqual(accuracy);
-		expect(
-			Schema.decodeSync(trialCaseResultSchema)({
-				name: "case",
-				passed: 0,
-				attempts: Number.MAX_SAFE_INTEGER,
-				example: undefined,
-			}),
-		).toEqual({ name: "case", passed: 0, attempts: Number.MAX_SAFE_INTEGER, example: undefined });
-	});
-	it.each([NaN, Infinity, -Infinity, -1, "1"])("rejects invalid duration %s", (value) => {
-		for (const field of ["typicalMs", "slowestMs", "budgetMs"]) {
-			expect(
-				Result.isFailure(
-					Schema.decodeUnknownResult(trialSpeedSchema)({ ...speed, [field]: value }),
-				),
-			).toBe(true);
-		}
-	});
-	it("rejects zero budgets, unsafe or fractional counts, and out-of-range shares", () => {
-		expect(
-			Result.isFailure(Schema.decodeUnknownResult(trialSpeedSchema)({ ...speed, budgetMs: 0 })),
-		).toBe(true);
-		for (const fields of [
-			{ passed: Number.MAX_SAFE_INTEGER + 1 },
-			{ passed: 0.5 },
-			{ attempts: 0 },
-			{ share: 1.01 },
-			{ needed: -0.01 },
-			{ share: NaN },
-			{ needed: Infinity },
-		]) {
-			expect(
-				Result.isFailure(
-					Schema.decodeUnknownResult(trialAccuracySchema)({ ...accuracy, ...fields }),
-				),
-			).toBe(true);
-		}
 	});
 });

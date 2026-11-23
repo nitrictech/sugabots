@@ -147,6 +147,13 @@ const RESET_EVENT_TYPE = "reset" satisfies KnownEventType;
 /**
  * State changes. Written to the `event` table, and their `seq` is the SSE `id`,
  * so a client that reconnects with `Last-Event-ID` gets every one it missed.
+ *
+ * Every other type (a reply's delta, somebody typing, a notification,
+ * presence) only matters while it is happening: it is sent to live
+ * subscribers only and carries no `id`, which per the SSE spec does not
+ * advance the client's last-event-id. A delta lost to a disconnect is
+ * recovered from the message row a running turn saves every second, not from
+ * a replay.
  */
 export const durableEventTypeSchema = Schema.Literals([
 	"message.created",
@@ -171,20 +178,6 @@ export const durableEventTypeSchema = Schema.Literals([
 ] satisfies KnownEventType[]);
 
 export type DurableEventType = typeof durableEventTypeSchema.Type;
-
-/**
- * What only matters while it is happening: progress within a state change, or
- * somebody typing. Sent to live subscribers only and carry no `id`, which per
- * the SSE spec means they do not advance the client's last-event-id: a delta
- * lost to a disconnect is recovered from the message row a running turn saves
- * every second, not from a replay.
- */
-export const ephemeralEventTypeSchema = Schema.Literals([
-	"message.delta",
-	"person.typing",
-	"notification",
-	"presence",
-] satisfies KnownEventType[]);
 
 /**
  * `string & {}` keeps the known types in autocomplete while still accepting an

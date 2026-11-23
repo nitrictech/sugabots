@@ -45,7 +45,6 @@ function automation(id: string, name: string, projectId: string, expression: str
 	};
 }
 
-/** An automation in the workspace list that is a bot's own, as these tests use. */
 /** An automation in a bot's default project, with the bot. */
 type BotsAutomation = { automation: Automation; bot: Bot };
 
@@ -993,7 +992,7 @@ describe("a bot's automations", () => {
 		expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
 		expect(client.api.chats.threads).not.toHaveBeenCalled();
 		expect(client.api.conversations.get).not.toHaveBeenCalled();
-		expect(client.api.automations.runs).not.toHaveBeenCalled();
+		expect(client.api.automations.projectRuns).not.toHaveBeenCalled();
 	});
 
 	it("shows an automation its viewer may not manage without a way to change it", async () => {

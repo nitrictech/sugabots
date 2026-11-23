@@ -51,7 +51,7 @@ function project(
 	id: string,
 	name: string,
 	color: Project["color"],
-	lead: Bot | null,
+	lead: Bot,
 	botCount: number,
 ): Project {
 	return {
@@ -61,7 +61,7 @@ function project(
 		slug: name.toLowerCase(),
 		color,
 		description: null,
-		leadBotId: lead?.id ?? null,
+		leadBotId: lead.id,
 		visibility: "public",
 		isMember: true,
 		permissions: PERMISSIONS,
@@ -118,14 +118,13 @@ export const chief = bot("Chief", "purple", "wink", "blob", {
 
 export const revenue = project("a1", "Revenue", "green", growthDesk, 3);
 export const engineering = project("a2", "Engineering", "blue", linearHandler, 2);
-/** A project from before projects had leads, which had no bots then. */
-export const design = project("a3", "Design", "plum", null, 0);
+export const design = project("a3", "Design", "plum", leadResearcher, 1);
 
 /** The projects, each with the bots added to it. */
 export const projectsWithBots = [
 	{ project: revenue, bots: [growthDesk, accountManager, leadResearcher] },
 	{ project: engineering, bots: [linearHandler, oncall] },
-	{ project: design, bots: [] },
+	{ project: design, bots: [leadResearcher] },
 ];
 
 /** Every bot in the stories' workspace. */

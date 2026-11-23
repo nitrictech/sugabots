@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
 /**
  * A row of a model provider's connection: its label, then what it holds (a
@@ -15,11 +16,10 @@ export function ProviderFieldRow({
 	action?: ReactNode;
 }) {
 	return (
-		<div className="flex min-h-14 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<span className="w-27.5 shrink-0 text-sm text-muted-foreground">{label}</span>
+		<SettingsControlRow label={label}>
 			<span className="min-w-0 flex-1">{children}</span>
 			{action}
-		</div>
+		</SettingsControlRow>
 	);
 }
 

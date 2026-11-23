@@ -11,12 +11,12 @@ import { SettingsControlRow, SettingsGroup, SettingsRow } from "@/ui/settings-pa
 /**
  * What every computer may connect to. On the allowlist, the trusted
  * hosts every workspace has, and the ones this workspace allowed, and each
- * project or bot adds its own in its settings; open, every host. The workspace's blocked
+ * project or bot adds its own on its Computer page; open, every host. The workspace's blocked
  * hosts are out of every computer's reach, unless the computers are open at a
  * provider that can't block hosts. `modeRow` leads the Network group: the
  * switch between open and the allowlist, which is the provider's.
  */
-export function ComputerNetworkSection({ modeRow }: { modeRow?: ReactNode }) {
+export function ComputerNetworkSection({ modeRow }: { modeRow: ReactNode }) {
 	const { settings, addHost, removeHost, blockHost, unblockHost } = useComputerNetwork();
 	if (settings.isPending) return null;
 	if (settings.isError) return <Alert>{failureMessage(settings.error)}</Alert>;
@@ -46,7 +46,7 @@ export function ComputerNetworkGroups({
 	onUnblock,
 }: {
 	/** The switch between open and the allowlist, leading the Network group. */
-	modeRow?: ReactNode;
+	modeRow: ReactNode;
 	settings: ComputerNetworkSettings;
 	pending: boolean;
 	error?: unknown;
@@ -68,17 +68,12 @@ export function ComputerNetworkGroups({
 							: "This provider can't block hosts, so the blocked hosts don't apply while it's open. They're kept, with the allowed hosts, for if it goes back to the allowlist."
 					}
 				>
-					{modeRow ?? (
-						<SettingsRow
-							label="Open"
-							sub={settings.blocking ? "Any host but the blocked ones below" : "Any host"}
-						/>
-					)}
+					{modeRow}
 				</SettingsGroup>
 			) : (
 				<SettingsGroup
 					label="Network"
-					note="Every computer connects to these hosts, and each project or bot adds its own under Computer in its settings. Blocked hosts still apply. When a bot needs another, it asks in a thread, and someone who manages the project or bot decides."
+					note="Every computer connects to these hosts, and each project or bot adds its own on its Computer page. Blocked hosts still apply. When a bot needs another, it asks in a thread, and someone who manages the project or bot decides."
 				>
 					{modeRow}
 					{settings.addedHosts.map((added) => (

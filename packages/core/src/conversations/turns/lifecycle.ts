@@ -70,7 +70,7 @@ export type TurnEvent = Data.TaggedEnum<{
 	Suspend: Record<never, never>;
 	Complete: Record<never, never>;
 	Fail: { readonly userMessage: UserText };
-	/** The run stopped short, as a person asked. */
+	/** The run stopped short, as it was asked to. */
 	Cancel: Record<never, never>;
 	/**
 	 * The turn ends without running again: its owner gave up on it, or it may
@@ -78,8 +78,6 @@ export type TurnEvent = Data.TaggedEnum<{
 	 * unfinished tool calls.
 	 */
 	Abandon: { readonly status: "failed" | "cancelled"; readonly userMessage: UserText };
-	/** A person asked the turn to stop. */
-	RequestCancel: Record<never, never>;
 	/** The workflow of a waiting turn heard the cancellation, and stops waiting. */
 	CancelWaiting: Record<never, never>;
 	/** The automation run the turn works for ended. */
@@ -99,8 +97,6 @@ export type FollowUp = Data.TaggedEnum<{
 	 * and people are told `userMessage` of the calls.
 	 */
 	End: { readonly userMessage: UserText };
-	/** Tell the waiting turn's workflow; recording the cancellation is its job. */
-	SignalOwner: { readonly owner: string };
 	/** Tell the workflow running the turn to stop. */
 	AnnounceCancelRequest: Record<never, never>;
 }>;
@@ -130,21 +126,6 @@ export function transition(state: TurnState, event: TurnEvent): Transition {
 						FollowUp.End({ userMessage }),
 					)
 				: ended,
-		RequestCancel: () => {
-			if (state.status === "waiting" && state.owner) {
-				return next(
-					{ ...factsOf(state), status: "waiting", cancelRequested: true },
-					FollowUp.SignalOwner({ owner: state.owner }),
-				);
-			}
-			if (mayRunTools(state)) {
-				return next(
-					{ ...factsOf(state), status: "running", cancelRequested: true },
-					FollowUp.AnnounceCancelRequest(),
-				);
-			}
-			return refused("The turn is not running");
-		},
 		CancelWaiting: () =>
 			state.status === "waiting"
 				? next(

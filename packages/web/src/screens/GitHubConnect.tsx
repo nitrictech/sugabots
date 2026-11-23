@@ -15,6 +15,7 @@ import {
 	DialogFormFooter,
 	DialogFormFrame,
 	DialogFormHeader,
+	DialogFormScroll,
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -228,7 +229,7 @@ function AddRepositoryDialog({
 					<SearchField label="Search repositories" value={query} onChange={setQuery} />
 					{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 					{reached.error && <Alert>{failureMessage(reached.error)}</Alert>}
-					<div className="-mx-1 max-h-repos overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+					<DialogFormScroll height="repos">
 						{shown.length > 0 ? (
 							<SettingsGroup>
 								{shown.map((choice) => (
@@ -261,7 +262,7 @@ function AddRepositoryDialog({
 								</p>
 							)
 						)}
-					</div>
+					</DialogFormScroll>
 				</DialogFormBody>
 				<DialogFormFooter onCancel={done} cancelDisabled={adding !== undefined} />
 			</DialogFormStep>

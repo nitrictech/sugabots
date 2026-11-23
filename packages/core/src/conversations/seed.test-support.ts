@@ -32,7 +32,7 @@ type KindSeed =
 			kind: "project_thread";
 			archivedAt?: Date | null;
 			doneAt?: Date | null;
-			startedById?: string | null;
+			startedById: string;
 	  } & (
 			| { projectId: string }
 			/** One of the bot's threads: in its default project. */

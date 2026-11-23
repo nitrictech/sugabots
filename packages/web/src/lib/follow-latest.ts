@@ -43,6 +43,22 @@ export function keepFootInView(viewport: HTMLElement): () => void {
 	return () => observer.disconnect();
 }
 
+/**
+ * Loads what came before with `load`, keeping what `viewport` shows where it
+ * is: the older items arrive above it, so it is scrolled down by their height.
+ */
+export async function loadOlderKeepingPlace(
+	viewport: HTMLElement | null,
+	load: () => Promise<unknown>,
+): Promise<void> {
+	const height = viewport?.scrollHeight ?? 0;
+	const top = viewport?.scrollTop ?? 0;
+	await load();
+	requestAnimationFrame(() => {
+		if (viewport) viewport.scrollTop = top + viewport.scrollHeight - height;
+	});
+}
+
 /** How many frames a log waits to reach its latest before it is shown wherever it is. */
 const SETTLE_FRAMES = 30;
 

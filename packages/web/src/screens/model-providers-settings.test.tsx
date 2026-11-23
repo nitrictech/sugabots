@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, builtInBots, MODELS, modelProviders, mount } from "@/test-api.tsx";
+import { apiAnswers, MODELS, modelProviders, mount, systemBots } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -132,10 +132,10 @@ describe("a model's capabilities", () => {
 	});
 });
 
-/** Puts the system bots, which make summaries, on `model`. */
-function summariesOn(model: string) {
+/** Puts the system bots, such as Compaction, on `model`. */
+function systemBotsOn(model: string) {
 	client.api.systemBots.list.mockReturnValue(
-		Effect.succeed(builtInBots.map((bot) => ({ ...bot, model }))),
+		Effect.succeed(systemBots.map((bot) => ({ ...bot, model }))),
 	);
 }
 
@@ -160,7 +160,7 @@ describe("switching off a model bots run on", () => {
 			}),
 		);
 		providers.switchOffModel.mockReturnValue(Effect.succeed({ moved: 2 }));
-		summariesOn(sonnet);
+		systemBotsOn(sonnet);
 		mount(`/suga/settings/providers/${anthropic.id}`);
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Bots can use ${opus}` }));
@@ -213,7 +213,7 @@ describe("switching off a provider whose models bots run on", () => {
 			}),
 		);
 		providers.switchOff.mockReturnValue(Effect.succeed({ moved: 2 }));
-		summariesOn(sonnet);
+		systemBotsOn(sonnet);
 		mount(`/suga/settings/providers/${anthropic.id}`);
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Use ${anthropic.name}` }));
@@ -236,12 +236,12 @@ describe("switching off a provider whose models bots run on", () => {
 	});
 });
 
-describe("switching off the model summaries run on", () => {
+describe("switching off the model system bots run on", () => {
 	const [, anthropic] = modelProviders;
 	const [opus, sonnet] = MODELS;
 	if (!anthropic || !opus || !sonnet) throw new Error("fixture");
 
-	it("moves summaries with the bots as it switches the model off", async () => {
+	it("moves the system bots with the bots as it switches the model off", async () => {
 		const providers = client.api.modelProviders;
 		providers.listEnabledModels.mockReturnValue(
 			Effect.succeed({
@@ -257,13 +257,13 @@ describe("switching off the model summaries run on", () => {
 			}),
 		);
 		providers.switchOffModel.mockReturnValue(Effect.succeed({ moved: 2 }));
-		summariesOn(opus);
+		systemBotsOn(opus);
 		mount(`/suga/settings/providers/${anthropic.id}`);
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Bots can use ${opus}` }));
 		const dialog = await screen.findByRole("dialog", { name: `Switch off ${opus}` });
 		expect(
-			within(dialog).getByRole("button", { name: `Move summaries to: ${sonnet}` }),
+			within(dialog).getByRole("button", { name: `Move compaction to: ${sonnet}` }),
 		).toBeDefined();
 		fireEvent.click(within(dialog).getByRole("button", { name: "Move and switch off" }));
 
@@ -274,7 +274,7 @@ describe("switching off the model summaries run on", () => {
 					providerId: anthropic.id,
 					modelId: anthropic.models[0]?.id,
 				},
-				payload: { moveBotsTo: sonnet, newBotsTo: undefined, summariesTo: sonnet },
+				payload: { moveBotsTo: sonnet, newBotsTo: undefined, systemBotsTo: sonnet },
 			}),
 		);
 	});

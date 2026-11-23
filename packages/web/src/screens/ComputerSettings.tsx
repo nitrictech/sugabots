@@ -13,8 +13,9 @@ import {
 	computerProviderPreset,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
+import { cn } from "cn";
 import { Schema } from "effect";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { useBots } from "@/lib/bots.ts";
 import {
 	useComputerDisks,
@@ -30,14 +31,12 @@ import { ownerLink, ownerName, type ResourceOwner } from "@/lib/resource-owner.t
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
-import { LetterTile } from "@/ui/letter-tile.tsx";
 import { Note } from "@/ui/note.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	SETTINGS_CARD,
-	SETTINGS_RADIO_ROW,
 	SettingsGroup,
-	SettingsRadioMark,
+	SettingsRadioList,
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
@@ -117,7 +116,7 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 
 	return (
 		<>
-			<Note className="-mt-6 rounded-xl border border-settings-card-border bg-settings-card text-xs">
+			<Note className={cn(SETTINGS_CARD, "-mt-6 text-xs")}>
 				Computers are experimental. How they work, and what they keep, may change between releases.
 			</Note>
 			<SettingsGroup
@@ -144,9 +143,13 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 					}
 				/>
 			</SettingsGroup>
-			<ProviderChoice
+			<SettingsRadioList
+				legend="Provider"
+				options={computerProviderCatalog.map((candidate) => ({
+					...candidate,
+					badge: candidate.id === enabled?.preset ? "In use" : undefined,
+				}))}
 				chosen={chosen}
-				enabled={enabled?.preset}
 				disabled={pending}
 				onChoose={(next) => {
 					setError(undefined);
@@ -274,53 +277,6 @@ function ProjectDisks() {
 				/>
 			))}
 		</SettingsGroup>
-	);
-}
-
-/** The providers as one pick-one list: the one being configured ticked, the enabled one marked. */
-function ProviderChoice({
-	chosen,
-	enabled,
-	disabled,
-	onChoose,
-}: {
-	chosen: ComputerProviderPresetId;
-	enabled: ComputerProviderPresetId | undefined;
-	disabled: boolean;
-	onChoose: (preset: ComputerProviderPresetId) => void;
-}) {
-	const name = useId();
-	return (
-		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
-			<legend className="px-0.5 pb-2.5 font-medium text-xs text-muted-foreground">Provider</legend>
-			<div className={SETTINGS_CARD}>
-				{computerProviderCatalog.map((candidate) => (
-					<label key={candidate.id} className={SETTINGS_RADIO_ROW}>
-						<input
-							type="radio"
-							name={name}
-							value={candidate.id}
-							checked={candidate.id === chosen}
-							onChange={() => onChoose(candidate.id)}
-							className="sr-only"
-						/>
-						<LetterTile name={candidate.name} />
-						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
-							<span className="truncate font-medium text-sm text-foreground">
-								{candidate.name}
-								{candidate.id === enabled && (
-									<span className="ml-2 font-normal text-subtle-foreground text-xs">In use</span>
-								)}
-							</span>
-							<span className="text-pretty text-subtle-foreground text-xs">
-								{candidate.description}
-							</span>
-						</span>
-						<SettingsRadioMark checked={candidate.id === chosen} />
-					</label>
-				))}
-			</div>
-		</fieldset>
 	);
 }
 

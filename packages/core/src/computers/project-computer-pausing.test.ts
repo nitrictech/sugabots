@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Exit, Fiber, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Database, query } from "../database/database.ts";
-import { computer, project as projectTable, user, workspace } from "../database/schema.ts";
+import { computer, user, workspace } from "../database/schema.ts";
 import {
 	closeDatabase,
 	holdTransaction,
@@ -12,6 +12,7 @@ import {
 } from "../database/testing.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
+import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { ComputerCredentials } from "./computer-credentials.ts";
 import { ComputerProviderRepository } from "./computer-provider-repository.ts";
 import { Computers } from "./computers.ts";
@@ -79,7 +80,6 @@ describe.skipIf(!process.env.DATABASE_URL)("pausing bots' computers, against Pos
 		info: (id) =>
 			Effect.succeed({
 				state: atProvider.get(id) ?? "running",
-				image: "debian",
 				workKeptApart: false,
 			}),
 		pause: (id) =>
@@ -160,13 +160,9 @@ describe.skipIf(!process.env.DATABASE_URL)("pausing bots' computers, against Pos
 				.returning(),
 		);
 		if (!space || !owner) throw new Error("fixture");
-		const [made] = await onDatabase((db) =>
-			db
-				.insert(projectTable)
-				.values({ workspaceId: space.id, name: "Launch", slug: "launch" })
-				.returning(),
+		const made = await onDatabase((db) =>
+			seedProject(db, { workspaceId: space.id, name: "Launch", slug: "launch" }),
 		);
-		if (!made) throw new Error("fixture");
 		theProject = { workspaceId: space.id, projectId: made.id };
 		await runOnPostgres(
 			providers.create(theProject.workspaceId, {

@@ -162,38 +162,6 @@ function sameAuthor(left: Message, right: Message): boolean {
 	return left.author.kind === right.author.kind && left.author.id === right.author.id;
 }
 
-function shortDateFor(date: Date, now: Date): Intl.DateTimeFormatOptions {
-	return date.getFullYear() === now.getFullYear()
-		? { month: "short", day: "numeric" }
-		: dateWithYear;
-}
-
-const dateWithYear: Intl.DateTimeFormatOptions = {
-	month: "short",
-	day: "numeric",
-	year: "numeric",
-};
-
-/**
- * "Today", "Yesterday", or the month and day, with the year only for another
- * year. Days are `now`'s, by this device's clock, and the date is written in
- * `locale`, by default the browser's.
- */
-export function formatDay(
-	date: Date,
-	{ now = new Date(), locale }: { now?: Date; locale?: string } = {},
-): string {
-	if (sameDate(date, now)) {
-		return "Today";
-	}
-	const yesterday = new Date(now);
-	yesterday.setDate(now.getDate() - 1);
-	if (sameDate(date, yesterday)) {
-		return "Yesterday";
-	}
-	return new Intl.DateTimeFormat(locale, shortDateFor(date, now)).format(date);
-}
-
 export function sameDay(left: { createdAt: string }, right: { createdAt: string }): boolean {
 	return sameDate(new Date(left.createdAt), new Date(right.createdAt));
 }

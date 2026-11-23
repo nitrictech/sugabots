@@ -9,7 +9,6 @@ import {
 	bot,
 	fileVersion,
 	message,
-	project,
 	projectBot,
 	projectMember,
 	turn,
@@ -20,6 +19,7 @@ import {
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Installation } from "../installation/installation.ts";
 import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
+import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { servedOnPostgresAs } from "../workspaces/testing.ts";
 import { ConversationFiles } from "./conversation-files.ts";
 import { Files } from "./files.ts";
@@ -274,11 +274,8 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 				{ workspaceId, userId: adminId, role: "admin" },
 			]),
 		);
-		const [room] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({ workspaceId, name: "Planning", slug: `planning-${stamp}` })
-				.returning(),
+		const room = await onDatabase((db) =>
+			seedProject(db, { workspaceId, name: "Planning", slug: `planning-${stamp}` }),
 		);
 		if (!room) throw new Error("fixture");
 		projectId = room.id;
@@ -289,7 +286,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			db
 				.insert(bot)
 				.values(
-					["Summariser", "Stranger"].map((name) => ({
+					["Writer", "Stranger"].map((name) => ({
 						workspaceId,
 						name,
 						handle: `${name.toLowerCase()}-${stamp}`,
@@ -311,6 +308,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 				kind: "project_thread",
 				projectId,
 				title: "Planning",
+				startedById: memberId,
 			}),
 		);
 		const strangersThread = await onDatabase((db) =>
@@ -319,6 +317,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 				kind: "project_thread",
 				botId: stranger.id,
 				title: "Elsewhere",
+				startedById: memberId,
 			}),
 		);
 		by = { botId: writer.id, conversationId: planning.id };
@@ -364,7 +363,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		const at = { fileId: made.id };
 		expect(await reader.get(at)).toMatchObject({
 			version: 2,
-			createdBy: { name: "Summariser" },
+			createdBy: { name: "Writer" },
 			content: "# Launch plan\n\n## Goals\n\nShip by Friday.\n\n## Risks\n\nNone yet.\n",
 		});
 		expect((await reader.versions(at)).map((version) => version.number)).toEqual([2, 1]);
@@ -585,7 +584,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 		expect(listed.find(({ id }) => id === chart.id)).toMatchObject({
 			kind: "attachment",
 			name: "chart.csv",
-			sentBy: "Summariser",
+			sentBy: "Writer",
 		});
 		// Only a written file is read here; a sent one is read through its conversation.
 		await expect(as(memberId).get({ fileId: sent.id })).rejects.toMatchObject({

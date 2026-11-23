@@ -8,7 +8,7 @@ import type {
 import { useLocation } from "@tanstack/react-router";
 import { type ConversationPlace, placeBot } from "@/lib/chats.ts";
 import { conversationFileUrl } from "@/lib/conversation-files.ts";
-import { resourcePermissions, useLeadBot } from "@/lib/resource-owner.tsx";
+import { useLeadBot } from "@/lib/resource-owner.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { AutomationPanel } from "./AutomationPanel.tsx";
 import { AutomationsStage, type AutomationsView } from "./AutomationsStage.tsx";
@@ -97,7 +97,6 @@ export function ChatBeside({
 				conversationId={details.conversation.id}
 				owner={owner}
 				bot={lead}
-				mayUse={resourcePermissions(owner).useDesktop}
 				onClose={closeStage}
 			/>
 		);

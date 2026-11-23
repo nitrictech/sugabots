@@ -32,6 +32,7 @@ import {
 import { Email } from "../../email/email.ts";
 import { Installation } from "../../installation/installation.ts";
 import { unimplemented } from "../../testing.ts";
+import { seedProject } from "../projects/seed.test-support.ts";
 import { Membership } from "./membership.ts";
 
 const WEB_APP_URL = "http://localhost:5173";
@@ -554,15 +555,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const kim = await person("Kim");
-		const [shared] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId: workspace.id,
-					name: "Launch",
-					slug: `launch-${unique()}`,
-				})
-				.returning(),
+		const shared = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId: workspace.id,
+				name: "Launch",
+				slug: `launch-${unique()}`,
+			}),
 		);
 		if (!shared) throw new Error("The project was not created");
 		const inShared = () =>
@@ -667,15 +665,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const bobMember = await join(workspace.id, ada.id, bob, "viewer");
-		const [shared] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId: workspace.id,
-					name: "Launch",
-					slug: `launch-${unique()}`,
-				})
-				.returning(),
+		const shared = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId: workspace.id,
+				name: "Launch",
+				slug: `launch-${unique()}`,
+			}),
 		);
 		if (!shared) throw new Error("The project was not created");
 
@@ -808,11 +803,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				}),
 			).pipe(Effect.provide(ComputerProviderRepository.layer)),
 		);
-		const [launch] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({ workspaceId: workspace.id, name: "Launch", slug: "launch" })
-				.returning(),
+		const launch = await onDatabase((db) =>
+			seedProject(db, { workspaceId: workspace.id, name: "Launch", slug: "launch" }),
 		);
 		if (!launch) throw new Error("The project was not created");
 		await onDatabase((db) =>
@@ -821,6 +813,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				projectId: launch.id,
 				computerProviderId: provider.id,
 				providerComputerId: Computers.ComputerId("running"),
+				image: "debian",
 			}),
 		);
 
@@ -910,15 +903,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const bobMember = await join(workspace.id, ada.id, bob);
-		const [shared] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId: workspace.id,
-					name: "Private",
-					slug: `private-${unique()}`,
-				})
-				.returning(),
+		const shared = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId: workspace.id,
+				name: "Private",
+				slug: `private-${unique()}`,
+			}),
 		);
 		if (!shared) throw new Error("The project was not created");
 		await onDatabase((db) =>
@@ -952,6 +942,19 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		const bobMember = await join(workspace.id, ada.id, bob);
+		const [lead] = await onDatabase((db) =>
+			db
+				.insert(bot)
+				.values({
+					workspaceId: workspace.id,
+					name: "Lead",
+					handle: "lead",
+					color: "sky",
+					face: "pill",
+				})
+				.returning(),
+		);
+		if (!lead) throw new Error("The bot was not created");
 		// Holds Bob's membership, so his removal waits there with the workspace locked,
 		// as it would on his Personal Assistant's computer at its provider.
 		const hold = holdTransaction(
@@ -970,9 +973,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		await waitUntilWaitingOnLocks(1);
 
 		const made = onDatabase((db) =>
-			db
-				.insert(project)
-				.values({ workspaceId: workspace.id, name: "Launch", slug: `launch-${unique()}` }),
+			seedProject(db, {
+				workspaceId: workspace.id,
+				name: "Launch",
+				slug: `launch-${unique()}`,
+				leadBotId: lead.id,
+			}),
 		);
 		expect(
 			await Promise.race([
@@ -997,16 +1003,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const { ada, workspace } = await workspaceOfAda();
 		const bob = await person("Bob");
 		await join(workspace.id, ada.id, bob);
-		const [shared] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId: workspace.id,
-					name: "Launch",
-					slug: `launch-${unique()}`,
-					createdById: bob.id,
-				})
-				.returning(),
+		const shared = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId: workspace.id,
+				name: "Launch",
+				slug: `launch-${unique()}`,
+				createdById: bob.id,
+			}),
 		);
 		if (!shared) throw new Error("The project was not created");
 

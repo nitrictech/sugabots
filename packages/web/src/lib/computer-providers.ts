@@ -131,20 +131,19 @@ export function useComputerProviderActions() {
  * How an E2B provider's template stands. Checked again every few seconds
  * while it is building, which takes minutes.
  */
-export function useComputerTemplate(providerId: string | undefined) {
+export function useComputerTemplate(providerId: string) {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
 		queryKey: ["computer-providers", workspaceId, providerId, "template"],
-		queryFn:
-			workspaceId && providerId
-				? ({ signal }) =>
-						Effect.runPromise(
-							client.api.computerProviders.template({
-								params: { workspace: workspaceId, providerId },
-							}),
-							{ signal },
-						)
-				: skipToken,
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(
+						client.api.computerProviders.template({
+							params: { workspace: workspaceId, providerId },
+						}),
+						{ signal },
+					)
+			: skipToken,
 		refetchInterval: (query) => (query.state.data?.state === "building" ? 5_000 : false),
 	});
 }

@@ -32,7 +32,11 @@ export async function recordingFirstComputer(input: {
 }): Promise<{ release: () => Promise<void> }> {
 	const recording = holdTransaction(
 		query((db) =>
-			db.insert(computer).values({ ...input, providerComputerId: Computers.ComputerId("first") }),
+			db.insert(computer).values({
+				...input,
+				providerComputerId: Computers.ComputerId("first"),
+				image: "debian",
+			}),
 		),
 	);
 	await recording.held;

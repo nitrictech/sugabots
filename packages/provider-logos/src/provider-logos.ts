@@ -25,7 +25,7 @@ import xaiDark from "../logos/xai-dark.svg";
  * provider publishes them: never redraw or recolour one. To update a logo,
  * download the new file from `source` and change `fetched`.
  */
-export interface ProviderLogoAsset {
+interface ProviderLogoAsset {
 	/** The logo's URL, for light backgrounds, or for both when `dark` is absent. */
 	light: string;
 	/** A version for dark backgrounds, where the provider publishes one. */

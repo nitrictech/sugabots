@@ -41,7 +41,6 @@ const groq: ModelProvider = {
 	hasApiKey: true,
 	signedIn: false,
 	customHeaders: [],
-	modelCount: 0,
 	lastTestError: null,
 	connectedBy: null,
 	createdAt: "2026-09-09T00:00:00.000Z",

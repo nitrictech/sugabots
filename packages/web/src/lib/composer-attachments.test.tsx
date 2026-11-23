@@ -270,11 +270,6 @@ describe("useComposerAttachments", () => {
 		});
 	});
 
-	it("has nothing to attach to until the chat exists", () => {
-		const { result } = renderHook(() => useComposerAttachments(undefined));
-		expect(result.current.attach).toBeUndefined();
-	});
-
 	it("sends text, files or both, but nothing empty and nothing still uploading", async () => {
 		const { result } = renderHook(() => useComposerAttachments(chatId));
 		expect(result.current.takeForSending("   ")).toBeUndefined();

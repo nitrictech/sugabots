@@ -10,14 +10,9 @@ import {
 	growthDesk,
 	linearHandler,
 	oncall,
-} from "@/shell/story-fixtures.ts";
-import {
-	appHandlers,
-	StoryApp,
 	storyBots,
-	storyChatDetails,
-	storyWorkspace,
-} from "../story-app.tsx";
+} from "@/shell/story-fixtures.ts";
+import { appHandlers, StoryApp, storyChatDetails, storyWorkspace } from "../story-app.tsx";
 
 /*
  * Making and changing automations on a bot's Automations page: one set up in the

@@ -1,16 +1,10 @@
 import type { ConversationDetails } from "@sugabots/contracts";
-import {
-	conversationActivitySchema,
-	conversationDetailsSchema,
-	placedConversationSchema,
-} from "@sugabots/contracts";
+import { conversationActivitySchema, conversationDetailsSchema } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { ConversationView } from "@sugabots/core/conversations/conversation-view";
 import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
-import { Turns } from "@sugabots/core/conversations/turns/turns";
-import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { UserResolver } from "../../http/app.test-support.ts";
@@ -43,7 +37,6 @@ const thread = {
 	title: "Check the release",
 	status: "running" as const,
 	parentConversationId: null,
-	startedById: USER,
 	doneAt: null,
 	createdAt: "2026-09-10T04:00:00.000Z",
 	updatedAt: "2026-09-10T04:00:00.000Z",
@@ -96,27 +89,18 @@ const seenBy = <A>(conversationId: string, seen: A) =>
 
 let view: ConversationView.Interface;
 let reacted: Array<{ change: "add" | "remove"; messageId: string; emoji: string }>;
-let cancellation: { turnId: string; userId: string } | undefined;
 let requestedHistory: Parameters<ConversationView.Interface["get"]>[1] | undefined;
 
 beforeEach(() => {
 	reacted = [];
-	cancellation = undefined;
 	requestedHistory = undefined;
 	view = {
-		list: () =>
-			Effect.flatMap(CurrentActor.Service, ({ userId }) =>
-				userId === USER
-					? Effect.succeed([thread])
-					: Effect.fail(new ResourceHidden({ resource: "workspace" })),
-			),
 		get: (conversationId, history) => {
 			requestedHistory = history;
 			return seenBy(conversationId, details);
 		},
 		activity: (conversationId) =>
 			seenBy(conversationId, {
-				summary: null,
 				context: null,
 			}),
 	};
@@ -139,15 +123,6 @@ const app = () =>
 					return Effect.succeed([]);
 				},
 			}),
-			unimplemented(Turns.Controls, {
-				cancel: (turnId) =>
-					Effect.flatMap(CurrentActor.Service, ({ userId }) => {
-						cancellation = { turnId, userId };
-						return userId === USER
-							? Effect.succeed(turnId === THREAD)
-							: Effect.fail(new ResourceHidden({ resource: "turn" }));
-					}),
-			}),
 		),
 	);
 
@@ -157,21 +132,6 @@ const as = (token: string, init: RequestInit = {}) => ({
 });
 
 describe("conversation routes", () => {
-	it("lists only through a workspace membership", async () => {
-		const response = await app().request(
-			`/workspaces/${WORKSPACE}/conversations`,
-			as("member-token"),
-		);
-
-		expect(response.status).toBe(200);
-		expect(
-			Schema.decodeUnknownSync(Schema.Array(placedConversationSchema))(await response.json()),
-		).toEqual([thread]);
-		expect(
-			(await app().request(`/workspaces/${WORKSPACE}/conversations`, as("outsider-token"))).status,
-		).toBe(404);
-	});
-
 	it("returns scoped conversation history and hides an unavailable id", async () => {
 		const response = await app().request(`/conversations/${THREAD}`, as("member-token"));
 		expect(Schema.decodeUnknownSync(conversationDetailsSchema)(await response.json())).toEqual(
@@ -186,7 +146,6 @@ describe("conversation routes", () => {
 	it("returns a visible conversation's activity and hides an unavailable id", async () => {
 		const response = await app().request(`/conversations/${THREAD}/activity`, as("member-token"));
 		expect(Schema.decodeUnknownSync(conversationActivitySchema)(await response.json())).toEqual({
-			summary: null,
 			context: null,
 		});
 
@@ -254,26 +213,5 @@ describe("conversation routes", () => {
 			expect(refused.status).toBe(400);
 		}
 		expect(reacted).toHaveLength(2);
-	});
-
-	it("requests cancellation only for a visible active turn", async () => {
-		const accepted = await app().request(
-			`/turns/${THREAD}/cancel`,
-			as("member-token", { method: "POST" }),
-		);
-		expect(accepted.status).toBe(202);
-		expect(cancellation).toEqual({ turnId: THREAD, userId: USER });
-
-		const ended = await app().request(
-			`/turns/${BOT}/cancel`,
-			as("member-token", { method: "POST" }),
-		);
-		expect(await ended.json()).toEqual({ _tag: "NotFound", message: "No active turn" });
-
-		const hidden = await app().request(
-			`/turns/${BOT}/cancel`,
-			as("outsider-token", { method: "POST" }),
-		);
-		expect(await hidden.json()).toEqual({ _tag: "NotFound", message: "No such turn" });
 	});
 });

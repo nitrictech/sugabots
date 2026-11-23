@@ -30,9 +30,6 @@ export interface Interface {
 	readonly list: (input: {
 		workspace: string;
 	}) => Effect.Effect<Bot[], AuthorizationDenied, CurrentActor.Service>;
-	readonly get: (input: {
-		botId: string;
-	}) => Effect.Effect<Bot, AuthorizationDenied, CurrentActor.Service>;
 	/** A bot made by the actor, and pinned for them. */
 	readonly create: (input: {
 		workspace: string;
@@ -136,15 +133,6 @@ export const make = Effect.gen(function* () {
 						"workspace.read",
 					);
 					return yield* visiblePersonFacingBots(workspaceId, actor);
-				}),
-			),
-
-		get: ({ botId }) =>
-			operation(
-				"get",
-				Effect.gen(function* () {
-					const standing = yield* authorization.bot(botId, "bot.settings.read");
-					return yield* shown(standing.bot, standing.actor);
 				}),
 			),
 

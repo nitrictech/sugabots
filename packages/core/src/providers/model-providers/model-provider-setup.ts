@@ -71,13 +71,6 @@ export interface Interface {
 	readonly listEnabledModels: (
 		input: InWorkspace,
 	) => Effect.Effect<WorkspaceModelsResponse, AuthorizationDenied, CurrentActor.Service>;
-	readonly get: (
-		input: InProvider,
-	) => Effect.Effect<
-		ModelProvider,
-		AuthorizationDenied | ModelProviderNotFound,
-		CurrentActor.Service
-	>;
 	/** Discovers the new provider's models straight away when it has a key. */
 	readonly create: (
 		input: InWorkspace & { provider: NewModelProvider },
@@ -196,7 +189,7 @@ export interface Interface {
 	/**
 	 * Switches a model off and moves the bots on it to `moveBotsTo`, returning
 	 * how many moved, and the default and the system bots to `newBotsTo` and
-	 * `summariesTo`, as {@link SettingMoves} says.
+	 * `systemBotsTo`, as {@link SettingMoves} says.
 	 */
 	readonly switchOffModel: (
 		input: InProvider & { modelId: string; moveBotsTo?: string } & SettingMoves,
@@ -242,7 +235,7 @@ export interface Interface {
  */
 interface SettingMoves {
 	newBotsTo?: string;
-	summariesTo?: string;
+	systemBotsTo?: string;
 }
 
 /** A workspace, by its id or its slug. */
@@ -299,7 +292,7 @@ export const make = Effect.gen(function* () {
 	 */
 	const movingOffSwitchedOff = <E, R>(
 		workspaceId: string,
-		{ moves, newBotsTo, summariesTo }: { moves: readonly BotMove[] } & SettingMoves,
+		{ moves, newBotsTo, systemBotsTo }: { moves: readonly BotMove[] } & SettingMoves,
 		switchOff: Effect.Effect<unknown, E, R>,
 	) =>
 		keepingHeldModelsOffered(
@@ -310,9 +303,9 @@ export const make = Effect.gen(function* () {
 					yield* providers.requireEnabled(workspaceId, newBotsTo);
 					yield* providers.setDefaultModel(workspaceId, newBotsTo);
 				}
-				if (summariesTo !== undefined) {
-					yield* providers.requireEnabled(workspaceId, summariesTo);
-					yield* bots.setAllSystemBotModels(workspaceId, summariesTo);
+				if (systemBotsTo !== undefined) {
+					yield* providers.requireEnabled(workspaceId, systemBotsTo);
+					yield* bots.setAllSystemBotModels(workspaceId, systemBotsTo);
 				}
 				const moved = yield* Effect.forEach(moves, ({ from, to }) =>
 					Effect.gen(function* () {
@@ -405,14 +398,6 @@ export const make = Effect.gen(function* () {
 				"listEnabledModels",
 				Effect.flatMap(authorization.workspace(workspace, "workspace.read"), ({ workspaceId }) =>
 					offeredModels(workspaceId),
-				),
-			),
-
-		get: ({ workspace, providerId }) =>
-			operation(
-				"get",
-				Effect.flatMap(managed(workspace), (workspaceId) =>
-					requireProvider(workspaceId, providerId),
 				),
 			),
 
@@ -634,7 +619,7 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		switchOffModel: ({ workspace, providerId, modelId, moveBotsTo, newBotsTo, summariesTo }) =>
+		switchOffModel: ({ workspace, providerId, modelId, moveBotsTo, newBotsTo, systemBotsTo }) =>
 			operation(
 				"switchOffModel",
 				Effect.gen(function* () {
@@ -649,14 +634,14 @@ export const make = Effect.gen(function* () {
 						{
 							moves: moveBotsTo ? [{ from: switchingOff.modelId, to: moveBotsTo }] : [],
 							newBotsTo,
-							summariesTo,
+							systemBotsTo,
 						},
 						providers.updateModel(workspaceId, providerId, modelId, { enabled: false }),
 					);
 				}),
 			),
 
-		switchOff: ({ workspace, providerId, moveBots, newBotsTo, summariesTo }) =>
+		switchOff: ({ workspace, providerId, moveBots, newBotsTo, systemBotsTo }) =>
 			operation(
 				"switchOff",
 				Effect.gen(function* () {
@@ -666,7 +651,7 @@ export const make = Effect.gen(function* () {
 					);
 					return yield* movingOffSwitchedOff(
 						workspaceId,
-						{ moves: moveBots, newBotsTo, summariesTo },
+						{ moves: moveBots, newBotsTo, systemBotsTo },
 						Effect.filterOrFail(
 							providers.update(workspaceId, providerId, { active: false }, actor.userId),
 							(updated) => updated !== undefined,

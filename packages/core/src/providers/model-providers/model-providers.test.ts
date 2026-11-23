@@ -845,7 +845,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
 				defaultModel: "first",
 			});
-			expect(await systemBotModels()).toEqual(["first", "first"]);
+			expect(await systemBotModels()).toEqual(["first"]);
 			const [assistantModel] = await onDatabase((db) =>
 				db.select({ model: bot.model }).from(bot).where(eq(bot.id, assistant.id)),
 			);
@@ -913,7 +913,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			await expect(refused).rejects.toMatchObject({
 				_tag: "ModelInUse",
 				modelId: "first",
-				holders: { workspaceDefault: false, systemBots: ["Compaction", "Summariser"] },
+				holders: { workspaceDefault: false, systemBots: ["Compaction"] },
 			});
 		});
 
@@ -1028,7 +1028,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 			});
 		});
 
-		describe("switching off the model new bots and summaries use", () => {
+		describe("switching off the model new bots and system bots use", () => {
 			/** `first` and `second` on, with `first` the default and every system bot's. */
 			const withSettingsOnFirst = async () => {
 				await (await botsOnPostgres()).ensureSystemBots({ workspaceId, createdById: userId });
@@ -1053,14 +1053,14 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 					providerId,
 					modelId: ids.first ?? "",
 					newBotsTo: "second",
-					summariesTo: "second",
+					systemBotsTo: "second",
 				});
 
 				expect(await setup.listEnabledModels({ workspace: workspaceId })).toEqual({
 					models: [expect.objectContaining({ modelId: "second" })],
 					defaultModel: "second",
 				});
-				expect(await systemBotModels()).toEqual(["second", "second"]);
+				expect(await systemBotModels()).toEqual(["second"]);
 			});
 
 			it("refuses, changing nothing, when one is left on the model", async () => {
@@ -1075,7 +1075,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model providers, against Postgres", 
 					}),
 				).rejects.toMatchObject({
 					_tag: "ModelInUse",
-					holders: { workspaceDefault: false, systemBots: ["Compaction", "Summariser"] },
+					holders: { workspaceDefault: false, systemBots: ["Compaction"] },
 				});
 				expect(await setup.listEnabledModels({ workspace: workspaceId })).toMatchObject({
 					defaultModel: "first",

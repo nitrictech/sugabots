@@ -13,12 +13,9 @@ import { useSearchProvider, useSearchProviderActions } from "@/lib/search-provid
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
-import { LetterTile } from "@/ui/letter-tile.tsx";
 import {
-	SETTINGS_CARD,
-	SETTINGS_RADIO_ROW,
 	SettingsGroup,
-	SettingsRadioMark,
+	SettingsRadioList,
 	SettingsRow,
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
@@ -123,7 +120,13 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 				</Button>
 				{advancedOpen && (
 					<div id={advancedId} className="flex flex-col gap-7">
-						<ProviderChoice chosen={chosen} disabled={pending} onChoose={choose} />
+						<SettingsRadioList
+							legend="Provider"
+							options={searchProviderCatalog}
+							chosen={chosen}
+							disabled={pending}
+							onChoose={choose}
+						/>
 						<ProviderSettings
 							key={chosen}
 							chosen={chosen}
@@ -138,46 +141,6 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 			</div>
 			{error && <Alert>{error}</Alert>}
 		</>
-	);
-}
-
-/** The providers as one pick-one list, the chosen one ticked. */
-function ProviderChoice({
-	chosen,
-	disabled,
-	onChoose,
-}: {
-	chosen: SearchProviderPresetId;
-	disabled: boolean;
-	onChoose: (preset: SearchProviderPresetId) => void;
-}) {
-	const name = useId();
-	return (
-		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
-			<legend className="px-0.5 pb-2.5 font-medium text-xs text-muted-foreground">Provider</legend>
-			<div className={SETTINGS_CARD}>
-				{searchProviderCatalog.map((candidate) => (
-					<label key={candidate.id} className={SETTINGS_RADIO_ROW}>
-						<input
-							type="radio"
-							name={name}
-							value={candidate.id}
-							checked={candidate.id === chosen}
-							onChange={() => onChoose(candidate.id)}
-							className="sr-only"
-						/>
-						<LetterTile name={candidate.name} />
-						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
-							<span className="truncate font-medium text-sm text-foreground">{candidate.name}</span>
-							<span className="text-pretty text-subtle-foreground text-xs">
-								{candidate.description}
-							</span>
-						</span>
-						<SettingsRadioMark checked={candidate.id === chosen} />
-					</label>
-				))}
-			</div>
-		</fieldset>
 	);
 }
 

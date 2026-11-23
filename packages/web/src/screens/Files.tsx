@@ -12,11 +12,11 @@ import { cn } from "cn";
 import { Check, ChevronDown, Download, FileText, Link2, Paperclip, Trash2 } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
 import { conversationFileUrl } from "@/lib/conversation-files.ts";
-import { failureMessage } from "@/lib/failure.ts";
+import { API_DID_NOT_ANSWER, failureMessage } from "@/lib/failure.ts";
 import { fileSizeLabel } from "@/lib/file-looks.ts";
 import { useDeleteFile, useFile, useFiles, useFileVersions } from "@/lib/files.ts";
-import { formatClockTime, formatListTime } from "@/lib/list-time.ts";
-import { usePaneWidth } from "@/lib/pane-width.ts";
+import { formatListTime, formatTimeAfterVerb } from "@/lib/list-time.ts";
+import { FILE_PANE_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import {
 	OwnerLink,
 	ownerLinkOptions,
@@ -37,6 +37,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
+import { FileRow } from "@/ui/file-row.tsx";
 import { IconTile } from "@/ui/icon-tile.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
@@ -139,9 +140,7 @@ export function FileListView({
 				) : (
 					<div className="flex flex-col gap-5 px-4 pt-4 pb-12">
 						{files === "failed" ? (
-							<EmptyState title="Could not load the files">
-								The API did not answer. Reload, or check that it is running.
-							</EmptyState>
+							<EmptyState title="Could not load the files">{API_DID_NOT_ANSWER}</EmptyState>
 						) : files === "loading" ? null : (
 							byWhen(files, now).map((group) => (
 								<section
@@ -155,7 +154,7 @@ export function FileListView({
 									<ul className="m-0 flex list-none flex-col gap-0.5 p-0">
 										{group.files.map((file) => (
 											<li key={file.id}>
-												<FileRow
+												<ListedFileRow
 													owner={owner}
 													file={file}
 													selected={file.id === selectedId}
@@ -183,7 +182,7 @@ export function FileListView({
 						label="Resize the file"
 						pane={pane}
 						edge="start"
-						min={360}
+						min={FILE_PANE_MIN_WIDTH_PX}
 						onResize={setWidth}
 					/>
 					{children}
@@ -194,7 +193,7 @@ export function FileListView({
 }
 
 /** A file in the list: one a bot wrote, opened beside the list, or one sent on a message, opened on its own. */
-function FileRow({
+function ListedFileRow({
 	owner,
 	file,
 	selected,
@@ -226,26 +225,28 @@ function WrittenFileRow({
 }) {
 	const kind = FILE_KINDS[file.kind];
 	return (
-		<OwnerLink
-			owner={owner}
-			to={{ page: "file", fileId: file.id }}
-			aria-current={selected ? "page" : undefined}
+		<FileRow
+			look="list"
 			className={cn(
-				"focus-ring flex items-center gap-3 rounded-lg p-2 transition-colors",
+				"focus-ring transition-colors",
 				selected ? "bg-row-selected" : "hover:bg-message-hover",
 			)}
-		>
-			<KindMark kind={file.kind} />
-			<span className="flex min-w-0 flex-1 flex-col leading-snug">
-				<span className="truncate font-medium text-xs text-foreground">{file.title}</span>
-				<span className="truncate text-subtle-foreground text-xs">
-					{[kind.label, `v${file.version}`, authorName(file.createdBy)].join(", ")}
-				</span>
-			</span>
-			<time dateTime={file.updatedAt} className="shrink-0 text-subtle-foreground text-xs">
-				{formatListTime(new Date(file.updatedAt), now)}
-			</time>
-		</OwnerLink>
+			render={
+				<OwnerLink
+					owner={owner}
+					to={{ page: "file", fileId: file.id }}
+					aria-current={selected ? "page" : undefined}
+				/>
+			}
+			icon={
+				<IconTile size="md">
+					<kind.Icon size={16} strokeWidth={1.75} />
+				</IconTile>
+			}
+			title={file.title}
+			subtitle={[kind.label, `v${file.version}`, authorName(file.createdBy)].join(", ")}
+			trailing={<ListTime at={file.updatedAt} now={now} />}
+		/>
 	);
 }
 
@@ -256,28 +257,25 @@ function WrittenFileRow({
 function MessageFileRow({ file, now }: { file: MessageFileSummary; now: Date }) {
 	const sentBy = file.sentBy ?? (file.kind === "upload" ? "Someone who left" : REMOVED_BOT);
 	return (
-		<a
-			href={conversationFileUrl(file.conversationId, file.id)}
-			target="_blank"
-			rel="noreferrer"
-			className="focus-ring flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-message-hover"
-		>
-			<span
-				aria-hidden
-				className="grid size-8 shrink-0 place-items-center rounded-md bg-chip text-muted-foreground"
-			>
-				<Paperclip size={16} strokeWidth={1.75} />
-			</span>
-			<span className="flex min-w-0 flex-1 flex-col leading-snug">
-				<span className="truncate font-medium text-xs text-foreground">{file.name}</span>
-				<span className="truncate text-subtle-foreground text-xs">
-					{[fileSizeLabel(file.size), sentBy].join(", ")}
-				</span>
-			</span>
-			<time dateTime={file.updatedAt} className="shrink-0 text-subtle-foreground text-xs">
-				{formatListTime(new Date(file.updatedAt), now)}
-			</time>
-		</a>
+		<FileRow
+			look="list"
+			className="focus-ring transition-colors hover:bg-message-hover"
+			render={
+				<a
+					href={conversationFileUrl(file.conversationId, file.id)}
+					target="_blank"
+					rel="noreferrer"
+				/>
+			}
+			icon={
+				<IconTile size="md">
+					<Paperclip size={16} strokeWidth={1.75} />
+				</IconTile>
+			}
+			title={file.name}
+			subtitle={[fileSizeLabel(file.size), sentBy].join(", ")}
+			trailing={<ListTime at={file.updatedAt} now={now} />}
+		/>
 	);
 }
 
@@ -402,7 +400,9 @@ export function FileStageView({
 			byline={
 				<>
 					{authorName(shown.author)}{" "}
-					<time dateTime={shown.createdAt}>{writtenWhen(new Date(shown.createdAt), now)}</time>
+					<time dateTime={shown.createdAt}>
+						{formatTimeAfterVerb(new Date(shown.createdAt), now)}
+					</time>
 				</>
 			}
 			actions={
@@ -475,7 +475,7 @@ function VersionPicker({
 				className={cn(
 					"focus-ring inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-border-strong pr-2 pl-2.5 text-xs transition-colors hover:bg-row-hover",
 					// Round on glass on a phone, beside its ⋯.
-					"max-md:glass max-md:h-11 max-md:rounded-full max-md:border-0 max-md:pr-3 max-md:pl-3.5 max-md:text-xs max-md:active:bg-hover-strong max-md:data-popup-open:bg-hover-strong",
+					"max-md:glass max-md:h-11 max-md:rounded-full max-md:border-0 max-md:pr-3 max-md:pl-3.5 max-md:active:bg-hover-strong max-md:data-popup-open:bg-hover-strong",
 					isCurrent ? "text-soft-foreground" : "text-foreground",
 				)}
 			>
@@ -507,14 +507,6 @@ function VersionPicker({
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);
-}
-
-/** When a version was written, to follow its author: "at 2:46", "yesterday", "on Mon", "on 14 Sep". */
-function writtenWhen(at: Date, now: Date): string {
-	const shown = formatListTime(at, now);
-	if (shown === formatClockTime(at)) return `at ${shown}`;
-	if (shown === "Yesterday") return "yesterday";
-	return `on ${shown}`;
 }
 
 interface Group {
@@ -567,15 +559,12 @@ function fileNameFor(title: string, extension: string): string {
 	return name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
 }
 
-function KindMark({ kind }: { kind: WrittenFileSummary["kind"] }) {
-	const { Icon } = FILE_KINDS[kind];
+/** When a file in the list last changed, at the row's end. */
+function ListTime({ at, now }: { at: string; now: Date }) {
 	return (
-		<span
-			aria-hidden
-			className="grid size-8 shrink-0 place-items-center rounded-md bg-chip text-muted-foreground"
-		>
-			<Icon size={16} strokeWidth={1.75} />
-		</span>
+		<time dateTime={at} className="shrink-0 text-subtle-foreground text-xs">
+			{formatListTime(new Date(at), now)}
+		</time>
 	);
 }
 

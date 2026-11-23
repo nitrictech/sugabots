@@ -174,8 +174,6 @@ function streamEventsFor(event: ConversationEvent): PendingEvent[] {
 			conversationChanged(workspaceId, conversationId),
 		ProjectThreadChanged: ({ workspaceId, conversationId }) =>
 			conversationChanged(workspaceId, conversationId),
-		ConversationSummarised: ({ workspaceId, conversationId }) =>
-			conversationChanged(workspaceId, conversationId),
 		ConversationCompacted: ({ workspaceId, conversationId }) =>
 			conversationChanged(workspaceId, conversationId),
 		RunAccepted: ({ workspaceId, rootConversationId, conversationId }) => [

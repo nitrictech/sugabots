@@ -1,5 +1,6 @@
 import type { AutomationTrigger } from "./automations.ts";
 import { handleFromName } from "./bots.ts";
+import type { ListedThread, ProjectThread } from "./chats.ts";
 import {
 	type Connection,
 	type ConnectionToolWithAccess,
@@ -69,4 +70,22 @@ export function automationTriggers(
 						: `${automationId.slice(0, -2)}${String(index).padStart(2, "0")}`,
 			}) as AutomationTrigger,
 	);
+}
+
+/** A project's thread as its list shows it, with nothing new in it unless `standing` says. */
+export function listedThread(
+	thread: ProjectThread,
+	standing: Partial<Omit<ListedThread, "conversation">> = {},
+): ListedThread {
+	return {
+		conversation: thread,
+		lastMessage: null,
+		participants: [],
+		messageCount: 1,
+		unreadMessages: 0,
+		needsApproval: false,
+		mentionsYou: false,
+		activity: null,
+		...standing,
+	};
 }

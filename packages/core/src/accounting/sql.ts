@@ -59,7 +59,7 @@ export const modelRequest = pgTable(
 			.where(sql`${table.conversationId} is not null`),
 		check(
 			"model_request_purpose_valid",
-			sql`${table.purpose} in ('bot-turn', 'facilitation', 'summary', 'compaction', 'trial', 'provider-check')`,
+			sql`${table.purpose} in ('bot-turn', 'facilitation', 'compaction', 'trial', 'provider-check')`,
 		),
 		check(
 			"model_request_outcome_valid",

@@ -131,7 +131,7 @@ export function handleFromName(name: string): string {
  * name the same system bot, and adding one is a compile error everywhere it has
  * to be handled rather than a string to remember.
  */
-export const systemBotKeySchema = Schema.Literals(["summarise", "compact"]);
+export const systemBotKeySchema = Schema.Literals(["compact"]);
 export type SystemBotKey = typeof systemBotKeySchema.Type;
 
 /** Whether everyone in the workspace sees a bot, or only the person who made it. */

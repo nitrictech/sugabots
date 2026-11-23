@@ -131,6 +131,7 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 				kind: "project_thread",
 				botId,
 				title: "Look something up",
+				startedById: ownerId,
 			}),
 		);
 		conversationId = thread.id;

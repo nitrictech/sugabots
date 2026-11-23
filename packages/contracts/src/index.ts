@@ -20,7 +20,6 @@ export * from "./github.ts";
 export * from "./me.ts";
 export * from "./membership.ts";
 export * from "./model-providers.ts";
-export * from "./model-trials.ts";
 export * from "./notifications.ts";
 export * from "./onboarding.ts";
 export * from "./projects.ts";

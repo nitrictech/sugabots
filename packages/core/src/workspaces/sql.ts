@@ -227,8 +227,11 @@ export const workspaceInvite = pgTable(
  * `authorization/access.ts`), so its `name`, `slug` and `visibility` are only
  * placeholders.
  *
- * `lead_bot_id` is null only on a project from before projects had leads that
- * had no bots then; making a project, or changing it, always sets one.
+ * `lead_bot_id`'s foreign key is checked when the transaction commits, so
+ * deleting a bot can delete the default project it leads with it. Drizzle has
+ * no way to declare that, so `20261122231027_fresh_start_requirements` makes
+ * it deferrable. A bot leading a project people made can't be deleted until
+ * it is replaced as lead there.
  */
 export const project = pgTable(
 	"project",
@@ -244,10 +247,12 @@ export const project = pgTable(
 		color: text("color").$type<ProjectColor>(),
 		description: text("description"),
 		visibility: text("visibility").$type<"public" | "private">().notNull().default("public"),
-		// Who made it. Kept when they leave, so the record survives the person.
+		// Who made it. Kept when they leave the workspace; cleared when their account is deleted.
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		/** The bot that works on the project and answers its threads unless another is asked. */
-		leadBotId: uuid("lead_bot_id").references((): AnyPgColumn => bot.id, { onDelete: "set null" }),
+		leadBotId: uuid("lead_bot_id")
+			.notNull()
+			.references((): AnyPgColumn => bot.id),
 		/** On a bot's default project: the bot, which it goes with. */
 		defaultOfBotId: uuid("default_of_bot_id").references((): AnyPgColumn => bot.id, {
 			onDelete: "cascade",
@@ -380,7 +385,7 @@ export const bot = pgTable(
 		usesComputer: boolean("uses_computer").notNull().default(false),
 		// Whether it browses so people watching can follow, which is slower.
 		naturalBrowsing: boolean("natural_browsing").notNull().default(false),
-		// Who made it. Kept when they leave, so the record survives the person.
+		// Who made it. Kept when they leave the workspace; cleared when their account is deleted.
 		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),

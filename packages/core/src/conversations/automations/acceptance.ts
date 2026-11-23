@@ -14,7 +14,6 @@ import {
 import { ConversationRepository } from "../repository/repository.ts";
 import {
 	AutomationNotFound,
-	AutomationProjectHasNoLead,
 	AutomationTriggerConflict,
 	AutomationTriggerRejected,
 	inScope,
@@ -97,7 +96,6 @@ export const makeAcceptTrigger = Effect.gen(function* () {
 					return { runId: existing.id, conversationId: existing.conversationId, duplicate: true };
 				}
 				const { leadBotId } = definition;
-				if (leadBotId === null) return yield* new AutomationProjectHasNoLead();
 
 				// The feed the run is listed in, opened before the run's own conversation.
 				yield* conversations.openAutomationFeed(definition.automation, leadBotId);

@@ -438,10 +438,13 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		const segment = vi.fn((_turn: StoredTurn) =>
 			Effect.succeed<SegmentOutcome>({ _tag: "Finished" }),
 		);
+		const cancelWaiting = vi.fn((stored: StoredTurn) =>
+			Effect.promise(() => turns.cancelWaiting(turnOfStored(stored))),
+		);
 		// Recording cancellations is real; the segments are not.
 		const steps = TurnSteps.of({
 			segment,
-			cancelWaiting: (stored) => Effect.promise(() => turns.cancelWaiting(turnOfStored(stored))),
+			cancelWaiting,
 			abandon: () => Effect.void,
 			announceReleased: () => Effect.void,
 		});
@@ -560,46 +563,24 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			expect(segment).toHaveBeenCalledTimes(1);
 		});
 
-		it("sends a cancel to the workflow, which records it and ends", async () => {
-			const signals = await parkInWorkflow(workflowCall());
-
-			expect(
-				await onPostgresAs(memberId)(
-					Context.get(await conversationsForTests(bus, signals), Turns.Controls),
-				).cancel(prepared.turnId),
-			).toBe(true);
-
-			// Marked at once, so a segment starting as the signal lands stops too.
-			const [marked] = await onDatabase((db) =>
-				db.select().from(turn).where(eq(turn.id, prepared.turnId)),
-			);
-			expect(marked?.cancelRequested).toBe(true);
-			await vi.waitFor(async () => {
-				const [cancelled] = await onDatabase((db) =>
-					db.select().from(turn).where(eq(turn.id, prepared.turnId)),
-				);
-				expect(cancelled?.status).toBe("cancelled");
-			});
-			expect(segment).toHaveBeenCalledTimes(1);
-		});
-
 		it("sends a cancel again when the first never reached the workflow", async () => {
 			const signals = await parkInWorkflow(workflowCall());
-			// Cancelled and committed, but the process stopped before the signal left.
+			cancelWaiting.mockClear();
+			// Cancelled as its automation run ended and committed, but the process
+			// stopped before the signal left.
 			await onDatabase((db) =>
-				db.update(turn).set({ cancelRequested: true }).where(eq(turn.id, prepared.turnId)),
+				db
+					.update(turn)
+					.set({ status: "cancelled", cancelRequested: true })
+					.where(eq(turn.id, prepared.turnId)),
 			);
 
 			await runOnPostgres(
 				Turns.resendLostCancels.pipe(Effect.provideService(TurnSignals.Service, signals)),
 			);
 
-			await vi.waitFor(async () => {
-				const [cancelled] = await onDatabase((db) =>
-					db.select().from(turn).where(eq(turn.id, prepared.turnId)),
-				);
-				expect(cancelled?.status).toBe("cancelled");
-			});
+			// The workflow heard it and stopped waiting.
+			await vi.waitFor(() => expect(cancelWaiting).toHaveBeenCalledTimes(1));
 			expect(segment).toHaveBeenCalledTimes(1);
 		});
 	});

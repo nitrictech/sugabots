@@ -1,5 +1,3 @@
-import { scrypt, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
 import {
 	MAX_IDEMPOTENCY_KEY_CHARACTERS,
 	type WebhookAuth,
@@ -18,7 +16,6 @@ import {
 	type Delivery,
 	deliveryAuthentic,
 	deliveryIdOf,
-	presentedSecret,
 	slackChallengeOf,
 } from "./webhook-auth.ts";
 import { meetsFilter } from "./webhook-filter.ts";
@@ -31,15 +28,8 @@ export const makeWebhooks = Effect.gen(function* () {
 
 	const authentic = (webhook: EnabledWebhook, delivery: Delivery, now: Date) => {
 		// Left without a secret on purpose, so its address alone runs it.
-		if (webhook.secret === null && webhook.digest === null) return Effect.succeed(true);
-		if (webhook.secret !== null) {
-			const secret = credentials.decrypt(webhook.secret);
-			return Effect.succeed(deliveryAuthentic(webhook.auth, secret, delivery, now));
-		}
-		const { auth, digest } = webhook;
-		const presented = auth.kind === "bearer" ? presentedSecret(auth, delivery.headers) : undefined;
-		if (presented === undefined || digest === null) return Effect.succeed(false);
-		return Effect.promise(() => verifyLegacySecret(presented, digest));
+		if (webhook.secret === null) return true;
+		return deliveryAuthentic(webhook.auth, credentials.decrypt(webhook.secret), delivery, now);
 	};
 
 	return {
@@ -51,7 +41,7 @@ export const makeWebhooks = Effect.gen(function* () {
 					// Checked before the automation's trigger lock is taken, so a caller
 					// without the secret cannot hold up its other triggers.
 					const found = isUuid(triggerId) ? yield* enabledWebhook(triggerId) : undefined;
-					if (!found || !(yield* authentic(found, delivery, now))) return undefined;
+					if (!found || !authentic(found, delivery, now)) return undefined;
 					const challenge = slackChallengeOf(found.auth, delivery.payload);
 					if (challenge !== undefined) return { kind: "challenge" as const, challenge };
 					return yield* transaction(
@@ -97,8 +87,6 @@ interface EnabledWebhook {
 	filter: readonly WebhookCondition[] | undefined;
 	/** Sealed with `Credentials`. */
 	secret: string | null;
-	/** The hash of a bearer secret made before secrets were sealed. */
-	digest: string | null;
 }
 
 const enabledWebhook = (triggerId: string) =>
@@ -111,7 +99,6 @@ const enabledWebhook = (triggerId: string) =>
 					automationId: automation.id,
 					settings: automationTrigger.settings,
 					secret: automationTrigger.secretEncrypted,
-					digest: automationTrigger.secretDigest,
 				})
 				.from(automationTrigger)
 				.innerJoin(automation, eq(automation.id, automationTrigger.automationId))
@@ -139,26 +126,5 @@ const enabledWebhook = (triggerId: string) =>
 
 /** Whether two reads of a trigger check callers the same way, with the same secret. */
 function sameCheck(a: EnabledWebhook, b: EnabledWebhook): boolean {
-	return (
-		a.secret === b.secret &&
-		a.digest === b.digest &&
-		JSON.stringify(a.auth) === JSON.stringify(b.auth)
-	);
-}
-
-const deriveKey = promisify(scrypt);
-
-/** Checks `secret` against an `scrypt:{salt}:{digest}` hash, off the event loop since scrypt is slow on purpose. */
-async function verifyLegacySecret(secret: string, encoded: string) {
-	const [algorithm, saltText, digestText] = encoded.split(":");
-	if (algorithm !== "scrypt" || !saltText || !digestText) return false;
-	try {
-		const expected = Buffer.from(digestText, "base64url");
-		const actual = Buffer.from(
-			(await deriveKey(secret, Buffer.from(saltText, "base64url"), expected.length)) as ArrayBuffer,
-		);
-		return timingSafeEqual(actual, expected);
-	} catch {
-		return false;
-	}
+	return a.secret === b.secret && JSON.stringify(a.auth) === JSON.stringify(b.auth);
 }

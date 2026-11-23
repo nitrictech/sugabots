@@ -29,11 +29,10 @@ type BotAvatarProps = {
 } & (
 	| {
 			/**
-			 * A ring in the surface colour, for a face that overlaps something — the
-			 * corner of its own message bubble, or the next face in a stack. `true` is
-			 * the panel's colour; a face on another surface names that surface's.
+			 * A ring in `color`, the surface's, for a face that overlaps something,
+			 * such as the next face in a stack. It follows the head's shape.
 			 */
-			ringed?: boolean | { color: string; width: number };
+			ringed?: { color: string; width: number };
 			lively?: never;
 	  }
 	| {
@@ -46,15 +45,12 @@ type BotAvatarProps = {
 	  }
 );
 
-/** The surface colour round a face that overlaps something, following the head's shape. */
-const RING = { color: "var(--panel)", width: 3 };
-
 export function BotAvatar({
 	color,
 	face = "pill",
 	shape,
 	size = 32,
-	ringed = false,
+	ringed,
 	lively,
 	className,
 }: BotAvatarProps) {
@@ -78,7 +74,7 @@ export function BotAvatar({
 			shape={shape}
 			width={size}
 			height={size}
-			ring={ringed === true ? RING : ringed || undefined}
+			ring={ringed}
 			className={className}
 		/>
 	);
@@ -100,13 +96,11 @@ export function WatchingAvatar({
 	size,
 	busy,
 	watching,
-	className,
 }: {
 	bot: BotLook;
 	size: number;
 	busy: boolean;
 	watching: boolean;
-	className?: string;
 }) {
 	const watchingMood = useMoodLoop(WATCHING_MOODS, watching && !busy);
 	const mood = busy ? "thinking" : watching ? watchingMood : "still";
@@ -117,7 +111,6 @@ export function WatchingAvatar({
 			shape={bot.shape}
 			size={size}
 			lively={{ mood, watchPointer: true, watchTyping: true }}
-			className={className}
 		/>
 	);
 }
@@ -130,12 +123,10 @@ export function TurnTakingAvatar({
 	bot,
 	size,
 	faceRef,
-	className,
 }: {
 	bot: BotLook;
 	size: number;
 	faceRef: Ref<LivelyFace>;
-	className?: string;
 }) {
 	const movingTurn = useGroupTurn();
 	return (
@@ -145,7 +136,6 @@ export function TurnTakingAvatar({
 			shape={bot.shape}
 			size={size}
 			lively={{ mood: movingTurn ? "idle" : "still", watchPointer: true, ref: faceRef }}
-			className={className}
 		/>
 	);
 }

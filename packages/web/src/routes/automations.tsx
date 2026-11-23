@@ -54,17 +54,17 @@ function OwnerAutomations({
  * An automation's own page: how it is set up, under its breadcrumb. With
  * `?itemPage=`, one of its runs instead, as the sidebar opens them.
  */
-function AutomationPage({
+function AutomationPage<Owner extends ResourceOwner>({
 	owner,
 	automationId,
 	itemPage,
 	feed,
 }: {
-	owner: ResourceOwner | undefined;
+	owner: Owner | undefined;
 	automationId: string;
 	itemPage: string | undefined;
 	/** The automation's feed, open with the run as its page. */
-	feed: (owner: ResourceOwner, feedId: string) => ReactNode;
+	feed: (owner: Owner, feedId: string) => ReactNode;
 }) {
 	if (!owner) return null;
 	// A run is history, which somebody who manages the bot without reaching it does not read.
@@ -76,14 +76,14 @@ function AutomationPage({
 }
 
 /** The automation's feed, opened first when it has none, with the run `?itemPage=` names as the page. */
-function AutomationFeed({
+function AutomationFeed<Owner extends ResourceOwner>({
 	owner,
 	automationId,
 	feed,
 }: {
-	owner: ResourceOwner;
+	owner: Owner;
 	automationId: string;
-	feed: (owner: ResourceOwner, feedId: string) => ReactNode;
+	feed: (owner: Owner, feedId: string) => ReactNode;
 }) {
 	const opened = useOpenAutomationFeed(resourceProjectId(owner), automationId);
 	if (opened.isError) {
@@ -142,16 +142,14 @@ export const automationFeedRoute = createRoute({
 				owner={useBotRouteOwner()}
 				automationId={automation}
 				itemPage={search.itemPage}
-				feed={(owner, feedId) =>
-					"bot" in owner && (
-						<BotConversation
-							bot={owner.bot}
-							conversationId={feedId}
-							search={search}
-							navigate={(change) => void navigate(change)}
-						/>
-					)
-				}
+				feed={(owner, feedId) => (
+					<BotConversation
+						bot={owner.bot}
+						conversationId={feedId}
+						search={search}
+						navigate={(change) => void navigate(change)}
+					/>
+				)}
 			/>
 		);
 	},
@@ -200,16 +198,14 @@ export const projectAutomationRoute = createRoute({
 				owner={useProjectRouteOwner()}
 				automationId={automation}
 				itemPage={search.itemPage}
-				feed={(owner, feedId) =>
-					"project" in owner && (
-						<ProjectConversation
-							projectSlug={owner.project.slug}
-							conversationId={feedId}
-							search={search satisfies ConversationSearch}
-							navigate={(change) => void navigate(change)}
-						/>
-					)
-				}
+				feed={(owner, feedId) => (
+					<ProjectConversation
+						projectSlug={owner.project.slug}
+						conversationId={feedId}
+						search={search satisfies ConversationSearch}
+						navigate={(change) => void navigate(change)}
+					/>
+				)}
 			/>
 		);
 	},

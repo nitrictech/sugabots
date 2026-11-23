@@ -1,6 +1,5 @@
 import { conversationStream, handleFromName } from "@sugabots/contracts";
-import { DisplayName } from "@sugabots/errors";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ResourceHidden } from "../../authorization/access.ts";
@@ -9,12 +8,9 @@ import { EventStore } from "../../database/events/store.ts";
 import {
 	bot,
 	conversation,
-	conversationSummary,
-	event,
 	file,
 	message,
 	modelProvider,
-	placedConversation,
 	project,
 	projectBot,
 	projectMember,
@@ -31,11 +27,11 @@ import {
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../database/testing.ts";
-import { Models } from "../../providers/models/models.ts";
 import { lane } from "../../workflows/sql.ts";
 import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
 import { SYSTEM_BOTS } from "../../workspaces/bots/system-bots.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
+import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { ChatView } from "../chats/chat-view.ts";
 import { Chats } from "../chats/chats.ts";
@@ -45,8 +41,6 @@ import { Compactions } from "../compaction/compactions.ts";
 import { compactionLineTokens } from "../compaction/window.ts";
 import { ConversationView } from "../conversation-view.ts";
 import { seedConversation } from "../seed.test-support.ts";
-import { Summaries } from "../summaries/summaries.ts";
-import { summarise } from "../summaries/summary.steps.ts";
 import { conversationsForTests } from "../testing.ts";
 import { searchHistoryTool } from "../tools/search-history/tool.ts";
 import {
@@ -59,7 +53,6 @@ import {
 	TurnExecution,
 	TurnRepository,
 } from "../turns/testing.ts";
-import { Turns } from "../turns/turns.ts";
 
 /** What these tests set the workspace's system bots up with. */
 const SYSTEM_BOT_MODEL = "test-model";
@@ -75,16 +68,8 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		onPostgresAs(userId)(Context.get(conversations, Chats.Service));
 	const threadsAs = (userId: string) =>
 		onPostgresAs(userId)(Context.get(conversations, ChatView.Service));
-	const controlsAs = (userId: string) =>
-		onPostgresAs(userId)(Context.get(conversations, Turns.Controls));
 	const turns = onPostgres({ prepare: Context.get(conversations, TurnExecution.Service).prepare });
 	const turnRecords = onPostgres(Context.get(conversations, TurnRepository.Service));
-	const summaries = onPostgres({
-		prepare: Context.get(conversations, Summaries.Service).prepare,
-		complete: Context.get(conversations, Summaries.Service).complete,
-		prepareBotSummary: Context.get(conversations, Summaries.Service).prepareBotSummary,
-		completeBotSummary: Context.get(conversations, Summaries.Service).completeBotSummary,
-	});
 	const compactions = onPostgres({
 		prepare: Context.get(conversations, Compactions.Service).prepare,
 		complete: Context.get(conversations, Compactions.Service).complete,
@@ -112,13 +97,6 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		return viewAs(input.startedById).get(started.id);
 	}
 
-	/** Makes the bot private, so only its creator, the member, reaches it. */
-	async function makeBotPrivate() {
-		await onDatabase((db) =>
-			db.update(bot).set({ visibility: "private" }).where(eq(bot.id, botId)),
-		);
-	}
-
 	/** The bot's turn running in the conversation, as its workflow runs it. */
 	async function runningTurn(conversationId: string, bot = botId) {
 		const run = (await runOnPostgres(runningTurns(conversationId))).find(
@@ -126,15 +104,6 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		);
 		if (!run) throw new Error("No turn is running in the conversation");
 		return run;
-	}
-
-	/** Prepares the summary `request` asks for, for a case that needs it to run. */
-	async function preparedSummary(request: Parameters<typeof summaries.prepare>[0]) {
-		const preparation = await summaries.prepare(request);
-		if (preparation._tag !== "Prepared") {
-			throw new Error(`Conversation test could not prepare its summary: ${preparation.reason}`);
-		}
-		return preparation;
 	}
 
 	/** Prepares the compaction `request` asks for, for a case that needs it to run. */
@@ -182,16 +151,13 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				{ workspaceId, userId: outsiderId },
 			]),
 		);
-		const [projectRow] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId,
-					name: "Suga-Team",
-					slug: `suga-${suffix}`,
-					createdById: memberId,
-				})
-				.returning(),
+		const projectRow = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId,
+				name: "Suga-Team",
+				slug: `suga-${suffix}`,
+				createdById: memberId,
+			}),
 		);
 		const [botRow] = await onDatabase((db) =>
 			db
@@ -207,9 +173,7 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				})
 				.returning(),
 		);
-		if (!projectRow || !botRow) {
-			throw new Error("Could not create conversation scope");
-		}
+		if (!botRow) throw new Error("Could not create conversation scope");
 		projectId = projectRow.id;
 		botId = botRow.id;
 		await onDatabase((db) =>
@@ -265,6 +229,10 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 				{ workspaceId, projectId, botId },
 				{ workspaceId, projectId, botId: otherRow.id },
 			]),
+		);
+		// The bot that speaks first, by leading the project.
+		await onDatabase((db) =>
+			db.update(project).set({ leadBotId: botId }).where(eq(project.id, projectId)),
 		);
 		const { conversation: projectThread, message: posted } = await chatsAs(
 			memberId,
@@ -465,15 +433,12 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		await onDatabase((db) =>
 			db.insert(workspaceMember).values({ workspaceId: otherWorkspace.id, userId: memberId }),
 		);
-		const [foreignProject] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId: otherWorkspace.id,
-					name: "Foreign",
-					slug: "foreign",
-				})
-				.returning(),
+		const foreignProject = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId: otherWorkspace.id,
+				name: "Foreign",
+				slug: "foreign",
+			}),
 		);
 		const [foreignBot] = await onDatabase((db) =>
 			db
@@ -593,290 +558,6 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		expect(await recentIds()).toEqual([memberId, botId]);
 	});
 
-	it("queues and persists a fresh summary after a completed exchange", async () => {
-		const started = await startThread({
-			botId,
-			startedById: memberId,
-			message: "Summarize this conversation",
-		});
-		const firstRun = await runningTurn(started.id);
-		const preparedTurn = await prepareRunnable(turns, firstRun);
-		await turnRecords.complete(
-			replyTurnOf(preparedTurn),
-			{ content: "The work is complete.", collaborations: [], toolCalls: [] },
-			{
-				contextTokens: 30,
-				contextCapacity: 200_000,
-				readKeptFrom: null,
-			},
-		);
-		await runOnPostgres(releaseTurn(firstRun));
-		const firstSummary = await preparedSummary({
-			conversationId: started.id,
-			botId: preparedTurn.context.bot.id,
-			sourceMessageId: preparedTurn.responseMessage.id,
-		});
-		expect(firstSummary.model).toBe(SYSTEM_BOT_MODEL);
-
-		// The summariser works in its own conversation hanging off the one it summarises,
-		// so its turns never appear in the conversation people are having.
-		expect(firstSummary.summariser.conversationId).not.toBe(started.id);
-		const [systemBotConversation] = await onDatabase((db) =>
-			db
-				.select({
-					systemBotKey: placedConversation.systemBotKey,
-					parentConversationId: placedConversation.parentConversationId,
-				})
-				.from(placedConversation)
-				.where(eq(placedConversation.id, firstSummary.summariser.conversationId)),
-		);
-		expect(systemBotConversation).toMatchObject({
-			systemBotKey: "summarise",
-			parentConversationId: started.id,
-		});
-
-		// And it stays out of the project's thread list.
-		const listed = await viewAs(memberId).list(workspaceId);
-		expect(listed.some((row) => row.id === firstSummary.summariser.conversationId)).toBe(false);
-		// Recorded as the Summariser's turn, measured at 1,000 tokens.
-		await runOnPostgres(
-			Context.get(conversations, Turns.Service).recordSystemTurn(
-				{
-					...firstSummary.summariser,
-					triggerMessageId: firstSummary.sourceMessageId,
-					model: firstSummary.model,
-					name: "summary",
-				},
-				() =>
-					Context.get(conversations, Summaries.Service)
-						.complete(firstSummary, {
-							title: "Verify the release",
-							content: "The release work is complete.",
-						})
-						.pipe(Effect.as({ value: undefined, contextTokens: 1_000 })),
-			),
-		);
-
-		const refreshed = await viewAs(memberId).get(started.id);
-		// The first summary titles the conversation, and the conversation holding the summaries
-		// is named after it.
-		expect(refreshed?.conversation.title).toBe("Verify the release");
-		const [summariesConversation] = await onDatabase((db) =>
-			db
-				.select({ title: placedConversation.title })
-				.from(placedConversation)
-				.where(
-					and(
-						eq(placedConversation.parentConversationId, started.id),
-						eq(placedConversation.systemBotKey, "summarise"),
-					),
-				),
-		);
-		expect(summariesConversation?.title).toBe("Summaries of Verify the release");
-		expect((await viewAs(memberId).activity(started.id))?.summary).toMatchObject({
-			content: "The release work is complete.",
-		});
-		// The Summariser's own turn, measured at 1,000 tokens, is in a conversation of its own, so
-		// the context is the bot reply's.
-		expect((await viewAs(memberId).activity(started.id))?.context).toEqual({
-			usedTokens: 30,
-			measuredAt: expect.any(String),
-			// The window the reply was read with, as its turn recorded it.
-			windowTokens: 200_000,
-			compactionLineTokens: 140_000,
-			compactedAt: null,
-		});
-
-		await chatsAs(memberId).post({
-			conversationId: started.id,
-			messageId: crypto.randomUUID(),
-			content: "What remains?",
-		});
-		const nextTurn = await prepareRunnable(turns, await runningTurn(started.id));
-		expect(nextTurn.context).not.toHaveProperty("summary");
-		expect(nextTurn.context.messages.map(({ content }) => content)).toEqual([
-			"Summarize this conversation",
-			"The work is complete.",
-			"What remains?",
-		]);
-		await turnRecords.complete(
-			replyTurnOf(nextTurn),
-			{ content: "Only approval remains.", collaborations: [], toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null },
-		);
-		const nextSummary = await preparedSummary({
-			conversationId: started.id,
-			botId: nextTurn.context.bot.id,
-			sourceMessageId: nextTurn.responseMessage.id,
-		});
-		expect(nextSummary).toMatchObject({
-			previousContent: "The release work is complete.",
-			transcript: [
-				{ content: "Summarize this conversation" },
-				{ content: "The work is complete." },
-				{ content: "What remains?" },
-				{ content: "Only approval remains." },
-			],
-		});
-		await summaries.complete(nextSummary, { content: "Only approval remains." });
-		// Only the first summary titles the conversation.
-		expect((await viewAs(memberId).get(started.id))?.conversation.title).toBe("Verify the release");
-
-		// The bot's own summary is written from its threads' summaries, the newest first.
-		const bot = await summaries.prepareBotSummary(started.id);
-		expect(bot).toMatchObject({
-			botId,
-			previousContent: undefined,
-			conversations: [
-				{ title: "Verify the release", summary: "Only approval remains.", doneAt: null },
-			],
-		});
-		if (!bot) throw new Error("The bot's summary was not prepared");
-		await summaries.completeBotSummary(bot, "Verifying the release; only approval remains.");
-		expect(await summaries.prepareBotSummary(started.id)).toMatchObject({
-			previousContent: "Verifying the release; only approval remains.",
-		});
-
-		// A collaboration the bot was asked in belongs to the conversation that asked it.
-		const asked = await onDatabase((db) =>
-			seedConversation(db, {
-				workspaceId,
-				kind: "collaboration",
-				title: "A private plan",
-				collaboration: {
-					parentConversationId: started.id,
-					rootConversationId: started.id,
-					parentMessageId: nextTurn.responseMessage.id,
-					turnId: nextTurn.turnId,
-					collaboratorBotId: botId,
-					brief: "Plan something private.",
-					atOffset: 0,
-				},
-			}),
-		);
-		const [answer] = await onDatabase((db) =>
-			db
-				.insert(message)
-				.values({
-					conversationId: asked.id,
-					authorBotId: botId,
-					kind: "text",
-					status: "complete",
-					parts: [{ type: "text", text: "Planned." }],
-					content: "Planned.",
-				})
-				.returning(),
-		);
-		if (!answer) throw new Error("The collaboration has no answer");
-		await onDatabase((db) =>
-			db.insert(conversationSummary).values({
-				conversationId: asked.id,
-				content: "Planning something private.",
-				sourceMessageId: answer.id,
-			}),
-		);
-		expect(await summaries.prepareBotSummary(asked.id)).toBeUndefined();
-		expect((await summaries.prepareBotSummary(started.id))?.conversations).toEqual([
-			expect.objectContaining({ title: "Verify the release" }),
-		]);
-	});
-
-	it("does not summarise a project's thread the bot replies in", async () => {
-		const [host] = await onDatabase((db) =>
-			db.select({ handle: bot.handle }).from(bot).where(eq(bot.id, botId)),
-		);
-		if (!host) throw new Error("The bot is gone");
-		await onDatabase((db) => db.insert(projectBot).values({ workspaceId, projectId, botId }));
-		const { conversation: projectThread } = await chatsAs(memberId).startProjectThread({
-			projectId,
-			messageId: crypto.randomUUID(),
-			content: `@${host.handle} what changed?`,
-		});
-		const run = await runningTurn(projectThread.id);
-		const reply = await prepareRunnable(turns, run);
-		await turnRecords.complete(
-			replyTurnOf(reply),
-			{ content: "Nothing yet.", collaborations: [], toolCalls: [] },
-			{ contextCapacity: 200_000, readKeptFrom: null },
-		);
-		await runOnPostgres(releaseTurn(run));
-
-		expect(
-			await summaries.prepare({
-				conversationId: projectThread.id,
-				botId,
-				sourceMessageId: reply.responseMessage.id,
-			}),
-		).toMatchObject({ _tag: "Skipped" });
-	});
-
-	it("records a summary the model could not write as the Summariser's failed turn", async () => {
-		const started = await startThread({
-			botId,
-			startedById: memberId,
-			message: "Summarize this conversation",
-		});
-		const preparedTurn = await prepareRunnable(turns, await runningTurn(started.id));
-		await turnRecords.complete(
-			replyTurnOf(preparedTurn),
-			{ content: "The work is complete.", collaborations: [], toolCalls: [] },
-			{ contextCapacity: 128_000, readKeptFrom: null },
-		);
-		const unreachable = new Models.ProviderUnreachable({
-			provider: DisplayName.fromRecord("Test provider"),
-			model: DisplayName.fromRecord("test-model"),
-			cause: new Error("ECONNREFUSED"),
-		});
-		const providerDown = Models.fromStream(() => Effect.fail(unreachable));
-
-		await runOnPostgres(
-			summarise(
-				{
-					conversationId: started.id,
-					botId,
-					sourceMessageId: preparedTurn.responseMessage.id,
-				},
-				providerDown,
-			).pipe(Effect.provideContext(conversations)),
-		);
-
-		const summariserTurns = await onDatabase((db) =>
-			db
-				.select({ status: turn.status, error: turn.error })
-				.from(turn)
-				.innerJoin(placedConversation, eq(placedConversation.id, turn.conversationId))
-				.where(
-					and(
-						eq(placedConversation.parentConversationId, started.id),
-						eq(placedConversation.systemBotKey, "summarise"),
-					),
-				),
-		);
-		expect(summariserTurns).toEqual([{ status: "failed", error: unreachable.userMessage }]);
-	});
-
-	it("requests cancellation only once while an authorized turn remains active", async () => {
-		await makeBotPrivate();
-		const details = await startThreadShown({
-			botId,
-			startedById: memberId,
-			message: "Wait for review",
-		});
-		const prepared = await prepareRunnable(turns, await runningTurn(details.conversation.id));
-
-		expect(await controlsAs(memberId).cancel(prepared.turnId)).toBe(true);
-		expect(await controlsAs(memberId).cancel(prepared.turnId)).toBe(false);
-		await expect(controlsAs(outsiderId).cancel(prepared.turnId)).rejects.toThrow(ResourceHidden);
-		// Announced once, for the workflow running the turn.
-		const announced = await onDatabase((db) =>
-			db
-				.select({ payload: event.payload })
-				.from(event)
-				.where(eq(event.type, "turn.cancel_requested")),
-		);
-		expect(announced.filter(({ payload }) => payload.turnId === prepared.turnId)).toHaveLength(1);
-	});
-
 	it("compacts a long thread into a summary and the newest messages, and searches what came before", async () => {
 		const details = await startThreadShown({
 			botId,
@@ -920,6 +601,15 @@ describe.skipIf(!process.env.DATABASE_URL)("conversations, against Postgres", as
 		expect(prepared.transcript.map(({ content }) => content.split(".")[0])).toEqual(
 			Array.from({ length: 11 }, (_, index) => `Message ${index + 4}`),
 		);
+		// The Compaction bot works in its own conversation hanging off the one it
+		// compacts, which stays out of the project's thread list.
+		expect(prepared.compactor.conversationId).not.toBe(details.conversation.id);
+		const { threads } = await threadsAs(memberId).threads(
+			await runOnPostgres(defaultProjectOf(botId)),
+		);
+		expect(
+			threads.some((listed) => listed.conversation.id === prepared.compactor.conversationId),
+		).toBe(false);
 		await compactions.complete(prepared, "The family is planning a trip.");
 
 		const turn = await prepareRunnable(turns, await runningTurn(details.conversation.id));

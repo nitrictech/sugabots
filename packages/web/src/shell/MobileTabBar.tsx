@@ -19,7 +19,7 @@ type MobileTab = (typeof TABS)[number];
  * screen, the one the page is under marked. Out of the way while the
  * keyboard is up.
  */
-export function MobileTabBar({ className }: { className?: string }) {
+export function MobileTabBar() {
 	const tab = useMobileTab();
 	const typing = useTyping();
 	const { unreadForYou, unreadInInbox, waitingApprovals } = useAttentionCounts();
@@ -29,12 +29,9 @@ export function MobileTabBar({ className }: { className?: string }) {
 		<nav
 			aria-label="Tabs"
 			data-tab-bar=""
-			className={cn(
-				// Named apart from the page, so it stays still while a page slides past. It floats
-				// over the page, which scrolls on under it; only the bar itself takes a tap.
-				"pointer-events-none absolute inset-x-0 bottom-0 z-40 px-4 pb-safe-or-3 view-transition-tabs md:hidden",
-				className,
-			)}
+			// Named apart from the page, so it stays still while a page slides past. It floats
+			// over the page, which scrolls on under it; only the bar itself takes a tap.
+			className="pointer-events-none absolute inset-x-0 bottom-0 z-40 px-4 pb-safe-or-3 view-transition-tabs md:hidden"
 		>
 			<div className="glass pointer-events-auto relative grid grid-cols-4 gap-0.5 rounded-4xl p-1.25">
 				{/*

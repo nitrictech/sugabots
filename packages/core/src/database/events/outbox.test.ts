@@ -14,8 +14,7 @@ class Abandoned extends Data.TaggedError("Abandoned") {}
 /**
  * The two promises an `EventOutbox` makes: a row and its delivery stand or
  * fall with the transaction that published them, and a stream's deliveries
- * arrive in the order its transactions committed. Both need a real Postgres,
- * so the file skips without one, as `db/schema.test.ts` does.
+ * arrive in the order its transactions committed. Both need a real Postgres.
  */
 
 describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {

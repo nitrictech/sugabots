@@ -3,7 +3,6 @@ import type {
 	Bot,
 	Connection,
 	ConversationContext,
-	ConversationSummary,
 	FilePart,
 	Participant,
 	Project,
@@ -11,9 +10,8 @@ import type {
 } from "@sugabots/contracts";
 import { connectionMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { cn } from "cn";
 import { Archive, FileText, Monitor, Pencil, RefreshCcw } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import { useAutomationActions, useAutomations } from "@/lib/automations.ts";
 import { useModelName } from "@/lib/bots.ts";
 import { useComputerGap } from "@/lib/computer-providers.ts";
@@ -25,7 +23,6 @@ import { countOf } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { automationStartsLabel } from "@/lib/routine-schedule.ts";
-import { useSystemBots } from "@/lib/system-bots.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -33,13 +30,11 @@ import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
-import { ChatSidebar, Expandable, ShowMore, SidebarSection } from "./ChatSidebar.tsx";
+import { ChatSidebar, Expandable, SidebarSection } from "./ChatSidebar.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
-import { MessageMarkdown } from "./MessageMarkdown.tsx";
 import { ParticipantAvatar } from "./ParticipantAvatar.tsx";
 import { ProjectThreadActions, type ProjectThreadToChange } from "./ProjectThreadMenu.tsx";
-import { SystemBotsNotSetUp } from "./SystemBotsNotSetUp.tsx";
 
 /**
  * The Details' scrolling list: a column on a phone, and from a tablet up a
@@ -53,14 +48,12 @@ const FILES_SHOWN = 3;
 const AUTOMATIONS_SHOWN = 2;
 /** How big a bot's face is over a phone's Details, as a project's mark is there: `size-22`. */
 const DETAILS_FACE_PX = 88;
-/** A summary longer than this is folded to three lines until asked for the rest. */
-const SUMMARY_FOLDED_OVER = 240;
 
 /**
  * A bot beside its thread. On a phone: its face, name and model, and the way to
- * its settings and automations, then what the thread is about. From a tablet
- * up, floating cards: what the bot works with (its connections and how full
- * its short-term memory is), the files shared in the thread, and its computer.
+ * its settings and automations. From a tablet up, floating cards: what the bot
+ * works with (its connections and how full its short-term memory is), the files
+ * shared in the thread, and its computer.
  */
 export function DetailsSidebar({
 	bot,
@@ -81,7 +74,6 @@ export function DetailsSidebar({
 	onClose: () => void;
 }) {
 	const activity = useConversationActivity(conversationId).data;
-	const summariser = useSystemBots().data?.find(({ key }) => key === "summarise");
 	const modelName = useModelName(bot.model);
 	return (
 		<ChatSidebar label="Details" onClose={onClose} headerless floating>
@@ -113,13 +105,6 @@ export function DetailsSidebar({
 							label="Automations"
 						/>
 					</div>
-				</div>
-				{/* What a phone keeps under the bot; from a tablet up, the thread says it. */}
-				<div className="contents md:hidden">
-					<Summary
-						summary={activity?.summary}
-						summariserHasModel={summariser && summariser.model !== null}
-					/>
 				</div>
 				<Context bot={bot} memory={activity?.context ?? undefined} />
 				<SharedFiles files={contents.files} fileUrlOf={contents.fileUrlOf} />
@@ -201,7 +186,7 @@ export function ProjectDetails({
 	contents: ConversationContents;
 	/**
 	 * The project's computer, as its lead bot works on it in this thread, and
-	 * opening its desktop; none while the project has no lead bot.
+	 * opening its desktop.
 	 */
 	computer?: { bot: Bot; conversationId: string; onOpen: () => void };
 	onClose: () => void;
@@ -295,45 +280,6 @@ function SharedFiles({
 					</li>
 				)}
 			</Expandable>
-		</SidebarSection>
-	);
-}
-
-function Summary({
-	summary,
-	summariserHasModel,
-}: {
-	summary: ConversationSummary | null | undefined;
-	/** `undefined` while the system bots load, so the unconfigured state is not flashed. */
-	summariserHasModel: boolean | undefined;
-}) {
-	const [open, setOpen] = useState(false);
-	if (summariserHasModel === false) {
-		return (
-			<SidebarSection title="Summary">
-				<SystemBotsNotSetUp />
-			</SidebarSection>
-		);
-	}
-	const text = summary?.content;
-	const folds = text !== undefined && text.length > SUMMARY_FOLDED_OVER;
-	return (
-		<SidebarSection title="Summary">
-			{text ? (
-				<div
-					className={cn(
-						"text-soft-foreground text-xs leading-normal",
-						folds && !open && "line-clamp-3",
-					)}
-				>
-					<MessageMarkdown text={text} mentionable={[]} writer="bot" />
-				</div>
-			) : (
-				<p className="m-0 text-muted-foreground text-xs leading-normal">
-					A summary will appear after the first reply.
-				</p>
-			)}
-			{folds && <ShowMore open={open} onToggle={() => setOpen(!open)} />}
 		</SidebarSection>
 	);
 }

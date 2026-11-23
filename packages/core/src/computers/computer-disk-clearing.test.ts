@@ -83,6 +83,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 				botId,
 				title: "Conversation",
 				doneAt: done ? lastTurnAt : null,
+				startedById: userId,
 			}),
 		);
 		await aTurn(id, lastTurnAt, status);

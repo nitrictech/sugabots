@@ -6,6 +6,7 @@ import { useAuthorLinks } from "@/lib/author-links.ts";
 import { useConversationEvents, useConversationNotices } from "@/lib/conversation-events.ts";
 import { conversationFileUrl } from "@/lib/conversation-files.ts";
 import { useConversation } from "@/lib/conversations.ts";
+import { loadOlderKeepingPlace } from "@/lib/follow-latest.ts";
 import { OwnerLink, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
@@ -107,15 +108,7 @@ export function ItemPanel({
 		if (itemConversationId) heading.current?.focus();
 	}, [itemConversationId]);
 
-	async function loadOlder() {
-		const element = timeline.current;
-		const height = element?.scrollHeight ?? 0;
-		const top = element?.scrollTop ?? 0;
-		await query.loadOlder();
-		requestAnimationFrame(() => {
-			if (element) element.scrollTop = top + element.scrollHeight - height;
-		});
-	}
+	const loadOlder = () => loadOlderKeepingPlace(timeline.current, query.loadOlder);
 
 	const title = details?.conversation.title ?? "Conversation";
 	const headed = {
@@ -195,9 +188,11 @@ export function ItemPanel({
 					fileUrlOf={(fileId) => conversationFileUrl(itemConversationId, fileId)}
 					messages={shownMessages}
 					answeringFace={findAnsweringFace(shownMessages, true)}
-					host={host}
-					// A notice says the reply is not coming, so nobody is shown typing it.
-					isRunning={details.conversation.status === "running" && notices.length === 0}
+					typing={{
+						host,
+						// A notice says the reply is not coming, so nobody is shown typing it.
+						isRunning: details.conversation.status === "running" && notices.length === 0,
+					}}
 					participants={mentionableIn(details)}
 					peopleReachingProject={details.peopleReachingProject}
 					conversationKind={details.conversation.kind}

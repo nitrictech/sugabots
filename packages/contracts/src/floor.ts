@@ -18,13 +18,12 @@ const nobody: Floor = { kind: "nobody" };
  *      with no model takes no such turn, which could only fail.
  *   4. Otherwise the lead bot.
  *   Mentions of bots outside the project are ignored, so in a bot's own
- *   threads, where it is the only bot, only it ever answers. A project with no
- *   lead yet has nobody to fall back on.
+ *   threads, where it is the only bot, only it ever answers.
  * - An automation's feed (`automation_feed`), in the automation's project:
  *   1. Mentioning only people: nobody.
  *   2. Otherwise the project's lead bot, which runs the automation, whichever
  *      bots the person mentions: another bot they name is reached by the lead
- *      collaborating, not by joining. A project with no lead yet has nobody.
+ *      collaborating, not by joining.
  */
 export function decideFloor(message: AddressedMessage): Floor {
 	switch (message.conversationKind) {
@@ -45,8 +44,7 @@ export interface AddressedMessage {
 	conversationKind: ConversationKind;
 	/**
 	 * The project's lead bot, and whether it has a model, without which it is not
-	 * offered a turn it may decline. Null outside a project, or in a project with
-	 * no lead yet.
+	 * offered a turn it may decline. Null outside a project.
 	 */
 	lead: { id: string; hasModel: boolean } | null;
 	/** The project's bots the message mentions, each once; bots outside the project don't count. */

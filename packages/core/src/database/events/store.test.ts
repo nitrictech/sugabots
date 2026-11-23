@@ -14,9 +14,7 @@ import { EventStore } from "./store.ts";
  * Both stores, against the same cases.
  *
  * The memory one is what every other test in the tree turns on, so the pair has
- * to behave alike or those tests prove nothing about production. Postgres needs
- * a migrated database and skips without one, exactly as `db/schema.test.ts`
- * does; CI always has one.
+ * to behave alike or those tests prove nothing about production.
  */
 
 const DAY_MS = 24 * 60 * 60_000;

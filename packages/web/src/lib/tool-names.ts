@@ -1,6 +1,7 @@
 import { builtInToolCatalog, CONNECTION_TOOL_SEPARATOR } from "@sugabots/contracts";
+import { capitalise } from "@/lib/name-list.ts";
 
-/**
+/*
  * What a tool call is called wherever it is shown: the tool line and approval
  * card in a conversation, and a chat list row waiting on one.
  */
@@ -81,5 +82,5 @@ export function wordsFromKey(key: string): string {
 		.replace(/[_-]+/g, " ")
 		.trim();
 	if (!words) return key;
-	return words.charAt(0).toUpperCase() + words.slice(1);
+	return capitalise(words);
 }

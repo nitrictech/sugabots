@@ -144,7 +144,7 @@ export const fromE2b = (
 				try: async (): Promise<Computers.Info> => {
 					const info = await E2bSandbox.getInfo(id, options());
 					// Work stays on the sandbox's disk, so moving it means copying it.
-					return { state: info.state, image: info.name ?? info.templateId, workKeptApart: false };
+					return { state: info.state, workKeptApart: false };
 				},
 				catch: missingOr(id),
 			}),

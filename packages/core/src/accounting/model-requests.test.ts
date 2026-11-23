@@ -28,7 +28,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model requests, against Postgres", (
 	const started = (): ModelRequests.Started => ({
 		workspaceId: randomUUID(),
 		activity: {
-			purpose: "summary",
+			purpose: "compaction",
 			conversationId: randomUUID(),
 			turnId: randomUUID(),
 		},
@@ -52,7 +52,7 @@ describe.skipIf(!process.env.DATABASE_URL)("model requests, against Postgres", (
 
 		expect(await rowOf(id)).toMatchObject({
 			workspaceId: request.workspaceId,
-			purpose: "summary",
+			purpose: "compaction",
 			botId: null,
 			outcome: "started",
 			endedAt: null,

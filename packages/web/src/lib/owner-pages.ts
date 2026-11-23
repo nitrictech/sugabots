@@ -1,6 +1,12 @@
 import type { Bot } from "@sugabots/contracts";
 import { Folder, type LucideIcon, Monitor, Settings2, Wrench, Zap } from "lucide-react";
-import { type OwnerPage, type ResourceOwner, resourcePermissions } from "@/lib/resource-owner.tsx";
+import { useModels } from "@/lib/bots.ts";
+import {
+	type OwnerPage,
+	type ResourceOwner,
+	resourcePermissions,
+	useLeadBot,
+} from "@/lib/resource-owner.tsx";
 
 /** One of a bot's or a project's own pages, as its sidebar and a phone's page of it list them. */
 interface OwnerPageEntry {
@@ -48,8 +54,8 @@ export function ownerPages(
 
 /**
  * What is wrong with an owner, by the page of its that sets it right: its
- * settings for no lead bot, no model or one since switched off, and its
- * automations for one whose latest run failed.
+ * settings for no model or one since switched off, and its automations for
+ * one whose latest run failed.
  */
 type OwnerProblems = Partial<Record<OwnerPageName, string>>;
 
@@ -57,22 +63,13 @@ type OwnerProblems = Partial<Record<OwnerPageName, string>>;
 const AUTOMATION_FAILED = "An automation's last run failed";
 
 /**
- * What stops the owner working that its own pages set right. `lead` is the
- * bot itself, or a project's lead bot; `enabledModels` the workspace's models
- * switched on, undefined until loaded.
+ * What stops the owner working that its own pages set right, checked against
+ * its lead bot (the bot itself, or a project's lead bot) and the workspace's
+ * models switched on: no settings problem while either is loading.
  */
-export function ownerProblems(
-	owner: ResourceOwner,
-	{
-		lead,
-		enabledModels,
-		automationFailed,
-	}: {
-		lead: Bot | undefined;
-		enabledModels: readonly { modelId: string }[] | undefined;
-		automationFailed: boolean;
-	},
-): OwnerProblems {
+export function useOwnerProblems(owner: ResourceOwner, automationFailed: boolean): OwnerProblems {
+	const lead = useLeadBot(owner);
+	const enabledModels = useModels().data?.models;
 	return {
 		settings: settingsProblem(owner, lead, enabledModels),
 		automations: automationFailed ? AUTOMATION_FAILED : undefined,
@@ -84,7 +81,7 @@ function settingsProblem(
 	lead: Bot | undefined,
 	enabledModels: readonly { modelId: string }[] | undefined,
 ): string | undefined {
-	if (!lead) return "No lead bot chosen";
+	if (!lead) return undefined;
 	if (lead.model === null)
 		return "bot" in owner ? "No model chosen" : `${lead.name} has no model chosen`;
 	if (enabledModels && !enabledModels.some((model) => model.modelId === lead.model)) {

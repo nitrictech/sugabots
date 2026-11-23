@@ -1,9 +1,13 @@
-import type { Bot, BotParticipant } from "@sugabots/contracts";
+import { botParticipantOf } from "@sugabots/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import { useState } from "react";
-import { THREAD_NOT_STARTED, useProjectThreads, useThreadStarter } from "@/lib/chats.ts";
-import { useComposerAttachments } from "@/lib/composer-attachments.ts";
+import {
+	needsViewer,
+	THREAD_NOT_STARTED,
+	useProjectThreads,
+	useThreadStarter,
+} from "@/lib/chats.ts";
 import { usePeopleReachingProject, useProjectBots } from "@/lib/projects.ts";
 import {
 	ownerName,
@@ -16,7 +20,6 @@ import { useSession } from "@/lib/session.ts";
 import { useSidebarHiddenBesideChat } from "@/lib/sidebar-hidden.tsx";
 import { WatchingAvatar } from "@/shell/Bot.tsx";
 import { OwnerCrumb } from "@/shell/BotCrumb.tsx";
-import { EmptyState } from "@/ui/empty-state.tsx";
 import { BotsWithoutModelNotice, useRequiredRepliers } from "./BotsWithoutModelNotice.tsx";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { backToOwner, PlainChatHeader } from "./ChatHeader.tsx";
@@ -28,10 +31,9 @@ import { composerMentionable } from "./mentions.tsx";
  * thread, and a bot's own page on a wider screen. Its bot's face (a project's lead bot's), what of the
  * work there waits on the viewer, and the box to give it something new.
  * Sending starts the thread and opens it. Files are added once it has started.
+ * The box waits for the bot, which the roster may not have yet.
  */
 export function NewThreadPage({ owner }: { owner: ResourceOwner }) {
-	// A thread has nowhere to upload to until it starts.
-	const attachments = useComposerAttachments(undefined);
 	const threads = useThreadStarter({ projectId: resourceProjectId(owner) });
 	const navigateToOwnerPage = useNavigateToOwnerPage();
 	const router = useRouter();
@@ -103,11 +105,7 @@ export function NewThreadPage({ owner }: { owner: ResourceOwner }) {
 							{greetingFor(waiting)}
 						</h2>
 					</div>
-					{!bot ? (
-						<EmptyState title={`${name} has no lead bot yet`}>
-							Somebody who can change {name} chooses the bot that answers its threads.
-						</EmptyState>
-					) : (
+					{bot && (
 						<ChatComposer
 							label={`Message ${name}`}
 							placeholder={`Ask ${bot.name} to…`}
@@ -122,7 +120,6 @@ export function NewThreadPage({ owner }: { owner: ResourceOwner }) {
 							notice={withoutModel.length > 0 && <BotsWithoutModelNotice bots={withoutModel} />}
 							error={failed ? THREAD_NOT_STARTED : undefined}
 							mentionable={mentionable}
-							attachments={attachments}
 						/>
 					)}
 				</div>
@@ -139,22 +136,7 @@ function historyEntryKey(router: ReturnType<typeof useRouter>): string | undefin
 /** How many of the bot's or project's open threads wait on the viewer, which its page greets them with. */
 function useWaitingOnViewer(owner: ResourceOwner): number {
 	const threads = useProjectThreads(resourceProjectId(owner)).data?.threads;
-	return (threads ?? []).filter(
-		(row) => row.conversation.doneAt === null && (row.needsApproval || row.mentionsYou),
-	).length;
-}
-
-/** A bot as a mention names it. */
-function botParticipantOf(bot: Bot): BotParticipant {
-	return {
-		kind: "bot",
-		id: bot.id,
-		name: bot.name,
-		handle: bot.handle,
-		color: bot.color,
-		face: bot.face,
-		shape: bot.shape,
-	};
+	return (threads ?? []).filter(needsViewer).length;
 }
 
 /**

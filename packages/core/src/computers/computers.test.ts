@@ -15,6 +15,20 @@ import { removeWorkVolumes } from "./testing.ts";
  */
 const env = process.env;
 
+/** E2B, or E2B Embed when its endpoints are set, from the environment. */
+const e2b: Computers.E2bConnection | undefined = env.E2B_API_KEY
+	? {
+			provider: "e2b",
+			apiKey: Redacted.make(env.E2B_API_KEY),
+			template: "base",
+			size: COMPUTER_E2B_DEFAULT_SIZE,
+			networkMode: "allowlist",
+			...(env.E2B_API_URL && env.E2B_SANDBOX_URL
+				? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
+				: {}),
+		}
+	: undefined;
+
 const connections: ReadonlyArray<[string, Computers.Connection | undefined]> = [
 	[
 		"OpenSandbox",
@@ -30,21 +44,7 @@ const connections: ReadonlyArray<[string, Computers.Connection | undefined]> = [
 				}
 			: undefined,
 	],
-	[
-		"E2B",
-		env.E2B_API_KEY
-			? {
-					provider: "e2b",
-					apiKey: Redacted.make(env.E2B_API_KEY),
-					template: "base",
-					size: COMPUTER_E2B_DEFAULT_SIZE,
-					networkMode: "allowlist",
-					...(env.E2B_API_URL && env.E2B_SANDBOX_URL
-						? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
-						: {}),
-				}
-			: undefined,
-	],
+	["E2B", e2b],
 ];
 
 const SPEC: Computers.Spec = {
@@ -311,7 +311,7 @@ describe.each(connections)("%s computers", (_, connection) => {
 		);
 
 		it(
-			"reports whether it runs, and the image it was made from",
+			"reports whether it runs",
 			async () => {
 				const made = await run(Effect.flatMap(provider, (p) => p.create(SPEC)));
 				const info = (id: Computers.ComputerId) => run(Effect.flatMap(provider, (p) => p.info(id)));
@@ -322,11 +322,6 @@ describe.each(connections)("%s computers", (_, connection) => {
 				await run(Effect.flatMap(provider, (p) => p.destroy(made.id)));
 
 				expect(running.state).toBe("running");
-				expect(running.image).toContain(
-					connection?.provider === "e2b"
-						? connection.template
-						: (connection as Computers.OpenSandboxConnection).image,
-				);
 				expect(paused.state).toBe("paused");
 			},
 			SLOW,
@@ -373,17 +368,17 @@ describe.each(connections)("%s computers", (_, connection) => {
 	});
 });
 
-describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
+describe.skipIf(!e2b)("E2B templates, against the service", () => {
+	/** The environment's E2B with its own template. */
+	const withTemplate = (template: string): Computers.E2bConnection => ({
+		...(e2b as Computers.E2bConnection),
+		template,
+	});
+
 	it("builds a template from an image, then makes computers from it", async () => {
 		const connection: Computers.E2bConnection = {
-			provider: "e2b",
-			apiKey: Redacted.make(env.E2B_API_KEY ?? ""),
-			template: `sugabots-test-${Date.now()}`,
+			...withTemplate(`sugabots-test-${Date.now()}`),
 			size: { cpuCount: 2, memoryGiB: 2 },
-			networkMode: "allowlist",
-			...(env.E2B_API_URL && env.E2B_SANDBOX_URL
-				? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
-				: {}),
 		};
 		const provider = await run(Effect.map(Computers.Service, (s) => s.forConnection(connection)));
 		const templates = provider.templates;
@@ -411,18 +406,7 @@ describe.skipIf(!env.E2B_API_KEY)("E2B templates, against the service", () => {
 
 	it("says so when the workspace's template hasn't been built", async () => {
 		const provider = await run(
-			Effect.map(Computers.Service, (s) =>
-				s.forConnection({
-					provider: "e2b",
-					apiKey: Redacted.make(env.E2B_API_KEY ?? ""),
-					template: "sugabots-never-built",
-					networkMode: "allowlist",
-					size: COMPUTER_E2B_DEFAULT_SIZE,
-					...(env.E2B_API_URL && env.E2B_SANDBOX_URL
-						? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
-						: {}),
-				}),
-			),
+			Effect.map(Computers.Service, (s) => s.forConnection(withTemplate("sugabots-never-built"))),
 		);
 
 		const exit = await runExit(provider.create(SPEC));

@@ -1,6 +1,5 @@
 import { botColorVariables } from "@sugabots/avatars";
 import {
-	type AutomationResultOf,
 	type BotParticipant,
 	type CollaborationPart,
 	type ConversationKind,
@@ -14,14 +13,14 @@ import {
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, CornerUpLeft, Reply, SquareArrowOutUpRight } from "lucide-react";
+import { CornerUpLeft, Reply, SquareArrowOutUpRight } from "lucide-react";
 import { type CSSProperties, Fragment, type ReactNode, useMemo, useRef, useState } from "react";
 import { type ApprovalCapabilities, mayAnswer } from "@/lib/approvals.ts";
 import type { AuthorLink, PagedAuthor } from "@/lib/author-links.ts";
 import { type ConnectionLook, useConnectionLooks } from "@/lib/connections.ts";
 import { useConversationEvents } from "@/lib/conversation-events.ts";
 import { useConversation } from "@/lib/conversations.ts";
-import { formatClockTime } from "@/lib/list-time.ts";
+import { formatClockTime, formatDay, formatFullTimestamp } from "@/lib/list-time.ts";
 import { BROWSER_TOOL_PREFIX, splitToolKey } from "@/lib/tool-names.ts";
 import { collaborationWorkState } from "@/lib/work-state.ts";
 import { BotAvatar, WatchingAvatar } from "@/shell/Bot.tsx";
@@ -32,7 +31,6 @@ import { LabelledRule } from "@/ui/labelled-rule.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import {
 	type AnsweringFace,
-	formatDay,
 	isTyping,
 	sameDay,
 	segmentsOf,
@@ -49,7 +47,7 @@ import { AddReactionButton, MessageReactions, type Reacting } from "./MessageRea
 import { groupMentionsBy } from "./mentions.tsx";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 import { WorkedFor } from "./ToolLine.tsx";
-import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
+import { type Typer, TypingIndicator } from "./TypingIndicator.tsx";
 
 /*
  * A bot's message is drawn open on the page, its face and name at the head of
@@ -76,8 +74,7 @@ import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx
 
 export function ConversationMessages({
 	messages,
-	host,
-	isRunning,
+	typing,
 	participants,
 	peopleReachingProject,
 	conversationKind,
@@ -91,13 +88,10 @@ export function ConversationMessages({
 	compact = false,
 	queued = NONE_QUEUED,
 	sending = NONE_SENDING,
-	peopleTyping = [],
-	showsTyping = true,
 	highlightedMessageId,
 	authorLinkOf,
 	onReply,
 	sideLinesOf,
-	inAutomationFeed = false,
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
@@ -108,9 +102,13 @@ export function ConversationMessages({
 	nameColorsFor,
 }: {
 	messages: Message[];
-	/** The bot the thread is with; none in a project. */
-	host?: BotParticipant;
-	isRunning: boolean;
+	/**
+	 * Where the messages say who is typing themselves: a bot typing its reply,
+	 * and `host`, the bot the conversation is with, while `isRunning` and its
+	 * reply has not started. Without it the caller says who is typing, as a
+	 * chat does under its composer.
+	 */
+	typing?: { host: BotParticipant | undefined; isRunning: boolean };
 	/**
 	 * Everyone in the conversation and the project's bots and people: how a
 	 * collaboration's other bot is found, and who a mention can name.
@@ -130,10 +128,7 @@ export function ConversationMessages({
 	 * chat does between these messages and its activity rows.
 	 */
 	dividers?: boolean;
-	/**
-	 * Opens a collaboration from its line, or the run an automation's result came
-	 * from, in the sidebar beside this conversation.
-	 */
+	/** Opens a collaboration from its line, in the sidebar beside this conversation. */
 	onOpenItem: (conversationId: string) => void;
 	/** Opens a file a reply wrote, from its card. Without it, no cards are drawn. */
 	onOpenFile?: (fileId: string) => void;
@@ -163,13 +158,6 @@ export function ConversationMessages({
 	 * cannot be replied or reacted to, as neither would find them there.
 	 */
 	sending?: ReadonlySet<string>;
-	/**
-	 * Other people typing in the conversation. They join a bot typing the last reply,
-	 * or are shown after the last message on their own.
-	 */
-	peopleTyping?: readonly PersonParticipant[];
-	/** Off where the caller says who is typing itself, as the chat does under its composer. */
-	showsTyping?: boolean;
 	/** A message pointed out for a moment, as one jumped to is. */
 	highlightedMessageId?: string;
 	/** Where an author's name leads. Names are plain text without it. */
@@ -178,11 +166,6 @@ export function ConversationMessages({
 	onReply?: (message: Message) => void;
 	/** The lines of the threads a bot's message started, drawn under it. */
 	sideLinesOf?: (message: Message) => ReactNode;
-	/**
-	 * In an automation's feed, where each result already sits under its run,
-	 * so a result does not also say which automation it came from.
-	 */
-	inAutomationFeed?: boolean;
 	/** Goes to the message a reply quotes, from its quote. Without it, the quote is only read. */
 	onJumpToMessage?: (messageId: string) => void;
 	/**
@@ -214,11 +197,9 @@ export function ConversationMessages({
 	 */
 	nameColorsFor?: string;
 }) {
-	const lastMessage = messages.at(-1);
 	// The turn has started but its reply has not been created yet.
-	const replyPending = isRunning && lastMessage?.author.kind === "person";
-	const lastReplyTyping =
-		lastMessage !== undefined && lastMessage.author.kind === "bot" && isTyping(lastMessage);
+	const pendingReplier =
+		typing?.isRunning && messages.at(-1)?.author.kind === "person" ? typing.host : undefined;
 	const speakers = useMemo(() => speakersIn(messages), [messages]);
 	const looksOf = useConnectionLooks(speakers, projectId);
 	const fileNames = useMemo(() => fileNamesIn(messages), [messages]);
@@ -240,65 +221,49 @@ export function ConversationMessages({
 				return (
 					<Fragment key={message.id}>
 						{divider && <DaySeparator at={message.createdAt} />}
-						{message.author.kind === "automation_trigger" ? (
-							<AutomationTriggerCard message={message} />
-						) : (
-							<ThreadMessage
-								message={message}
-								startsGroup={headsRun}
-								viewerId={viewerId}
-								namedBotId={namedBotId}
-								nameColorsFor={nameColorsFor}
-								liveFace={
-									message.id === answeringFace?.messageId
-										? { botTyping: answeringFace.botTyping, viewerWriting }
-										: undefined
-								}
-								participants={participants}
-								peopleReachingProject={peopleReachingProject}
-								conversationKind={conversationKind}
-								looks={
-									message.author.kind === "bot" ? looksOf(message.author.id) : NO_CONNECTION_LOOKS
-								}
-								fileNames={fileNames}
-								approvalCapabilities={approvalCapabilities}
-								compact={compact}
-								arrivedLive={watchedWritten.has(message.id)}
-								queued={queued.has(message.id)}
-								sending={sending.has(message.id)}
-								queuedNote={queuedNote}
-								highlighted={message.id === highlightedMessageId}
-								authorLink={authorLinkOf?.(message.author)}
-								onReply={onReply}
-								sideLines={sideLinesOf?.(message)}
-								inAutomationFeed={inAutomationFeed}
-								onJumpToMessage={onJumpToMessage}
-								reacting={reacting}
-								fileUrlOf={fileUrlOf}
-								onOpenItem={onOpenItem}
-								onOpenFile={onOpenFile}
-								onOpenDesktop={onOpenDesktop}
-								previews={previews}
-							/>
-						)}
-						{showsTyping && message.author.kind === "bot" && isTyping(message) && (
-							<TypingIndicator
-								key={`${message.id}-typing`}
-								typers={
-									message === lastMessage ? [message.author, ...peopleTyping] : [message.author]
-								}
-							/>
+						<ThreadMessage
+							message={message}
+							startsGroup={headsRun}
+							viewerId={viewerId}
+							namedBotId={namedBotId}
+							nameColorsFor={nameColorsFor}
+							liveFace={
+								message.id === answeringFace?.messageId
+									? { botTyping: answeringFace.botTyping, viewerWriting }
+									: undefined
+							}
+							participants={participants}
+							peopleReachingProject={peopleReachingProject}
+							conversationKind={conversationKind}
+							looks={
+								message.author.kind === "bot" ? looksOf(message.author.id) : NO_CONNECTION_LOOKS
+							}
+							fileNames={fileNames}
+							approvalCapabilities={approvalCapabilities}
+							compact={compact}
+							arrivedLive={watchedWritten.has(message.id)}
+							queued={queued.has(message.id)}
+							sending={sending.has(message.id)}
+							queuedNote={queuedNote}
+							highlighted={message.id === highlightedMessageId}
+							authorLinkOf={authorLinkOf}
+							onReply={onReply}
+							sideLines={sideLinesOf?.(message)}
+							onJumpToMessage={onJumpToMessage}
+							reacting={reacting}
+							fileUrlOf={fileUrlOf}
+							onOpenItem={onOpenItem}
+							onOpenFile={onOpenFile}
+							onOpenDesktop={onOpenDesktop}
+							previews={previews}
+						/>
+						{typing && message.author.kind === "bot" && isTyping(message) && (
+							<TypingIndicator key={`${message.id}-typing`} typers={[message.author]} />
 						)}
 					</Fragment>
 				);
 			})}
-			{showsTyping &&
-				(replyPending && host ? (
-					<TypingIndicator typers={[host, ...peopleTyping]} />
-				) : (
-					!lastReplyTyping &&
-					anyoneTyping(peopleTyping) && <TypingIndicator typers={peopleTyping} />
-				))}
+			{pendingReplier && <TypingIndicator typers={[pendingReplier]} />}
 		</div>
 	);
 }
@@ -403,10 +368,9 @@ function ThreadMessage({
 	sending,
 	queuedNote,
 	highlighted,
-	authorLink,
+	authorLinkOf,
 	onReply,
 	sideLines,
-	inAutomationFeed,
 	onJumpToMessage,
 	reacting,
 	fileUrlOf,
@@ -445,10 +409,9 @@ function ThreadMessage({
 	/** Whether it is pointed out for a moment, as one jumped to is. */
 	highlighted: boolean;
 	/** Where its author's name leads. */
-	authorLink?: AuthorLink;
+	authorLinkOf?: (author: PagedAuthor) => AuthorLink | undefined;
 	onReply?: (message: Message) => void;
 	sideLines?: ReactNode;
-	inAutomationFeed: boolean;
 	onJumpToMessage?: (messageId: string) => void;
 	reacting?: Reacting;
 	/** Where a file attached to it is served. */
@@ -463,7 +426,9 @@ function ThreadMessage({
 	// The actions stay up while their emoji picker is open, as the pointer has left the row for it.
 	const [picking, setPicking] = useState(false);
 	const { author } = message;
+	// Only a run's own conversation has its trigger, and the run's panel leaves it out.
 	if (author.kind === "automation_trigger") return null;
+	const authorLink = authorLinkOf?.(author);
 	// A reply with nothing settled yet is only its typing line, under the last message.
 	if (showsNothingYet(message)) return null;
 
@@ -557,11 +522,6 @@ function ThreadMessage({
 	);
 	const notes = (
 		<>
-			{message.automationResultOf && !inAutomationFeed && (
-				<RowNote className="text-subtle-foreground">
-					<AutomationResultLink run={message.automationResultOf} onOpenItem={onOpenItem} />
-				</RowNote>
-			)}
 			{message.status === "failed" && (
 				<RowNote className="text-destructive-text">
 					<span className="font-semibold">Reply failed.</span>
@@ -694,7 +654,6 @@ function ThreadMessage({
 										side === "mine" ? "bubble-mine" : "bg-bubble",
 									)}
 								>
-									{/* Someone else's face and name head their bubble. */}
 									{startsGroup && side === "person" && (
 										<header className="flex items-center gap-1.5 pb-0.5 text-xs">
 											{author.kind === "person" && (
@@ -920,16 +879,16 @@ function AuthorName({
 
 /** The colours names are set in, each made to read in both themes. */
 const NAME_COLORS = [
-	{ text: "text-pink-700 dark:text-pink-400" },
-	{ text: "text-blue-700 dark:text-blue-400" },
-	{ text: "text-emerald-700 dark:text-emerald-400" },
-	{ text: "text-amber-700 dark:text-amber-400" },
-	{ text: "text-violet-700 dark:text-violet-400" },
-	{ text: "text-red-700 dark:text-red-400" },
-	{ text: "text-cyan-700 dark:text-cyan-400" },
-	{ text: "text-lime-700 dark:text-lime-400" },
-	{ text: "text-orange-700 dark:text-orange-400" },
-	{ text: "text-fuchsia-700 dark:text-fuchsia-400" },
+	{ text: "text-name-1" },
+	{ text: "text-name-2" },
+	{ text: "text-name-3" },
+	{ text: "text-name-4" },
+	{ text: "text-name-5" },
+	{ text: "text-name-6" },
+	{ text: "text-name-7" },
+	{ text: "text-name-8" },
+	{ text: "text-name-9" },
+	{ text: "text-name-10" },
 ] as const;
 
 /**
@@ -948,7 +907,7 @@ function MessageTime({ createdAt }: { createdAt: string }) {
 	return (
 		<Tooltip label={formatFullTimestamp(createdAt)} side="top">
 			<time dateTime={createdAt} className="whitespace-nowrap hover:underline">
-				{formatTime(createdAt)}
+				{formatClockTime(new Date(createdAt))}
 			</time>
 		</Tooltip>
 	);
@@ -957,26 +916,6 @@ function MessageTime({ createdAt }: { createdAt: string }) {
 /** A line under a message's words, such as why a reply failed. */
 function RowNote({ className, children }: { className: string; children: ReactNode }) {
 	return <p className={cn("m-0 pt-1 text-xs", className)}>{children}</p>;
-}
-
-/** Where an automation's result came from, opening the run with the work behind it. */
-function AutomationResultLink({
-	run,
-	onOpenItem,
-}: {
-	run: AutomationResultOf;
-	onOpenItem: (conversationId: string) => void;
-}) {
-	return (
-		<button
-			type="button"
-			onClick={() => onOpenItem(run.conversationId)}
-			className="focus-ring inline-flex items-center gap-0.5 rounded-sm font-medium transition-colors hover:text-soft-foreground"
-		>
-			From {run.automationName}
-			<ChevronRight aria-hidden size={12} strokeWidth={2.4} />
-		</button>
-	);
 }
 
 /**
@@ -1079,49 +1018,9 @@ function CollaborationMessage({
 	);
 }
 
-/** What started an automation run, at the top of the run's conversation. */
-function AutomationTriggerCard({ message }: { message: Message }) {
-	if (message.author.kind !== "automation_trigger") return null;
-	const source =
-		message.author.triggerKind === "routine"
-			? "Routine"
-			: message.author.triggerKind === "webhook"
-				? "Webhook trigger"
-				: message.author.triggerKind === "github"
-					? "GitHub trigger"
-					: "Manual run";
-	return (
-		<article aria-label={`${source} for ${message.author.automationName}`} className="px-5 pt-3.5">
-			<div className="rounded-xl border border-border bg-list px-4 py-3">
-				<div className="pb-1 font-semibold text-muted-foreground text-xs">
-					{message.author.automationName} <span className="font-normal">{source}</span>
-				</div>
-				<p className="m-0 whitespace-pre-wrap break-words text-body-foreground text-xs leading-relaxed">
-					{message.content}
-				</p>
-			</div>
-		</article>
-	);
-}
-
 /** Where the chat moves on to a new day: a rule either side of "Today", "Yesterday" or the date. */
 export function DaySeparator({ at }: { at: string }) {
 	return <LabelledRule className="pt-6 pb-1">{formatDay(new Date(at))}</LabelledRule>;
-}
-
-/** For example "Today at 4:58:34 PM", "Aug 5 at 3:46:46 PM", or "Aug 5, 2025 at 3:46:46 PM". */
-export function formatFullTimestamp(createdAt: string): string {
-	const date = new Date(createdAt);
-	const time = new Intl.DateTimeFormat(undefined, {
-		hour: "numeric",
-		minute: "2-digit",
-		second: "2-digit",
-	}).format(date);
-	return `${formatDay(date)} at ${time}`;
-}
-
-function formatTime(createdAt: string): string {
-	return formatClockTime(new Date(createdAt));
 }
 
 function messageStatus(message: Message, { queued }: { queued: boolean }): string {
@@ -1134,7 +1033,7 @@ function messageStatus(message: Message, { queued }: { queued: boolean }): strin
 	if (message.status === "cancelled") {
 		return "stopped";
 	}
-	return formatTime(message.createdAt);
+	return formatClockTime(new Date(message.createdAt));
 }
 
 /** A person's message makes no calls, so no connection names any. */

@@ -122,7 +122,7 @@ export type SegmentOutcome = typeof SegmentOutcome.Type;
 export const approvalDecided = (approvalId: string) =>
 	DurableDeferred.make(`approval/${approvalId}`, { success: ApprovalDecision });
 
-/** A person cancelled the turn while it waited for approvals. */
+/** The turn was cancelled while it waited for approvals, because its automation run ended. */
 export const cancelRequested = DurableDeferred.make("cancelled");
 
 export class TurnSteps extends Context.Service<

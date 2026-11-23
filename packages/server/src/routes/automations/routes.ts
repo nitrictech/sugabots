@@ -39,25 +39,15 @@ export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (
 				if (accepted.kind === "ignored") return { ignored: true as const };
 				if (accepted.kind === "challenge") return { challenge: accepted.challenge };
 				const { runId, duplicate } = accepted.run;
-				return { executionId: runId, duplicate };
+				return { runId, duplicate };
 			});
 		return (
 			handlers
-				.handle("listInWorkspace", ({ params }) =>
-					automations.listInWorkspace(params.workspace).pipe(
-						Effect.map((items) => ({ items })),
-						asSessionUser,
-						asHttpError(automationErrors),
-					),
-				)
 				.handle("list", ({ params }) =>
 					automations.list(params).pipe(asSessionUser, asHttpError(automationErrors)),
 				)
 				.handle("create", ({ params, payload }) =>
 					automations.create(params, payload).pipe(asSessionUser, asHttpError(automationErrors)),
-				)
-				.handle("get", ({ params }) =>
-					automations.get(params).pipe(asSessionUser, asHttpError(automationErrors)),
 				)
 				.handle("update", ({ params, payload }) =>
 					automations.update(params, payload).pipe(asSessionUser, asHttpError(automationErrors)),
@@ -98,16 +88,9 @@ export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (
 						.listProjectRuns(params, query)
 						.pipe(asSessionUser, asHttpError(automationErrors)),
 				)
-				.handle("runs", ({ params, query }) =>
-					automations.listRuns(params, query).pipe(asSessionUser, asHttpError(automationErrors)),
-				)
 				// Raw, so a body that is not JSON is refused with the reason rather
 				// than the generic unsupported-content-type answer.
 				.handleRaw("webhook", ({ params, request }) => receive(params.triggerId, request))
-				// A trigger moved from an automation's single trigger has the automation's id.
-				.handleRaw("automationWebhook", ({ params, request }) =>
-					receive(params.automationId, request),
-				)
 		);
 	}),
 );
@@ -124,7 +107,6 @@ const automationErrors = {
 	AutomationDeliveryIdTooLong: BadRequest,
 	AutomationNameTaken: Conflict,
 	AutomationNotFound: NotFound,
-	AutomationProjectHasNoLead: Conflict,
 	AutomationRepositoryNotConnected: BadRequest,
 	AutomationTriggerConflict: Conflict,
 	AutomationTriggerKindChanged: BadRequest,

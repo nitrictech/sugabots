@@ -30,15 +30,8 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 		word: "pod",
 		plural: "pods",
 		replacement: "project, or the bot",
-		// Names run from outside, which keep their old words: the
-		// `destroy-pod-computers` script, and migrations by their names. And
-		// Apple's iPod.
-		otherMeanings: /destroy-pod-computers|\b\d{14}_[a-z0-9_]+|iPod/g,
-		keptIn: [
-			// Reads a database whose tables and columns still have their
-			// pre-migration names, `pod_id` among them.
-			/^packages\/core\/src\/computers\/destroy-pod-computers\.ts$/,
-		],
+		// Migrations by their names, and Apple's iPod.
+		otherMeanings: /\b\d{14}_[a-z0-9_]+|iPod/g,
 	},
 	{ word: "crew", plural: "crews", replacement: "the project's bots" },
 	{
@@ -60,13 +53,10 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 		// certificate name in computers' homes, the tool name earlier calls
 		// record, and the tables as a database not yet migrated has them.
 		otherMeanings:
-			/OpenSandbox|SANDBOX_CONFIG_PATH|SandboxManager|listSandboxInfos|`sandbox-\$\{|sandboxUrl|E2B_SANDBOX_URL|--no-sandbox|chromium_sandbox_flags|Chromium's flags for its own sandbox|sugabots-sandbox|PROVIDER_AUTHORITY=sandbox-provider|copy_file_to_sandbox|DELETE FROM sandbox WHERE provider_sandbox_id|toHaveAttribute\("sandbox"/g,
+			/OpenSandbox|SANDBOX_CONFIG_PATH|SandboxManager|listSandboxInfos|`sandbox-\$\{|sandboxUrl|E2B_SANDBOX_URL|--no-sandbox|chromium_sandbox_flags|Chromium's flags for its own sandbox|sugabots-sandbox|PROVIDER_AUTHORITY=sandbox-provider|copy_file_to_sandbox|toHaveAttribute\("sandbox"/g,
 		keptIn: [
 			// Talking to each provider in its own words.
 			/^packages\/core\/src\/computers\/implementations\//,
-			// Reads a database whose tables still have their pre-migration
-			// names, `sandbox` and `sandbox_provider`.
-			/^packages\/core\/src\/computers\/destroy-pod-computers\.ts$/,
 			// Nix's build sandbox.
 			/^docker\/computer\/nix\/nix\.conf$/,
 			// The browser's: an iframe's `sandbox` and Content-Security-Policy's.
@@ -75,18 +65,16 @@ const RETIRED_WORDS: readonly RetiredWord[] = [
 			/^packages\/server\/src\/routes\/chats\/(file-response|files\.test)\.ts$/,
 		],
 	},
-	{ word: "scribe", plural: "scribes", replacement: "summariser" },
 	{
 		word: "agent",
 		plural: "agents",
 		replacement: "bot",
 		// Others' agents: the HTTP user agent, coding agents and their
 		// AGENTS.md, crawlers and AI agents generally, and SSH's and GPG's. And
-		// names stored or run from outside, which keep
-		// their old words: the key workflow payloads store the bot's id under, and
-		// the user and folder bots' homes are in on the computers made before.
+		// the key workflow payloads store the bot's id under, which the workflow
+		// engine stores.
 		otherMeanings:
-			/user[-_ ]?agents?|AGENTS\.md|AI agents?|your[- ]agent|(?:ssh|gpg)-agent|SSH and GPG agents|\bagentId(?=: (?:Schema\.String|botId|crypto\.randomUUID\(\)))|\{ agentId,|: agentId\b|stored\.agentId|name: "agent"|\/home\/agent|WORKSPACE_DIRECTORY\}\/agents/gi,
+			/user[-_ ]?agents?|AGENTS\.md|AI agents?|your[- ]agent|(?:ssh|gpg)-agent|SSH and GPG agents|\bagentId(?=: (?:Schema\.String|botId|crypto\.randomUUID\(\)))|\{ agentId,|: agentId\b|stored\.agentId/gi,
 		keptIn: [
 			// undici's Agent, the connection pool requests are sent through.
 			/^packages\/core\/src\/providers\/network\/egress(\.test)?\.ts$/,

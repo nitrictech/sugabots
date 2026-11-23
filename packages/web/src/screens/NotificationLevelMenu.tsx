@@ -12,7 +12,7 @@ import {
 	Settings,
 } from "lucide-react";
 import type { ReactElement } from "react";
-import { NOTIFICATION_LEVEL_LABELS } from "@/lib/notification-choices.ts";
+import { NOTIFICATION_LEVEL_LABELS, NOTIFICATION_LEVELS } from "@/lib/notification-choices.ts";
 import {
 	formatUntil,
 	levelAbove,
@@ -83,8 +83,7 @@ function MoreOptions({
 }) {
 	const mute = useMuteNotifications();
 	const mutedUntil = mutedUntilFor(settings, place);
-	const notifiesOfNothing =
-		(levelChosenFor(settings, place) ?? levelAbove(settings, place)) === "nothing";
+	const notifiesOfNothing = (levelChosenFor(settings, place) ?? levelAbove(settings)) === "nothing";
 	return (
 		<DropdownMenuSub>
 			<DropdownMenuSubTrigger>
@@ -190,8 +189,6 @@ const LEVEL_ICONS: Record<NotificationLevel, LucideIcon> = {
 	nothing: BellOff,
 };
 
-const LEVELS = Object.keys(LEVEL_ICONS) as NotificationLevel[];
-
 /** The levels a place can take, the one it follows from above first, under `label` when given. */
 function LevelChoices({
 	settings,
@@ -203,7 +200,7 @@ function LevelChoices({
 	label?: string;
 }) {
 	const setLevel = useSetNotificationLevel();
-	const followed = levelAbove(settings, place);
+	const followed = levelAbove(settings);
 	const FollowedIcon = LEVEL_ICONS[followed];
 	return (
 		<DropdownMenuRadioGroup
@@ -217,7 +214,7 @@ function LevelChoices({
 				<FollowedIcon className="text-muted-foreground" />
 				Default ({NOTIFICATION_LEVEL_LABELS[followed].toLowerCase()})
 			</DropdownMenuRadioItem>
-			{LEVELS.map((level) => {
+			{NOTIFICATION_LEVELS.map((level) => {
 				const Icon = LEVEL_ICONS[level];
 				return (
 					<DropdownMenuRadioItem key={level} value={level} closeOnClick>

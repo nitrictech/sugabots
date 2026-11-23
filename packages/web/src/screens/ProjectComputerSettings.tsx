@@ -8,7 +8,7 @@ import {
 } from "@sugabots/contracts";
 import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
-import { formatListTimeInSentence } from "@/lib/list-time.ts";
+import { formatFullTimestamp, formatListTimeInSentence } from "@/lib/list-time.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useProjectComputer, useProjectComputerActions } from "@/lib/project-computer.ts";
 import {
@@ -22,7 +22,6 @@ import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { DiskMeter, DiskPercent, diskSummary } from "./ComputerDisk.tsx";
-import { formatFullTimestamp } from "./ConversationMessages.tsx";
 import { ProjectComputerNetworkSettings } from "./ProjectComputerNetworkSettings.tsx";
 
 /*
@@ -48,12 +47,9 @@ export function ProjectComputerSettings({
 	if (!shown.providerEnabled && shown.computer.kind === "none") return null;
 	return (
 		<>
-			<ComputerGroup projectId={projectId} shown={shown} />
+			<ComputerGroup owner={owner} shown={shown} />
 			{shown.computer.kind === "present" && <DiskGroup disk={shown.computer.disk} bots={bots} />}
-			<ProjectComputerNetworkSettings
-				owner={owner}
-				canManage={resourcePermissions(owner).manageComputer}
-			/>
+			<ProjectComputerNetworkSettings owner={owner} />
 		</>
 	);
 }
@@ -65,10 +61,11 @@ const STATE_WORDS = {
 	unreachable: "Not answering",
 } as const;
 
-function ComputerGroup({ projectId, shown }: { projectId: string; shown: ProjectComputer }) {
-	const actions = useProjectComputerActions(projectId);
+function ComputerGroup({ owner, shown }: { owner: ResourceOwner; shown: ProjectComputer }) {
+	const actions = useProjectComputerActions(resourceProjectId(owner));
 	const [confirm, setConfirm] = useState<"reset" | "upgrade">();
-	const { computer, canManage } = shown;
+	const { computer } = shown;
+	const canManage = resourcePermissions(owner).manageComputer;
 	const pending = actions.reset.isPending || actions.upgrade.isPending;
 	const failure = actions.reset.error ?? actions.upgrade.error;
 
@@ -260,7 +257,7 @@ function UnsizedRemainder({ disk }: { disk: ComputerDisk }) {
 
 const FOLDER_DESCRIPTIONS = {
 	home: "Home: its tools, settings and caches, in every thread",
-	threads: "Where the bots clone, install and build",
+	conversations: "Where the bots clone, install and build",
 	temporary: "/tmp",
 } as const;
 
@@ -268,8 +265,8 @@ function folderLabel(folder: ComputerDiskFolder, botName: string | undefined) {
 	switch (folder.kind) {
 		case "home":
 			return botName ?? "A removed bot";
-		case "threads":
-			return "Thread folders";
+		case "conversations":
+			return "Conversation folders";
 		case "temporary":
 			return "Temporary files";
 	}

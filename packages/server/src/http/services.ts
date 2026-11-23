@@ -8,7 +8,6 @@ import type { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import type { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import type { Chats } from "@sugabots/core/conversations/chats/chats";
 import type { ConversationView } from "@sugabots/core/conversations/conversation-view";
-import type { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import type { Reactions } from "@sugabots/core/conversations/reactions/reactions";
 import type { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import type { Turns } from "@sugabots/core/conversations/turns/turns";
@@ -58,7 +57,6 @@ export type HttpServices =
 	| ConnectionSetup.Service
 	| Files.Service
 	| FilePages.Service
-	| ModelTrials.Service
 	| Usage.Service
 	| Notifications.Service
 	| Chats.Service

@@ -183,17 +183,22 @@ describe("cookie request origins", () => {
 					? user
 					: null,
 			),
-			unimplemented(Turns.Controls, { cancel: () => Effect.succeed(true) }),
+			unimplemented(Turns.Controls, { decide: () => Effect.void }),
 		),
 	);
 
-	it("accepts an unsafe cookie request from a trusted origin", async () => {
-		const response = await cookieApp.request("/turns/turn-id/cancel", {
+	/** Decides a tool approval: a POST, so an unsafe request. */
+	const decideApproval = (headers: Record<string, string>) =>
+		cookieApp.request("/tool-calls/call-id/approval", {
 			method: "POST",
-			headers: {
-				cookie: "better-auth.session_token=cookie-token",
-				origin: trustedOrigin,
-			},
+			headers: { "content-type": "application/json", ...headers },
+			body: JSON.stringify({ decision: "allow_once" }),
+		});
+
+	it("accepts an unsafe cookie request from a trusted origin", async () => {
+		const response = await decideApproval({
+			cookie: "better-auth.session_token=cookie-token",
+			origin: trustedOrigin,
 		});
 
 		expect(response.status).toBe(202);
@@ -202,12 +207,9 @@ describe("cookie request origins", () => {
 	it.each([undefined, "https://attacker.example.com"])(
 		"rejects an unsafe cookie request from origin %s",
 		async (origin) => {
-			const response = await cookieApp.request("/turns/turn-id/cancel", {
-				method: "POST",
-				headers: {
-					cookie: "better-auth.session_token=cookie-token",
-					...(origin ? { origin } : {}),
-				},
+			const response = await decideApproval({
+				cookie: "better-auth.session_token=cookie-token",
+				...(origin ? { origin } : {}),
 			});
 
 			expect(response.status).toBe(403);
@@ -219,13 +221,10 @@ describe("cookie request origins", () => {
 	);
 
 	it("exempts a valid bearer-authenticated request from origin checks", async () => {
-		const response = await cookieApp.request("/turns/turn-id/cancel", {
-			method: "POST",
-			headers: {
-				authorization: "Bearer good-token",
-				cookie: "better-auth.session_token=stale-cookie",
-				origin: "https://attacker.example.com",
-			},
+		const response = await decideApproval({
+			authorization: "Bearer good-token",
+			cookie: "better-auth.session_token=stale-cookie",
+			origin: "https://attacker.example.com",
 		});
 
 		expect(response.status).toBe(202);

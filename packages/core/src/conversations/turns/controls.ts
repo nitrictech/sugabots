@@ -1,20 +1,15 @@
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
-import {
-	computerProjectStandingFor,
-	mayDecideToolCall,
-	ResourceHidden,
-} from "../../authorization/access.ts";
+import { computerProjectStandingFor, mayDecideToolCall } from "../../authorization/access.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
-import { afterCommit, query, serviceOperations, transaction } from "../../database/database.ts";
+import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { toolCall, turn } from "../../database/schema.ts";
 import { isUuid } from "../../ids/ids.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { decidersOf } from "../tools/approval-deciders.ts";
 import { awaitsDecisions } from "./lifecycle.ts";
-import { TurnRepository } from "./repository.ts";
 import { TurnSignals } from "./signals.ts";
 import { awaitsDecision } from "./tool-calls/lifecycle.ts";
 import { ToolCallRepository } from "./tool-calls/repository.ts";
@@ -22,48 +17,17 @@ import type { Turns } from "./turns.ts";
 import { WorkAdmission } from "./work-admission.ts";
 
 /**
- * `Turns.Controls`: people cancelling a turn and deciding the tool calls it
- * parked for approval. The turn reading their decisions and running what they
- * allowed is `ApprovedToolCalls`.
+ * `Turns.Controls`: people deciding the tool calls a turn parked for
+ * approval. The turn reading their decisions and running what they allowed is
+ * `ApprovedToolCalls`.
  */
 export const makeControls = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Turns.ControlsInterface>("Turns.Controls");
 	const visibility = yield* Visibility.Service;
-	const turns = yield* TurnRepository.Service;
 	const toolCalls = yield* ToolCallRepository.Service;
 	const signals = yield* TurnSignals.Service;
 	const admission = yield* WorkAdmission.Service;
 	return {
-		cancel: (turnId) =>
-			operation(
-				"cancel",
-				transaction(
-					Effect.gen(function* () {
-						const hidden = new ResourceHidden({ resource: "turn" });
-						if (!isUuid(turnId)) return yield* hidden;
-						const [candidate] = yield* query((db) =>
-							db
-								.select({ conversationId: turn.conversationId })
-								.from(turn)
-								.where(eq(turn.id, turnId))
-								.limit(1),
-						);
-						if (!candidate) return yield* hidden;
-						yield* visibility
-							.conversationStanding(candidate.conversationId)
-							.pipe(Effect.catchTag("ResourceHidden", () => Effect.fail(hidden)));
-						const requested = yield* turns.requestCancel(turnId);
-						if (requested._tag === "Refused") return false;
-						// Telling the workflow is the cancellation; it records it. The flag
-						// set with it stops the next segment instead if the workflow has
-						// just stopped waiting, since the signal would then go unheard.
-						if (requested._tag === "SignalOwner") {
-							yield* afterCommit(signals.cancel(requested.owner));
-						}
-						return true;
-					}),
-				),
-			),
 		decide: (input) =>
 			operation(
 				"decide",

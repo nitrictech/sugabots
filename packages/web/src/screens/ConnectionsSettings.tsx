@@ -1,25 +1,37 @@
+import { Accordion } from "@base-ui/react/accordion";
 import {
+	type Bot,
 	type Connection,
 	type ConnectionPreset,
 	connectionCatalog,
 	connectionMarkFor,
 	connectionPresetFor,
+	type Project,
 	type UnsavedConnection,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ArrowUpRight, ChevronRight, Code, Globe } from "lucide-react";
-import { type FormEvent, useState } from "react";
-import { bearerAuthorization, useConnectionActions, useConnections } from "@/lib/connections.ts";
+import { ArrowUpRight, ChevronDown, ChevronRight, Code, Globe, Plus } from "lucide-react";
+import { type FormEvent, type ReactNode, useState } from "react";
+import {
+	bearerAuthorization,
+	connectionNeedsAttention,
+	useConnectionActions,
+	useConnections,
+} from "@/lib/connections.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { listNames } from "@/lib/name-list.ts";
+import { useProjectBots } from "@/lib/projects.ts";
 import {
 	OwnerLink,
 	ownerName,
 	type ResourceOwner,
+	resourcePermissions,
 	resourceProjectId,
 	useNavigateToOwnerPage,
 } from "@/lib/resource-owner.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert, Success } from "@/ui/alert.tsx";
-import { Button } from "@/ui/button.tsx";
+import { Button, buttonStyles } from "@/ui/button.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
@@ -27,6 +39,7 @@ import {
 	DialogFormFooter,
 	DialogFormFrame,
 	DialogFormHeader,
+	DialogFormScroll,
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
@@ -52,20 +65,15 @@ import { accessSummaryText } from "./tool-access.tsx";
 
 export function ConnectionsSettings({
 	owner,
-	canManage,
 	signInError,
-	adding,
-	onAddingChange,
 }: {
 	/** The bot or project whose connections these are. */
 	owner: ResourceOwner;
-	canManage: boolean;
 	/** Why the OAuth sign-in that just returned here did not finish, in our own words. */
 	signInError?: string;
-	/** Whether Add connection is open, which the page's own button beside its title opens. */
-	adding: boolean;
-	onAddingChange: (adding: boolean) => void;
 }) {
+	const canManage = resourcePermissions(owner).manageConnections;
+	const [adding, setAdding] = useState(false);
 	const projectId = resourceProjectId(owner);
 	const connections = useConnections(projectId);
 	if (connections.isPending) return null;
@@ -76,7 +84,19 @@ export function ConnectionsSettings({
 	return (
 		<>
 			{signInError && <Alert>Signing in did not finish: {signInError}</Alert>}
-			<SettingsGroup note="Bots act as whoever connected each one. Open one to choose for each tool.">
+			<SettingsGroup
+				label={"project" in owner ? `${ownerName(owner)}'s own` : undefined}
+				headingLevel={2}
+				note="Bots act as whoever connected each one. Open one to choose for each tool."
+				action={
+					canManage && (
+						<Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+							<Plus aria-hidden />
+							Add connection
+						</Button>
+					)
+				}
+			>
 				{listed.map((one) => (
 					<ConnectionRow key={one.id} connection={one} owner={owner} canManage={canManage} />
 				))}
@@ -85,14 +105,14 @@ export function ConnectionsSettings({
 				)}
 			</SettingsGroup>
 			{canManage && (
-				<Dialog open={adding} onOpenChange={onAddingChange}>
+				<Dialog open={adding} onOpenChange={setAdding}>
 					{adding && (
 						<AddConnectionDialog
 							projectId={projectId}
 							addingTo={ownerName(owner)}
 							available={connectionCatalog.filter((preset) => !taken.has(preset.id))}
 							offersGitHub={!listed.some((one) => one.kind === "github")}
-							done={() => onAddingChange(false)}
+							done={() => setAdding(false)}
 						/>
 					)}
 				</Dialog>
@@ -100,6 +120,128 @@ export function ConnectionsSettings({
 		</>
 	);
 }
+
+/**
+ * The connections of each of a project's bots, which a bot uses in the
+ * project's threads beside the project's own: a row for each bot, naming its
+ * own and marking any that needs attention, which opens in place to list them,
+ * with Edit in the bot, its own Connections, for whoever may change them.
+ */
+export function ProjectBotsConnections({ project }: { project: Project }) {
+	const bots = useProjectBots(project.id);
+	if (!bots.data?.length) return null;
+	return (
+		<SettingsGroup
+			label="Its bots' own"
+			headingLevel={2}
+			note={`Each bot also uses its own connections when it works in ${project.name}.`}
+		>
+			<Accordion.Root multiple>
+				{bots.data.map((bot) => (
+					<BotConnections key={bot.id} bot={bot} />
+				))}
+			</Accordion.Root>
+		</SettingsGroup>
+	);
+}
+
+function BotConnections({ bot }: { bot: Bot }) {
+	const connections = useConnections(bot.defaultProjectId);
+	const listed = connections.data ?? [];
+	return (
+		<Accordion.Item className="border-border border-b last:border-b-0">
+			<Accordion.Header className="m-0">
+				<SettingsRow
+					render={<Accordion.Trigger className="group/bot-connections" />}
+					className="border-b-0"
+					icon={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={34} />}
+					label={bot.name}
+					sub={
+						connections.isError
+							? "Its connections could not be loaded"
+							: connections.isPending
+								? "\u00a0"
+								: botConnectionsLine(listed)
+					}
+					trailing={
+						<>
+							<span aria-hidden className="flex shrink-0 gap-1">
+								{listed.slice(0, MARKS_SHOWN).map((one) => (
+									<ConnectionMark
+										key={one.id}
+										presetId={connectionMarkFor(one)}
+										name={one.name}
+										size="md"
+									/>
+								))}
+							</span>
+							<ChevronDown
+								aria-hidden
+								size={14}
+								strokeWidth={2}
+								className="shrink-0 text-subtle-foreground transition-transform group-data-panel-open/bot-connections:rotate-180"
+							/>
+						</>
+					}
+				/>
+			</Accordion.Header>
+			<Accordion.Panel className="h-(--accordion-panel-height) overflow-hidden transition-height duration-200 ease-out data-ending-style:h-0 data-starting-style:h-0 motion-reduce:transition-none">
+				<div className="flex flex-col gap-1 pr-4 pb-3 pl-16">
+					{listed.map((connection) => (
+						<div key={connection.id} className="flex min-w-0 items-center gap-3 py-1.5">
+							<ConnectionMark
+								presetId={connectionMarkFor(connection)}
+								name={connection.name}
+								size="md"
+							/>
+							<span className="flex min-w-0 flex-col leading-snug">
+								<span className="truncate text-sm text-foreground">{connection.name}</span>
+								<span className="text-pretty text-subtle-foreground text-xs">
+									{lineFor(connection)}
+								</span>
+							</span>
+						</div>
+					))}
+					{bot.permissions.resources.manageConnections && (
+						<OwnerLink
+							owner={{ bot }}
+							to={{ page: "connections" }}
+							className={cn(
+								buttonStyles({ size: "sm", variant: "secondary" }),
+								"mt-1.5 self-start",
+							)}
+						>
+							Edit in {bot.name}
+						</OwnerLink>
+					)}
+				</div>
+			</Accordion.Panel>
+		</Accordion.Item>
+	);
+}
+
+/** A bot's row's line: its connections by name, any needing attention in red. */
+function botConnectionsLine(connections: readonly Connection[]): ReactNode {
+	if (connections.length === 0) return "None of its own";
+	const failing = connections.filter(connectionNeedsAttention);
+	const fine = connections.filter((one) => !failing.includes(one));
+	const needs = failing.length > 0 && (
+		<span className="text-destructive-text">
+			{listNames(failing.map((one) => one.name))} {failing.length === 1 ? "needs" : "need"}{" "}
+			attention
+		</span>
+	);
+	return (
+		<>
+			{listNames(fine.map((one) => one.name))}
+			{fine.length > 0 && needs && " · "}
+			{needs}
+		</>
+	);
+}
+
+/** How many of a bot's connections its row shows the marks of. */
+const MARKS_SHOWN = 4;
 
 /** What a connection's line says under its name: what it needs, or what its tools are set to. */
 function lineFor(connection: Connection): string {
@@ -164,7 +306,7 @@ function ConnectionRow({
 				</span>
 			</OwnerLink>
 			<span className="relative ml-auto flex shrink-0 items-center gap-2">
-				{canManage && (needsSignIn || failing) && (
+				{canManage && connectionNeedsAttention(connection) && (
 					<Button size="sm" variant="secondary" disabled={pending} onClick={reconnect}>
 						{connection.signInExpired
 							? "Sign in again"
@@ -272,7 +414,7 @@ function AppList({
 			<DialogFormHeader title={`Add to ${addingTo}`} />
 			<DialogFormBody>
 				<SearchField label="Search apps" value={query} onChange={setQuery} />
-				<div className="-mx-1 flex max-h-picker flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+				<DialogFormScroll height="picker">
 					{matches.length > 0 && (
 						<SettingsGroup>
 							{matches.map((app) => (
@@ -316,7 +458,7 @@ function AppList({
 							onClick={() => onChoose("http")}
 						/>
 					</SettingsGroup>
-				</div>
+				</DialogFormScroll>
 			</DialogFormBody>
 			<DialogFormFooter onCancel={done} />
 		</DialogFormStep>
@@ -338,13 +480,9 @@ function AppStep({
 }) {
 	const actions = useConnectionActions(projectId);
 
-	async function submit(event: FormEvent) {
+	function submit(event: FormEvent) {
 		event.preventDefault();
-		try {
-			await actions.connect.mutateAsync({ name: preset.name, url: preset.url });
-		} catch {
-			return;
-		}
+		actions.connect.mutate({ name: preset.name, url: preset.url });
 	}
 
 	return (

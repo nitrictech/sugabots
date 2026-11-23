@@ -3,7 +3,6 @@ import { Result, Schema, SchemaIssue } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	conversationHistoryQuerySchema,
-	conversationSummarySchema,
 	DEFAULT_CONVERSATION_HISTORY_LIMIT,
 	jsonValueSchema,
 	MAX_CONVERSATION_HISTORY_LIMIT,
@@ -37,7 +36,6 @@ const placedThread = {
 	status: "done",
 	parentConversationId: null,
 	doneAt: null,
-	startedById: ID,
 	createdAt: "2026-09-11T00:00:00.000Z",
 	updatedAt: "2026-09-11T00:00:00.000Z",
 };
@@ -181,14 +179,8 @@ describe("conversation contracts", () => {
 		}
 	});
 
-	it("trims message and summary content before validating", () => {
+	it("trims message content before validating", () => {
 		expect(Schema.decodeSync(newMessageSchema)({ id: ID, message: " hi " }).message).toBe("hi");
-		expect(
-			Schema.decodeSync(conversationSummarySchema)({
-				content: " ready ",
-				updatedAt: "2026-09-11T00:00:00Z",
-			}).content,
-		).toBe("ready");
 	});
 
 	it("validates nested JSON", () => {

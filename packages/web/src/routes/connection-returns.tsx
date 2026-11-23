@@ -10,8 +10,9 @@ import { botsQuery } from "@/lib/bots.ts";
 import { signInFailureReason } from "@/lib/connections.ts";
 import { ownerOfProject } from "@/lib/owner-of-project.ts";
 import { projectsQuery } from "@/lib/projects.ts";
-import type { ResourceOwner } from "@/lib/resource-owner.tsx";
+import { ownerName, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useWorkspaces } from "@/lib/workspace.ts";
+import { Splash } from "@/shell/Splash.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { requireUser, rootRoute } from "./root.tsx";
 import { optionalString } from "./search.ts";
@@ -46,27 +47,16 @@ function SignInReturnRoute() {
 
 	useEffect(() => {
 		if (!owner || !slug) return;
-		// Outside any workspace, so this names one; the link helpers are for pages inside.
-		void navigate(
-			"bot" in owner
-				? {
-						to: "/$workspace/bots/$bot/connections",
-						params: { workspace: slug, bot: owner.bot.handle },
-						search: { oauth_error: oauthError },
-						replace: true,
-					}
-				: {
-						to: "/$workspace/projects/$project/connections",
-						params: { workspace: slug, project: owner.project.slug },
-						search: { oauth_error: oauthError },
-						replace: true,
-					},
-		);
+		void navigate({
+			...ownerConnectionsLink(slug, owner),
+			search: { oauth_error: oauthError },
+			replace: true,
+		});
 	}, [owner, slug, oauthError, navigate]);
 
 	const resolving = workspace !== undefined && (ownerResolving || workspaces.isPending);
 	if ((owner && slug) || resolving) {
-		return <div className="h-full bg-list" />;
+		return <Splash />;
 	}
 	return (
 		<div className="grid h-full place-items-center bg-list p-6">
@@ -115,47 +105,20 @@ function GitHubSetupReturnRoute() {
 
 	useEffect(() => {
 		if (failure || !slug || !owner || !connection) return;
-		// Outside any workspace, so this names one; the link helpers are for pages inside.
-		void navigate(
-			"bot" in owner
-				? {
-						to: "/$workspace/bots/$bot/connections/$connection",
-						params: { workspace: slug, bot: owner.bot.handle, connection },
-						replace: true,
-					}
-				: {
-						to: "/$workspace/projects/$project/connections/$connection",
-						params: { workspace: slug, project: owner.project.slug, connection },
-						replace: true,
-					},
-		);
+		void navigate({ ...ownerConnectionLink(slug, owner, connection), replace: true });
 	}, [failure, slug, owner, connection, navigate]);
 
 	const resolving = workspace !== undefined && (ownerResolving || workspaces.isPending);
 	if ((!failure && slug && owner && connection) || resolving) {
-		return <div className="h-full bg-list" />;
+		return <Splash />;
 	}
 	return (
 		<div className="grid h-full place-items-center bg-list p-6">
 			<EmptyState title="GitHub setup didn't finish">
 				<p>{gitHubSetupFailureReason(failure)}</p>
-				{slug && owner && "bot" in owner ? (
-					<Link
-						to="/$workspace/bots/$bot/connections"
-						params={{ workspace: slug, bot: owner.bot.handle }}
-						search={{}}
-						className="text-link underline"
-					>
-						Back to {owner.bot.name}
-					</Link>
-				) : slug && owner && "project" in owner ? (
-					<Link
-						to="/$workspace/projects/$project/connections"
-						params={{ workspace: slug, project: owner.project.slug }}
-						search={{}}
-						className="text-link underline"
-					>
-						Back to {owner.project.name}
+				{slug && owner ? (
+					<Link {...ownerConnectionsLink(slug, owner)} search={{}} className="text-link underline">
+						Back to {ownerName(owner)}
 					</Link>
 				) : (
 					<Link to="/" className="text-link underline">
@@ -194,4 +157,34 @@ function gitHubSetupFailureReason(failure: string | undefined) {
 	return failure && failure in GITHUB_SETUP_FAILURES
 		? GITHUB_SETUP_FAILURES[failure as GitHubSetupFailure]
 		: "The bot or project it was for is no longer available to you.";
+}
+
+/*
+ * An owner's Connections page, and one connection on it, in the workspace
+ * `workspaceSlug`. These return pages are outside any workspace, so they name
+ * one; the link helpers in `links.ts` are for pages inside.
+ */
+
+function ownerConnectionsLink(workspaceSlug: string, owner: ResourceOwner) {
+	return "bot" in owner
+		? ({
+				to: "/$workspace/bots/$bot/connections",
+				params: { workspace: workspaceSlug, bot: owner.bot.handle },
+			} as const)
+		: ({
+				to: "/$workspace/projects/$project/connections",
+				params: { workspace: workspaceSlug, project: owner.project.slug },
+			} as const);
+}
+
+function ownerConnectionLink(workspaceSlug: string, owner: ResourceOwner, connection: string) {
+	return "bot" in owner
+		? ({
+				to: "/$workspace/bots/$bot/connections/$connection",
+				params: { workspace: workspaceSlug, bot: owner.bot.handle, connection },
+			} as const)
+		: ({
+				to: "/$workspace/projects/$project/connections/$connection",
+				params: { workspace: workspaceSlug, project: owner.project.slug, connection },
+			} as const);
 }

@@ -12,6 +12,7 @@ import {
 	DropdownMenuRadioItem,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 
@@ -53,7 +54,6 @@ export function SettingsPage({
 	backOnWide = false,
 	headerAction,
 	children,
-	className,
 }: {
 	title?: ReactNode;
 	description?: ReactNode;
@@ -71,7 +71,6 @@ export function SettingsPage({
 	/** A control beside the title, such as Invite people. */
 	headerAction?: ReactNode;
 	children: ReactNode;
-	className?: string;
 }) {
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const besideTitle = headerAction && !phone && <div className="shrink-0">{headerAction}</div>;
@@ -99,7 +98,6 @@ export function SettingsPage({
 					// Close under its Back; on a wide screen, as high as any other page.
 					// On a phone every page has a Back above it, the frame's or its own.
 					!back ? "pt-10 max-md:pt-3" : backOnWide ? "pt-3 lg:pt-0.5" : "pt-3 lg:pt-10",
-					className,
 				)}
 			>
 				{hero ? (
@@ -214,13 +212,13 @@ export function SettingsGroup({
 				</div>
 			)}
 			{description && (
-				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-xs">
+				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal">
 					{description}
 				</p>
 			)}
 			<div className={cn(SETTINGS_CARD, className)}>{children}</div>
 			{note && (
-				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-xs">
+				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal">
 					{note}
 				</div>
 			)}
@@ -345,8 +343,6 @@ export function SettingsNameRow({
 	name,
 	maxLength,
 	optional = false,
-	placeholder,
-	mono = false,
 	savePending = false,
 	error,
 	onCommit,
@@ -355,9 +351,6 @@ export function SettingsNameRow({
 	name: string;
 	maxLength?: number;
 	optional?: boolean;
-	placeholder?: string;
-	/** For addresses, keys and header names. */
-	mono?: boolean;
 	savePending?: boolean;
 	error?: string | undefined;
 	onCommit: (name: string) => unknown;
@@ -375,20 +368,11 @@ export function SettingsNameRow({
 					id={id}
 					{...fieldProps}
 					maxLength={maxLength}
-					placeholder={placeholder}
 					autoComplete="off"
-					spellCheck={mono ? false : undefined}
-					className={cn(
-						"-ml-2.5 h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2.5 text-xs text-foreground outline-none placeholder:text-subtle-foreground hover:border-border-strong focus-visible:border-ring focus-visible:bg-settings-row-hover",
-						mono && "font-mono",
-					)}
+					className="-ml-2.5 h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2.5 text-xs text-foreground outline-none hover:border-border-strong focus-visible:border-ring focus-visible:bg-settings-row-hover"
 				/>
 			</SettingsControlRow>
-			{error && (
-				<Alert className="border-border border-b px-4 py-2.5 text-xs last:border-b-0">
-					{error}
-				</Alert>
-			)}
+			{error && <SettingsRowAlert>{error}</SettingsRowAlert>}
 		</>
 	);
 }
@@ -571,6 +555,15 @@ export function SettingsRowButton({
 	);
 }
 
+/** A failure said as a row of a settings group, among or after its rows. */
+export function SettingsRowAlert({ children }: { children: ReactNode }) {
+	return (
+		<div className="border-border border-b px-4 py-3 last:border-b-0">
+			<Alert>{children}</Alert>
+		</div>
+	);
+}
+
 /** The round mark at the end of a pick-one row, filled for the one picked. */
 export function SettingsRadioMark({ checked }: { checked: boolean }) {
 	return (
@@ -589,6 +582,69 @@ export function SettingsRadioMark({ checked }: { checked: boolean }) {
 /** A pick-one row's look, for a `<label>` around a hidden radio: the row lifts under the pointer and rings when focused. */
 export const SETTINGS_RADIO_ROW =
 	"flex min-h-14 cursor-pointer items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover active:bg-row-selected has-focus-visible:shadow-(--ring-shadow) has-disabled:cursor-default";
+
+/** One choice in a `SettingsRadioList`. */
+export interface SettingsRadioOption<Id extends string> {
+	id: Id;
+	name: string;
+	description: string;
+	/** A word beside its name, such as "In use". */
+	badge?: string;
+}
+
+/**
+ * A pick-one list in a card under `legend`: each option a row with its name's
+ * initial, its name and what it is, the `chosen` one ticked.
+ */
+export function SettingsRadioList<Id extends string>({
+	legend,
+	options,
+	chosen,
+	disabled,
+	onChoose,
+}: {
+	legend: string;
+	options: readonly SettingsRadioOption<Id>[];
+	chosen: Id;
+	disabled: boolean;
+	onChoose: (id: Id) => void;
+}) {
+	const name = useId();
+	return (
+		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
+			<legend className="px-0.5 pb-2.5 font-medium text-xs text-muted-foreground">{legend}</legend>
+			<div className={SETTINGS_CARD}>
+				{options.map((option) => (
+					<label key={option.id} className={SETTINGS_RADIO_ROW}>
+						<input
+							type="radio"
+							name={name}
+							value={option.id}
+							checked={option.id === chosen}
+							onChange={() => onChoose(option.id)}
+							className="sr-only"
+						/>
+						<LetterTile name={option.name} />
+						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
+							<span className="truncate font-medium text-sm text-foreground">
+								{option.name}
+								{option.badge && (
+									<span className="ml-2 font-normal text-subtle-foreground text-xs">
+										{option.badge}
+									</span>
+								)}
+							</span>
+							<span className="text-pretty text-subtle-foreground text-xs">
+								{option.description}
+							</span>
+						</span>
+						<SettingsRadioMark checked={option.id === chosen} />
+					</label>
+				))}
+			</div>
+		</fieldset>
+	);
+}
 
 /** How a Test went, as a dot and a line cut short to fit, given whole when pointed at. */
 export function SettingsTestOutcome({ good, children }: { good: boolean; children: string }) {

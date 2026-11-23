@@ -8,7 +8,7 @@
  * Two services. `Service` is for the rest of the system and acts for no one:
  * asking for a turn, stopping the turns under an automation run, and recording a
  * system bot's work as a turn. `Controls` is for people, and checks what
- * the current actor may do: cancelling a turn and deciding its tool approvals.
+ * the current actor may do: deciding a turn's tool approvals.
  *
  * This is the only file outside `turns/` may import.
  */
@@ -17,7 +17,7 @@ export * as Turns from "./turns.ts";
 import type { ToolApprovalDecision } from "@sugabots/contracts";
 import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Context, type Effect, Layer } from "effect";
-import type { AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
+import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
 import { Visibility } from "../../authorization/visibility.ts";
@@ -63,7 +63,7 @@ export interface SystemTurn {
 	readonly botId: string;
 	readonly triggerMessageId: string;
 	readonly model: string;
-	/** What the work is, as the logs name it: "summary", "compaction". */
+	/** What the work is, as the logs name it, such as "compaction". */
 	readonly name: string;
 }
 
@@ -107,8 +107,6 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 /** What people may do to a turn, as the current actor. */
 export interface ControlsInterface {
-	/** Asks a turn in a conversation the actor can see to stop. `false` when it is no longer running. */
-	readonly cancel: (turnId: string) => Effect.Effect<boolean, ResourceHidden, CurrentActor.Service>;
 	/**
 	 * Decides a tool call a turn is waiting on, as the actor, once they may.
 	 * The decision is recorded, so the conversation's watchers see it at once, and

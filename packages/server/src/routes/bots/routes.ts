@@ -18,9 +18,6 @@ export const botRoutes = HttpApiBuilder.group(ServerApi, "bots", (handlers) =>
 					.create({ workspace: params.workspace, bot: payload })
 					.pipe(asSessionUser, asHttpError(botErrors)),
 			)
-			.handle("get", ({ params }) =>
-				bots.get({ botId: params.botId }).pipe(asSessionUser, asHttpError(botErrors)),
-			)
 			.handle("update", ({ params, payload }) =>
 				bots
 					.update({ botId: params.botId, changes: payload })

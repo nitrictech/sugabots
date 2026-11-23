@@ -1,12 +1,11 @@
 import type { Project } from "@sugabots/contracts";
-import { createRoute, Navigate, Outlet, useMatchRoute } from "@tanstack/react-router";
+import { createRoute, Navigate, Outlet } from "@tanstack/react-router";
 import { prefetchConversation, useProjectThreadPlace, useProjectThreads } from "@/lib/chats.ts";
-import { failureMessage } from "@/lib/failure.ts";
+import { API_DID_NOT_ANSWER, failureMessage } from "@/lib/failure.ts";
 import { conversationLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { findProject, useJoinProject, useProjects, useUpdateProject } from "@/lib/projects.ts";
+import { findProject, useJoinProject, useProjects } from "@/lib/projects.ts";
 import { FilesPage } from "@/screens/Files.tsx";
-import { LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
 import { MobileOwner } from "@/shell/MobileHome.tsx";
 import { OwnerNotFound } from "@/shell/OwnerNotFound.tsx";
 import { ProjectsDirectory } from "@/shell/ProjectsDirectory.tsx";
@@ -14,7 +13,6 @@ import { Panes } from "@/shell/Shell.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import {
-	API_DID_NOT_ANSWER,
 	ConversationPage,
 	ConversationScreen,
 	preloadChatScreenForWideLayout,
@@ -55,10 +53,6 @@ function ProjectRoute() {
 	const { project: slug } = projectRoute.useParams();
 	const { data: projects, isPending, error } = useProjects();
 	const project = findProject(projects, slug);
-	const matchRoute = useMatchRoute();
-	const onSettings = Boolean(
-		matchRoute({ to: "/$workspace/projects/$project/settings", fuzzy: true }),
-	);
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!project) return <OwnerNotFound kind="project" error={error} />;
 	// A public project the person isn't in, opened by its address: what it is, and Join.
@@ -69,14 +63,6 @@ function ProjectRoute() {
 			</Panes>
 		);
 	}
-	// A project with no lead bot waits on somebody choosing one, unless its settings, which choose one too, are open.
-	if (project.leadBotId === null && project.permissions.rename && !onSettings) {
-		return (
-			<Panes>
-				<ChooseLeadBot project={project} />
-			</Panes>
-		);
-	}
 	return (
 		<Panes>
 			<Outlet />
@@ -84,43 +70,26 @@ function ProjectRoute() {
 	);
 }
 
-/** A project with no lead bot yet, and choosing one, for whoever may change the project. */
-function ChooseLeadBot({ project }: { project: Project }) {
-	const update = useUpdateProject(project.id);
-	return (
-		<EmptyState title={`Choose a lead bot for ${project.name}`}>
-			<span className="flex flex-col items-center gap-3">
-				<span>
-					The lead bot answers the project's threads unless people mention another bot, and reads
-					the messages that mention only people, in case it can help.
-				</span>
-				<LeadBotPicker
-					value={null}
-					disabled={update.isPending}
-					onChange={(leadBotId) => void update.mutateAsync({ leadBotId }).catch(() => {})}
-				/>
-				{update.isError && <span role="alert">{failureMessage(update.error)}</span>}
-			</span>
-		</EmptyState>
-	);
-}
-
 /** A project the person isn't in: its name and what it's for, with Join where they may. */
 function JoinProject({ project }: { project: Project }) {
 	const join = useJoinProject();
 	return (
-		<EmptyState title={project.name}>
-			<span className="flex flex-col items-center gap-3">
-				<span>{project.description ?? "You're not in this project yet."}</span>
-				{project.permissions.join ? (
-					<Button disabled={join.isPending} onClick={() => join.mutate(project.id)}>
-						Join {project.name}
-					</Button>
-				) : (
-					<span>Ask someone in it to add you.</span>
-				)}
-				{join.isError && <span role="alert">{failureMessage(join.error)}</span>}
-			</span>
+		<EmptyState
+			title={project.name}
+			actions={
+				<>
+					{project.permissions.join ? (
+						<Button disabled={join.isPending} onClick={() => join.mutate(project.id)}>
+							Join {project.name}
+						</Button>
+					) : (
+						<span>Ask someone in it to add you.</span>
+					)}
+					{join.isError && <span role="alert">{failureMessage(join.error)}</span>}
+				</>
+			}
+		>
+			{project.description ?? "You're not in this project yet."}
 		</EmptyState>
 	);
 }

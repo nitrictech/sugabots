@@ -39,6 +39,7 @@ import {
 	type TestInfrastructure,
 } from "../database/testing.ts";
 import { unimplemented } from "../testing.ts";
+import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { Notifications } from "./notifications.ts";
 import { inQuietHours } from "./recipients.ts";
 
@@ -167,16 +168,13 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			db.insert(workspaceMember).values(rows.map((person) => ({ workspaceId, userId: person.id }))),
 		);
 		projectSlug = `project-${suffix}`;
-		const [room] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId,
-					name: "Launch",
-					slug: projectSlug,
-					createdById: ada.id,
-				})
-				.returning(),
+		const room = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId,
+				name: "Launch",
+				slug: projectSlug,
+				createdById: ada.id,
+			}),
 		);
 		if (!room) throw new Error("Could not create the project");
 		projectId = room.id;
@@ -216,6 +214,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				kind: "project_thread",
 				botId,
 				title: "Release notes",
+				startedById: people.ada.id,
 			}),
 		);
 		await onDatabase((db) =>
@@ -238,6 +237,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				kind: "project_thread",
 				projectId,
 				title: "Launch",
+				startedById: people.ada.id,
 			}),
 		);
 		return id;

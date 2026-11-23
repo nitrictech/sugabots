@@ -22,7 +22,6 @@ import { Context, DateTime, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
-import { Visibility } from "../../authorization/visibility.ts";
 import { Credentials } from "../../credentials/credentials.ts";
 import { type Database, query, serviceOperations, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
@@ -33,7 +32,6 @@ import { lockTriggers, makeAcceptTrigger } from "./acceptance.ts";
 import {
 	type AutomationDeliveryIdTooLong,
 	AutomationNotFound,
-	type AutomationProjectHasNoLead,
 	AutomationRepositoryNotConnected,
 	type AutomationTriggerConflict,
 	AutomationTriggerKindChanged,
@@ -205,17 +203,9 @@ export interface Interface {
 		| AuthorizationDenied
 		| AutomationNotFound
 		| AutomationTriggerConflict
-		| AutomationTriggerRejected
-		| AutomationProjectHasNoLead,
+		| AutomationTriggerRejected,
 		CurrentActor.Service
 	>;
-	/**
-	 * Every automation of a project the actor reaches, in a workspace
-	 * named by its id or its slug, by name.
-	 */
-	readonly listInWorkspace: (
-		workspace: string,
-	) => Effect.Effect<Automation[], AuthorizationDenied, CurrentActor.Service>;
 	/**
 	 * The project's automations, by name, each with how it stands for
 	 * whoever may read its runs.
@@ -223,21 +213,6 @@ export interface Interface {
 	readonly list: (owner: {
 		projectId: string;
 	}) => Effect.Effect<ListedAutomationDefinition[], AuthorizationDenied, CurrentActor.Service>;
-	readonly get: (
-		automation: InProject,
-	) => Effect.Effect<Automation, AuthorizationDenied | AutomationNotFound, CurrentActor.Service>;
-	/**
-	 * A page of the automation's runs, newest first. A removed automation keeps its
-	 * history, so this finds it as long as it was ever defined.
-	 */
-	readonly listRuns: (
-		automation: InProject,
-		page?: RunPageQuery,
-	) => Effect.Effect<
-		RunPage,
-		AuthorizationDenied | AutomationNotFound | InvalidRunCursor,
-		CurrentActor.Service
-	>;
 	/**
 	 * A page of the runs of every automation of the project, newest first,
 	 * removed automations' included.
@@ -273,10 +248,7 @@ export interface WebhooksInterface {
 		| { kind: "ignored" }
 		| ({ kind: "challenge" } & AutomationWebhookChallenge)
 		| undefined,
-		| AutomationTriggerConflict
-		| AutomationTriggerRejected
-		| AutomationDeliveryIdTooLong
-		| AutomationProjectHasNoLead
+		AutomationTriggerConflict | AutomationTriggerRejected | AutomationDeliveryIdTooLong
 	>;
 }
 
@@ -378,7 +350,6 @@ export const make = Effect.gen(function* () {
 								filter: checked.filter,
 							},
 							secretEncrypted: checked.secretEncrypted,
-							secretDigest: checked.secretDigest,
 							nextScheduledAt: null,
 						},
 						secret: checked.secret,
@@ -619,12 +590,8 @@ export const make = Effect.gen(function* () {
 					yield* automationIn(scope);
 					const trigger = yield* triggerIn(scope, addressed.triggerId);
 					if (trigger.settings.kind !== "webhook") return yield* new AutomationTriggerRejected();
-					if (trigger.secretEncrypted !== null) {
-						return { kind: "set" as const, secret: credentials.decrypt(trigger.secretEncrypted) };
-					}
-					return {
-						kind: trigger.secretDigest === null ? ("none" as const) : ("hashed" as const),
-					};
+					if (trigger.secretEncrypted === null) return { kind: "none" as const };
+					return { kind: "set" as const, secret: credentials.decrypt(trigger.secretEncrypted) };
 				}),
 			),
 
@@ -690,12 +657,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([
-		Authorization.layer,
-		Visibility.layer,
-		AutomationRepository.layer,
-		ConversationRepository.layer,
-	]),
+	Layer.provide([Authorization.layer, AutomationRepository.layer, ConversationRepository.layer]),
 );
 
 export const webhooksLayer = Layer.effect(Webhooks, makeWebhooks).pipe(
@@ -729,7 +691,7 @@ interface Written {
 	secret: string | null;
 }
 
-const NO_SECRET = { secretEncrypted: null, secretDigest: null } as const;
+const NO_SECRET = { secretEncrypted: null } as const;
 
 /** The secrets made for `triggers`, written in the same order as `written`. */
 function secretsMade(
@@ -819,8 +781,7 @@ const DEFAULT_WEBHOOK_AUTH: WebhookAuth = { kind: "bearer" };
  * one). The filter is kept unless one is brought, and none is `undefined`.
  * The secret, or the lack of one, is kept whatever the auth becomes, unless
  * one is brought; a null one leaves it without. A new webhook without one
- * brought gets one made, which is returned, and so does one leaving bearer
- * auth with only the hash of a token made before secrets were kept. A secret
+ * brought gets one made, which is returned. A secret
  * brought for a generic webhook must be long enough to be hard to guess; a
  * source's is whatever its sender made.
  */
@@ -834,7 +795,6 @@ function webhookCheck(
 		deliveryIdHeader: string | null | undefined;
 		filter: readonly WebhookCondition[] | undefined;
 		secretEncrypted: string | null;
-		secretDigest: string | null;
 		secret: string | null;
 	},
 	WebhookSecretTooShort | WebhookDeliveryIdHeaderRejected
@@ -857,14 +817,12 @@ function webhookCheck(
 	if (typeof input.secret === "string" && !webhookSecretLongEnough(auth.kind, input.secret)) {
 		return Effect.fail(new WebhookSecretTooShort());
 	}
-	const hashOnly = current?.secretDigest != null && auth.kind !== "bearer";
-	if (current && !hashOnly && input.secret === undefined) {
+	if (current && input.secret === undefined) {
 		return Effect.succeed({
 			auth,
 			deliveryIdHeader,
 			filter,
 			secretEncrypted: current.secretEncrypted,
-			secretDigest: current.secretDigest,
 			secret: null,
 		});
 	}
@@ -874,7 +832,6 @@ function webhookCheck(
 			deliveryIdHeader,
 			filter,
 			secretEncrypted: null,
-			secretDigest: null,
 			secret: null,
 		});
 	}
@@ -884,7 +841,6 @@ function webhookCheck(
 		deliveryIdHeader,
 		filter,
 		secretEncrypted: credentials.encrypt(secret),
-		secretDigest: null,
 		secret,
 	});
 }

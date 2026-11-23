@@ -65,13 +65,13 @@ export const make = Effect.gen(function* () {
 	const projectComputers = yield* ProjectComputers.Service;
 	const providers = yield* ComputerProviderRepository.Service;
 
-	const shown = (project: ProjectComputers.Project, canManage: boolean) =>
+	const shown = (project: ProjectComputers.Project) =>
 		Effect.gen(function* () {
 			const current = yield* providers.enabled(project.workspaceId);
 			const status = yield* projectComputers.status(project, current);
 			const providerEnabled = current !== undefined;
 			if (status.kind === "none")
-				return { computer: status, providerEnabled, canManage } satisfies ProjectComputer;
+				return { computer: status, providerEnabled } satisfies ProjectComputer;
 			const row = (yield* providers.list(project.workspaceId)).find(
 				(candidate) => candidate.id === status.providerId,
 			);
@@ -89,23 +89,19 @@ export const make = Effect.gen(function* () {
 					disk: status.disk ? shownDisk(status.disk) : null,
 				},
 				providerEnabled,
-				canManage,
 			} satisfies ProjectComputer;
 		});
 
 	const standingOn = (projectId: string, permission: "computer.read" | "computer.manage") =>
 		Effect.map(authorization.project(projectId, permission), (standing) => ({
 			project: { workspaceId: standing.project.workspaceId, projectId: standing.project.id },
-			canManage: standing.may("computer.manage"),
 		}));
 
 	return Service.of({
 		get: (projectId) =>
 			operation(
 				"get",
-				Effect.flatMap(standingOn(projectId, "computer.read"), ({ project, canManage }) =>
-					shown(project, canManage),
-				),
+				Effect.flatMap(standingOn(projectId, "computer.read"), ({ project }) => shown(project)),
 			),
 
 		disks: (workspace) =>
@@ -137,7 +133,7 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { project } = yield* standingOn(projectId, "computer.manage");
 					yield* projectComputers.reset(project);
-					return yield* shown(project, true);
+					return yield* shown(project);
 				}),
 			),
 
@@ -149,7 +145,7 @@ export const make = Effect.gen(function* () {
 					const provider = yield* providers.enabled(project.workspaceId);
 					if (!provider) return yield* new NoComputerProvider();
 					yield* projectComputers.upgrade(project, provider);
-					return yield* shown(project, true);
+					return yield* shown(project);
 				}),
 			),
 	});

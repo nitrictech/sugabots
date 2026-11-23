@@ -117,7 +117,7 @@ export const workspacePermissionsSchema = Schema.Struct({
 	manageProviders: Schema.Boolean,
 	/** Invite, remove and set the access of the people in the workspace. */
 	manageMembers: Schema.Boolean,
-	/** Choose the models the Summariser and Compaction run on. */
+	/** Choose the model Compaction runs on. */
 	configureBuiltInBots: Schema.Boolean,
 	/** See what the workspace's models cost, and limit it. */
 	manageUsage: Schema.Boolean,

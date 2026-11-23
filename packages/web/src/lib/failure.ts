@@ -1,6 +1,9 @@
 import type { ApiFailure } from "@sugabots/contracts/http";
 import { isApiFailure } from "@sugabots/sdk";
 
+/** What a page says when a request it needed never reached the API. */
+export const API_DID_NOT_ANSWER = "The API did not answer. Reload this page to try again.";
+
 export class NotReadyError extends Error {
 	constructor() {
 		super("Workspace not ready");

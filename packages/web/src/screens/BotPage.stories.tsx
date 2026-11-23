@@ -1,17 +1,15 @@
 import type { ConversationDetails, Message, WrittenFileSummary } from "@sugabots/contracts";
-import { type TestConnection, testPerson } from "@sugabots/contracts/testing";
+import { listedThread, type TestConnection, testPerson } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, linearHandler, revenue } from "@/shell/story-fixtures.ts";
+import { growthDesk, linearHandler, revenue, storyBots } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	chatPath,
 	connectionHandlers,
 	StoryApp,
-	storyBots,
 	storyChatDetails,
-	storyListedThread,
 	storyProjectThreadDetails,
 	storyProjectThreadFor,
 	storyThreadFor,
@@ -293,38 +291,6 @@ export const ProjectThread = meta.story({
 	},
 });
 
-/** An automation's result, posted by its bot in the project's thread. */
-const automationResult: Message = {
-	...said("23", "bot", "Six of the overnight leads replied.", "2026-09-18T06:14:00.000Z"),
-	conversationId: storyProjectThreadFor(revenue).id,
-	automationResultOf: {
-		runId: "0199a3a0-0000-7000-8000-0000000005e1",
-		conversationId: "0199a3a0-0000-7000-8000-0000000005e2",
-		automationId: "0199a3a0-0000-7000-8000-0000000005e3",
-		automationName: "Overnight outbound",
-	},
-};
-
-/** An automation's result in the project's thread says which automation it is from. */
-export const ProjectThreadAutomationResult = meta.story({
-	beforeEach({ msw }) {
-		msw.use(
-			...appHandlers({
-				projectThreadMessages: { [revenue.id]: [...projectThread, automationResult] },
-			}),
-		);
-	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
-	play: async ({ canvas }) => {
-		const log = await canvas.findByRole("log", { name: "Chat messages" });
-		const result = (await within(log).findByText(/overnight leads replied/)).closest("article");
-		if (!result) throw new Error("The automation's result is not a message row");
-		await expect(
-			within(result).getByRole("button", { name: "From Overnight outbound" }),
-		).toBeInTheDocument();
-	},
-});
-
 /** A project's thread before anyone has written in it opens on its name and the project it is in. */
 export const ProjectThreadEmpty = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
@@ -446,10 +412,7 @@ export const NamedChat = meta.story({
 			http.get(`${API}/projects/${revenue.id}/threads`, () =>
 				HttpResponse.json({
 					automations: [],
-					threads: [
-						storyListedThread(storyProjectThreadFor(revenue)),
-						storyListedThread(pricingChat),
-					],
+					threads: [listedThread(storyProjectThreadFor(revenue)), listedThread(pricingChat)],
 				}),
 			),
 			http.get(`${API}/conversations/${pricingChat.id}`, () =>
@@ -508,18 +471,18 @@ export const ThreadActivity = meta.story({
 					automations: [],
 					threads: [
 						{
-							...storyListedThread(titled("Deploy the pricing page", "e1")),
+							...listedThread(titled("Deploy the pricing page", "e1")),
 							activity: { kind: "working", since: minutesAgo(20) },
 						},
 						{
-							...storyListedThread(titled("Refund for Acme", "e2")),
+							...listedThread(titled("Refund for Acme", "e2")),
 							activity: { kind: "waiting", since: minutesAgo(2) },
 						},
 						{
-							...storyListedThread(titled("Weekly revenue report", "e3")),
+							...listedThread(titled("Weekly revenue report", "e3")),
 							activity: { kind: "finished", at: minutesAgo(1) },
 						},
-						storyListedThread(thread),
+						listedThread(thread),
 					],
 				}),
 			),
@@ -819,7 +782,7 @@ async function openDetails(canvas: ReturnType<typeof within>): Promise<HTMLEleme
 	return canvas.findByRole("complementary", { name: "Details" });
 }
 
-/** Details open beside the chat: the bot's card, summary, who has written and what it can use. */
+/** Details open beside the chat: the bot's card, who has written and what it can use. */
 export const Details = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await openDetails(canvas)).toBeInTheDocument();
@@ -920,7 +883,6 @@ const collaboration: ConversationDetails = {
 		title: "Check Sentry and open an issue if nothing is tracked",
 		status: "done",
 		parentConversationId: storyThreadFor(growthDesk).id,
-		startedById: storyUser.id,
 		doneAt: null,
 		createdAt: "2026-09-18T06:03:00.000Z",
 		updatedAt: "2026-09-18T06:05:00.000Z",

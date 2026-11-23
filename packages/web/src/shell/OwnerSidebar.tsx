@@ -2,10 +2,9 @@ import { useRender } from "@base-ui/react/use-render";
 import { Link } from "@tanstack/react-router";
 import { ChevronLeft, SquarePen } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { useModels } from "@/lib/bots.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
-import { type OwnerPageName, ownerPages, ownerProblems } from "@/lib/owner-pages.ts";
-import { ownerLink, ownerName, type ResourceOwner, useLeadBot } from "@/lib/resource-owner.tsx";
+import { type OwnerPageName, ownerPages, useOwnerProblems } from "@/lib/owner-pages.ts";
+import { ownerLink, ownerName, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { OwnerWork, useOwnerWork } from "@/shell/OwnerWork.tsx";
 import { ProblemMark } from "@/ui/attention-dot.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
@@ -32,14 +31,8 @@ export function OwnerSidebar({
 	/** The owner's own page open, if one is: its files, automations, computer, connections or settings. */
 	page: OwnerSidebarPage;
 }) {
-	const lead = useLeadBot(owner);
-	const enabledModels = useModels().data?.models;
 	const work = useOwnerWork(owner);
-	const problems = ownerProblems(owner, {
-		lead,
-		enabledModels,
-		automationFailed: work.automationFailing,
-	});
+	const problems = useOwnerProblems(owner, work.automationFailing);
 	const computersOn = useComputerAccess().data?.enabled === true;
 	const name = ownerName(owner);
 	const [search, setSearch] = useState("");
@@ -67,11 +60,13 @@ export function OwnerSidebar({
 						/>
 					))}
 				</nav>
-				<div className="flex items-center gap-1 pt-1">
+				{/* Its pages above, its work below. */}
+				<div aria-hidden className="mx-2 my-1.5 h-px bg-border" />
+				<div className="flex items-center gap-1">
 					<SearchField
 						look="sidebar"
 						label={`Search ${name}'s threads`}
-						placeholder="Search threads"
+						placeholder="Search"
 						value={search}
 						onChange={setSearch}
 						className="flex-1"

@@ -2,9 +2,7 @@ import type { WrittenFileKind } from "@sugabots/contracts";
 
 /*
  * What each kind of file a bot writes is called and what Download saves it
- * as. Plain data, which the native apps' copies are generated from; how each kind is
- * drawn is in `screens/file-kinds.tsx`. apps/codegen loads this module
- * with Node, so it imports nothing but types.
+ * as. How each kind is drawn is in `screens/file-kinds.tsx`.
  */
 
 /** What it is called beside its title, such as "Document". */

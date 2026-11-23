@@ -12,7 +12,12 @@ import {
 	resourceProjectId,
 } from "@/lib/resource-owner.tsx";
 import { ConnectionMark } from "@/ui/connection-mark.tsx";
-import { DialogFormBody, DialogFormHeader, DialogFormStep } from "@/ui/dialog-form.tsx";
+import {
+	DialogFormBody,
+	DialogFormHeader,
+	DialogFormScroll,
+	DialogFormStep,
+} from "@/ui/dialog-form.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SettingsGroup, SettingsRow, SettingsRowIcon } from "@/ui/settings-page.tsx";
 import { AutomationTriggerIcon } from "./RunRow.tsx";
@@ -81,7 +86,7 @@ export function TriggerKindStep({
 			<DialogFormHeader title="Add a trigger" onClose={done} />
 			<DialogFormBody>
 				<SearchField label="Search triggers" value={query} onChange={setQuery} />
-				<div className="-mx-1 flex max-h-picker flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+				<DialogFormScroll height="picker">
 					{own.length > 0 && <SettingsGroup label="Built in">{own.map(row)}</SettingsGroup>}
 					<SettingsGroup
 						label={
@@ -100,8 +105,8 @@ export function TriggerKindStep({
 							}
 							sub={
 								integrations.length > 0
-									? `In ${ownerName(owner)}'s settings`
-									: `Connect an app in ${ownerName(owner)}'s settings`
+									? `On ${ownerName(owner)}'s Connections page`
+									: `Connect an app on ${ownerName(owner)}'s Connections page`
 							}
 							trailing={
 								<ArrowUpRight aria-hidden size={15} className="shrink-0 text-subtle-foreground" />
@@ -109,7 +114,7 @@ export function TriggerKindStep({
 							render={ownerLink(owner, { page: "connections" })}
 						/>
 					</SettingsGroup>
-				</div>
+				</DialogFormScroll>
 			</DialogFormBody>
 		</DialogFormStep>
 	);

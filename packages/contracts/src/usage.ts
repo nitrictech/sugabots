@@ -69,8 +69,8 @@ export const workspaceUsageSchema = Schema.Struct({
 	bots: Schema.Array(botUsageSchema),
 	models: Schema.Array(modelUsageSchema),
 	/**
-	 * What the system bots spent: routing, summaries and titles,
-	 * compaction, and trying models out from settings.
+	 * What the system bots spent: routing, compaction, and trying models
+	 * out from settings.
 	 */
 	systemBots: Schema.Struct(spendFields),
 	/**

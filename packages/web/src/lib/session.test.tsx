@@ -52,15 +52,6 @@ it("can retry an initial transient session failure", async () => {
 	expect(result.current.error).toBeUndefined();
 });
 
-it("discovers a cookie session without checking for a local token", async () => {
-	client.tokens.get.mockReturnValue(undefined);
-	const { result } = renderHook(useSessionFromApi);
-
-	await waitFor(() => expect(result.current.user).toEqual(sam));
-
-	expect(client.tokens.get).not.toHaveBeenCalled();
-});
-
 it("clears authentication when the API rejects the session", async () => {
 	client.api.me.mockReturnValue(Effect.fail(new Unauthorized({ message: userText`Expired` })));
 	const { result } = renderHook(useSessionFromApi);

@@ -1,6 +1,6 @@
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
 import type { ConnectionLook } from "@/lib/connections.ts";
-import { countOf, listNames } from "@/lib/name-list.ts";
+import { capitalise, countOf, listNames } from "@/lib/name-list.ts";
 import {
 	BROWSER_TOOL_PREFIX,
 	BUILT_IN_HANDLE,
@@ -77,8 +77,6 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 		case "write_file":
 			return step("Wrote", code(input.path), "Wrote a file");
 		case "copy_file_to_computer":
-		// The tool's name before computers were called that, which earlier calls record.
-		case "copy_file_to_sandbox":
 			return step("Copied", name(fileName(input.file)), "Copied a file to the computer");
 		case "share_file":
 			return step(
@@ -87,8 +85,6 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 				"Shared a file",
 			);
 		case "read_conversation_file":
-		// The tool's name before conversations were called that, which earlier calls record.
-		case "read_thread_file":
 			// A long tool result is kept as a file too, and has no name in the conversation.
 			return step("Read", name(fileName(input.file)), "Read a long result");
 		case "web_search":
@@ -103,17 +99,6 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 				name(input.query),
 				"Read back through the conversation",
 			);
-		// Tools since taken away, which earlier calls record, with the output they answered in.
-		case "list_threads":
-			return step("Looked for conversations about", name(input.title), "Listed conversations");
-		case "read_thread":
-			return input.query === undefined
-				? step("Read", name(asRecord(output.thread).title), "Read another conversation")
-				: step(
-						"Searched another conversation for",
-						name(input.query),
-						"Searched another conversation",
-					);
 		case "read_docs":
 			return step("Read the docs on", name(input.page), "Read the docs");
 		case "file_list":
@@ -135,8 +120,6 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 		case "mark_done":
 			return { action: "Marked the thread done" };
 		case "start_thread":
-		// The name some recorded calls of `start_thread` have.
-		case "start_task":
 			return step("Started the thread", name(input.title), "Started a thread");
 		case "save_instructions":
 			return { action: "Saved its instructions" };
@@ -193,8 +176,6 @@ export function stepDetails(call: ToolCallPart): StepDetails {
 		case "write_file":
 			return { ...inputWithText("content"), output: shown(stored.output), ...cut };
 		case "read_conversation_file":
-		// The tool's name before conversations were called that, which earlier calls record.
-		case "read_thread_file":
 			return {
 				input: shown(call.input),
 				output: textOf(output.lines) ?? shown(stored.output),
@@ -350,7 +331,7 @@ export function toolLineText(
 		const totalMs = calls.filter(finished).reduce((sum, call) => sum + durationOf(call), 0);
 		return `Used ${used} for ${formatTotal(totalMs)}`;
 	}
-	return used ? `Used ${used}, ${tail}` : capitalised(tail);
+	return used ? `Used ${used}, ${tail}` : capitalise(tail);
 }
 
 function durationOf(call: ToolCallPart): number {
@@ -365,10 +346,6 @@ function durationOf(call: ToolCallPart): number {
 function formatTotal(ms: number): string {
 	if (ms < 1_000) return `${Math.round(ms)}ms`;
 	return `${Math.round(ms / 1_000)}s`;
-}
-
-function capitalised(text: string): string {
-	return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**

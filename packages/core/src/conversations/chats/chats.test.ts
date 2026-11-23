@@ -40,6 +40,7 @@ import {
 import { ConversationFiles } from "../../files/conversation-files.ts";
 import { INTERVIEW_PROMPT } from "../../workspaces/bots/interview-prompt.ts";
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
+import { seedProject } from "../../workspaces/projects/seed.test-support.ts";
 import { onPostgresAs } from "../../workspaces/testing.ts";
 import { Automations } from "../automations/automations.ts";
 import { ConversationView } from "../conversation-view.ts";
@@ -163,16 +164,13 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		chats = onPostgresAs(userId)(Context.get(conversations, Chats.Service));
 		view = onPostgresAs(userId)(Context.get(conversations, ChatView.Service));
 		automations = onPostgresAs(administrator.id)(Context.get(conversations, Automations.Service));
-		const [room] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId,
-					name: "Chat project",
-					slug: `chat-${suffix}`,
-					createdById: userId,
-				})
-				.returning(),
+		const room = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId,
+				name: "Chat project",
+				slug: `chat-${suffix}`,
+				createdById: userId,
+			}),
 		);
 		if (!room) throw new Error("Could not create chat test project");
 		projectId = room.id;
@@ -1089,17 +1087,14 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("lists a project the person is in, and hides one they are not", async () => {
-		const [unjoined] = await onDatabase((db) =>
-			db
-				.insert(project)
-				.values({
-					workspaceId,
-					name: "Elsewhere",
-					slug: `elsewhere-${crypto.randomUUID()}`,
-					visibility: "private",
-					createdById: administratorId,
-				})
-				.returning(),
+		const unjoined = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId,
+				name: "Elsewhere",
+				slug: `elsewhere-${crypto.randomUUID()}`,
+				visibility: "private",
+				createdById: administratorId,
+			}),
 		);
 		if (!unjoined) throw new Error("Could not create the project");
 

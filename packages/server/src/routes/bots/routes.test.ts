@@ -176,19 +176,17 @@ describe("bot routes", () => {
 		expect(await response.json()).toMatchObject({ assistant: true });
 	});
 
-	it("reads, edits and deletes the bot in the path", async () => {
+	it("edits and deletes the bot in the path", async () => {
 		const asked: unknown[] = [];
 		const record = (input: unknown) =>
 			Effect.sync(() => {
 				asked.push(input);
 			});
 		const routes = app({
-			get: (input) => Effect.as(record(input), bot),
 			update: (input) => Effect.as(record(input), bot),
 			remove: record,
 		});
 
-		expect((await routes.request(`/bots/${BOT}`, auth())).status).toBe(200);
 		expect(
 			(
 				await routes.request(`/bots/${BOT}`, {
@@ -201,7 +199,6 @@ describe("bot routes", () => {
 			204,
 		);
 		expect(asked).toEqual([
-			{ botId: BOT },
 			{ botId: BOT, changes: { description: "Sorts the inbox" } },
 			{ botId: BOT },
 		]);
@@ -209,8 +206,8 @@ describe("bot routes", () => {
 
 	it("answers a bot hidden from the caller as not found", async () => {
 		const response = await app({
-			get: () => Effect.fail(new ResourceHidden({ resource: "bot" })),
-		}).request(`/bots/${BOT}`, auth());
+			remove: () => Effect.fail(new ResourceHidden({ resource: "bot" })),
+		}).request(`/bots/${BOT}`, { ...auth(), method: "DELETE" });
 
 		expect(response.status).toBe(404);
 		expect(await response.json()).toEqual({ _tag: "NotFound", message: "No such bot" });

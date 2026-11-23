@@ -6,17 +6,15 @@ import { refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 /**
- * The workspace's Summariser and Compaction: what they are, and the model each
- * runs on.
+ * The workspace's system bots, such as Compaction: what they are, and the
+ * model each runs on.
  *
  * Addressed by key rather than by id, because there is exactly one of each per
  * workspace. That is also what keeps this from being pointed at a bot people talk to,
  * which is configured in its own settings instead.
  *
- * Reading is open to the whole workspace, because a chat's summary has to say
- * why there is none when the Summariser has no model, and has to tell "no model
- * chosen" apart from "you cannot see". What is exposed is two names and two
- * model ids, which a member already sees on every bot they can see.
+ * Reading is open to the whole workspace: what is exposed is names and model
+ * ids, which a member already sees on every bot they can see.
  */
 export class SystemBotsApi extends HttpApiGroup.make("systemBots")
 	.add(

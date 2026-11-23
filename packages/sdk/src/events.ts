@@ -14,26 +14,22 @@ import type { TokenStore } from "./tokens.ts";
  * ```
  *
  * Not `EventSource`: it cannot send an `Authorization` header for bearer
- * clients. `fetch` plus a parser also turns in browsers, Electron, and Node.
- * React Native, whose fetch does not stream, uses `react-native-sse` against the
- * same routes.
+ * clients. It needs a `fetch` whose response body streams.
  *
  * A dropped connection is the normal case, not an error: the server hangs up
  * every thirty minutes on purpose. The loop below reconnects with
- * `Last-Event-ID` and the server replays what was missed, so a consumer sees
- * one uninterrupted sequence of events and never learns a reconnect happened.
+ * `Last-Event-ID` set to the last event that carried an id, and the server
+ * replays what was missed. When it cannot resume from there, or an event with
+ * an id cannot be read, the stream yields a `reset` event and starts live, so
+ * the consumer reloads what it shows.
  */
 
 export interface EventStreamOptions {
-	/** Resume from here instead of starting live. Usually a remembered `lastEventId`. */
-	lastEventId?: string;
 	/** Ends the stream. Without one, iterate with `break` or call `close`. */
 	signal?: AbortSignal;
 }
 
 export interface EventStream extends AsyncIterable<StreamEvent> {
-	/** The last durable event seen, to resume from after this stream is gone. */
-	readonly lastEventId: string | undefined;
 	/** Ends the stream. The iterator finishes; it does not throw. */
 	close(): void;
 }
@@ -95,10 +91,9 @@ function createEventStream(context: StreamContext): EventStream {
 		? AbortSignal.any([context.signal, closing.signal])
 		: closing.signal;
 
-	let lastEventId = context.lastEventId;
-
 	async function* iterate(): AsyncGenerator<StreamEvent> {
 		let attempt = 0;
+		let lastEventId: string | undefined;
 
 		while (!signal.aborted) {
 			try {
@@ -144,9 +139,6 @@ function createEventStream(context: StreamContext): EventStream {
 
 	return {
 		[Symbol.asyncIterator]: iterate,
-		get lastEventId() {
-			return lastEventId;
-		},
 		close: () => closing.abort(),
 	};
 }

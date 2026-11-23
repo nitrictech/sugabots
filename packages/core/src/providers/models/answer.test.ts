@@ -26,7 +26,7 @@ describe("asking a model again", () => {
 	it("does not ask again for anything but the shape", async () => {
 		// A timeout costs the same next time, and a dead provider is for the
 		// caller to handle.
-		const ask = vi.fn(() => Effect.fail(new Models.AnswerTimedOut({ purpose: "summary" })));
+		const ask = vi.fn(() => Effect.fail(new Models.AnswerTimedOut({ purpose: "compaction" })));
 
 		const exit = await Effect.runPromiseExit(Models.retryUnusable(Effect.suspend(ask)));
 

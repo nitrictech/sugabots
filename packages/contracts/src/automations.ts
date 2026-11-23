@@ -79,7 +79,7 @@ const webhookSignatureEncodingSchema = Schema.Literals(["hex", "base64"]);
 export type WebhookSignatureEncoding = typeof webhookSignatureEncodingSchema.Type;
 
 /**
- * How a webhook automation's caller proves it holds the automation's secret: as a
+ * How a webhook trigger's caller proves it holds the trigger's secret: as a
  * known source signs, or, for any other sender, one of the generic kinds.
  * `hmac` signs the raw body with the secret using `algorithm` and sends the
  * digest in `header`, written in `encoding`, optionally after the
@@ -294,14 +294,6 @@ export const automationSchema = Schema.Struct({
 });
 
 export type Automation = typeof automationSchema.Type;
-
-/**
- * Every automation of a project the person can reach, by name. A bot's own
- * are those whose `projectId` is the bot's `defaultProjectId`.
- */
-export const workspaceAutomationListSchema = Schema.Struct({
-	items: Schema.mutable(Schema.Array(automationSchema)),
-});
 
 /**
  * A webhook trigger as written. Without `auth`, a new one takes a bearer
@@ -562,13 +554,11 @@ export const automationSecretSchema = Schema.Struct({ secret: Schema.NullOr(Sche
 
 /**
  * A webhook trigger's current secret, for somebody who manages it. One with
- * `none` runs the automation for anybody who has its address; a `hashed` one has
- * a bearer token made before secrets were kept, which only its hash checks.
+ * `none` runs the automation for anybody who has its address.
  */
 export const automationCurrentSecretSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("set"), secret: Schema.String }),
 	Schema.Struct({ kind: Schema.Literal("none") }),
-	Schema.Struct({ kind: Schema.Literal("hashed") }),
 ]);
 export type AutomationCurrentSecret = typeof automationCurrentSecretSchema.Type;
 
@@ -580,9 +570,9 @@ export const automationSecretReplacementSchema = Schema.Struct({
 	secret: Schema.optional(Schema.NullOr(webhookSecretSchema)),
 });
 
-/** What a webhook's caller is answered: `executionId` is the run's id, a name callers are documented to read. */
+/** What a webhook's caller is answered: the run it started, and whether an earlier delivery started it. */
 export const acceptedAutomationWebhookSchema = Schema.Struct({
-	executionId: uuidSchema,
+	runId: uuidSchema,
 	duplicate: Schema.Boolean,
 });
 

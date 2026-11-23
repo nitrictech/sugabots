@@ -460,11 +460,12 @@ export const ReplyingTo = meta.story({
 });
 
 /**
- * Before a new thread exists there is nowhere to upload to: Upload files is
- * off, and a pasted file writes nothing into the draft.
+ * Before a new thread exists there is nowhere to upload to, so the composer
+ * has no attachments: Upload files is off, and a pasted file writes nothing
+ * into the draft.
  */
 export const BeforeTheChatExists = meta.story({
-	args: { attachments: { ...withFiles([]), attach: undefined } },
+	render: ({ attachments: _attachments, ...args }) => <ChatComposer {...args} />,
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Add" }));
 		await expect(

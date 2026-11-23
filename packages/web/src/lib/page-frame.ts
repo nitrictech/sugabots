@@ -1,8 +1,4 @@
-/*
- * How a bot-made page is framed in the app, as plain data, which the native
- * apps' copies are generated from. apps/codegen loads this module with Node,
- * so it imports nothing but types.
- */
+/* How a bot-made page is framed in the app. */
 
 /** How tall a frame fitted to its page may be before it is clipped, so one page never takes over a conversation. */
 export const FIT_HEIGHT_PX = { min: 120, max: 560 } as const;

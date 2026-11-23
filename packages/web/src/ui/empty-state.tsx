@@ -5,14 +5,15 @@ import type { ReactNode } from "react";
  * Nothing here yet, and what to do about it: a flat statement of what is
  * missing, and one line naming what would fill it. The second part is the one
  * that matters. "No bots yet" is a dead end; naming the button that makes one
- * tells somebody where to go next.
+ * tells somebody where to go next. `actions`, under it, are the ways to go,
+ * such as the button that makes one, each on a line of its own.
  */
 export function EmptyState({
 	title,
 	icon,
 	page,
 	children,
-	className,
+	actions,
 }: {
 	title: ReactNode;
 	/**
@@ -24,7 +25,7 @@ export function EmptyState({
 	/** A mark of what would be here, on a tile above the title. */
 	icon?: ReactNode;
 	children?: ReactNode;
-	className?: string;
+	actions?: ReactNode;
 }) {
 	return (
 		<div
@@ -32,7 +33,6 @@ export function EmptyState({
 				"grid place-items-center",
 				page === "fill" ? "h-above-tab-bar px-6 pt-6 pb-26" : "flex-1 p-6",
 				page === "min" && "min-h-80",
-				className,
 			)}
 		>
 			<div className="flex max-w-100 flex-col items-center gap-2.5 text-center">
@@ -47,6 +47,11 @@ export function EmptyState({
 				<div className="font-semibold text-foreground text-base">{title}</div>
 				{children !== undefined && (
 					<div className="text-xs text-muted-foreground leading-relaxed">{children}</div>
+				)}
+				{actions && (
+					<div className="flex flex-col items-center gap-3 pt-0.5 text-xs text-muted-foreground leading-relaxed">
+						{actions}
+					</div>
 				)}
 			</div>
 		</div>

@@ -50,11 +50,10 @@ function DialogContent({
 		<DialogPortal>
 			{/*
 			 * `forceRender` because Base UI drops a nested dialog's backdrop, on the
-			 * assumption that the dialog above it already dims the page. Settings is
-			 * a dialog now, so every confirmation opened inside it is nested — and
-			 * the settings surface it would be dimming is opaque and fills the
-			 * screen, so without this the confirmation arrives over an undimmed
-			 * page. On a dialog that is not nested the flag changes nothing.
+			 * assumption that the dialog under it already dims the page. A
+			 * confirmation opened from inside another dialog would otherwise sit
+			 * over that dialog undimmed. On a dialog that is not nested the flag
+			 * changes nothing.
 			 */}
 			<DialogOverlay forceRender />
 			{/*

@@ -10,7 +10,6 @@ import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
 import { Chats } from "@sugabots/core/conversations/chats/chats";
 import { ConversationView } from "@sugabots/core/conversations/conversation-view";
-import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
 import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
 import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
 import { Turns } from "@sugabots/core/conversations/turns/turns";
@@ -125,7 +124,6 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(GitHubApps.Service),
 	unimplemented(GitHubConnections.Service),
 	unimplemented(ConnectionSetup.Service),
-	unimplemented(ModelTrials.Service),
 	unimplemented(Usage.Service),
 	unimplemented(Notifications.Service),
 	unimplemented(Chats.Service),

@@ -110,7 +110,7 @@ export const Stacked = meta.story({
 					face="dot"
 					shape={shape}
 					size={44}
-					ringed
+					ringed={{ color: "var(--panel)", width: 3 }}
 					className="-mr-3"
 				/>
 			))}

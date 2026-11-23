@@ -87,7 +87,7 @@ function ApprovalDetail({ found }: { found: InboxRequest }) {
 								{bot.name} wants to use {appName}
 								<span className="md:hidden"> · {askedIn}</span>
 							</span>
-							<h1 className="m-0 truncate font-bold text-xl text-foreground leading-tight tracking-normal max-md:whitespace-normal max-md:font-semibold max-md:text-xl">
+							<h1 className="m-0 truncate font-bold text-xl text-foreground leading-tight tracking-normal max-md:whitespace-normal max-md:font-semibold">
 								{action}
 							</h1>
 						</div>

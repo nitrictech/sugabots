@@ -56,8 +56,7 @@ export function resourcePermissions(owner: ResourceOwner): ResourcePermissions {
 
 /**
  * The bot that works on the owner's threads and runs its automations: a bot
- * itself, or a project's lead bot. Undefined until the roster has it, or
- * while the project has no lead bot.
+ * itself, or a project's lead bot. Undefined until the roster has it.
  */
 export function useLeadBot(owner: ResourceOwner): Bot | undefined {
 	const lead = useBot("project" in owner ? owner.project.leadBotId : null);
