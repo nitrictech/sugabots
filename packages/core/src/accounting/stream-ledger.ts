@@ -2,7 +2,7 @@ import { usageFromAiSdk } from "@sugabots/accounting";
 import type { LanguageModelUsage } from "ai";
 import { Clock, DateTime, Effect, Exit, type Tracer } from "effect";
 import type { ModelRegistry } from "../providers/model-providers/dialects/index.ts";
-import type { ModelProviderRepository } from "../providers/model-providers/model-provider-repository.ts";
+import type { ModelProviderStore } from "../providers/model-providers/model-provider-store.ts";
 import type { ModelRequests } from "./model-requests.ts";
 import { requestCost } from "./request-cost.ts";
 
@@ -27,11 +27,11 @@ interface StreamLedgerOptions {
 	requests: ModelRequests.Interface;
 	registry: Pick<ModelRegistry, "cost" | "version">;
 	workspaceId: string;
-	activity: ModelRequests.Activity;
+	purpose: ModelRequests.RequestPurpose;
 	model: string;
-	connection: Pick<
-		ModelProviderRepository.ProviderEndpoint,
-		"providerId" | "preset" | "baseUrl" | "apiFormat"
+	access: Pick<
+		ModelProviderStore.ProviderAccess,
+		"providerId" | "builtIn" | "baseUrl" | "apiFormat"
 	>;
 }
 
@@ -45,7 +45,7 @@ interface OpenRequest {
  * A ledger for one stream. Its writes run with the caller's services, so
  * their clock is the caller's and their spans sit under the caller's. A
  * request that can't be recorded is logged rather than raised: a gap in the
- * numbers is no reason to stop a conversation.
+ * numbers is no reason to stop a chat.
  */
 export const streamLedger = (options: StreamLedgerOptions): Effect.Effect<StreamLedger> =>
 	Effect.gen(function* () {
@@ -58,18 +58,18 @@ export const streamLedger = (options: StreamLedgerOptions): Effect.Effect<Stream
 			const span = yield* Effect.makeSpan("Models.request", {
 				attributes: {
 					"gen_ai.request.model": options.model,
-					"gen_ai.provider.name": options.connection.preset ?? "custom",
-					"sugabots.model_request.purpose": options.activity.purpose,
+					"gen_ai.provider.name": options.access.builtIn ?? "custom",
+					"sugabots.model_request.purpose": options.purpose.name,
 					"sugabots.model_request.step": step,
 				},
 			});
 			const id = yield* options.requests
 				.start({
 					workspaceId: options.workspaceId,
-					activity: options.activity,
+					purpose: options.purpose,
 					step,
-					providerId: options.connection.providerId,
-					preset: options.connection.preset,
+					providerId: options.access.providerId,
+					builtIn: options.access.builtIn,
 					model: options.model,
 					startedAt: yield* DateTime.nowAsDate,
 				})
@@ -89,7 +89,7 @@ export const streamLedger = (options: StreamLedgerOptions): Effect.Effect<Stream
 				open = undefined;
 				const usage = sdkUsage && usageFromAiSdk(sdkUsage);
 				const cost =
-					sdkUsage && requestCost(options.connection, options.model, sdkUsage, options.registry);
+					sdkUsage && requestCost(options.access, options.model, sdkUsage, options.registry);
 				annotate(request.span, outcome, usage, cost);
 				if (request.id !== undefined) {
 					yield* options.requests

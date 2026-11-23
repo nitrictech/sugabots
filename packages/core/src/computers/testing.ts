@@ -6,7 +6,7 @@ import { holdTransaction } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
-import { ComputerCredentials } from "./computer-credentials.ts";
+import { ComputerSignIn } from "./computer-sign-in.ts";
 import { Computers } from "./computers.ts";
 import { workVolume } from "./implementations/opensandbox.ts";
 
@@ -16,7 +16,7 @@ import { workVolume } from "./implementations/opensandbox.ts";
  * whose default project has none: any use dies.
  */
 export const noComputers = Layer.mergeAll(
-	unimplemented(ComputerCredentials.Service, {}),
+	unimplemented(ComputerSignIn.Service, {}),
 	unimplemented(Egress.Service, {}),
 );
 

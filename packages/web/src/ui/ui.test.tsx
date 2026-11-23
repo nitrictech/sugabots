@@ -13,13 +13,13 @@ describe("IconButton", () => {
 	it("names itself for assistive technology from the label it requires", () => {
 		render(
 			<TooltipProvider>
-				<IconButton label="New thread" onClick={vi.fn()}>
+				<IconButton label="New chat" onClick={vi.fn()}>
 					<svg />
 				</IconButton>
 			</TooltipProvider>,
 		);
 
-		expect(screen.getByRole("button", { name: "New thread" })).toBeDefined();
+		expect(screen.getByRole("button", { name: "New chat" })).toBeDefined();
 	});
 
 	it("can be a link, for a control that navigates rather than acts", () => {

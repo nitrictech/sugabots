@@ -55,12 +55,6 @@ const FIXED_SIZE_VARIANTS: Partial<Record<IconButtonVariant, string>> = {
 };
 
 /**
- * Merged over a `bar` button beside a phone's large page title, such as
- * Inbox's: sized for a thumb, with its icon to match.
- */
-export const ROOMY_ON_PHONE = "max-md:size-10 max-md:rounded-lg max-md:[&_svg]:size-5";
-
-/**
  * Merged over a `bar` button in a chat's header: on a phone it floats over the
  * chat as a round glass button, 44px as a phone's own are, as Back there does,
  * darker while pressed or while the menu it opens is open.

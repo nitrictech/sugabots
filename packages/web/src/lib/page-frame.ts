@@ -1,6 +1,6 @@
 /* How a bot-made page is framed in the app. */
 
-/** How tall a frame fitted to its page may be before it is clipped, so one page never takes over a conversation. */
+/** How tall a frame fitted to its page may be before it is clipped, so one page never takes over a chat. */
 export const FIT_HEIGHT_PX = { min: 120, max: 560 } as const;
 
 /**

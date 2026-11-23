@@ -1,0 +1,183 @@
+import { type CollaborationPart, chatStream, streamEvent } from "@sugabots/contracts";
+import { type Duration, Effect, ManagedRuntime } from "effect";
+import { describe, expect, it, vi } from "vitest";
+import { effectRunner } from "../../../database/database.ts";
+import { EventBus } from "../../../database/events/bus.ts";
+import { EventStore } from "../../../database/events/store.ts";
+import { noDatabase } from "../../../database/testing.ts";
+import { CollaborationRefused, type Collaborations } from "./collaborations.ts";
+import { collaborateTool } from "./tool.ts";
+
+/**
+ * The tool over fake collaborations and a real in-memory bus: they decide
+ * what is written; this is about waiting for the answer and giving up
+ * gracefully.
+ */
+
+const run = effectRunner(ManagedRuntime.make(noDatabase));
+const from = { chatId: "t-root", botId: "a-host", turnId: "turn-1", messageId: "m-reply" };
+const collaboration: CollaborationPart = {
+	type: "collaboration",
+	id: "d-1",
+	botId: "a-helper",
+	botName: "Helper",
+	chatId: "t-child",
+	brief: "Look",
+	status: "waiting",
+	answer: null,
+	atOffset: 12,
+};
+const opened = { collaboration, collaborator: { id: "a-helper", name: "Helper" } };
+const answered = streamEvent("collaboration.updated", {
+	chatId: "t-root",
+	messageId: "m-reply",
+	collaboration: { ...collaboration, status: "answered", answer: "All good." },
+});
+
+type FakeCollaborations = Pick<Collaborations.Interface, "open" | "collectAnswer">;
+
+/** Collaborations answered with `answer()` once it returns one, and otherwise still waiting. */
+function fakeCollaborations(answer: () => string | undefined): FakeCollaborations {
+	return {
+		open: vi.fn(() => Effect.succeed(opened)),
+		collectAnswer: vi.fn(() =>
+			Effect.sync((): Collaborations.WaitOutcome => {
+				const given = answer();
+				return given === undefined ? { _tag: "MovedOn" } : { _tag: "Answered", answer: given };
+			}),
+		),
+	};
+}
+
+function toolWith(
+	collaborations: FakeCollaborations,
+	options: {
+		bus?: EventBus.Interface;
+		wait?: Duration.Input;
+		signal?: AbortSignal;
+	} = {},
+) {
+	const noted: Array<Pick<CollaborationPart, "id" | "atOffset">> = [];
+	const tool = collaborateTool({
+		from,
+		collaborations,
+		bus: options.bus ?? EventBus.inProcess({ store: EventStore.inMemory() }),
+		run,
+		replyLength: () => 12,
+		noteCollaboration: (made) => Effect.sync(() => void noted.push(made)),
+		signal: options.signal ?? new AbortController().signal,
+		wait: options.wait ?? "2 seconds",
+	});
+	return { tool, noted };
+}
+
+async function call(
+	tool: ReturnType<typeof collaborateTool>,
+	input: { to: string; brief: string },
+) {
+	const options = { toolCallId: "call", messages: [] } as unknown as Parameters<
+		NonNullable<typeof tool.execute>
+	>[1];
+	return tool.execute?.(input, options);
+}
+
+describe("collaborate tool", () => {
+	it("returns the answer when the collaboration is answered in time, and marks the reply", async () => {
+		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+		let answer: string | undefined;
+		const collaborations = fakeCollaborations(() => answer);
+		const { tool, noted } = toolWith(collaborations, { bus });
+
+		const pending = call(tool, { to: "Helper", brief: "Look" });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		answer = "All good.";
+		await bus.publish(chatStream("t-root"), answered);
+
+		expect(await pending).toEqual({ status: "answered", answer: "All good." });
+		expect(collaborations.open).toHaveBeenCalledWith({
+			from: { ...from, atOffset: 12 },
+			to: "Helper",
+			brief: "Look",
+		});
+		expect(noted).toEqual([collaboration]);
+	});
+
+	it("keeps waiting through updates that do not answer the collaboration", async () => {
+		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+		const collaborations = fakeCollaborations(() => undefined);
+		const { tool } = toolWith(collaborations, { bus, wait: "200 millis" });
+		const started = Date.now();
+
+		const pending = call(tool, { to: "Helper", brief: "Look" });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		await bus.publish(
+			chatStream("t-child"),
+			streamEvent("turn.completed", {
+				chatId: "t-child",
+				turnId: "turn-2",
+				status: "cancelled",
+			}),
+		);
+		await bus.publish(chatStream("t-root"), {
+			...answered,
+			collaboration: { ...answered.collaboration, id: "d-2" },
+		});
+
+		expect(await pending).toMatchObject({ status: "pending", chatId: "t-child" });
+		expect(Date.now() - started).toBeGreaterThanOrEqual(190);
+	});
+
+	it("gives up after the wait and says the answer is still coming", async () => {
+		const collaborations = fakeCollaborations(() => undefined);
+		const { tool } = toolWith(collaborations, { wait: "20 millis" });
+
+		const result = await call(tool, { to: "Helper", brief: "Look" });
+
+		expect(result).toMatchObject({ status: "pending", chatId: "t-child" });
+		expect(collaborations.collectAnswer).toHaveBeenCalledWith("d-1");
+	});
+
+	it("hands a refusal back to the model rather than failing the turn", async () => {
+		const collaborations = fakeCollaborations(() => undefined);
+		vi.mocked(collaborations.open).mockReturnValueOnce(
+			Effect.fail(new CollaborationRefused({ reason: "A bot cannot collaborate with itself" })),
+		);
+		const { tool, noted } = toolWith(collaborations);
+
+		expect(await call(tool, { to: "Host", brief: "Look" })).toEqual({
+			status: "refused",
+			reason: "A bot cannot collaborate with itself",
+		});
+		expect(noted).toEqual([]);
+	});
+
+	it.each([true, false])(
+		"stops waiting when aborted (already aborted: %s)",
+		async (alreadyAborted) => {
+			const controller = new AbortController();
+			const bus = EventBus.inProcess({ store: EventStore.inMemory() });
+			const subscribe = vi.spyOn(bus, "subscribe");
+			const collaborations = fakeCollaborations(() => undefined);
+			const { tool } = toolWith(collaborations, {
+				bus,
+				signal: controller.signal,
+				wait: "1 minute",
+			});
+			if (alreadyAborted) {
+				controller.abort();
+			}
+			const pending = call(tool, { to: "Helper", brief: "Look" });
+			if (!alreadyAborted) {
+				await vi.waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
+				controller.abort();
+			}
+			expect(await pending).toMatchObject({ status: "pending", chatId: "t-child" });
+			expect(collaborations.collectAnswer).toHaveBeenCalledWith("d-1");
+			if (alreadyAborted) {
+				expect(subscribe).not.toHaveBeenCalled();
+			} else {
+				expect(subscribe.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+			}
+		},
+	);
+});

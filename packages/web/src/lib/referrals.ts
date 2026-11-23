@@ -4,7 +4,7 @@ import { client } from "@/api.ts";
 
 const referralLinkKey = ["referral-link"];
 
-/** The signed-in person's referral link, `null` where the installation does not sign people up by referral. */
+/** The signed-in person's referral link, `null` where the server does not sign people up by referral. */
 export function useReferralLink() {
 	return useQuery({
 		queryKey: referralLinkKey,

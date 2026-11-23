@@ -43,7 +43,7 @@ export function measureDisk(
 		// Run as the bots' user, du skips what it may not read, such as
 		// root's files in /tmp; everything under the workspace is theirs.
 		const sized = yield* computer.exec(
-			`shopt -s nullglob; du -sxB1 -- ${Computers.BOTS_DIRECTORY}/* ${Computers.CONVERSATIONS_DIRECTORY} ${TEMPORARY_DIRECTORY} 2>/dev/null; exit 0`,
+			`shopt -s nullglob; du -sxB1 -- ${Computers.BOTS_DIRECTORY}/* ${Computers.CHATS_DIRECTORY} ${TEMPORARY_DIRECTORY} 2>/dev/null; exit 0`,
 			FOLDERS_OPTIONS,
 		);
 		const timedOut = sized.exitCode === null;
@@ -86,7 +86,7 @@ function fullestOf(listing: string) {
 		);
 }
 
-const BOT_HOME = new RegExp(`^${Computers.BOTS_DIRECTORY}/([0-9a-f-]{36})$`);
+const HOME_FOLDER = new RegExp(`^${Computers.BOTS_DIRECTORY}/([0-9a-f-]{36})$`);
 
 /** The folders `du -sB1` sized, as `<bytes>\t<path>` lines, largest first. */
 function foldersOf(listing: string): ComputerDiskFolder[] {
@@ -96,9 +96,9 @@ function foldersOf(listing: string): ComputerDiskFolder[] {
 			const [size = "", path = ""] = line.split("\t");
 			const bytes = Number(size);
 			if (size === "" || !Number.isSafeInteger(bytes)) return [];
-			if (path === Computers.CONVERSATIONS_DIRECTORY) return [{ kind: "conversations", bytes }];
+			if (path === Computers.CHATS_DIRECTORY) return [{ kind: "chats", bytes }];
 			if (path === TEMPORARY_DIRECTORY) return [{ kind: "temporary", bytes }];
-			const botId = BOT_HOME.exec(path)?.[1];
+			const botId = HOME_FOLDER.exec(path)?.[1];
 			return botId ? [{ kind: "home", botId, bytes }] : [];
 		})
 		.toSorted((a, b) => b.bytes - a.bytes);

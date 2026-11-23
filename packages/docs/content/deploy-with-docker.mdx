@@ -39,7 +39,7 @@ both the web app and the API. It stores everything in PostgreSQL 18.
          DATABASE_URL: postgres://sugabots:${POSTGRES_PASSWORD}@postgres:5432/sugabots
          PUBLIC_URL: https://sugabots.example.com
          BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set it in .env}
-         CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?Set it in .env}
+         SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?Set it in .env}
          EMAIL_PROVIDER: resend
          EMAIL_RESEND_API_KEY: ${EMAIL_RESEND_API_KEY:?Set it in .env}
          EMAIL_TRANSACTIONAL_FROM: Sugabots <no-reply@example.com>
@@ -88,7 +88,7 @@ both the web app and the API. It stores everything in PostgreSQL 18.
    ```sh
    echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)" >> .env
    echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)" >> .env
-   echo "CREDENTIALS_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
+   echo "SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
    ```
 
    Then add your Resend API key. If you don't have one yet, follow
@@ -179,7 +179,7 @@ both the web app and the API. It stores everything in PostgreSQL 18.
 
 5. Create your account
 
-   Open `https://sugabots.example.com` and sign up. A new installation lets its
+   Open `https://sugabots.example.com` and sign up. A new server lets its
    first account in without an invitation, and you own the workspace you create.
 
 </Steps>
@@ -199,7 +199,7 @@ Either way, the service needs these settings:
 
 - `DATABASE_URL`: the database's connection string
 - `PUBLIC_URL`: the service's HTTPS address
-- `BETTER_AUTH_SECRET` and `CREDENTIALS_ENCRYPTION_KEY`: generate each with
+- `BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEY`: generate each with
   `openssl rand -base64 32`
 - The email settings from `compose.yml` above: `EMAIL_PROVIDER`,
   `EMAIL_RESEND_API_KEY` and `EMAIL_TRANSACTIONAL_FROM`
@@ -286,7 +286,7 @@ yourself.
    Put the key in `.env` as `EMAIL_RESEND_API_KEY`, and set
    `EMAIL_TRANSACTIONAL_FROM` in `compose.yml` to an address on the domain you
    verified. Then restart with `docker compose up -d`, and invite someone from
-   **Settings → Members** to check that email arrives.
+   **Settings → People** to check that email arrives.
 
 </Steps>
 
@@ -317,7 +317,7 @@ newer release of your operating system, and restart the server.
 
 ### What OpenSandbox can see
 
-OpenSandbox adds your connections' credentials to a computer's requests as
+OpenSandbox adds your connectors' credentials to a computer's requests as
 they leave it. For secure (HTTPS) connections, it decrypts each one beside the
 computer, adds the credentials, and encrypts it again before it goes on to the
 site. So OpenSandbox can read the computer's connections, the browser's on its

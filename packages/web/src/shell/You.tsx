@@ -62,7 +62,7 @@ export function You() {
 						}
 						label="New workspace"
 						chevron
-						render={<Link to="/onboarding" />}
+						render={<Link to="/workspace-setup" />}
 					/>
 				</SettingsGroup>
 				<SettingsGroup>

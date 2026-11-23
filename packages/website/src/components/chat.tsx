@@ -1,4 +1,4 @@
-import type { BotLook } from "@sugabots/avatars";
+import type { AvatarParts } from "@sugabots/avatars";
 import { cn } from "cn";
 import { CheckIcon, XIcon } from "lucide-react";
 import { AnimatePresence } from "motion/react";
@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
 /*
- * A conversation drawn the way the app draws one: each message is a row with
+ * A chat drawn the way the app draws one: each message is a row with
  * its author's face, name and time at the head, and its words under them,
  * everyone's on the same side.
  */
@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 export interface ChatBot {
 	kind: "bot";
 	name: string;
-	look: BotLook;
+	look: AvatarParts;
 }
 
 interface ChatPerson {
@@ -101,8 +101,8 @@ export function ChatToolLine({ className, ...props }: ComponentProps<"p">) {
 }
 
 interface ChatCollaborationProps {
-	from: BotLook;
-	to: { name: string; look: BotLook };
+	from: AvatarParts;
+	to: { name: string; look: AvatarParts };
 	/** When the other bot last wrote in it, e.g. "9:05am". */
 	lastReply?: string;
 	/** Where it stands, e.g. "Done". */
@@ -120,7 +120,7 @@ export function ChatCollaboration({ from, to, lastReply, status }: ChatCollabora
 			<span aria-hidden className="flex shrink-0">
 				{[from, to.look].map((look) => (
 					<BotAvatar
-						key={`${look.color}-${look.face}`}
+						key={`${look.color}-${look.eyes}`}
 						size="xs"
 						className="-mr-1.75 ring-2 ring-card"
 						{...look}

@@ -5,31 +5,31 @@ import { lazyNamed } from "./lazy-screen.tsx";
 import { rootRoute } from "./root.tsx";
 import { optionalString } from "./search.ts";
 
-const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
-const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
+const Invitation = lazyNamed(() => import("@/screens/Invitation.tsx"), "Invitation");
+const SignIn = lazyNamed(() => import("@/screens/SignIn.tsx"), "SignIn");
 const ResetPassword = lazyNamed(
 	() => import("@/screens/ResetPassword.tsx").then(({ ResetPassword }) => ({ ResetPassword })),
 	"ResetPassword",
 );
 
-interface LoginSearch {
+interface SignInSearch {
 	/** The invitation to open once signed in. */
-	invite?: string;
+	invitation?: string;
 	/** Set on the way back from a password reset. */
 	passwordChanged?: boolean;
 	/** Where signing in interrupted, as a path in this app; anything else is dropped. */
 	returnTo?: string;
 }
 
-export const loginRoute = createRoute({
+export const signInRoute = createRoute({
 	getParentRoute: () => rootRoute,
-	path: "/login",
-	validateSearch: (search: Record<string, unknown>): LoginSearch => ({
-		invite: optionalString(search.invite),
+	path: "/sign-in",
+	validateSearch: (search: Record<string, unknown>): SignInSearch => ({
+		invitation: optionalString(search.invitation),
 		passwordChanged: search.passwordChanged === true ? true : undefined,
 		returnTo: isAppPath(search.returnTo) ? search.returnTo : undefined,
 	}),
-	component: LoginRoute,
+	component: SignInRoute,
 });
 
 /** A path in this app: not protocol-relative or backslashed, which a browser would take elsewhere. */
@@ -42,28 +42,28 @@ function isAppPath(value: unknown): value is string {
 	);
 }
 
-function LoginRoute() {
+function SignInRoute() {
 	const session = useSession();
-	const { invite, passwordChanged, returnTo = "/" } = loginRoute.useSearch();
+	const { invitation, passwordChanged, returnTo = "/" } = signInRoute.useSearch();
 	const navigate = useNavigate();
 
-	if (session.user) {
-		return invite !== undefined ? (
-			<Navigate to="/invite/$id" params={{ id: invite }} replace />
+	if (session.person) {
+		return invitation !== undefined ? (
+			<Navigate to="/invitations/$id" params={{ id: invitation }} replace />
 		) : (
 			<Navigate to={returnTo} replace />
 		);
 	}
 
 	return (
-		<Login
-			inviteId={invite}
+		<SignIn
+			invitationId={invitation}
 			passwordChanged={passwordChanged}
 			onSignedIn={async () => {
 				await session.refresh();
 				await navigate({
-					to: invite !== undefined ? "/invite/$id" : returnTo,
-					params: invite !== undefined ? { id: invite } : undefined,
+					to: invitation !== undefined ? "/invitations/$id" : returnTo,
+					params: invitation !== undefined ? { id: invitation } : undefined,
 					replace: true,
 				});
 			}}
@@ -71,7 +71,7 @@ function LoginRoute() {
 	);
 }
 
-/** `$code` is from a member's referral link; the API decides whether it still works. */
+/** `$code` is from a person's referral link; the API decides whether it still works. */
 export const joinRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/join/$code",
@@ -84,10 +84,10 @@ function JoinRoute() {
 	const { code } = joinRoute.useParams();
 	const navigate = useNavigate();
 
-	if (session.user) return <Navigate to="/" replace />;
+	if (session.person) return <Navigate to="/" replace />;
 
 	return (
-		<Login
+		<SignIn
 			referralCode={code}
 			onSignedIn={async () => {
 				await session.refresh();
@@ -115,41 +115,41 @@ function ResetPasswordRoute() {
 	const session = useSession();
 	const { token } = resetPasswordRoute.useSearch();
 	const navigate = useNavigate();
-	const toLogin = (search: LoginSearch) => navigate({ to: "/login", search, replace: true });
+	const toSignIn = (search: SignInSearch) => navigate({ to: "/sign-in", search, replace: true });
 
 	return (
 		<ResetPassword
 			token={token}
-			onBack={() => toLogin({})}
+			onBack={() => toSignIn({})}
 			onReset={async () => {
 				// The reset ended every session, this browser's included.
 				await session.refresh();
-				await toLogin({ passwordChanged: true });
+				await toSignIn({ passwordChanged: true });
 			}}
 		/>
 	);
 }
 
-export const inviteRoute = createRoute({
+export const invitationRoute = createRoute({
 	getParentRoute: () => rootRoute,
-	path: "/invite/$id",
+	path: "/invitations/$id",
 	beforeLoad: ({ context, params }) => {
 		// An invitation is accepted as somebody. Sign in first, and come back:
 		// the id rides along so the link is not lost on the way.
-		if (context.user === null) {
-			throw redirect({ to: "/login", search: { invite: params.id } });
+		if (context.person === null) {
+			throw redirect({ to: "/sign-in", search: { invitation: params.id } });
 		}
 	},
-	component: InviteRoute,
+	component: InvitationRoute,
 });
 
-function InviteRoute() {
+function InvitationRoute() {
 	const session = useSession();
-	const { id } = inviteRoute.useParams();
+	const { id } = invitationRoute.useParams();
 	const navigate = useNavigate();
 
 	return (
-		<Invite
+		<Invitation
 			id={id}
 			onDone={async () => {
 				await session.refresh();

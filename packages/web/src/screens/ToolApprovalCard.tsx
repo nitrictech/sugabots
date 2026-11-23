@@ -11,14 +11,14 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { awaitedDeciders } from "@/lib/approvals.ts";
-import type { ConnectionLook } from "@/lib/connections.ts";
-import { useReviewToolCall } from "@/lib/conversations.ts";
+import { awaitedApprovers } from "@/lib/approvals.ts";
+import { useReviewToolCall } from "@/lib/chat-query.ts";
+import type { MarkedConnector } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { countOf } from "@/lib/name-list.ts";
 import {
-	connectionLabel,
-	NETWORK_REQUEST_TOOL,
+	connectorLabel,
+	HOST_REQUEST_TOOL,
 	splitToolKey,
 	stepLabel,
 	wordsFromKey,
@@ -26,7 +26,7 @@ import {
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { Dialog, DialogClose, DialogContent } from "@/ui/dialog.tsx";
 import { ScrollArea } from "@/ui/scroll-area.tsx";
 import { awaitsApproval } from "./tool-activity.ts";
@@ -43,41 +43,41 @@ import { awaitsApproval } from "./tool-activity.ts";
  * request is read as a page rather than in a box inside the chat.
  */
 
-type Asker = Pick<BotParticipant, "name" | "color" | "face" | "shape">;
+type Asker = Pick<BotParticipant, "name" | "color" | "eyes" | "shape">;
 type Decision = "allow_once" | "deny";
 
 export function ToolApprovalCard({
 	call,
 	bot,
-	conversationId,
+	chatId,
 	canApprove,
-	look,
+	connector,
 }: {
 	call: ToolCallPart;
 	/** The bot whose reply is waiting on this. */
 	bot: Asker;
-	conversationId: string;
+	chatId: string;
 	/** Whether the reader may answer it. */
 	canApprove: boolean;
-	look?: ConnectionLook;
+	connector?: MarkedConnector;
 }) {
-	const review = useReviewToolCall(conversationId);
+	const review = useReviewToolCall(chatId);
 	const [reviewing, setReviewing] = useState(false);
 	const { handle, name } = splitToolKey(call.tool);
-	const where = handle ? connectionLabel(handle, look?.name) : "";
+	const where = handle ? connectorLabel(handle, connector?.name) : "";
 	const action = stepLabel(call.tool, name);
-	const networkRequest = call.tool === NETWORK_REQUEST_TOOL;
+	const hostRequest = call.tool === HOST_REQUEST_TOOL;
 	const step: Step = {
 		action,
-		who: networkRequest
+		who: hostRequest
 			? `${bot.name} wants the project's computer to reach a new host`
 			: `${bot.name} wants to use ${where || "a tool"}`,
 		where,
-		look,
-		networkRequest,
+		connector,
+		hostRequest,
 	};
 	const answerable = awaitsApproval(call) && canApprove;
-	// The answer stays given from when it is sent until the conversation's events say
+	// The answer stays given from when it is sent until the chat's events say
 	// the call is decided, a moment after the decision is accepted.
 	const sent = review.isPending || review.isSuccess;
 	const decide = (decision: Decision) =>
@@ -88,7 +88,7 @@ export function ToolApprovalCard({
 	const status =
 		awaitsApproval(call) && !canApprove ? (
 			<p className="m-0 text-pretty text-muted-foreground text-xs leading-normal">
-				{awaitedDeciders(call)}
+				{awaitedApprovers(call)}
 			</p>
 		) : decided?.status === "allowed" ? (
 			<Outcome announced={announced} icon={<Check aria-hidden size={12} strokeWidth={2.8} />}>
@@ -195,24 +195,24 @@ interface Step {
 	action: string;
 	who: string;
 	where: string;
-	look: ConnectionLook | undefined;
-	/** A request for the computer to reach another host, which no connection makes. */
-	networkRequest: boolean;
+	connector: MarkedConnector | undefined;
+	/** A request for the computer to reach another host, which no connector makes. */
+	hostRequest: boolean;
 }
 
-/** What the step uses: the connection's mark, or a globe for a network request. */
+/** What the step uses: the connector's mark, or a globe for a host request. */
 function StepMark({ step, size }: { step: Step; size: "md" | "sm" }) {
 	return (
-		<ConnectionMark
-			presetId={step.look?.presetId}
+		<ConnectorMark
+			markId={step.connector?.markId}
 			name={step.where || step.action}
-			icon={step.networkRequest ? Globe : undefined}
+			icon={step.hostRequest ? Globe : undefined}
 			size={size}
 		/>
 	);
 }
 
-/** The connection's mark beside who wants to use it, and what they would do. */
+/** The connector's mark beside who wants to use it, and what they would do. */
 function StepHeading({ step }: { step: Step }) {
 	return (
 		<div className="flex min-w-0 items-start gap-2.5">
@@ -367,7 +367,7 @@ function ReviewHeading({ step, bot, headingId }: { step: Step; bot: Asker; headi
 	return (
 		<div className="flex flex-col items-center gap-1 pb-2 text-center">
 			<span aria-hidden className="relative mb-2.5 inline-flex">
-				<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={64} />
+				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={64} />
 				<span className="absolute -right-2 -bottom-1 rounded-lg ring-3 ring-panel">
 					<StepMark step={step} size="sm" />
 				</span>

@@ -53,9 +53,11 @@
 		},
 		{
 			"includes": [
-				"packages/core/src/providers/connections/github/**/*.ts",
+				"packages/core/src/providers/connectors/github/**/*.ts",
 				"packages/core/src/providers/models/**/*.ts",
 				"packages/core/src/providers/model-providers/remote.ts",
+				"packages/core/src/operations/**/*.ts",
+				"packages/contracts/src/errors/**/*.ts",
 				"packages/server/src/http/errors.ts"
 			],
 			"plugins": [
@@ -67,7 +69,7 @@
 		{
 			"includes": [
 				"packages/**/src/**",
-				"!packages/core/src/conversations/turns/**",
+				"!packages/core/src/chats/turns/**",
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
@@ -82,7 +84,7 @@
 								"patterns": [
 									{
 										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
-										"message": "Outside `conversations/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
 									}
 								]
 							}
@@ -97,7 +99,7 @@
 				"packages/**/src/**/*.test.tsx",
 				"packages/**/src/**/testing.ts",
 				"packages/**/src/**/*.test-support.ts",
-				"!packages/core/src/conversations/turns/**"
+				"!packages/core/src/chats/turns/**"
 			],
 			"linter": {
 				"rules": {
@@ -114,7 +116,7 @@
 											"!**/turns/testing",
 											"!**/turns/testing.ts"
 										],
-										"message": "Outside `conversations/turns/`, a test imports the Turns module only through `turns/turns.ts` or `turns/testing.ts`."
+										"message": "Outside `chats/turns/`, a test imports the Turns module only through `turns/turns.ts` or `turns/testing.ts`."
 									}
 								]
 							}
@@ -144,7 +146,92 @@
 									},
 									{
 										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
-										"message": "Outside `conversations/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/**/src/**/*.{ts,tsx}", "!packages/core/src/proofs/**"],
+			"plugins": ["./lint/proofs-only-in-proofs.grit"]
+		},
+		{
+			"includes": ["packages/**/src/**/*.{ts,tsx}", "!packages/core/src/proofs/proof.ts"],
+			"plugins": ["./lint/no-proof-assertion.grit"]
+		},
+		{
+			"includes": [
+				"packages/core/src/proofs/**/*.ts",
+				"packages/core/src/authentication/**/*.ts",
+				"packages/core/src/operations/**/*.ts",
+				"packages/core/src/principal.ts",
+				"packages/core/src/tiers.ts",
+				"packages/bot-loop/src/**/*.ts",
+				"packages/contracts/src/operations/**/*.ts",
+				"packages/contracts/src/errors/**/*.ts",
+				"!packages/core/src/proofs/proof.ts"
+			],
+			"plugins": ["./lint/no-double-assertion.grit"]
+		},
+		{
+			"includes": ["packages/**/src/**/*.{ts,tsx}", "!packages/core/src/authentication/**"],
+			"plugins": ["./lint/principals-only-in-authentication.grit"]
+		},
+		{
+			"includes": [
+				"packages/core/src/**/*.ts",
+				"packages/bot-loop/src/**/*.ts",
+				"!**/*.test.ts",
+				"!**/*.test-support.ts",
+				"!**/testing.ts",
+				"!packages/core/src/database/test-*.ts"
+			],
+			"plugins": ["./lint/no-module-state.grit"]
+		},
+		{
+			"includes": [
+				"packages/core/src/operations/**",
+				"packages/bot-loop/src/**",
+				"packages/contracts/src/**",
+				"packages/sdk/src/**",
+				"packages/web/src/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"**/database/database",
+											"**/database/database.ts",
+											"**/database/schema",
+											"**/database/schema.ts",
+											"**/sql",
+											"**/sql.ts",
+											"drizzle-orm",
+											"drizzle-orm/*"
+										],
+										"message": "Only services reach the database. Call a service, which takes the proofs it needs."
+									},
+									{
+										"group": [
+											"**/turns/**",
+											"!**/turns/turns",
+											"!**/turns/turns.ts",
+											"!./turns/index.ts"
+										],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal. (`./turns/index.ts` in `operations/` is the turns domain's operations.)"
 									}
 								]
 							}

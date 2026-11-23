@@ -69,13 +69,13 @@ describe("asHttpError", () => {
 
 	it("passes a failure already in the API's terms through as it is", () => {
 		const refusal = new NotFound({
-			message: userText`No such conversation`,
+			message: userText`No such chat`,
 			details: { id: "t1" },
 		});
 
 		expect(failWith(refusal)).toEqual({
 			_tag: "NotFound",
-			message: "No such conversation",
+			message: "No such chat",
 			details: { id: "t1" },
 		});
 	});

@@ -30,7 +30,7 @@ export const refuseWhileLeading = Effect.fn("ProjectLeads.refuseWhileLeading")(f
 				seen: sql<boolean>`(${project.visibility} = 'public' or exists (
 					select 1 from ${projectMember}
 					where ${projectMember.projectId} = ${project.id}
-						and ${projectMember.userId} = ${among.viewerId}
+						and ${projectMember.personId} = ${among.viewerId}
 				))`,
 			})
 			.from(project)

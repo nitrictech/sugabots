@@ -1,19 +1,19 @@
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import type { Computers } from "@sugabots/core/computers/computers";
-import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
+import { DesktopViewer } from "@sugabots/core/chats/tools/browser/viewer";
 import {
 	answerChallenge,
 	CHALLENGE_BYTES,
-} from "@sugabots/core/conversations/tools/browser/vnc-authentication";
-import { Installation } from "@sugabots/core/installation/installation";
+} from "@sugabots/core/chats/tools/browser/vnc-authentication";
+import type { Computers } from "@sugabots/core/computers/computers";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { Data, Effect, Layer } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Socket } from "effect/unstable/socket";
 import { Authentication } from "../auth/authentication.ts";
 
 /**
- * A bot's desktop in a conversation, live: a WebSocket the web app's noVNC
+ * A bot's desktop in a chat, live: a WebSocket the web app's noVNC
  * viewer opens, relayed to the desktop's VNC server in the computer. The relay
  * logs in to the server with its password and offers the viewer no
  * authentication, then passes frames both ways untouched; neither the
@@ -25,11 +25,11 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 		const router = yield* HttpRouter.HttpRouter;
 		const authentication = yield* Authentication.Service;
 		const viewer = yield* DesktopViewer.Service;
-		const trusted = new Set((yield* Installation.Service).trustedOrigins);
+		const trusted = new Set((yield* ServerSettings.Service).trustedOrigins);
 
 		yield* router.add(
 			"GET",
-			`${API_BASE_PATH}/conversations/:conversationId/bots/:botId/desktop`,
+			`${API_BASE_PATH}/chats/:chatId/bots/:botId/desktop`,
 			Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest;
 				// Any page the browser visits can open a WebSocket here with the
@@ -39,12 +39,12 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 				}
 				const holder = yield* authentication.identify(new Headers(request.headers));
 				if (!holder) return HttpServerResponse.text("Sign in first", { status: 401 });
-				const { conversationId, botId } = yield* HttpRouter.params;
-				if (!conversationId || !botId) return HttpServerResponse.empty({ status: 404 });
+				const { chatId, botId } = yield* HttpRouter.params;
+				if (!chatId || !botId) return HttpServerResponse.empty({ status: 404 });
 
 				return yield* Effect.scoped(
 					Effect.gen(function* () {
-						const desktop = yield* viewer.open({ conversationId, botId });
+						const desktop = yield* viewer.open({ chatId, botId });
 						const browserSide = yield* request.upgrade;
 						// Ending the relay closes the person's socket.
 						yield* Effect.raceFirst(
@@ -54,7 +54,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 						return HttpServerResponse.empty();
 					}),
 				).pipe(
-					CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(holder.user.id)),
+					CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(holder.person.id)),
 					Effect.catchTags({
 						DesktopUnavailable: (failure) =>
 							Effect.succeed(HttpServerResponse.text(failure.userMessage, { status: 404 })),

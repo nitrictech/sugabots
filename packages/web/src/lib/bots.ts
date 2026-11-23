@@ -10,7 +10,7 @@ import {
 import { Effect } from "effect";
 import { useEffect, useRef } from "react";
 import { client } from "@/api.ts";
-import { projectThreadsKey } from "@/lib/chats.ts";
+import { projectChatsKey } from "@/lib/chats.ts";
 import { projectsQuery } from "@/lib/projects.ts";
 import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
 
@@ -264,8 +264,8 @@ function useInvalidateBots(): () => Promise<void> {
 	return async () => {
 		await Promise.all([
 			queries.invalidateQueries({ queryKey: ["bots", workspaceId] }),
-			// A bot's threads list shows it.
-			queries.invalidateQueries({ queryKey: projectThreadsKey(workspaceId) }),
+			// A bot's chats list shows it.
+			queries.invalidateQueries({ queryKey: projectChatsKey(workspaceId) }),
 			// So do the bots lists of the projects it is in, which the list of
 			// projects counts. A bot made private or deleted leaves every project.
 			queries.invalidateQueries({ queryKey: ["project-bots"] }),

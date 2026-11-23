@@ -14,12 +14,12 @@
 	color-scheme: dark;
 
 	/*
-	 * Surfaces. The conversation and the sidebar share the ground in dark; light gives
-	 * the sidebar its own grey so the white conversation reads as the working area.
+	 * Surfaces. The chat and the sidebar share the ground in dark; light gives
+	 * the sidebar its own grey so the white chat reads as the working area.
 	 */
 	--background: light-dark(#ffffff, var(--color-zinc-950));
 	--rail: light-dark(var(--color-zinc-100), var(--color-black));
-	/* The conversation list column, and the grouped rows in settings. */
+	/* The chat list column, and the grouped rows in settings. */
 	--list: light-dark(var(--color-zinc-50), var(--color-zinc-900));
 	/* The column beside a chat: Details, or a collaboration or run. */
 	--aside: light-dark(#ffffff, var(--color-zinc-950));
@@ -53,7 +53,7 @@
 	--row-hover: light-dark(var(--color-zinc-200), var(--color-zinc-900));
 	/* A message row under the pointer, barely lifted off the chat. */
 	--message-hover: light-dark(#f7f7f8, #111113);
-	/* The open conversation in the list. */
+	/* The open chat in the list. */
 	--row-selected: light-dark(var(--color-zinc-200), var(--color-zinc-800));
 
 	--foreground: light-dark(var(--color-zinc-900), var(--color-zinc-100));
@@ -107,7 +107,7 @@
 	--ring-shadow: 0 0 0 3px var(--ring-halo);
 	/* How full a bot's short-term memory is. */
 	--meter: var(--primary);
-	/* The count of what is unread or waiting, on Inbox, a menu row or a tab. */
+	/* The count of what is unread or waiting, on a menu row or a tab. */
 	--rail-count: var(--primary);
 	/* A reaction you are among, under a message: a grey wash edged in the accent. Others' are a card on a chip's edge. */
 	--reaction-mine: light-dark(#f1f1f3, #1f1f23);
@@ -128,7 +128,7 @@
 	--success: #3fcb6b;
 	/* Green text for something that worked. Both pass AA on a panel. */
 	--success-text: light-dark(#1a7f37, #4ade80);
-	/* A bot working on a reply, the one blue: its spinner and time in a thread's row. Both pass AA on the rail and on a selected row. */
+	/* A bot working on a reply, the one blue: its spinner and time in a chat's row. Both pass AA on the rail and on a selected row. */
 	--working: light-dark(#1d4ed8, #60a5fa);
 
 	/*
@@ -572,9 +572,9 @@
 }
 
 /*
- * Room on the right of a bot's thread for Details' floating cards (17rem), only
+ * Room on the right of a bot's chat for Details' floating cards (17rem), only
  * as much as its centred column (50rem, `max-w-200`) needs to clear them: none
- * while the thread is wide enough for both, all of them once it is not.
+ * while the chat is wide enough for both, all of them once it is not.
  */
 @utility pr-clear-details {
 	padding-right: clamp(0px, 2 * 17rem + 50rem - 100%, 17rem);
@@ -605,7 +605,7 @@
 	color: #ffffff;
 }
 
-/* A collapsible panel growing to its content, as `Trace` opens one. */
+/* A collapsible panel growing to its content, as `Activity` opens one. */
 @utility transition-height {
 	transition-property: height;
 	transition-timing-function: var(--default-transition-timing-function);
@@ -614,7 +614,7 @@
 
 /*
  * Words for something still happening, with a light sweeping across them, as
- * `Trace` draws a running line. Still, under reduced motion, they keep their colour.
+ * `Activity` draws a running line. Still, under reduced motion, they keep their colour.
  */
 @utility shimmer {
 	@media (prefers-reduced-motion: no-preference) {
@@ -888,21 +888,18 @@
 @utility w-file-pane {
 	width: clamp(360px, var(--pane-width, 58%), calc(100% - 320px));
 }
-@utility w-conversation-pane {
+@utility w-chat-pane {
 	width: clamp(320px, var(--pane-width, 440px), calc(100% - 360px));
-}
-@utility w-inbox-list {
-	width: clamp(280px, var(--list-width, 380px), 60%);
 }
 @utility w-desktop-screen {
 	/* As large as its container allows while keeping the desktop's 4:3 shape. */
 	width: min(100cqw, calc(100cqh * 4 / 3));
 }
 @utility w-tab {
-	/* One of a phone's four tabs, after the 16px of gaps between them. */
-	width: calc((100% - 16px) / 4);
+	/* One of a phone's three tabs, after the bar's 10px of padding and the 4px of gaps between them. */
+	width: calc((100% - 14px) / 3);
 }
-@utility w-conversation-line {
+@utility w-chat-line {
 	width: calc(100% - 8px);
 }
 @utility w-header-popover {

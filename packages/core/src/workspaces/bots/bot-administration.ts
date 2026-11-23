@@ -12,12 +12,12 @@ import { ProjectComputers } from "../../computers/project-computers.ts";
 import { serviceOperations } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
-import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
+import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
 import type { UserFacing } from "../../user-message.ts";
 import type { LeadsProjects } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
 import { personFacingBot, systemBots, visiblePersonFacingBots } from "./bot-reads.ts";
-import { BotRepository } from "./bot-repository.ts";
+import { BotStore } from "./bot-store.ts";
 import { PersonalAssistants } from "./personal-assistants.ts";
 
 /**
@@ -37,9 +37,9 @@ export interface Interface {
 	}) => Effect.Effect<
 		Bot,
 		| AuthorizationDenied
-		| ModelProviderRepository.ModelNotEnabled
-		| BotRepository.BotNameTaken
-		| BotRepository.BotHandleReserved,
+		| ModelProviderStore.ModelNotEnabled
+		| BotStore.BotNameTaken
+		| BotStore.BotHandleReserved,
 		CurrentActor.Service
 	>;
 	/** Pins the bot to the actor's sidebar, or takes it off. */
@@ -58,7 +58,7 @@ export interface Interface {
 		model?: string;
 	}) => Effect.Effect<
 		Bot,
-		AuthorizationDenied | ModelProviderRepository.ModelNotEnabled,
+		AuthorizationDenied | ModelProviderStore.ModelNotEnabled,
 		CurrentActor.Service
 	>;
 	readonly update: (input: {
@@ -68,11 +68,11 @@ export interface Interface {
 		Bot,
 		| AuthorizationDenied
 		| EmptyBotUpdate
-		| ModelProviderRepository.ModelNotEnabled
-		| BotRepository.BotNameTaken
-		| BotRepository.BotHandleReserved
-		| BotRepository.BotGone
-		| BotRepository.SystemBotImmutable
+		| ModelProviderStore.ModelNotEnabled
+		| BotStore.BotNameTaken
+		| BotStore.BotHandleReserved
+		| BotStore.BotGone
+		| BotStore.SystemBotImmutable
 		| LeadsProjects
 		| AssistantStaysPrivate
 		| AssistantInstructionsManaged
@@ -84,7 +84,7 @@ export interface Interface {
 	}) => Effect.Effect<
 		void,
 		| AuthorizationDenied
-		| BotRepository.SystemBotImmutable
+		| BotStore.SystemBotImmutable
 		| LeadsProjects
 		| Computers.Unavailable
 		| ProjectComputers.ComputerMadeMeanwhile,
@@ -100,7 +100,7 @@ export interface Interface {
 		model: string;
 	}) => Effect.Effect<
 		SystemBot,
-		AuthorizationDenied | ModelProviderRepository.ModelNotEnabled | BotRepository.SystemBotMissing,
+		AuthorizationDenied | ModelProviderStore.ModelNotEnabled | BotStore.SystemBotMissing,
 		CurrentActor.Service
 	>;
 }
@@ -112,8 +112,8 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("BotAdministration");
 	const authorization = yield* Authorization.Service;
-	const bots = yield* BotRepository.Service;
-	const modelProviders = yield* ModelProviderRepository.Service;
+	const bots = yield* BotStore.Service;
+	const modelProviders = yield* ModelProviderStore.Service;
 	const projectComputers = yield* ProjectComputers.Service;
 	const personalAssistants = yield* PersonalAssistants.Service;
 
@@ -142,7 +142,7 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId, actor } = yield* authorization.workspace(workspace, "bot.create");
 					yield* modelProviders.requireEnabled(workspaceId, bot.model);
-					const made = yield* bots.create(workspaceId, { createdById: actor.userId, bot });
+					const made = yield* bots.create(workspaceId, { createdById: actor.personId, bot });
 					return yield* shown(made, actor);
 				}),
 			),
@@ -154,7 +154,7 @@ export const make = Effect.gen(function* () {
 					const { bot, actor } = yield* authorization.bot(botId, "bot.read");
 					yield* bots.setPinned({
 						workspaceId: bot.workspaceId,
-						userId: actor.userId,
+						personId: actor.personId,
 						botId: bot.id,
 						pinned,
 					});
@@ -170,7 +170,7 @@ export const make = Effect.gen(function* () {
 						workspace,
 						"workspace.read",
 					);
-					const person = { workspaceId, userId: actor.userId };
+					const person = { workspaceId, personId: actor.personId };
 					const assistant =
 						model === undefined
 							? yield* personalAssistants.provision(person)
@@ -187,7 +187,7 @@ export const make = Effect.gen(function* () {
 					if (Object.values(changes).every((value) => value === undefined)) {
 						return yield* new EmptyBotUpdate();
 					}
-					if (bot.assistantOf !== null) yield* requireAssistantLookOnly(changes);
+					if (bot.assistantOf !== null) yield* requireAssistantAvatarOnly(changes);
 					if (changes.usesComputer !== undefined && changes.usesComputer !== bot.usesComputer) {
 						yield* authorization.bot(botId, "computer.manage");
 					}
@@ -196,7 +196,7 @@ export const make = Effect.gen(function* () {
 						yield* modelProviders.requireEnabled(bot.workspaceId, changes.model);
 					}
 					return yield* shown(
-						yield* bots.update(bot.workspaceId, bot.id, changes, actor.userId),
+						yield* bots.update(bot.workspaceId, bot.id, changes, actor.personId),
 						actor,
 					);
 				}),
@@ -217,7 +217,7 @@ export const make = Effect.gen(function* () {
 							ProjectComputers.lockWithoutComputer(defaultProject),
 						);
 					});
-					yield* bots.remove(bot.workspaceId, bot.id, actor.userId, destroyComputer);
+					yield* bots.remove(bot.workspaceId, bot.id, actor.personId, destroyComputer);
 				}),
 			),
 
@@ -236,14 +236,14 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId } = yield* authorization.workspace(
 						workspace,
-						"workspace.builtInBots.configure",
+						"workspace.systemModel.choose",
 					);
 					yield* holdingModel(workspaceId, model, bots.setSystemBotModel(workspaceId, key, model));
 					const updated = (yield* systemBots(workspaceId)).find(
 						(candidate) => candidate.key === key,
 					);
 					if (!updated) {
-						return yield* new BotRepository.SystemBotMissing({ key });
+						return yield* new BotStore.SystemBotMissing({ key });
 					}
 					return updated;
 				}),
@@ -256,21 +256,21 @@ export const layerNoDeps = Layer.effect(Service, make);
 export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
-		BotRepository.layer,
-		ModelProviderRepository.layer,
+		BotStore.layer,
+		ModelProviderStore.layer,
 		ProjectComputers.layer,
 		PersonalAssistants.layer,
 	]),
 );
 
 /** What a Personal Assistant's person may change of it: its name and its look. */
-const ASSISTANT_LOOK: ReadonlySet<keyof BotUpdate> = new Set(["name", "color", "face", "shape"]);
+const ASSISTANT_LOOK: ReadonlySet<keyof BotUpdate> = new Set(["name", "color", "eyes", "shape"]);
 
 /**
  * Refuses `changes` to a Personal Assistant that change more than its look:
- * Sugabots manages the rest of it. Its connections are changed apart.
+ * Sugabots manages the rest of it. Its connectors are changed apart.
  */
-const requireAssistantLookOnly = (changes: BotUpdate) =>
+const requireAssistantAvatarOnly = (changes: BotUpdate) =>
 	Effect.gen(function* () {
 		const changed = (Object.keys(changes) as (keyof BotUpdate)[]).filter(
 			(field) => changes[field] !== undefined,
@@ -299,10 +299,10 @@ export class AssistantInstructionsManaged
 	}
 }
 
-/** Sugabots manages a Personal Assistant: its person changes only its name, its look and its connections. */
+/** Sugabots manages a Personal Assistant: its person changes only its name, its look and its connectors. */
 export class AssistantManaged extends Data.TaggedError("AssistantManaged") implements UserFacing {
 	get userMessage() {
-		return userText`Only a Personal Assistant's name, look and connections can be changed`;
+		return userText`Only a Personal Assistant's name, look and connectors can be changed`;
 	}
 }
 

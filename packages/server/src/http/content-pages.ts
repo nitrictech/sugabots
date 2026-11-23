@@ -6,12 +6,12 @@ import {
 	withLeadingTags,
 } from "@sugabots/contracts/file-pages";
 import { FilePages } from "@sugabots/core/files/pages";
-import { Installation } from "@sugabots/core/installation/installation";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { Effect, Layer, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 /**
- * Bot-made HTML pages, served from the installation's content origin when
+ * Bot-made HTML pages, served from the server's content origin when
  * one is set, at addresses `FilePages` seals. Only the content origin
  * answers here, and it answers nothing else (see `onlyPagesOnContentHost`).
  *
@@ -24,14 +24,14 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 export const contentPageRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const router = yield* HttpRouter.HttpRouter;
-		const installation = yield* Installation.Service;
+		const serverSettings = yield* ServerSettings.Service;
 		const pages = yield* FilePages.Service;
-		const { contentOrigin } = installation;
+		const { contentOrigin } = serverSettings;
 		if (!contentOrigin) return;
 		const sentToContentOrigin = contentOriginMatcher(contentOrigin);
 		const headers = {
-			"content-security-policy": `sandbox allow-scripts; ${PAGE_CONTENT_POLICY}; frame-ancestors ${installation.trustedOrigins.join(" ")}`,
-			"allow-csp-from": new URL(installation.webAppUrl).origin,
+			"content-security-policy": `sandbox allow-scripts; ${PAGE_CONTENT_POLICY}; frame-ancestors ${serverSettings.trustedOrigins.join(" ")}`,
+			"allow-csp-from": new URL(serverSettings.webAppUrl).origin,
 			"x-content-type-options": "nosniff",
 			"referrer-policy": "no-referrer",
 			// The address stops working within minutes, and the page is for whoever may see its file.

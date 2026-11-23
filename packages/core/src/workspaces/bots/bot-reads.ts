@@ -23,8 +23,8 @@ export const visiblePersonFacingBots = (workspaceId: string, actor: Actor) =>
 					eq(bot.workspaceId, workspaceId),
 					isNull(bot.systemBotKey),
 					managesEveryBot(actor)
-						? or(isNull(bot.assistantOf), eq(bot.assistantOf, actor.userId))
-						: reachesBotFor(bot.id, actor.userId),
+						? or(isNull(bot.assistantOf), eq(bot.assistantOf, actor.personId))
+						: reachesBotFor(bot.id, actor.personId),
 				),
 			)
 			.orderBy(asc(bot.name)),
@@ -43,7 +43,7 @@ export const personFacingBot = (botId: string, actor: Actor) =>
 /** What a bot is shown with: its row, whether `actor` pinned it, its default project and who added it. */
 const shownColumns = (actor: Actor) => ({
 	bot,
-	pinned: pinnedBy(bot.id, actor.userId),
+	pinned: pinnedBy(bot.id, actor.personId),
 	defaultProjectId: defaultProjectIdOf(bot.id),
 	createdBy: creatorOf(bot),
 });
@@ -86,7 +86,7 @@ export const systemBots = (workspaceId: string) =>
 				name: definition.name,
 				description: definition.description,
 				color: definition.color,
-				face: definition.face,
+				eyes: definition.eyes,
 				shape: definition.shape,
 				model: modelOf.get(definition.key) ?? null,
 			}));

@@ -1,0 +1,6 @@
+/**
+ * The errors the events operations can fail with: `Schema.TaggedError` classes
+ * implementing `DomainError`.
+ */
+
+export {};

@@ -6,7 +6,7 @@ import {
 } from "@sugabots/contracts";
 import type { ReactElement } from "react";
 import { useBot } from "@/lib/bots.ts";
-import { useWorkspace, useWorkspaceMembers } from "@/lib/workspace.ts";
+import { useMemberships, useWorkspace } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { PopoverContent } from "@/ui/popover.tsx";
@@ -106,11 +106,11 @@ function PersonCard({ person }: { person: PersonParticipant }) {
 	);
 }
 
-/** The person's role in the workspace, once its members are loaded. */
+/** The person's role in the workspace, once its memberships are loaded. */
 function PersonRole({ personId }: { personId: string }) {
 	const { workspace } = useWorkspace();
-	const { data: members } = useWorkspaceMembers(workspace?.id);
-	const role = members?.find((member) => member.user.id === personId)?.role;
+	const { data: memberships } = useMemberships(workspace?.id);
+	const role = memberships?.find((membership) => membership.person.id === personId)?.role;
 	if (!role) return null;
 	return <TitleTag>{workspaceRoleLabel(role)}</TitleTag>;
 }
@@ -119,7 +119,7 @@ function BotCard({ bot }: { bot: BotParticipant }) {
 	return (
 		<>
 			<CardHeading
-				face={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={40} />}
+				face={<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={40} />}
 				title={
 					<>
 						<span className="truncate">{bot.name}</span>

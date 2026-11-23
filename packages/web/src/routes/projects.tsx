@@ -1,8 +1,8 @@
 import type { Project } from "@sugabots/contracts";
 import { createRoute, Navigate, Outlet } from "@tanstack/react-router";
-import { prefetchConversation, useProjectThreadPlace, useProjectThreads } from "@/lib/chats.ts";
+import { prefetchChat, useProjectChatPlace, useProjectChats } from "@/lib/chats.ts";
 import { API_DID_NOT_ANSWER, failureMessage } from "@/lib/failure.ts";
-import { conversationLink } from "@/lib/links.ts";
+import { chatLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { findProject, useJoinProject, useProjects } from "@/lib/projects.ts";
 import { FilesPage } from "@/screens/Files.tsx";
@@ -13,22 +13,18 @@ import { Panes } from "@/shell/Shell.tsx";
 import { Button } from "@/ui/button.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import {
-	ConversationPage,
-	ConversationScreen,
+	ChatPage,
+	ChatScreen,
 	preloadChatScreenForWideLayout,
-	RoutedConversation,
+	RoutedChat,
 	type SearchChange,
-} from "./conversation.tsx";
+} from "./chat.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { useProjectRouteOwner } from "./owner.ts";
-import {
-	type ConversationSearch,
-	validateConversationSearch,
-	validateFileSearch,
-} from "./search.ts";
+import { type ChatSearch, validateChatSearch, validateFileSearch } from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
-const NewThreadPage = lazyNamed(() => import("@/screens/NewThreadPage.tsx"), "NewThreadPage");
+const NewChatPage = lazyNamed(() => import("@/screens/NewChatPage.tsx"), "NewChatPage");
 
 /** Every project the person is in or could join, and making another. */
 export const projectsRoute = createRoute({
@@ -95,47 +91,45 @@ function JoinProject({ project }: { project: Project }) {
 }
 
 /**
- * A project opened without a thread chosen: on a phone, its sidebar as a
- * page, to pick from, as a bot's is; on a wider screen, its newest thread, or,
+ * A project opened without a chat chosen: on a phone, its sidebar as a
+ * page, to pick from, as a bot's is; on a wider screen, its newest chat, or,
  * while it has none, starting one, as a bot's index always does.
  */
 export const projectIndexRoute = createRoute({
 	getParentRoute: () => projectRoute,
 	path: "/",
-	loader: () => ConversationPage.preload(),
+	loader: () => ChatPage.preload(),
 	component: () => {
 		const project = findProject(useProjects().data, projectIndexRoute.useParams().project);
 		const wide = useMediaQuery(SIDE_BY_SIDE);
 		if (!project) return null;
-		return wide ? <OpenNewestThread project={project} /> : <MobileOwner owner={{ project }} />;
+		return wide ? <OpenNewestChat project={project} /> : <MobileOwner owner={{ project }} />;
 	},
 });
 
-function OpenNewestThread({ project }: { project: Project }) {
-	const list = useProjectThreads(project.id);
+function OpenNewestChat({ project }: { project: Project }) {
+	const list = useProjectChats(project.id);
 	if (list.isError) {
 		return <EmptyState title="Could not open this project">{API_DID_NOT_ANSWER}</EmptyState>;
 	}
 	if (!list.data) return null;
-	const [newest] = list.data.threads;
-	if (!newest) return <ProjectNewThread project={project} />;
-	return (
-		<Navigate {...conversationLink({ project, conversationId: newest.conversation.id })} replace />
-	);
+	const [newest] = list.data.chats;
+	if (!newest) return <ProjectNewChat project={project} />;
+	return <Navigate {...chatLink({ project, chatId: newest.chat.id })} replace />;
 }
 
-/** Starting a thread in `project` from its first message. */
-function ProjectNewThread({ project }: { project: Project }) {
-	return <NewThreadPage key={project.id} owner={{ project }} />;
+/** Starting a chat in `project` from its first message. */
+function ProjectNewChat({ project }: { project: Project }) {
+	return <NewChatPage key={project.id} owner={{ project }} />;
 }
 
-/** Starting a thread in the project, from its first message. */
-export const projectNewThreadRoute = createRoute({
+/** Starting a chat in the project, from its first message. */
+export const projectNewChatRoute = createRoute({
 	getParentRoute: () => projectRoute,
 	path: "/new",
 	component: () => {
-		const project = findProject(useProjects().data, projectNewThreadRoute.useParams().project);
-		return project ? <ProjectNewThread project={project} /> : null;
+		const project = findProject(useProjects().data, projectNewChatRoute.useParams().project);
+		return project ? <ProjectNewChat project={project} /> : null;
 	},
 });
 
@@ -160,27 +154,27 @@ export const projectFileRoute = createRoute({
 	},
 });
 
-/** One of a project's threads. */
-export const projectThreadRoute = createRoute({
+/** One of a project's chats. */
+export const projectChatRoute = createRoute({
 	getParentRoute: () => projectRoute,
-	path: "/$conversation",
-	validateSearch: (search: Record<string, unknown>) => validateConversationSearch(search),
+	path: "/$chat",
+	validateSearch: (search: Record<string, unknown>) => validateChatSearch(search),
 	// On every hover, not once per 30 s: the query cache, not the router,
-	// decides what of the conversation is still fresh.
+	// decides what of the chat is still fresh.
 	preloadStaleTime: 0,
 	// Also run while the pointer is on a link here, so it is loading before the click.
 	loader: ({ context, params }) => {
-		prefetchConversation(context.queries, params.conversation);
-		return ConversationPage.preload();
+		prefetchChat(context.queries, params.chat);
+		return ChatPage.preload();
 	},
 	component: () => {
-		const { project, conversation } = projectThreadRoute.useParams();
-		const navigate = projectThreadRoute.useNavigate();
-		const search = projectThreadRoute.useSearch();
+		const { project, chat } = projectChatRoute.useParams();
+		const navigate = projectChatRoute.useNavigate();
+		const search = projectChatRoute.useSearch();
 		return (
-			<ProjectConversation
+			<ProjectChatScreen
 				projectSlug={project}
-				conversationId={conversation}
+				chatId={chat}
 				search={search}
 				navigate={(change) => void navigate(change)}
 			/>
@@ -189,31 +183,31 @@ export const projectThreadRoute = createRoute({
 });
 
 /**
- * One of the conversations of the project at `projectSlug`, one of its
- * threads or automations' feeds, at its own address; see `RoutedConversation`.
+ * One of the chats of the project at `projectSlug`, one of its
+ * chats or automations' feeds, at its own address; see `RoutedChat`.
  */
-export function ProjectConversation({
+export function ProjectChatScreen({
 	projectSlug,
-	conversationId,
+	chatId,
 	search,
 	navigate,
 }: {
 	projectSlug: string;
-	conversationId: string;
-	search: ConversationSearch;
+	chatId: string;
+	search: ChatSearch;
 	navigate: (change: SearchChange) => void;
 }) {
 	return (
-		<ConversationScreen place={useProjectThreadPlace(projectSlug, conversationId)}>
-			{(found, user) => (
-				<RoutedConversation
+		<ChatScreen place={useProjectChatPlace(projectSlug, chatId)}>
+			{(found, signedIn) => (
+				<RoutedChat
 					found={found}
-					conversationId={conversationId}
-					user={user}
+					chatId={chatId}
+					signedIn={signedIn}
 					search={search}
 					navigate={navigate}
 				/>
 			)}
-		</ConversationScreen>
+		</ChatScreen>
 	);
 }

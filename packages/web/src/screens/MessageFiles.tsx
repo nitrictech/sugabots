@@ -54,7 +54,7 @@ function lookOf(file: FilePart): FileLook {
 /**
  * One image in a 4:3 frame up to 360 by 270, two side by side, or three to a
  * row, each tile 4:3 and the grid no wider than the chat it is in. Every image
- * is shown. Tiles keep their size before their images load, so the conversation
+ * is shown. Tiles keep their size before their images load, so the chat
  * doesn't move as they arrive.
  */
 function ImageGrid({ images, urlOf }: { images: readonly FilePart[]; urlOf: FileUrlOf }) {

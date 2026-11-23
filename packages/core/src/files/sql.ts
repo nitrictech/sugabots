@@ -10,9 +10,9 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import { conversation, message, toolCall } from "../conversations/sql.ts";
+import { chat, message, toolCall } from "../chats/sql.ts";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { bot, user } from "../workspaces/sql.ts";
+import { bot, person } from "../workspaces/sql.ts";
 
 /**
  * Where a file came from, which decides the columns it sets:
@@ -28,22 +28,22 @@ type FileKind = WrittenFileKind | "upload" | "bot_attachment" | "tool_result";
 export const WRITTEN_FILE_KINDS = ["document", "html"] as const satisfies readonly FileKind[];
 
 /**
- * A file a person uploaded or a bot made, in the conversation it was uploaded
+ * A file a person uploaded or a bot made, in the chat it was uploaded
  * or made in, through which it is reached and with which it goes.
  *
  * A written file's content is in `file_version`, in the blob store under
- * `artifacts/<fileId>` (see `files.ts`); `currentVersion` is the number of the
+ * `files/<fileId>` (see `files.ts`); `currentVersion` is the number of the
  * latest one, and a write names the version it started from so a stale write
  * is refused rather than overwriting a newer one. Any other file's bytes are
- * one blob under its conversation's folder (see `conversation-files.ts`).
+ * one blob under its chat's folder (see `chat-file-store.ts`).
  */
 export const file = pgTable(
 	"file",
 	{
 		id: primaryKey(),
-		conversationId: uuid("conversation_id")
+		chatId: uuid("chat_id")
 			.notNull()
-			.references(() => conversation.id, { onDelete: "cascade" }),
+			.references(() => chat.id, { onDelete: "cascade" }),
 		kind: text("kind").$type<FileKind>().notNull(),
 		/**
 		 * A written file's title; an upload's name as the person's computer had
@@ -57,7 +57,7 @@ export const file = pgTable(
 		/** For a tool result: the call whose result this is. */
 		toolCallId: uuid("tool_call_id").references(() => toolCall.id, { onDelete: "set null" }),
 		/** For an upload: who uploaded it, the only one who may attach it while it is unsent. */
-		uploaderId: uuid("uploader_id").references(() => user.id, { onDelete: "set null" }),
+		uploaderId: uuid("uploader_id").references(() => person.id, { onDelete: "set null" }),
 		/**
 		 * For an upload, the message it is attached to, unset until that message
 		 * is sent; for a bot's attachment, the reply it was attached to.
@@ -75,7 +75,7 @@ export const file = pgTable(
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		index("file_conversation_updated_at_idx").on(table.conversationId, table.updatedAt),
+		index("file_chat_updated_at_idx").on(table.chatId, table.updatedAt),
 		index("file_message_idx").on(table.messageId),
 		// What `file_version` points at, so a version is only ever a written file's.
 		uniqueIndex("file_id_kind_idx").on(table.id, table.kind),
@@ -112,7 +112,7 @@ export type FileRow = typeof file.$inferSelect;
 
 /**
  * One version of a written file, numbered from 1. Its content is in the blob
- * store under `artifacts/<fileId>/versions/<id>` (see `files.ts`), which the
+ * store under `files/<fileId>/versions/<id>` (see `files.ts`), which the
  * `file_blob_deletion` trigger queues for deletion with the file.
  */
 export const fileVersion = pgTable(

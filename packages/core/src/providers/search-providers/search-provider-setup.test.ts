@@ -1,7 +1,7 @@
 import { Layer } from "effect";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionForbidden } from "../../authorization/access.ts";
-import { user, workspace, workspaceMember } from "../../database/schema.ts";
+import { membership, person, workspace } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import { servedOnPostgresAs } from "../../workspaces/testing.ts";
 import { createEgressUrlValidator, Egress, urlValidation } from "../network/egress.ts";
@@ -14,7 +14,7 @@ import { SearchProviderSetup } from "./search-provider-setup.ts";
 describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres", () => {
 	let workspaceId: string;
 	let adminId: string;
-	let memberId: string;
+	let editorId: string;
 
 	/**
 	 * The setup as the workspace's administrator, under an egress policy
@@ -55,34 +55,34 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 				.values({ name: `Search ${suffix}`, slug: `search-setup-${suffix}` })
 				.returning(),
 		);
-		const [admin, member] = await onDatabase((db) =>
+		const [admin, editor] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values([
 					{ name: "Ada", email: `ada-${suffix}@example.com` },
 					{ name: "Sam", email: `sam-${suffix}@example.com` },
 				])
 				.returning(),
 		);
-		if (!space || !admin || !member) throw new Error("fixture");
+		if (!space || !admin || !editor) throw new Error("fixture");
 		workspaceId = space.id;
 		adminId = admin.id;
-		memberId = member.id;
+		editorId = editor.id;
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values([
-				{ workspaceId, userId: adminId, role: "admin" },
-				{ workspaceId, userId: memberId, role: "member" },
+			db.insert(membership).values([
+				{ workspaceId, personId: adminId, role: "admin" },
+				{ workspaceId, personId: editorId, role: "editor" },
 			]),
 		);
 	});
 
-	it("refuses a local address where the installation forbids private ones", async () => {
+	it("refuses a local address where the server forbids private ones", async () => {
 		const setup = await setupWith(answering(), { allowPrivateNetwork: false });
 
 		await expect(
 			setup.replace({
 				workspace: workspaceId,
-				provider: { preset: "searxng", baseUrl: "http://127.0.0.1:8080" },
+				provider: { builtIn: "searxng", baseUrl: "http://127.0.0.1:8080" },
 			}),
 		).rejects.toMatchObject({ _tag: "UrlNotAllowed" });
 		expect(await setup.get(workspaceId)).toBeUndefined();
@@ -93,7 +93,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		const setup = await setupWith(search);
 		await setup.replace({
 			workspace: workspaceId,
-			provider: { preset: "brave", apiKey: "k" },
+			provider: { builtIn: "brave", apiKey: "k" },
 		});
 
 		expect(await setup.test(workspaceId)).toMatchObject({ reachable: true, results: 1 });
@@ -107,7 +107,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		);
 		await setup.replace({
 			workspace: workspaceId,
-			provider: { preset: "brave", apiKey: "k" },
+			provider: { builtIn: "brave", apiKey: "k" },
 		});
 
 		expect(await setup.test(workspaceId)).toMatchObject({
@@ -125,7 +125,7 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		const setup = await setupWith(search);
 		await setup.replace({
 			workspace: workspaceId,
-			provider: { preset: "brave" },
+			provider: { builtIn: "brave" },
 		});
 
 		expect(await setup.test(workspaceId)).toEqual({
@@ -144,8 +144,8 @@ describe.skipIf(!process.env.DATABASE_URL)("setting up search, against Postgres"
 		);
 	});
 
-	it("lets a member ask whether the web tools are on, and change nothing", async () => {
-		const setup = await setupWith(answering(), { as: memberId });
+	it("lets an editor ask whether the web tools are on, and change nothing", async () => {
+		const setup = await setupWith(answering(), { as: editorId });
 
 		expect(await setup.webAccess(workspaceId)).toBe(false);
 		await expect(setup.get(workspaceId)).rejects.toBeInstanceOf(ActionForbidden);

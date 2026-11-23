@@ -4,7 +4,7 @@ import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provide
 import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -18,19 +18,19 @@ export const computerProviderRoutes = HttpApiBuilder.group(
 			const projectComputers = yield* ProjectComputerSetup.Service;
 			return handlers
 				.handle("list", ({ params }) =>
-					setup.list(params.workspace).pipe(asSessionUser, asHttpError(computerProviderErrors)),
+					setup.list(params.workspace).pipe(asSignedInPerson, asHttpError(computerProviderErrors)),
 				)
 				.handle("access", ({ params }) =>
 					setup.access(params.workspace).pipe(
 						Effect.map((enabled) => ({ enabled })),
-						asSessionUser,
+						asSignedInPerson,
 						asHttpError(computerProviderErrors),
 					),
 				)
 				.handle("create", ({ params, payload }) =>
 					setup
 						.create({ workspace: params.workspace, provider: payload })
-						.pipe(asSessionUser, asHttpError(computerProviderErrors)),
+						.pipe(asSignedInPerson, asHttpError(computerProviderErrors)),
 				)
 				.handle("update", ({ params, payload }) =>
 					setup
@@ -39,17 +39,17 @@ export const computerProviderRoutes = HttpApiBuilder.group(
 							providerId: params.providerId,
 							changes: payload,
 						})
-						.pipe(asSessionUser, asHttpError(computerProviderErrors)),
+						.pipe(asSignedInPerson, asHttpError(computerProviderErrors)),
 				)
 				.handle("remove", ({ params }) =>
 					setup
 						.remove({ workspace: params.workspace, providerId: params.providerId })
-						.pipe(asSessionUser, asHttpError(computerProviderErrors)),
+						.pipe(asSignedInPerson, asHttpError(computerProviderErrors)),
 				)
 				.handle("template", ({ params }) =>
 					setup.templateStatus({ workspace: params.workspace, providerId: params.providerId }).pipe(
 						Effect.map((state) => ({ state: state ?? null })),
-						asSessionUser,
+						asSignedInPerson,
 						asHttpError(computerProviderErrors),
 					),
 				)
@@ -58,40 +58,40 @@ export const computerProviderRoutes = HttpApiBuilder.group(
 						.prepareTemplate({ workspace: params.workspace, providerId: params.providerId })
 						.pipe(
 							Effect.map((state) => ({ state })),
-							asSessionUser,
+							asSignedInPerson,
 							asHttpError(computerProviderErrors),
 						),
 				)
 				.handle("test", ({ params }) =>
 					setup
 						.test({ workspace: params.workspace, providerId: params.providerId })
-						.pipe(asSessionUser, asHttpError(computerProviderErrors)),
+						.pipe(asSignedInPerson, asHttpError(computerProviderErrors)),
 				)
 				.handle("disks", ({ params }) =>
-					projectComputers.disks(params.workspace).pipe(asSessionUser, asHttpError(refusals)),
+					projectComputers.disks(params.workspace).pipe(asSignedInPerson, asHttpError(refusals)),
 				)
 				.handle("network", ({ params }) =>
-					network.settings(params.workspace).pipe(asSessionUser, asHttpError(refusals)),
+					network.settings(params.workspace).pipe(asSignedInPerson, asHttpError(refusals)),
 				)
 				.handle("addHost", ({ params, payload }) =>
 					network
 						.addHost({ workspace: params.workspace, host: payload.host })
-						.pipe(asSessionUser, asHttpError(refusals)),
+						.pipe(asSignedInPerson, asHttpError(refusals)),
 				)
 				.handle("removeHost", ({ params }) =>
 					network
 						.removeHost({ workspace: params.workspace, host: params.host })
-						.pipe(asSessionUser, asHttpError(refusals)),
+						.pipe(asSignedInPerson, asHttpError(refusals)),
 				)
 				.handle("blockHost", ({ params, payload }) =>
 					network
 						.blockHost({ workspace: params.workspace, host: payload.host })
-						.pipe(asSessionUser, asHttpError(refusals)),
+						.pipe(asSignedInPerson, asHttpError(refusals)),
 				)
 				.handle("unblockHost", ({ params }) =>
 					network
 						.unblockHost({ workspace: params.workspace, host: params.host })
-						.pipe(asSessionUser, asHttpError(refusals)),
+						.pipe(asSignedInPerson, asHttpError(refusals)),
 				);
 		}),
 );
@@ -101,7 +101,7 @@ const computerProviderErrors = {
 	ComputerProviderNotFound: NotFound,
 	UrlNotAllowed: BadRequest,
 	ComputerProviderIncomplete: BadRequest,
-	ComputerProviderPresetFixed: BadRequest,
+	ComputerProviderBuiltInFixed: BadRequest,
 	ComputersNotDestroyed: Conflict,
 	ComputerMadeMeanwhile: Conflict,
 	NoTemplates: BadRequest,

@@ -1,5 +1,5 @@
 import { type BotMood, botColorVariables, botMoods, type LivelyFace } from "@sugabots/avatars";
-import { botColors, botFaces, botShapes } from "@sugabots/contracts";
+import { botColors, botEyes, botShapes } from "@sugabots/contracts";
 import { useRef, useState } from "react";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
@@ -11,7 +11,7 @@ const meta = preview.meta({
 	title: "Product/BotAvatar",
 	component: BotAvatar,
 	tags: ["ai-generated"],
-	args: { color: "green" as const, face: "pill" as const, shape: "circle" as const, size: 44 },
+	args: { color: "green" as const, eyes: "pill" as const, shape: "circle" as const, size: 44 },
 });
 
 /** Default shows one bot's face at the list-row size. */
@@ -25,16 +25,16 @@ export const Palette = meta.story({
 			style={{ gridTemplateColumns: "auto repeat(6, 44px)" }}
 		>
 			<span />
-			{botFaces.map((face) => (
-				<span key={face} className="text-center text-subtle-foreground text-xs">
-					{face}
+			{botEyes.map((eyes) => (
+				<span key={eyes} className="text-center text-subtle-foreground text-xs">
+					{eyes}
 				</span>
 			))}
 			{botColors.map((color) => (
 				<div key={color} className="contents">
 					<span className="pr-2 text-subtle-foreground text-xs">{color}</span>
-					{botFaces.map((face) => (
-						<BotAvatar key={face} color={color} face={face} shape="circle" size={44} />
+					{botEyes.map((eyes) => (
+						<BotAvatar key={eyes} color={color} eyes={eyes} shape="circle" size={44} />
 					))}
 				</div>
 			))}
@@ -42,7 +42,7 @@ export const Palette = meta.story({
 	),
 	play: async ({ canvasElement }) => {
 		const faces = canvasElement.querySelectorAll('svg > g[fill] > circle[r="20"]');
-		await expect(faces).toHaveLength(botColors.length * botFaces.length);
+		await expect(faces).toHaveLength(botColors.length * botEyes.length);
 	},
 });
 
@@ -52,7 +52,7 @@ export const Bubbles = meta.story({
 		<div className="flex flex-col gap-2" style={{ maxWidth: 520 }}>
 			{botColors.map((color) => (
 				<div key={color} style={botColorVariables(color)} className="flex items-end gap-2 text-sm">
-					<BotAvatar color={color} face="pill" shape="circle" size={34} />
+					<BotAvatar color={color} eyes="pill" shape="circle" size={34} />
 					<p
 						className="m-0 rounded-bubble bg-bot-tint text-bot-text"
 						style={{ padding: "9px 15px" }}
@@ -71,7 +71,7 @@ export const Sizes = meta.story({
 	render: () => (
 		<div className="flex items-end gap-4">
 			{[26, 34, 40, 44, 60, 80, 96].map((size) => (
-				<BotAvatar key={size} color="purple" face="arc" shape="squircle" size={size} />
+				<BotAvatar key={size} color="purple" eyes="arc" shape="squircle" size={size} />
 			))}
 		</div>
 	),
@@ -85,7 +85,7 @@ export const Shapes = meta.story({
 				<figure key={shape} className="m-0 flex flex-col items-center gap-1.5">
 					<BotAvatar
 						color={botColors[index % botColors.length] ?? "green"}
-						face="pill"
+						eyes="pill"
 						shape={shape}
 						size={56}
 					/>
@@ -107,7 +107,7 @@ export const Stacked = meta.story({
 				<BotAvatar
 					key={shape}
 					color={botColors[index] ?? "green"}
-					face="dot"
+					eyes="dot"
 					shape={shape}
 					size={44}
 					ringed={{ color: "var(--panel)", width: 3 }}
@@ -136,7 +136,7 @@ export const Lively = meta.story({
 				<div className="flex items-center gap-3">
 					<Button
 						onClick={() => {
-							for (const face of faces.current) face?.play("hop");
+							for (const eyes of faces.current) eyes?.hop();
 						}}
 					>
 						Hop
@@ -148,13 +148,13 @@ export const Lively = meta.story({
 						<BotAvatar
 							key={shape}
 							color={botColors[index % botColors.length] ?? "green"}
-							face={botFaces[index % botFaces.length]}
+							eyes={botEyes[index % botEyes.length]}
 							shape={shape}
 							size={80}
 							lively={{
 								mood,
-								ref: (face) => {
-									faces.current[index] = face;
+								ref: (eyes) => {
+									faces.current[index] = eyes;
 								},
 							}}
 						/>
@@ -174,7 +174,7 @@ export const Moods = meta.story({
 				<figure key={mood} className="m-0 flex flex-col items-center gap-3">
 					<BotAvatar
 						color={botColors[index % botColors.length] ?? "green"}
-						face={botFaces[index % botFaces.length]}
+						eyes={botEyes[index % botEyes.length]}
 						shape={botShapes[index % botShapes.length] ?? "circle"}
 						size={96}
 						lively={{ mood }}

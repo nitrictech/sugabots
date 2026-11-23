@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { sessionUserSchema } from "./api.ts";
+import { signedInPersonSchema } from "./api.ts";
 import { workspaceSchema } from "./membership.ts";
 
 /**
@@ -8,7 +8,7 @@ import { workspaceSchema } from "./membership.ts";
  * would wait for the first to say they are signed in.
  */
 export const meSchema = Schema.Struct({
-	user: sessionUserSchema,
+	person: signedInPersonSchema,
 	workspaces: Schema.Array(workspaceSchema),
 });
 

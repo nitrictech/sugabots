@@ -1,4 +1,4 @@
-import { type ProviderDialectId, providerPreset } from "@sugabots/contracts";
+import { type ProviderDialectId, providerBuiltIn } from "@sugabots/contracts";
 import { anthropic } from "./anthropic.ts";
 import { chatgpt } from "./chatgpt.ts";
 import type { ProviderDialect, ProviderIdentity } from "./dialect.ts";
@@ -11,7 +11,7 @@ export type { DiscoveredModel, ProviderDialect, ProviderIdentity } from "./diale
 export { emptyRegistry, type ModelRegistry, modelsDev } from "./registry.ts";
 export { anthropic, chatgpt, gemini, ollama, openaiCompatible, openrouter };
 
-/** The code behind each name a preset may give. */
+/** The code behind each name a built-in provider may give. */
 export const dialects: Record<ProviderDialectId, ProviderDialect> = {
 	"openai-compatible": openaiCompatible,
 	anthropic,
@@ -24,13 +24,13 @@ export const dialects: Record<ProviderDialectId, ProviderDialect> = {
 /**
  * The dialect a provider is read in.
  *
- * A provider made from a preset speaks the dialect its preset names. A custom
+ * A provider made from a built-in provider speaks the dialect its built-in provider names. A custom
  * endpoint is known by its wire format, and by its host where a well-known
  * gateway sits behind an OpenAI-compatible URL; anything else is taken to be
  * plain OpenAI-compatible.
  */
 export function dialectFor(provider: ProviderIdentity): ProviderDialect {
-	if (provider.preset) return dialects[providerPreset(provider.preset).dialect];
+	if (provider.builtIn) return dialects[providerBuiltIn(provider.builtIn).dialect];
 	if (provider.apiFormat === "anthropic") return anthropic;
 	if (new URL(provider.baseUrl).hostname === "openrouter.ai") return openrouter;
 	return openaiCompatible;

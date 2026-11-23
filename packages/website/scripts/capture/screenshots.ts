@@ -34,10 +34,10 @@ interface Shot {
 /** The carousel's slides, but for Computers, which needs a desktop: see {@link COMPUTERS}. */
 const SHOTS: Shot[] = [
 	{
-		name: "project-thread",
+		name: "project-chat",
 		backdrop: { form: "swoop", family: "silver" },
 		async prepare(stage) {
-			// Growth's thread, where its people talk with each other and with its bots.
+			// Growth's chat, where its people talk with each other and with its bots.
 			await openProject(stage, "growth", "Pipeline");
 			await stage.app.getByText("Brightwater signed!").waitFor();
 		},
@@ -61,7 +61,7 @@ const SHOTS: Shot[] = [
 		name: "files",
 		backdrop: { form: "sur", family: "ink" },
 		async prepare(stage) {
-			await openSeededThread(stage, "researcher", "What changed in Postgres 18");
+			await openSeededChat(stage, "researcher", "What changed in Postgres 18");
 			await stage.app.getByRole("button", { name: "Preview" }).last().click();
 			await stage.app.waitForTimeout(600);
 			await scrollToTop(stage.app.getByText("Graphile Worker fits best").last());
@@ -76,11 +76,11 @@ const SHOTS: Shot[] = [
 		},
 	},
 	{
-		name: "mcp-connections",
+		name: "mcp-connectors",
 		backdrop: { form: "petals", family: "graphite" },
 		async prepare(stage) {
-			// Code Reviewer's connections, then Linear's tools one by one: those that change things ask first.
-			await stage.open(`/${WORKSPACE}/bots/code-reviewer/connections`);
+			// Code Reviewer's connectors, then Linear's tools one by one: those that change things ask first.
+			await stage.open(`/${WORKSPACE}/bots/code-reviewer/connectors`);
 			await stage.app.getByRole("link", { name: /^Linear, / }).click();
 			await stage.app.getByRole("button", { name: /^Individual tools/ }).click();
 			await stage.app.getByText("prepare_attachment_upload", { exact: true }).waitFor();
@@ -89,19 +89,19 @@ const SHOTS: Shot[] = [
 ];
 
 /**
- * Researcher's desktop, open beside its thread: at the capture's width the
- * computer is a card in the thread's Details, which a wide screen opens unless
+ * Researcher's desktop, open beside its chat: at the capture's width the
+ * computer is a card in the chat's Details, which a wide screen opens unless
  * this browser last closed them; Code Reviewer, whose review is in one of
- * Engineering's threads, has no thread of its own. Taken in a context of its
+ * Engineering's chats, has no chat of its own. Taken in a context of its
  * own: showing the desktop says computers are on, which puts the computer's
- * card in Details of every thread with a bot that uses one. The seeded
+ * card in Details of every chat with a bot that uses one. The seeded
  * computer is idle, so its card's button says so.
  */
 const COMPUTERS: Shot = {
 	name: "computers",
 	backdrop: { form: "petals", family: "ink" },
 	async prepare(stage) {
-		await openSeededThread(stage, "researcher", "What changed in Postgres 18");
+		await openSeededChat(stage, "researcher", "What changed in Postgres 18");
 		await stage.app.getByRole("log", { name: "Chat messages" }).waitFor();
 		const details = stage.app.getByRole("button", { name: "Details" });
 		if ((await details.getAttribute("aria-pressed")) === "false") await details.click();
@@ -138,7 +138,7 @@ export async function captureScreenshots(browser: Browser, environment: Environm
 	rmSync(work, { recursive: true });
 }
 
-/** Takes `shot` once for each system's title bar: `project-thread-mac.webp`, `project-thread-windows.webp` and so on. */
+/** Takes `shot` once for each system's title bar: `project-chat-mac.webp`, `project-chat-windows.webp` and so on. */
 async function take(stage: Stage, shot: Shot, work: string) {
 	step(`Screenshot: ${shot.name}`);
 	await stage.setBackdrop(shot.backdrop);
@@ -164,20 +164,20 @@ async function take(stage: Stage, shot: Shot, work: string) {
 }
 
 /**
- * The project's own address, which opens its newest thread: `thread`, the
+ * The project's own address, which opens its newest chat: `chat`, the
  * project's only one in the seed.
  */
-async function openProject(stage: Stage, project: string, thread: string) {
+async function openProject(stage: Stage, project: string, chat: string) {
 	await stage.open(`/${WORKSPACE}/projects/${project}`);
-	await stage.app.getByRole("heading", { name: thread }).first().waitFor();
+	await stage.app.getByRole("heading", { name: chat }).first().waitFor();
 }
 
 /**
- * Opens the seeded thread whose title starts `title`: the bot's own address
- * starts a new thread, so the thread is opened from its row in the bot's
+ * Opens the seeded chat whose title starts `title`: the bot's own address
+ * starts a new chat, so the chat is opened from its row in the bot's
  * sidebar, whose link is named by the title and then what else the row says.
  */
-async function openSeededThread(stage: Stage, botHandle: string, title: string) {
+async function openSeededChat(stage: Stage, botHandle: string, title: string) {
 	const startsWithTitle = new RegExp(`^${escapeRegExp(title)}`);
 	await stage.open(`/${WORKSPACE}/bots/${botHandle}`);
 	await stage.app.getByRole("link", { name: startsWithTitle }).first().click();

@@ -14,7 +14,7 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 
 /** How the person reading reacts to messages: who they are, so their own reactions show as theirs, and what changes them. */
 export interface Reacting {
-	userId: string;
+	personId: string;
 	/** Adds the person's `emoji` to the message, or takes it back if they had it. */
 	onToggle: (message: Message, emoji: string) => void;
 	/** Adds the person's `emoji` to the message, unless they have it already. */
@@ -39,8 +39,8 @@ export function MessageReactions({
 	return (
 		<ul aria-label="Reactions" className="m-0 flex list-none flex-wrap gap-1 p-0">
 			{reactions.map((reaction) => {
-				const mine = reacting !== undefined && isAmong(reaction, reacting.userId);
-				const who = whoReacted(reaction, reacting?.userId);
+				const mine = reacting !== undefined && isAmong(reaction, reacting.personId);
+				const who = whoReacted(reaction, reacting?.personId);
 				const count = reactorsOf(reaction).length;
 				const label = `${reaction.emoji} ${count}: ${who}`;
 				const pill = cn(
@@ -137,8 +137,8 @@ export function AddReactionButton({
  */
 const decodeReactionEmoji = Schema.decodeUnknownOption(reactionEmojiSchema);
 
-function isAmong(reaction: MessageReaction, userId: string): boolean {
-	return reaction.people.some((person) => person.id === userId);
+function isAmong(reaction: MessageReaction, personId: string): boolean {
+	return reaction.people.some((person) => person.id === personId);
 }
 
 /** How many people a reaction's tooltip names before it counts the rest. */
@@ -150,9 +150,9 @@ function reactorsOf(reaction: MessageReaction): MessageReaction["people"] {
 }
 
 /** For example "You, Sam and Reviewer reacted with 👍", or "… and 4 others reacted with 👍". */
-function whoReacted(reaction: MessageReaction, userId: string | undefined): string {
+function whoReacted(reaction: MessageReaction, personId: string | undefined): string {
 	const names = reactorsOf(reaction).map((reactor) =>
-		reactor.id === userId ? "You" : reactor.name,
+		reactor.id === personId ? "You" : reactor.name,
 	);
 	return `${listNames(names, { maxNamed: MAX_NAMED })} reacted with ${reaction.emoji}`;
 }

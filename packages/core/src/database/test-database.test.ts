@@ -3,7 +3,7 @@ import { DevelopmentDatabaseRefused, testDatabaseUrl } from "./test-database.ts"
 
 /**
  * Which database the tests write to, which is the one thing here that must not
- * be got wrong: the run empties it, and the repository tests fill it with rows
+ * be got wrong: the run empties it, and the store tests fill it with rows
  * and workflow executions a running dev server would resume.
  */
 

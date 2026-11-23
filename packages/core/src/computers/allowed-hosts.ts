@@ -96,16 +96,16 @@ export const allowedHostsOf = (project: { workspaceId: string; projectId: string
 	);
 
 /**
- * What the project's computer may reach at `provider`, by its network mode: on the
- * allowlist, {@link allowedHostsOf}; open, everything but what the workspace
+ * What the project's computer may reach at `provider`, by its network mode: allowed
+ * hosts only, {@link allowedHostsOf}; open, everything but what the workspace
  * blocked, if the provider can block hosts, and everything if not.
  */
 export const reachOf = (
 	project: { workspaceId: string; projectId: string },
 	provider: Pick<Computers.Provider, "networkMode" | "capabilities">,
 ): Effect.Effect<Computers.Reach, never, Database> => {
-	if (provider.networkMode === "allowlist") {
-		return Effect.map(allowedHostsOf(project), (hosts) => ({ kind: "allowlist", hosts }));
+	if (provider.networkMode === "allowed-hosts-only") {
+		return Effect.map(allowedHostsOf(project), (hosts) => ({ kind: "allowed-hosts-only", hosts }));
 	}
 	if (!provider.capabilities.blocksHosts) return Effect.succeed({ kind: "open", blockedHosts: [] });
 	return Effect.map(blockedHostsOf(project.workspaceId), (blocked) => ({
@@ -127,7 +127,7 @@ function namesBlockedBy(block: string) {
  * The block among `blocks` that keeps `host` out, if any: one that blocks a
  * name `host` reaches. Blocking `example.com` blocks its subdomains too, and
  * `*.example.com` its subdomains alone. A wildcard that reaches a blocked name
- * is kept out whole: the providers' allowlists can't make an exception inside
+ * is kept out whole: the providers' rules can't make an exception inside
  * a wildcard, so allowing `*.example.com` would let `api.example.com` through
  * though it is blocked.
  */

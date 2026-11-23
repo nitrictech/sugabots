@@ -15,7 +15,7 @@ import { CrumbSeparator } from "@/shell/BotCrumb.tsx";
 type PagePlace = { kind: "tab" } | { kind: "owner"; owner: ResourceOwner; under?: "settings" };
 
 /**
- * A page beside the sidebar, such as Inbox: its `PageHeader`, and what it
+ * A page beside the sidebar, such as Approvals: its `PageHeader`, and what it
  * holds scrolling under it.
  */
 export function Page({

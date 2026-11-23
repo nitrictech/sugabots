@@ -6,8 +6,8 @@ import { Context, DateTime, Effect, Layer } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
-import { AutomationRepository } from "../../conversations/automations/repository.ts";
-import { nextOccurrence } from "../../conversations/automations/schedule.ts";
+import { nextOccurrence } from "../../chats/automations/schedule.ts";
+import { AutomationStore } from "../../chats/automations/store.ts";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
 import { automation, automationTrigger, workspace } from "../../database/schema.ts";
 import {
@@ -39,7 +39,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("WorkspaceTimeZone");
 	const authorization = yield* Authorization.Service;
-	const automations = yield* AutomationRepository.Service;
+	const automations = yield* AutomationStore.Service;
 
 	/** Rewrites each routine in `from` to run in `to`, from now. */
 	const moveRoutines = (workspaceId: string, from: string, to: TimeZone) =>
@@ -148,9 +148,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, AutomationRepository.layer]),
-);
+export const layer = layerNoDeps.pipe(Layer.provide([Authorization.layer, AutomationStore.layer]));
 
 /** Routines in `timeZone` of the automations still defined. */
 function inZone(timeZone: string) {

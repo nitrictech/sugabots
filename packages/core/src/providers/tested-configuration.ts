@@ -6,7 +6,7 @@ import type { UserFacing } from "../user-message.ts";
 import type { Egress, EgressRefused } from "./network/egress.ts";
 
 /**
- * What model providers, search providers and connections share: each is
+ * What model providers, search providers and connectors share: each is
  * configured with an address and perhaps a key, tried by a test, and shown by
  * how that test went. A test's result belongs to the configuration it tried,
  * so it is recorded only while the row still holds that configuration.
@@ -44,11 +44,11 @@ export function configurationStatus(row: {
 	return row.lastTestError === null ? "connected" : "error";
 }
 
-/** Fails with {@link UrlNotAllowed} unless the egress policy lets a provider or connection use `url`. */
+/** Fails with {@link UrlNotAllowed} unless the egress policy lets a provider or connector use `url`. */
 export const requireAllowedUrl = (egress: Egress.Interface, url: string) =>
 	Effect.mapError(egress.validateProviderUrl(url), (refusal) => new UrlNotAllowed({ refusal }));
 
-/** The egress policy refuses the address a provider or connection was given. */
+/** The egress policy refuses the address a provider or connector was given. */
 export class UrlNotAllowed
 	extends Data.TaggedError("UrlNotAllowed")<{ readonly refusal: EgressRefused }>
 	implements UserFacing

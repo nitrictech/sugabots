@@ -41,7 +41,7 @@ credentials:
 
 ```dotenv
 BETTER_AUTH_SECRET=<output of openssl rand -base64 32>
-CREDENTIALS_ENCRYPTION_KEY=<output of another openssl rand -base64 32>
+SECRETS_ENCRYPTION_KEY=<output of another openssl rand -base64 32>
 ```
 
 Generate each value separately:
@@ -51,7 +51,7 @@ openssl rand -base64 32
 ```
 
 The remaining defaults are ready for a localhost installation. Keep `.env`
-private and backed up. Losing `CREDENTIALS_ENCRYPTION_KEY` makes saved
+private and backed up. Losing `SECRETS_ENCRYPTION_KEY` makes saved
 credentials unreadable; changing `BETTER_AUTH_SECRET` signs everyone
 out.
 
@@ -83,7 +83,7 @@ when source files change. On its first run, Portless creates a local certificate
 authority, adds it to your system trust store, and may ask for administrator
 access to start its HTTPS proxy.
 
-Open <https://sugabots.localhost>, create an account, and follow the onboarding
+Open <https://sugabots.localhost>, create an account, and follow the workspace setup
 flow. Development email is printed in the terminal, including the verification
 link.
 
@@ -153,7 +153,7 @@ bun run db:migrate
 ```
 
 Do not run `docker compose down -v` unless you intend to delete every account,
-workspace, conversation, and saved credential.
+workspace, chat, and saved credential.
 
 ### Build the Docker image
 

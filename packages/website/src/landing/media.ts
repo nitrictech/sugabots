@@ -28,7 +28,7 @@ export interface Screenshot {
 	title: string;
 	description: string;
 	/**
-	 * A 16:10 capture of the app, as WebP at 2240×1400: `/screenshots/project-thread.webp`.
+	 * A 16:10 capture of the app, as WebP at 2240×1400: `/screenshots/project-chat.webp`.
 	 * `bun run capture screenshots` makes them all; Computers needs the image from `bun run build:computer`.
 	 */
 	image?: string;
@@ -40,13 +40,13 @@ export const screenshots: readonly [Screenshot, ...Screenshot[]] = [
 	{
 		title: "Projects",
 		description:
-			"Each piece of work gets a project, where people and bots share its threads, and reply and react the same way.",
-		image: "/screenshots/project-thread.webp",
-		shows: "A project's thread with two people and a bot",
+			"Each piece of work gets a project, where people and bots share its chats, and reply and react the same way.",
+		image: "/screenshots/project-chat.webp",
+		shows: "A project's chat with two people and a bot",
 	},
 	{
 		title: "Automations",
-		description: "Automations run on routines or triggers, each run in a thread of the project.",
+		description: "Automations run on routines or triggers, each run in a chat of the project.",
 		image: "/screenshots/automations.webp",
 		shows: "Automations",
 	},
@@ -72,8 +72,8 @@ export const screenshots: readonly [Screenshot, ...Screenshot[]] = [
 	{
 		title: "Connect any MCP server",
 		description:
-			"Connect a project to Linear, Notion or any MCP server; its bots use them in its threads. Bots ask before each tool call, or run freely.",
-		image: "/screenshots/mcp-connections.webp",
-		shows: "A project’s connections to MCP servers",
+			"Connect a project to Linear, Notion or any MCP server; its bots use them in its chats. Bots ask before each tool call, or run freely.",
+		image: "/screenshots/mcp-connectors.webp",
+		shows: "A project’s connectors to MCP servers",
 	},
 ];

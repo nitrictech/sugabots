@@ -1,6 +1,6 @@
 import {
-	type ProviderPresetId,
-	presetSignInService,
+	type BuiltInProviderId,
+	builtInSignInService,
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
@@ -8,7 +8,7 @@ import { type UserText, userText } from "@sugabots/errors";
 import { Clock, Data, Effect, Schema } from "effect";
 import type { UserFacing } from "../../../user-message.ts";
 import type { EgressHttpClient, EgressHttpClients } from "../../network/egress.ts";
-import type { ModelProviderRepository } from "../model-provider-repository.ts";
+import type { ModelProviderStore } from "../model-provider-store.ts";
 import { chatgpt } from "./chatgpt.ts";
 import { xai } from "./xai.ts";
 
@@ -66,9 +66,9 @@ export interface SubscriptionSignIn {
 	readonly requestHeaders: (tokens: OAuthTokens) => Record<string, string>;
 }
 
-/** The sign-in of a provider made from `preset`, if it is signed in to rather than given a key. */
-export function signInFor(preset: ProviderPresetId | null): SubscriptionSignIn | undefined {
-	const service = presetSignInService(preset);
+/** The sign-in of a provider made from `builtIn`, if it is signed in to rather than given a key. */
+export function signInFor(builtIn: BuiltInProviderId | null): SubscriptionSignIn | undefined {
+	const service = builtInSignInService(builtIn);
 	return service ? signInTo(service) : undefined;
 }
 
@@ -105,22 +105,22 @@ const needsRefresh = (tokens: OAuthTokens) =>
 	Clock.currentTimeMillis.pipe(Effect.map((now) => tokens.expiresAt - now < REFRESH_MARGIN_MS));
 
 /**
- * The connection ready to send: for a signed-in provider, a live access token
+ * The provider access ready to send: for a signed-in provider, a live access token
  * as its key and its service's headers, refreshing the token first if it is
- * close to expiring. Any other connection is returned as it is.
+ * close to expiring. Any other provider access is returned as it is.
  */
 export function withSignInAccess(
-	store: Pick<ModelProviderRepository.Interface, "renewOAuthTokens">,
+	store: Pick<ModelProviderStore.Interface, "renewOAuthTokens">,
 	httpClients: EgressHttpClients,
 	workspaceId: string,
-	connection: ModelProviderRepository.ProviderEndpoint,
-): Effect.Effect<ModelProviderRepository.ProviderEndpoint, ProviderSignInFailed> {
-	const service = presetSignInService(connection.preset);
-	if (!service || !connection.oauthTokens) return Effect.succeed(connection);
+	access: ModelProviderStore.ProviderAccess,
+): Effect.Effect<ModelProviderStore.ProviderAccess, ProviderSignInFailed> {
+	const service = builtInSignInService(access.builtIn);
+	if (!service || !access.oauthTokens) return Effect.succeed(access);
 	const signIn = signInTo(service);
 	const http = httpClients.for({ baseUrl: signIn.issuer });
 	return Effect.gen(function* () {
-		const tokens = yield* store.renewOAuthTokens(workspaceId, connection.providerId, (current) =>
+		const tokens = yield* store.renewOAuthTokens(workspaceId, access.providerId, (current) =>
 			needsRefresh(current).pipe(
 				Effect.flatMap((stale) =>
 					stale ? signIn.refresh(http, current) : Effect.succeed(current),
@@ -133,9 +133,9 @@ export function withSignInAccess(
 			});
 		}
 		return {
-			...connection,
+			...access,
 			apiKey: tokens.access,
-			headers: { ...connection.headers, ...signIn.requestHeaders(tokens) },
+			headers: { ...access.headers, ...signIn.requestHeaders(tokens) },
 		};
 	});
 }

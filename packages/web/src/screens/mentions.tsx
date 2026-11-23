@@ -1,8 +1,8 @@
 import { botColorVariables } from "@sugabots/avatars";
 import {
 	type BotParticipant,
-	type ConversationDetails,
-	type ConversationKind,
+	type ChatDetails,
+	type ChatKind,
 	GROUP_MENTION_HANDLES,
 	type GroupMentionHandle,
 	type MessageAuthor,
@@ -31,11 +31,11 @@ import { MentionCard } from "./MentionCard.tsx";
  */
 
 /**
- * Everyone a mention in the conversation can name: those in it, then the project's bots
+ * Everyone a mention in the chat can name: those in it, then the project's bots
  * and the people who reach the project who are not.
  */
 export function mentionableIn(
-	details: Pick<ConversationDetails, "participants" | "projectBots" | "peopleReachingProject">,
+	details: Pick<ChatDetails, "participants" | "projectBots" | "peopleReachingProject">,
 ): Participant[] {
 	const joined = new Set(details.participants.map(({ id }) => id));
 	return [
@@ -52,7 +52,7 @@ export function botsNamed(draft: string, projectBots: readonly BotParticipant[])
 	);
 }
 
-/** `@here` or `@channel`, which a person writes in a thread to notify the people who reach its project. */
+/** `@here` or `@channel`, which a person writes in a chat to notify the people who reach its project. */
 export interface GroupMention {
 	kind: "group";
 	handle: GroupMentionHandle;
@@ -70,39 +70,39 @@ export type MentionTarget = Participant | GroupMention;
 type Writer = { kind: "person"; id: string } | { kind: Exclude<MessageAuthor["kind"], "person"> };
 
 /**
- * `@here` and `@channel` as `writer` can use them in a conversation of kind
- * `conversationKind`, each notifying `peopleReachingProject` but the writer.
+ * `@here` and `@channel` as `writer` can use them in a chat of kind
+ * `chatKind`, each notifying `peopleReachingProject` but the writer.
  * None where they would notify nobody, so they stay text: written by a bot or
- * an automation, in a conversation that notifies nobody, or in a project
+ * an automation, in a chat that notifies nobody, or in a project
  * nobody else reaches.
  */
 export function groupMentionsBy(
 	writer: Writer,
 	peopleReachingProject: readonly PersonParticipant[],
-	conversationKind: ConversationKind,
+	chatKind: ChatKind,
 ): GroupMention[] {
-	if (writer.kind !== "person" || !notifiesPeople(conversationKind)) return [];
+	if (writer.kind !== "person" || !notifiesPeople(chatKind)) return [];
 	const notifies = peopleReachingProject.filter((person) => person.id !== writer.id);
 	if (notifies.length === 0) return [];
 	return GROUP_MENTION_HANDLES.map((handle) => ({ kind: "group", handle, notifies }));
 }
 
 /**
- * Whom `user`'s composer offers to mention in a conversation of kind
- * `conversationKind`: everyone `mentionableIn` gives but the user, then
+ * Whom `signedIn`'s composer offers to mention in a chat of kind
+ * `chatKind`: everyone `mentionableIn` gives but the signed-in person, then
  * `@here` and `@channel` where they would notify anyone.
  */
 export function composerMentionable(
-	details: Pick<ConversationDetails, "participants" | "projectBots" | "peopleReachingProject">,
-	user: { id: string },
-	conversationKind: ConversationKind,
+	details: Pick<ChatDetails, "participants" | "projectBots" | "peopleReachingProject">,
+	signedIn: { id: string },
+	chatKind: ChatKind,
 ): MentionTarget[] {
 	return [
-		...mentionableIn(details).filter((candidate) => candidate.id !== user.id),
+		...mentionableIn(details).filter((candidate) => candidate.id !== signedIn.id),
 		...groupMentionsBy(
-			{ kind: "person", id: user.id },
+			{ kind: "person", id: signedIn.id },
 			details.peopleReachingProject,
-			conversationKind,
+			chatKind,
 		),
 	];
 }
@@ -160,7 +160,7 @@ export function MentionChip({
 				<>
 					<BotAvatar
 						color={target.color}
-						face={target.face}
+						eyes={target.eyes}
 						shape={target.shape}
 						size={14}
 						className="shrink-0 self-center"

@@ -64,7 +64,7 @@ for (const { name, skip, make, backdate } of stores) {
 		beforeEach(async () => {
 			clock = new Date(Date.now() - DAY_MS);
 			store = await make();
-			stream = `conversation:${crypto.randomUUID()}`;
+			stream = `chat:${crypto.randomUUID()}`;
 		});
 
 		it("hands back a sequence number that rises", async () => {
@@ -86,7 +86,7 @@ for (const { name, skip, make, backdate } of stores) {
 
 		it("returns the envelope exactly as it was stored", async () => {
 			const published = rawEvent("tool_call.completed", {
-				conversationId: "c1",
+				chatId: "c1",
 				output: { rows: [1, 2], nested: { ok: true } },
 			});
 
@@ -105,7 +105,7 @@ for (const { name, skip, make, backdate } of stores) {
 		});
 
 		it("never replays another stream's events", async () => {
-			await store.append(`workspace:${crypto.randomUUID()}`, rawEvent("conversation.created"));
+			await store.append(`workspace:${crypto.randomUUID()}`, rawEvent("chat.created"));
 
 			expect(await store.replay(stream, 0, 10)).toEqual([]);
 		});
@@ -116,7 +116,7 @@ for (const { name, skip, make, backdate } of stores) {
 			expect(await store.has(stream, seq)).toBe(true);
 			expect(await store.has(stream, seq + 1_000_000)).toBe(false);
 			// The row exists, but not on the stream the client is resuming.
-			expect(await store.has(`conversation:${crypto.randomUUID()}`, seq)).toBe(false);
+			expect(await store.has(`chat:${crypto.randomUUID()}`, seq)).toBe(false);
 		});
 
 		it("prunes what is older than the cutoff and keeps the rest", async () => {

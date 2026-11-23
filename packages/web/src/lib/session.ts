@@ -1,4 +1,4 @@
-import type { Me, SessionUser } from "@sugabots/contracts";
+import type { Me, SignedInPerson } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -18,8 +18,8 @@ import { client } from "@/api.ts";
 
 export interface Session {
 	/** `undefined` before `/me` succeeds, `null` when signed out. */
-	user: SessionUser | null | undefined;
-	/** What `/me` answered beside `user`, for the session's query cache to start from. */
+	person: SignedInPerson | null | undefined;
+	/** What `/me` answered beside `person`, for the session's query cache to start from. */
 	me?: Me;
 	/** Set once the API has stopped answering for long enough to be worth saying. */
 	error: unknown;
@@ -44,7 +44,7 @@ const RETRY_DELAYS_MS = [250, 500, 1_000, 2_000, 3_000, 3_000];
 const unreachable = (failure: unknown) => !isApiFailure(failure);
 
 export function useSessionFromApi(): Session {
-	// One answer, `null` when signed out, so `user` and `me` cannot disagree:
+	// One answer, `null` when signed out, so `person` and `me` cannot disagree:
 	// signing out leaves no earlier answer for a later session's cache to start from.
 	const [me, setMe] = useState<Me | null>();
 	const [error, setError] = useState<unknown>();
@@ -91,7 +91,7 @@ export function useSessionFromApi(): Session {
 		void refresh().catch(() => {});
 	}, [refresh]);
 
-	return { user: me === null ? null : me?.user, me: me ?? undefined, error, refresh };
+	return { person: me === null ? null : me?.person, me: me ?? undefined, error, refresh };
 }
 
 /**
@@ -108,19 +108,19 @@ export function useSession(): Session {
 	return session;
 }
 
-/** Signs you out, then opens the login page in place of the page you were on. */
+/** Signs you out, then opens the sign-in page in place of the page you were on. */
 export function useSignOut(): () => Promise<void> {
 	const session = useSession();
 	const navigate = useNavigate();
 	return async () => {
 		await client.auth.signOut();
 		await session.refresh();
-		await navigate({ to: "/login", replace: true });
+		await navigate({ to: "/sign-in", replace: true });
 	};
 }
 
 /**
- * Changes your name. Members, projects and chats look a person's name up whenever
+ * Changes your name. People, projects and chats look a person's name up whenever
  * they are read, so every cached answer is asked for again, as is who you are,
  * without holding up the save. Should `/me` fail just then, the old name stays
  * on screen until the session is next asked.

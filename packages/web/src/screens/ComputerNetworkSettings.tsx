@@ -9,12 +9,12 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsControlRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
- * What every computer may connect to. On the allowlist, the trusted
+ * What every computer may connect to. Allowed hosts only, the trusted
  * hosts every workspace has, and the ones this workspace allowed, and each
  * project or bot adds its own on its Computer page; open, every host. The workspace's blocked
  * hosts are out of every computer's reach, unless the computers are open at a
  * provider that can't block hosts. `modeRow` leads the Network group: the
- * switch between open and the allowlist, which is the provider's.
+ * switch between open and allowed hosts only, which is the provider's.
  */
 export function ComputerNetworkSection({ modeRow }: { modeRow: ReactNode }) {
 	const { settings, addHost, removeHost, blockHost, unblockHost } = useComputerNetwork();
@@ -45,7 +45,7 @@ export function ComputerNetworkGroups({
 	onBlock,
 	onUnblock,
 }: {
-	/** The switch between open and the allowlist, leading the Network group. */
+	/** The switch between open and allowed hosts only, leading the Network group. */
 	modeRow: ReactNode;
 	settings: ComputerNetworkSettings;
 	pending: boolean;
@@ -64,8 +64,8 @@ export function ComputerNetworkGroups({
 					label="Network"
 					note={
 						settings.blocking
-							? "Switching to an allowlist keeps your blocked hosts, and the hosts allowed apply again."
-							: "This provider can't block hosts, so the blocked hosts don't apply while it's open. They're kept, with the allowed hosts, for if it goes back to the allowlist."
+							? "Switching to allowed hosts only keeps your blocked hosts, and the hosts allowed apply again."
+							: "This provider can't block hosts, so the blocked hosts don't apply while it's open. They're kept, with the allowed hosts, for if it goes back to allowed hosts only."
 					}
 				>
 					{modeRow}
@@ -73,7 +73,7 @@ export function ComputerNetworkGroups({
 			) : (
 				<SettingsGroup
 					label="Network"
-					note="Every computer connects to these hosts, and each project or bot adds its own on its Computer page. Blocked hosts still apply. When a bot needs another, it asks in a thread, and someone who manages the project or bot decides."
+					note="Every computer connects to these hosts, and each project or bot adds its own on its Computer page. Blocked hosts still apply. When a bot needs another, it asks in a chat, and someone who manages the project or bot decides."
 				>
 					{modeRow}
 					{settings.addedHosts.map((added) => (

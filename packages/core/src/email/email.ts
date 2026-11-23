@@ -2,7 +2,7 @@ export * as Email from "./email.ts";
 
 import { Config, Context, Data, Effect, Layer, Option } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { Installation } from "../installation/installation.ts";
+import { ServerSettings } from "../server-settings/server-settings.ts";
 import { fromConsole } from "./implementations/console.ts";
 import { fromResend } from "./implementations/resend.ts";
 import { fromWebhook, type WebhookConfig } from "./implementations/webhook.ts";
@@ -73,10 +73,10 @@ export function parseAddress(value: string): Address | undefined {
  * Required in production, where providers send only from verified addresses.
  */
 export const transactionalSender = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
+	const serverSettings = yield* ServerSettings.Service;
 	const value = yield* Config.option(Config.String("EMAIL_TRANSACTIONAL_FROM"));
 	if (Option.isNone(value)) {
-		if (installation.isProduction) {
+		if (serverSettings.isProduction) {
 			return yield* new InvalidConfig({
 				message: "EMAIL_TRANSACTIONAL_FROM is required in production.",
 			});
@@ -99,13 +99,13 @@ const PROVIDERS = ["console", "webhook", "resend"] as const;
 
 /** The webhook's settings, `EMAIL_WEBHOOK_URL` and `EMAIL_WEBHOOK_TOKEN`. Production requires HTTPS. */
 const webhookConfig = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
+	const serverSettings = yield* ServerSettings.Service;
 	const url = yield* Config.URL("EMAIL_WEBHOOK_URL");
 	const token = yield* Config.option(Config.Redacted("EMAIL_WEBHOOK_TOKEN"));
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
 		return yield* new InvalidConfig({ message: "EMAIL_WEBHOOK_URL must use HTTP or HTTPS" });
 	}
-	if (installation.isProduction && url.protocol !== "https:") {
+	if (serverSettings.isProduction && url.protocol !== "https:") {
 		return yield* new InvalidConfig({
 			message: "EMAIL_WEBHOOK_URL must use HTTPS in production",
 		});

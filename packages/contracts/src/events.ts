@@ -1,14 +1,14 @@
 import { Schema } from "effect";
 import {
+	chatReadSchema,
 	collaborationPartSchema,
-	conversationReadSchema,
 	filePartSchema,
 	messageReactionsSchema,
 	messageSchema,
 	messageStatusSchema,
 	personParticipantSchema,
 	toolCallPartSchema,
-} from "./conversations.ts";
+} from "./messages.ts";
 import { notificationContentSchema, presenceSchema } from "./notifications.ts";
 import { uuidSchema } from "./uuid.ts";
 
@@ -25,7 +25,7 @@ import { uuidSchema } from "./uuid.ts";
 /** Bumped only for a change no existing client could read. */
 export const EVENT_VERSION = 1;
 
-const conversationId = uuidSchema;
+const chatId = uuidSchema;
 const messageId = Schema.String.check(Schema.isMinLength(1));
 /** Events that carry nothing agreed yet. Open, so a payload can be added without a version bump. */
 const nothing = Schema.StructWithRest(Schema.Struct({}), [
@@ -38,29 +38,29 @@ const nothing = Schema.StructWithRest(Schema.Struct({}), [
  * both derived from these.
  */
 export const eventPayloadSchemas = {
-	"message.created": Schema.Struct({ conversationId, message: messageSchema }),
+	"message.created": Schema.Struct({ chatId, message: messageSchema }),
 	/** `offset` is how much of the message came before this text, so a client can tell a duplicate from a gap. */
 	"message.delta": Schema.Struct({
-		conversationId,
+		chatId,
 		messageId,
 		offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 		text: Schema.String,
 	}),
 	"message.completed": Schema.Struct({
-		conversationId,
+		chatId,
 		messageId,
 		content: Schema.String,
 		status: messageStatusSchema,
 	}),
 	"message.failed": Schema.Struct({
-		conversationId,
+		chatId,
 		messageId,
 		turnId: uuidSchema,
 		error: Schema.String,
 	}),
 	/** Somebody reacted to the message or took a reaction back; `reactions` is all it has now. */
 	"message.reactions_changed": Schema.Struct({
-		conversationId,
+		chatId,
 		messageId,
 		reactions: messageReactionsSchema,
 	}),
@@ -69,61 +69,61 @@ export const eventPayloadSchemas = {
 	 * now. A reply that starts again comes with `turn.started`, without them.
 	 */
 	"message.files_changed": Schema.Struct({
-		conversationId,
+		chatId,
 		messageId,
 		files: Schema.Array(filePartSchema),
 	}),
 	/** A bot's reply called a built-in tool; the part is `running`. */
-	"tool_call.started": Schema.Struct({ conversationId, messageId, toolCall: toolCallPartSchema }),
+	"tool_call.started": Schema.Struct({ chatId, messageId, toolCall: toolCallPartSchema }),
 	/** The tool returned or failed; the part carries its output or error. */
-	"tool_call.completed": Schema.Struct({ conversationId, messageId, toolCall: toolCallPartSchema }),
-	"tool_call.updated": Schema.Struct({ conversationId, messageId, toolCall: toolCallPartSchema }),
+	"tool_call.completed": Schema.Struct({ chatId, messageId, toolCall: toolCallPartSchema }),
+	"tool_call.updated": Schema.Struct({ chatId, messageId, toolCall: toolCallPartSchema }),
 	"turn.started": Schema.Struct({
-		conversationId,
+		chatId,
 		turnId: uuidSchema,
 		botId: uuidSchema,
 	}),
 	/** Somebody asked a running turn to stop; `turn.completed` follows once it has. */
-	"turn.cancel_requested": Schema.Struct({ conversationId, turnId: uuidSchema }),
+	"turn.cancel_requested": Schema.Struct({ chatId, turnId: uuidSchema }),
 	"turn.completed": Schema.Struct({
-		conversationId,
+		chatId,
 		turnId: uuidSchema,
 		status: Schema.Literals(["done", "cancelled"]),
 	}),
 	/**
-	 * What people watching the conversation should know that no message in it
+	 * What people watching the chat should know that no message in it
 	 * records, such as why a bot they asked did not reply. `notice` is
-	 * written for people; it is not kept in the conversation's history.
+	 * written for people; it is not kept in the chat's history.
 	 */
-	"conversation.notice": Schema.Struct({ conversationId, notice: Schema.String }),
+	"chat.notice": Schema.Struct({ chatId, notice: Schema.String }),
 	/**
-	 * `person` is writing in the conversation's composer. Sent again every few
+	 * `person` is writing in the chat's composer. Sent again every few
 	 * seconds while they keep typing, and never to say they stopped: a
 	 * watcher stops showing them when these stop coming, or when their
 	 * message arrives.
 	 */
-	"person.typing": Schema.Struct({ conversationId, person: personParticipantSchema }),
-	/** Someone read further into the conversation. A read never moves anyone back. */
-	"conversation.read": Schema.Struct({ conversationId, ...conversationReadSchema.fields }),
-	"conversation.created": Schema.Struct({ conversationId }),
+	"person.typing": Schema.Struct({ chatId, person: personParticipantSchema }),
+	/** Someone read further into the chat. A read never moves anyone back. */
+	"chat.read": Schema.Struct({ chatId, ...chatReadSchema.fields }),
+	"chat.created": Schema.Struct({ chatId }),
 	/**
-	 * Something about the conversation no more specific event describes. On
-	 * the conversation's stream it means refetch the conversation; on
+	 * Something about the chat no more specific event describes. On
+	 * the chat's stream it means refetch the chat; on
 	 * its workspace's, that what lists show of it may be out of date.
 	 */
-	"conversation.changed": Schema.Struct({ conversationId }),
+	"chat.changed": Schema.Struct({ chatId }),
 	/**
-	 * A conversation opened beside `rootConversationId` changed: an automation
+	 * A chat opened beside `rootChatId` changed: an automation
 	 * run or collaboration in it.
 	 */
-	"conversation.item_changed": Schema.Struct({ rootConversationId: uuidSchema, conversationId }),
+	"chat.item_changed": Schema.Struct({ rootChatId: uuidSchema, chatId }),
 	/** Something to tell the person about, which their open tabs show. */
 	notification: notificationContentSchema,
 	/** One of the person's tabs says what it is looking at, so their other tabs hold back notifications about it. */
 	presence: presenceSchema,
 	/** A collaboration in `messageId` changed: opened, gave up waiting, answered, failed. */
 	"collaboration.updated": Schema.Struct({
-		conversationId,
+		chatId,
 		messageId,
 		collaboration: collaborationPartSchema,
 	}),
@@ -167,11 +167,11 @@ export const durableEventTypeSchema = Schema.Literals([
 	"turn.started",
 	"turn.cancel_requested",
 	"turn.completed",
-	"conversation.notice",
-	"conversation.read",
-	"conversation.created",
-	"conversation.changed",
-	"conversation.item_changed",
+	"chat.notice",
+	"chat.read",
+	"chat.created",
+	"chat.changed",
+	"chat.item_changed",
 	"collaboration.updated",
 	"bot.updated",
 	"project.updated",
@@ -253,8 +253,8 @@ function withEnvelope<T extends KnownEventType, Fields extends Schema.Struct.Fie
 
 const P = eventPayloadSchemas;
 
-/** Everything a conversation's stream can carry. */
-export const conversationUpdateEventSchema = Schema.Union([
+/** Everything a chat's stream can carry. */
+export const chatUpdateEventSchema = Schema.Union([
 	withEnvelope("message.created", P["message.created"]),
 	withEnvelope("message.delta", P["message.delta"]),
 	withEnvelope("message.completed", P["message.completed"]),
@@ -267,19 +267,19 @@ export const conversationUpdateEventSchema = Schema.Union([
 	withEnvelope("turn.started", P["turn.started"]),
 	withEnvelope("turn.cancel_requested", P["turn.cancel_requested"]),
 	withEnvelope("turn.completed", P["turn.completed"]),
-	withEnvelope("conversation.changed", P["conversation.changed"]),
-	withEnvelope("conversation.notice", P["conversation.notice"]),
-	withEnvelope("conversation.read", P["conversation.read"]),
+	withEnvelope("chat.changed", P["chat.changed"]),
+	withEnvelope("chat.notice", P["chat.notice"]),
+	withEnvelope("chat.read", P["chat.read"]),
 	withEnvelope("person.typing", P["person.typing"]),
-	withEnvelope("conversation.item_changed", P["conversation.item_changed"]),
+	withEnvelope("chat.item_changed", P["chat.item_changed"]),
 	withEnvelope("collaboration.updated", P["collaboration.updated"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
 /** Everything a workspace's stream can carry. */
 export const workspaceUpdateEventSchema = Schema.Union([
-	withEnvelope("conversation.changed", P["conversation.changed"]),
-	withEnvelope("conversation.item_changed", P["conversation.item_changed"]),
+	withEnvelope("chat.changed", P["chat.changed"]),
+	withEnvelope("chat.item_changed", P["chat.item_changed"]),
 	withEnvelope("reset", P.reset.schema),
 ]);
 
@@ -293,16 +293,15 @@ export const personUpdateEventSchema = Schema.Union([
 /**
  * The name of an event stream, which a client subscribes to and the event
  * store keeps events under. There are three kinds: a
- * workspace, a conversation, and a person, which only that person hears. A
- * conversation's system bots work in conversations of their own but publish on
- * the one they act on, so a client watching a conversation holds one
- * connection.
+ * workspace, a chat, and a person, which only that person hears. A
+ * chat's system bots work in chats of their own but publish on
+ * the one they act on, so a client watching a chat holds one
+ * connector.
  */
-export type EventStream = `workspace:${string}` | `conversation:${string}` | `person:${string}`;
+export type EventStream = `workspace:${string}` | `chat:${string}` | `person:${string}`;
 
 export const workspaceStream = (workspaceId: string): EventStream => `workspace:${workspaceId}`;
 
-export const conversationStream = (conversationId: string): EventStream =>
-	`conversation:${conversationId}`;
+export const chatStream = (chatId: string): EventStream => `chat:${chatId}`;
 
-export const personStream = (userId: string): EventStream => `person:${userId}`;
+export const personStream = (personId: string): EventStream => `person:${personId}`;

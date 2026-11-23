@@ -30,8 +30,8 @@ export type FileAuthor = typeof fileAuthorSchema.Type;
 /** A file a bot wrote with its file tools, kept in versions. */
 const writtenFileSummarySchema = Schema.Struct({
 	id: uuidSchema,
-	/** The conversation it was made in. */
-	conversationId: uuidSchema,
+	/** The chat it was made in. */
+	chatId: uuidSchema,
 	kind: writtenFileKindSchema,
 	title: Schema.String,
 	/** The number of the current version, counting from 1. */
@@ -44,12 +44,12 @@ export type WrittenFileSummary = typeof writtenFileSummarySchema.Type;
 
 /**
  * A file on a message: one a person uploaded and sent, or one a bot attached
- * to its reply. Its bytes are served at the conversation's file address.
+ * to its reply. Its bytes are served at the chat's file address.
  */
 const messageFileSummarySchema = Schema.Struct({
 	id: uuidSchema,
-	/** The conversation it was sent in. */
-	conversationId: uuidSchema,
+	/** The chat it was sent in. */
+	chatId: uuidSchema,
 	kind: Schema.Literals(["upload", "attachment"]),
 	name: Schema.String,
 	contentType: Schema.String,

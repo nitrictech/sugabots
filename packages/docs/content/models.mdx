@@ -11,12 +11,12 @@ Admins manage providers in **Settings → Models**.
 
 ## Providers Sugabots knows
 
-Sugabots has presets for these. Pick one and it fills in the server URL for you.
+These are built-in providers. Pick one and it fills in the server URL for you.
 
 <ProviderGrid />
 
 Every workspace starts with **Anthropic**, **OpenAI** and **Ollama** listed, plus
-any provider you picked during onboarding. Paste a key to use a hosted provider. Local servers need a server URL, not a key.
+any provider you picked during workspace setup. Paste a key to use a hosted provider. Local servers need a server URL, not a key.
 
 <Tip title="Anything else">
 
@@ -38,7 +38,7 @@ paste it. Its requests are billed to your OpenRouter account.
 Each provider lists its models. Switch on the ones you want, and only those show up when someone picks a bot's model. Use **Refresh
 list** to fetch new ones, or **Add model** to type in a model ID.
 
-Each model also says what it can do, like tools, vision or reasoning. Bots use
+Each model also says what it can do, like tools, vision or thinking. Bots use
 tools, so pick models that support them.
 
 ## Default model
@@ -48,7 +48,7 @@ bots use**. Each bot can move to another model in its own settings.
 
 ## Behind-the-scenes model
 
-Sugabots also uses a model for its own work: compacting a long conversation
+Sugabots also uses a model for its own work: compacting a long chat
 when the bot in it has no model of its own. An admin picks it under
 **Default → Compaction**. A fast, cheap model is best. [Usage](/docs/usage) shows what it costs,
 beside each bot.

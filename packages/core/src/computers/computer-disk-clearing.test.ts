@@ -1,8 +1,8 @@
 import { COMPUTER_OPENSANDBOX_DEFAULT_SIZE, type RunState } from "@sugabots/contracts";
 import { Effect, Layer, Redacted } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { anAutomationOwner } from "../conversations/automations/testing.ts";
-import { seedConversation } from "../conversations/seed.test-support.ts";
+import { anAutomationOwner } from "../chats/automations/testing.ts";
+import { seedChat } from "../chats/seed.test-support.ts";
 import { automation, message, type TurnStatus, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
@@ -27,25 +27,25 @@ const NEVER_FULL = 1;
 describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against Postgres", () => {
 	let workspaceId: string;
 	let botId: string;
-	let userId: string;
+	let personId: string;
 
 	afterAll(async () => {
 		await closeDatabase();
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, botId, userId } = await anAutomationOwner());
+		({ workspaceId, botId, personId } = await anAutomationOwner());
 	});
 
 	const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
 
-	async function aTurn(conversationId: string, startedAt: Date, status: TurnStatus = "done") {
+	async function aTurn(chatId: string, startedAt: Date, status: TurnStatus = "done") {
 		const [trigger] = await onDatabase((db) =>
 			db
 				.insert(message)
 				.values({
-					conversationId,
-					authorUserId: userId,
+					chatId,
+					authorPersonId: personId,
 					kind: "text",
 					status: "complete",
 					parts: [],
@@ -58,7 +58,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 			db
 				.insert(turn)
 				.values({
-					conversationId,
+					chatId,
 					botId,
 					triggerMessageId: trigger.id,
 					status,
@@ -72,36 +72,36 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		return { messageId: trigger.id, turnId: taken.id };
 	}
 
-	/** A conversation with the bot whose last turn started at `lastTurnAt`. */
-	async function aConversation(done: boolean, lastTurnAt: Date, status?: TurnStatus) {
+	/** A chat with the bot whose last turn started at `lastTurnAt`. */
+	async function aChat(resolved: boolean, lastTurnAt: Date, status?: TurnStatus) {
 		const id = crypto.randomUUID();
 		await onDatabase((db) =>
-			seedConversation(db, {
+			seedChat(db, {
 				id,
 				workspaceId,
-				kind: "project_thread",
+				kind: "project_chat",
 				botId,
-				title: "Conversation",
-				doneAt: done ? lastTurnAt : null,
-				startedById: userId,
+				title: "Chat",
+				resolvedAt: resolved ? lastTurnAt : null,
+				startedById: personId,
 			}),
 		);
 		await aTurn(id, lastTurnAt, status);
 		return id;
 	}
 
-	/** A collaboration asked from `conversationId`, the bot asking itself for help. */
-	async function aCollaboration(conversationId: string, lastTurnAt: Date) {
-		// Asked long ago, so the conversation's own latest turn still places it.
-		const asking = await aTurn(conversationId, new Date(0));
+	/** A collaboration asked from `chatId`, the bot asking itself for help. */
+	async function aCollaboration(chatId: string, lastTurnAt: Date) {
+		// Asked long ago, so the chat's own latest turn still places it.
+		const asking = await aTurn(chatId, new Date(0));
 		const made = await onDatabase((db) =>
-			seedConversation(db, {
+			seedChat(db, {
 				workspaceId,
 				kind: "collaboration",
 				title: "Collaboration",
 				collaboration: {
-					parentConversationId: conversationId,
-					rootConversationId: conversationId,
+					parentChatId: chatId,
+					rootChatId: chatId,
 					parentMessageId: asking.messageId,
 					turnId: asking.turnId,
 					collaboratorBotId: botId,
@@ -132,7 +132,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		const requestId = crypto.randomUUID();
 		const ended = state === "completed" || state === "failed" || state === "cancelled";
 		const run = await onDatabase((db) =>
-			seedConversation(db, {
+			seedChat(db, {
 				workspaceId,
 				kind: "run",
 				title: "Checks",
@@ -145,7 +145,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 						kind: "manual",
 						requestId,
 						requestedAt: startedAt.toISOString(),
-						requestedByUserId: userId,
+						requestedByPersonId: personId,
 					},
 					automationName: "Checks",
 					instructions: "Check.",
@@ -159,43 +159,43 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		return run.id;
 	}
 
-	it("clears deleted conversations' folders, then deleted bots' homes, then ended runs', then bots' caches, then done conversations', oldest first", async () => {
+	it("clears deleted chats' folders, then deleted bots' homes, then ended runs', then bots' caches, then resolved chats', oldest first", async () => {
 		const deleted = crypto.randomUUID();
 		const deletedBot = crypto.randomUUID();
 		const newerRun = await anAutomationRun("completed", at(30));
 		const olderRun = await anAutomationRun("failed", at(90));
-		const newerDone = await aConversation(true, at(20));
-		const olderDone = await aConversation(true, at(120));
-		const helpWithNewerDone = await aCollaboration(newerDone, at(10));
+		const newerResolved = await aChat(true, at(20));
+		const olderResolved = await aChat(true, at(120));
+		const helpWithNewerResolved = await aCollaboration(newerResolved, at(10));
 
 		const order = await runOnPostgres(
 			clearingOrder(workspaceId, {
-				conversationIds: [helpWithNewerDone, newerDone, newerRun, olderDone, deleted, olderRun],
+				chatIds: [helpWithNewerResolved, newerResolved, newerRun, olderResolved, deleted, olderRun],
 				botIds: [botId, deletedBot],
 			}),
 		);
 
 		expect(order).toEqual([
-			{ conversationId: deleted, reason: "conversation_deleted" },
+			{ chatId: deleted, reason: "chat_deleted" },
 			{ botId: deletedBot, reason: "bot_deleted" },
-			{ conversationId: olderRun, reason: "automation_run_ended" },
-			{ conversationId: newerRun, reason: "automation_run_ended" },
+			{ chatId: olderRun, reason: "automation_run_ended" },
+			{ chatId: newerRun, reason: "automation_run_ended" },
 			...BOT_CACHES.map((cache) => ({ botId, cache, reason: "bot_cache" })),
-			{ conversationId: olderDone, reason: "conversation_done" },
-			{ conversationId: newerDone, reason: "conversation_done" },
-			{ conversationId: helpWithNewerDone, reason: "conversation_done" },
+			{ chatId: olderResolved, reason: "chat_resolved" },
+			{ chatId: newerResolved, reason: "chat_resolved" },
+			{ chatId: helpWithNewerResolved, reason: "chat_resolved" },
 		]);
 	});
 
-	it("leaves the folders of conversations that may still be worked in", async () => {
-		const open = await aConversation(false, at(600));
+	it("leaves the folders of chats that may still be worked in", async () => {
+		const open = await aChat(false, at(600));
 		const running = await anAutomationRun("running", at(600));
-		const waitingForApproval = await aConversation(true, at(600), "waiting");
+		const waitingForApproval = await aChat(true, at(600), "waiting");
 
 		expect(
 			await runOnPostgres(
 				clearingOrder(workspaceId, {
-					conversationIds: [open, running, waitingForApproval],
+					chatIds: [open, running, waitingForApproval],
 					botIds: [],
 				}),
 			),
@@ -214,20 +214,20 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		beforeAll(async () => {
 			provider = await Effect.runPromise(
 				Effect.map(Computers.Service, (computers) =>
-					computers.forConnection({
+					computers.forAccess({
 						provider: "opensandbox",
 						baseUrl: env.OPENSANDBOX_URL ?? "",
 						apiKey: Redacted.make(env.OPENSANDBOX_API_KEY ?? ""),
 						image: "debian:bookworm-slim",
 						size: COMPUTER_OPENSANDBOX_DEFAULT_SIZE,
-						networkMode: "allowlist",
+						networkMode: "allowed-hosts-only",
 					}),
 				).pipe(Effect.provide(Computers.layer.pipe(Layer.provide(Ids.layer)))),
 			);
 			computer = await Effect.runPromise(
 				provider.create({
 					labels: {},
-					reach: { kind: "allowlist", hosts: [] },
+					reach: { kind: "allowed-hosts-only", hosts: [] },
 					workName,
 				}),
 			);
@@ -246,25 +246,25 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		};
 
 		beforeEach(async () => {
-			await run(`rm -rf ${Computers.CONVERSATIONS_DIRECTORY} ${Computers.BOTS_DIRECTORY}`);
+			await run(`rm -rf ${Computers.CHATS_DIRECTORY} ${Computers.BOTS_DIRECTORY}`);
 		});
 
 		/** Every path under `directory`, relative to it. */
 		const pathsUnder = async (directory: string) =>
 			(await run(`cd ${directory} && find . -mindepth 1 | sort`)).split("\n").filter(Boolean);
 
-		const conversationFolders = () => pathsUnder(Computers.CONVERSATIONS_DIRECTORY);
+		const chatFolders = () => pathsUnder(Computers.CHATS_DIRECTORY);
 
 		it(
-			"removes finished conversations' folders, and leaves open conversations' alone",
+			"removes finished chats' folders, and leaves open chats' alone",
 			async () => {
 				const deleted = crypto.randomUUID();
 				const ended = await anAutomationRun("completed", at(60));
-				const open = await aConversation(false, at(60));
+				const open = await aChat(false, at(60));
 				await run(
 					[
-						`mkdir -p ${Computers.CONVERSATIONS_DIRECTORY}`,
-						`cd ${Computers.CONVERSATIONS_DIRECTORY}`,
+						`mkdir -p ${Computers.CHATS_DIRECTORY}`,
+						`cd ${Computers.CHATS_DIRECTORY}`,
 						`mkdir -p ${deleted}/repo ${ended}/repo ${open}/repo`,
 						`touch ${deleted}/repo/a ${ended}/repo/a ${open}/repo/a`,
 					].join(" && "),
@@ -274,16 +274,12 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 
 				expect(clearing).toEqual({
 					cleared: [
-						{ conversationId: deleted, reason: "conversation_deleted" },
-						{ conversationId: ended, reason: "automation_run_ended" },
+						{ chatId: deleted, reason: "chat_deleted" },
+						{ chatId: ended, reason: "automation_run_ended" },
 					],
 					stoppedAtTimeout: false,
 				});
-				expect(await conversationFolders()).toEqual([
-					`./${open}`,
-					`./${open}/repo`,
-					`./${open}/repo/a`,
-				]);
+				expect(await chatFolders()).toEqual([`./${open}`, `./${open}/repo`, `./${open}/repo/a`]);
 			},
 			SLOW,
 		);
@@ -332,12 +328,12 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 			"clears nothing once the workspace is below the share",
 			async () => {
 				const ended = await anAutomationRun("completed", at(60));
-				await run(`mkdir -p ${Computers.CONVERSATIONS_DIRECTORY}/${ended}/repo`);
+				await run(`mkdir -p ${Computers.CHATS_DIRECTORY}/${ended}/repo`);
 
 				const clearing = await runOnPostgres(freeDiskSpace(computer, workspaceId, NEVER_FULL));
 
 				expect(clearing).toEqual({ cleared: [], stoppedAtTimeout: false });
-				expect(await conversationFolders()).toContain(`./${ended}/repo`);
+				expect(await chatFolders()).toContain(`./${ended}/repo`);
 			},
 			SLOW,
 		);
@@ -365,8 +361,8 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 				);
 				await run(
 					[
-						`mkdir -p ${Computers.CONVERSATIONS_DIRECTORY}`,
-						`cd ${Computers.CONVERSATIONS_DIRECTORY}`,
+						`mkdir -p ${Computers.CHATS_DIRECTORY}`,
+						`cd ${Computers.CHATS_DIRECTORY}`,
 						`mkdir ${deleted.join(" ")}`,
 					].join(" && "),
 				);
@@ -376,7 +372,7 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 
 				expect(first.cleared).toHaveLength(MAX_FOLDERS_CLEARED_AT_ONCE);
 				expect(second.cleared).toHaveLength(1);
-				expect(await conversationFolders()).toEqual([]);
+				expect(await chatFolders()).toEqual([]);
 			},
 			SLOW,
 		);

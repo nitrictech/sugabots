@@ -24,7 +24,7 @@ export async function signedInContext(
 	const context = await browser.newContext({ colorScheme: "dark", deviceScaleFactor });
 	await context.addInitScript(DETAILS_CLOSED);
 	const page = await context.newPage();
-	await page.goto(`${environment.appUrl}/login`);
+	await page.goto(`${environment.appUrl}/sign-in`);
 	await page.getByText("Continue with email").click();
 	await page.locator('input[type="email"]').fill(OWNER.email);
 	await page.locator('input[type="password"]').fill(OWNER.password);

@@ -1,10 +1,10 @@
-import { type BotLook, botColorVariables } from "@sugabots/avatars";
+import { type AvatarParts, botColorVariables } from "@sugabots/avatars";
 import type { ReactNode } from "react";
 import { BotAvatar } from "@/components/bot-avatar";
 import { RevealItem } from "@/components/reveal";
 
 interface BotAsideProps {
-	bot: BotLook;
+	bot: AvatarParts;
 	label: string;
 	children: ReactNode;
 }
@@ -30,7 +30,7 @@ function BotAside({ bot, label, children }: BotAsideProps) {
 /** Something helpful to know. */
 export function Tip({ children, title = "Tip" }: { children: ReactNode; title?: string }) {
 	return (
-		<BotAside bot={{ color: "green", face: "wink" }} label={title}>
+		<BotAside bot={{ color: "green", eyes: "wink" }} label={title}>
 			{children}
 		</BotAside>
 	);
@@ -39,7 +39,7 @@ export function Tip({ children, title = "Tip" }: { children: ReactNode; title?: 
 /** Something that loses data or locks people out if it's missed. */
 export function Careful({ children, title = "Careful" }: { children: ReactNode; title?: string }) {
 	return (
-		<BotAside bot={{ color: "rose", face: "square" }} label={title}>
+		<BotAside bot={{ color: "rose", eyes: "square" }} label={title}>
 			{children}
 		</BotAside>
 	);

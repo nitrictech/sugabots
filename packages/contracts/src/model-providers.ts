@@ -2,12 +2,12 @@ import { Effect, Schema } from "effect";
 import { namedPersonSchema } from "./api.ts";
 import { modelIdSchema } from "./bots.ts";
 import {
-	presetRequiresApiKey,
-	presetSignsIn,
-	presetTakesNoCredential,
-	providerCatalog,
-	providerPresetIdSchema,
-} from "./provider-catalog.ts";
+	builtInProviderIdSchema,
+	builtInProviders,
+	builtInRequiresApiKey,
+	builtInSignsIn,
+	builtInTakesNoCredential,
+} from "./built-in-providers.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { httpUrlSchema } from "./urls.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -28,7 +28,7 @@ export const providerModelCapabilitySchema = Schema.Literals([
 	"images",
 	"audio",
 	"embeddings",
-	"reasoning",
+	"thinking",
 ]);
 export type ProviderModelCapability = typeof providerModelCapabilitySchema.Type;
 
@@ -79,7 +79,7 @@ export function isClientOwnedHeader(name: string): boolean {
 /**
  * The headers a provider's SDK sets from the stored API key. A custom header
  * with the same name would fight it, so a provider may not add one; a
- * connection's secret, which has no SDK behind it, goes in exactly these.
+ * connector's secret, which has no SDK behind it, goes in exactly these.
  */
 const providerCredentialHeaders = new Set(["authorization", "x-api-key"]);
 
@@ -114,7 +114,7 @@ export const MAX_PROVIDER_MODELS = 2_000;
 /*
  * The shape of a provider URL, which is all a schema can judge. Whether the API
  * may actually connect to it — HTTPS or plain HTTP, public or private address —
- * is the installation's network policy, which the API applies in one place to
+ * is the server's network policy, which the API applies in one place to
  * every provider alike.
  */
 export const providerUrlSchema = httpUrlSchema.check(
@@ -162,7 +162,7 @@ export const providerModelCapabilityCatalog: ReadonlyArray<{
 	{ key: "vision", name: "Vision", description: "Reads images sent to it." },
 	{ key: "images", name: "Images", description: "Makes images." },
 	{ key: "audio", name: "Audio", description: "Hears or speaks." },
-	{ key: "reasoning", name: "Reasoning", description: "Thinks before it answers." },
+	{ key: "thinking", name: "Thinking", description: "Thinks before it answers." },
 	{
 		key: "embeddings",
 		name: "Embeddings",
@@ -192,8 +192,8 @@ export type ProviderModel = typeof providerModelSchema.Type;
 export const modelProviderSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	/** The catalog entry this was made from; null is a custom endpoint. */
-	preset: Schema.NullOr(providerPresetIdSchema),
+	/** The built-in provider this was made from; null is a custom model provider. */
+	builtIn: Schema.NullOr(builtInProviderIdSchema),
 	name: Schema.String,
 	baseUrl: providerUrlSchema,
 	apiFormat: providerApiFormatSchema,
@@ -206,7 +206,7 @@ export const modelProviderSchema = Schema.Struct({
 	lastTestError: Schema.NullOr(Schema.String),
 	/** Whoever connected it, while it is connected and they are still in the workspace. */
 	connectedBy: Schema.NullOr(namedPersonSchema),
-	/** When somebody added it, or, for a preset every workspace starts with, when it was seeded. */
+	/** When somebody added it, or, for a built-in provider every workspace starts with, when it was seeded. */
 	createdAt: isoTimestampSchema,
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
 });
@@ -215,10 +215,10 @@ export type ModelProvider = typeof modelProviderSchema.Type;
 
 /** Whether the provider still needs its key, or its sign-in, before it can be used. */
 export function providerLacksCredential(
-	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn">,
+	provider: Pick<ModelProvider, "builtIn" | "hasApiKey" | "signedIn">,
 ): boolean {
-	if (presetSignsIn(provider.preset)) return !provider.signedIn;
-	return presetRequiresApiKey(provider.preset) && !provider.hasApiKey;
+	if (builtInSignsIn(provider.builtIn)) return !provider.signedIn;
+	return builtInRequiresApiKey(provider.builtIn) && !provider.hasApiKey;
 }
 
 /**
@@ -227,15 +227,15 @@ export function providerLacksCredential(
  * key or sign-in only pauses it; it stays connected until Disconnect takes it away.
  */
 export function providerIsConnected(
-	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn" | "active">,
+	provider: Pick<ModelProvider, "builtIn" | "hasApiKey" | "signedIn" | "active">,
 ): boolean {
 	if (provider.hasApiKey || provider.signedIn) return !providerLacksCredential(provider);
-	return presetTakesNoCredential(provider.preset) && provider.active;
+	return builtInTakesNoCredential(provider.builtIn) && provider.active;
 }
 
 /** Whether bots can use the provider's models now: it is connected and switched on. */
 export function providerIsUsable(
-	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn" | "active">,
+	provider: Pick<ModelProvider, "builtIn" | "hasApiKey" | "signedIn" | "active">,
 ): boolean {
 	return provider.active && providerIsConnected(provider);
 }
@@ -247,7 +247,7 @@ export function providerIsUsable(
 export function providerIsReady(
 	provider: Pick<
 		ModelProvider,
-		"preset" | "hasApiKey" | "signedIn" | "active" | "status" | "models"
+		"builtIn" | "hasApiKey" | "signedIn" | "active" | "status" | "models"
 	>,
 ): boolean {
 	return providerIsConnected(provider) && provider.status !== "error" && provider.models.length > 0;
@@ -272,24 +272,24 @@ export const providerSignInCompletionSchema = Schema.Struct({
 	attempt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
 });
 
-const presetNames = new Set(providerCatalog.map(({ name }) => name.toLowerCase()));
+const builtInNames = new Set(builtInProviders.map(({ name }) => name.toLowerCase()));
 const apiKeySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
 
-/** A provider from the catalog: the preset supplies everything but the key. */
-const newProviderFromPresetSchema = Schema.Struct({
-	preset: providerPresetIdSchema,
+/** A built-in provider: Sugabots supplies everything but the key. */
+const newProviderFromBuiltInSchema = Schema.Struct({
+	builtIn: builtInProviderIdSchema,
 	apiKey: Schema.optional(apiKeySchema),
-	/** Only a local preset's address is worth changing at creation. */
+	/** Only a local built-in provider's address is worth changing at creation. */
 	baseUrl: Schema.optional(providerUrlSchema),
 });
 
-/** A provider the catalog does not know: every field is the caller's. */
+/** A provider that is no built-in provider: every field is the caller's. */
 export const newCustomProviderSchema = Schema.Struct({
 	name: Schema.Trim.check(
 		Schema.isMinLength(1),
 		Schema.isMaxLength(64),
-		Schema.makeFilter((name) => !presetNames.has(name.toLowerCase()), {
-			message: "That name belongs to a provider in the catalog; add it from there",
+		Schema.makeFilter((name) => !builtInNames.has(name.toLowerCase()), {
+			message: "That name belongs to a built-in provider; add it from there",
 		}),
 	),
 	baseUrl: providerUrlSchema,
@@ -299,7 +299,7 @@ export const newCustomProviderSchema = Schema.Struct({
 });
 
 export const newModelProviderSchema = Schema.Union([
-	newProviderFromPresetSchema,
+	newProviderFromBuiltInSchema,
 	newCustomProviderSchema,
 ]);
 export type NewModelProvider = typeof newModelProviderSchema.Type;
@@ -402,7 +402,7 @@ export const bulkProviderModelUpdateSchema = Schema.Struct({
 const workspaceModelSchema = Schema.Struct({
 	providerId: uuidSchema,
 	providerName: Schema.String,
-	providerPreset: Schema.NullOr(providerPresetIdSchema),
+	providerBuiltIn: Schema.NullOr(builtInProviderIdSchema),
 	modelId: modelIdSchema,
 	displayName: Schema.NullOr(Schema.String),
 	/** What bots may use it for: what it can do, less what an admin switched off. */

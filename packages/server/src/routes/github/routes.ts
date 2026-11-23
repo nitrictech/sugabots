@@ -1,37 +1,37 @@
 import { GITHUB_SETUP_RETURN_PATH, MAX_IDEMPOTENCY_KEY_CHARACTERS } from "@sugabots/contracts";
 import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
-import { Automations } from "@sugabots/core/conversations/automations/automations";
-import { Installation } from "@sugabots/core/installation/installation";
-import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
-import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
+import { Automations } from "@sugabots/core/chats/automations/automations";
+import { GitHubApps } from "@sugabots/core/providers/connectors/github/github-app";
+import { GitHubConnectors } from "@sugabots/core/providers/connectors/github/github-connectors";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { userText } from "@sugabots/errors";
 import { Effect } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
-const connectionErrors = {
+const connectorErrors = {
 	...refusals,
 	GitHubAppNotInstalled: BadRequest,
 	GitHubRequestFailed: BadRequest,
-	NotGitHubConnection: NotFound,
-	ProjectHasGitHubConnection: Conflict,
+	NotGitHubConnector: NotFound,
+	ProjectHasGitHubConnector: Conflict,
 	RepositoryUnreachable: BadRequest,
 };
 
-export const gitHubConnectionRoutes = HttpApiBuilder.group(
+export const gitHubConnectorRoutes = HttpApiBuilder.group(
 	ServerApi,
-	"gitHubConnections",
+	"gitHubConnectors",
 	(handlers) =>
 		Effect.gen(function* () {
 			// GitHub's callbacks redirect on to GitHub's next page, or back to
 			// `GITHUB_SETUP_RETURN_PATH` under the web app with the project's ids and,
 			// when setup stopped, why; the web app turns those into its own page.
-			const { webAppUrl } = yield* Installation.Service;
+			const { webAppUrl } = yield* ServerSettings.Service;
 			const gitHubApps = yield* GitHubApps.Service;
-			const connections = yield* GitHubConnections.Service;
+			const connectors = yield* GitHubConnectors.Service;
 			const redirect = (outcome: GitHubApps.SetupOutcome) => {
 				if (outcome.kind === "next") {
 					return HttpServerResponse.redirect(outcome.url, { status: 302 });
@@ -42,7 +42,7 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 					back.searchParams.set("workspace", outcome.at.workspaceId);
 					back.searchParams.set("project", outcome.at.projectId);
 				}
-				if (outcome.kind === "done") back.searchParams.set("connection", outcome.connectionId);
+				if (outcome.kind === "done") back.searchParams.set("connector", outcome.connectorId);
 				if (outcome.kind === "failed") back.searchParams.set("github_error", outcome.failure);
 				return HttpServerResponse.redirect(back.toString(), { status: 302 });
 			};
@@ -54,54 +54,54 @@ export const gitHubConnectionRoutes = HttpApiBuilder.group(
 				.handle("start", ({ params, payload }) =>
 					gitHubApps
 						.start({ projectId: params.projectId, organization: payload.organization })
-						.pipe(asSessionUser, asHttpError(connectionErrors)),
+						.pipe(asSignedInPerson, asHttpError(connectorErrors)),
 				)
 				.handle("installUrl", ({ params }) =>
 					gitHubApps.installUrl(params).pipe(
 						Effect.map((url) => ({ url })),
-						asSessionUser,
-						asHttpError(connectionErrors),
+						asSignedInPerson,
+						asHttpError(connectorErrors),
 					),
 				)
 				.handle("reachableRepositories", ({ params }) =>
-					connections
+					connectors
 						.reachableRepositories(params)
-						.pipe(asSessionUser, asHttpError(connectionErrors)),
+						.pipe(asSignedInPerson, asHttpError(connectorErrors)),
 				)
 				.handle("repositories", ({ params }) =>
-					connections.repositories(params).pipe(asSessionUser, asHttpError(connectionErrors)),
+					connectors.repositories(params).pipe(asSignedInPerson, asHttpError(connectorErrors)),
 				)
 				.handle("addRepository", ({ params, payload }) =>
-					connections
+					connectors
 						.addRepository({ ...params, repository: payload.repository })
-						.pipe(asSessionUser, asHttpError(connectionErrors)),
+						.pipe(asSignedInPerson, asHttpError(connectorErrors)),
 				)
 				.handle("removeRepository", ({ params, payload }) =>
-					connections
+					connectors
 						.removeRepository({ ...params, repository: payload.repository })
-						.pipe(asSessionUser, asHttpError(connectionErrors)),
+						.pipe(asSignedInPerson, asHttpError(connectorErrors)),
 				)
 				.handleRaw("gitHubAppMade", ({ request, query }) =>
 					request.method === "HEAD"
 						? headRefused
 						: gitHubApps
 								.made({ code: query.code, state: query.state })
-								.pipe(Effect.map(redirect), asSessionUser),
+								.pipe(Effect.map(redirect), asSignedInPerson),
 				)
 				.handleRaw("gitHubAppInstalled", ({ request, query }) =>
 					request.method === "HEAD"
 						? headRefused
 						: gitHubApps
 								.installed({ installationId: query.installation_id, state: query.state })
-								.pipe(Effect.map(redirect), asSessionUser),
+								.pipe(Effect.map(redirect), asSignedInPerson),
 				);
 		}),
 );
 
 export const gitHubWebhookRoutes = HttpApiBuilder.group(ServerApi, "gitHubWebhooks", (handlers) =>
 	Effect.gen(function* () {
-		const connections = yield* GitHubConnections.Service;
-		const connectionEvents = yield* Automations.ConnectionEvents;
+		const connectors = yield* GitHubConnectors.Service;
+		const connectorEvents = yield* Automations.ConnectorEvents;
 		// Raw, since the signature is over the body exactly as sent.
 		return handlers.handleRaw("delivery", ({ params, request }) =>
 			Effect.gen(function* () {
@@ -109,17 +109,17 @@ export const gitHubWebhookRoutes = HttpApiBuilder.group(ServerApi, "gitHubWebhoo
 					new Unauthorized({ message: userText`That delivery isn't signed by its app` });
 				const body = yield* Effect.mapError(request.text, refused);
 				// Deliberately without a session: the signature is what admits it.
-				const delivered = yield* connections
-					.receiveDelivery({ connectionId: params.connectionId, headers: request.headers, body })
+				const delivered = yield* connectors
+					.receiveDelivery({ connectorId: params.connectorId, headers: request.headers, body })
 					.pipe(Effect.mapError(refused));
 				if (!delivered.activity) return HttpServerResponse.empty({ status: 204 });
 				const { deliveryId } = delivered;
 				if (!deliveryId || deliveryId.length > MAX_IDEMPOTENCY_KEY_CHARACTERS) {
 					return yield* new BadRequest({ message: userText`The delivery has no usable id` });
 				}
-				yield* connectionEvents.accept({
+				yield* connectorEvents.accept({
 					workspaceId: delivered.workspaceId,
-					connectionId: delivered.connectionId,
+					connectorId: delivered.connectorId,
 					deliveryId,
 					activity: delivered.activity,
 				});

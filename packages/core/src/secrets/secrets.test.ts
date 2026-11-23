@@ -1,0 +1,51 @@
+import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
+import { describe, expect, it } from "vitest";
+import { Secrets } from "./secrets.ts";
+
+const key = Buffer.alloc(32, 7).toString("base64");
+
+function withEnv<A, E>(effect: Effect.Effect<A, E, Secrets.Service>, env: Record<string, string>) {
+	return Effect.runPromiseExit(
+		effect.pipe(
+			Effect.provide(
+				Secrets.layer.pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))),
+			),
+		),
+	);
+}
+
+describe("Secrets.layer", () => {
+	it("round trips without storing the plaintext", async () => {
+		const exit = await withEnv(
+			Effect.map(Secrets.Service, (cipher) => {
+				const encrypted = cipher.encrypt("sk-secret");
+				return { encrypted, decrypted: cipher.decrypt(encrypted) };
+			}),
+			{ SECRETS_ENCRYPTION_KEY: key },
+		);
+
+		expect(exit).toMatchObject({ _tag: "Success", value: { decrypted: "sk-secret" } });
+		expect(Exit.isSuccess(exit) && exit.value.encrypted).not.toContain("sk-secret");
+	});
+
+	it("opens a value sealed for a purpose only for that purpose", () => {
+		const cipher = Secrets.fromKey(key);
+		const forPages = cipher.encrypt("page", "pages");
+		const stored = cipher.encrypt("sk-secret");
+
+		expect(cipher.decrypt(forPages, "pages")).toBe("page");
+		expect(() => cipher.decrypt(forPages)).toThrow();
+		expect(() => cipher.decrypt(forPages, "other")).toThrow();
+		expect(() => cipher.decrypt(stored, "pages")).toThrow();
+		expect(() => cipher.encrypt("page", "")).toThrow();
+	});
+
+	it.each([
+		["without a key", {}, /is required/],
+		["with a key that is not 32 bytes", { SECRETS_ENCRYPTION_KEY: "not-a-key" }, /32-byte key/],
+	])("refuses to start %s", async (_, env, message) => {
+		const exit = await withEnv(Secrets.Service, env);
+
+		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toMatch(message);
+	});
+});

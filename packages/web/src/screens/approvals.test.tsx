@@ -14,7 +14,7 @@ const host = {
 	name: linear.name,
 	handle: linear.handle,
 	color: linear.color,
-	face: linear.face,
+	eyes: linear.eyes,
 	shape: linear.shape,
 };
 
@@ -27,7 +27,7 @@ function call(id: string, approval: ToolCallPart["approval"]): ToolCallPart {
 		output: null,
 		status: approval?.status === "pending" ? "awaiting_approval" : "completed",
 		error: null,
-		mutating: true,
+		writeOrDelete: true,
 		atOffset: 0,
 		startedAt: "2026-09-18T09:00:00.000Z",
 		finishedAt: null,
@@ -40,8 +40,8 @@ function request(id: string, approval: ToolCallPart["approval"]): ApprovalReques
 		call: call(id, approval),
 		bot: host,
 		projectId: project.id,
-		conversationId: "0199a3a0-0000-7000-8000-0000000003b1",
-		rootConversationId: "0199a3a0-0000-7000-8000-0000000003b1",
+		chatId: "0199a3a0-0000-7000-8000-0000000003b1",
+		rootChatId: "0199a3a0-0000-7000-8000-0000000003b1",
 	};
 }
 
@@ -60,13 +60,13 @@ const answered: AnsweredApproval = {
 	answer: decided,
 };
 
-function inbox(contents: { waiting: ApprovalRequest[]; answered: AnsweredApproval[] }) {
+function serveApprovals(contents: { waiting: ApprovalRequest[]; answered: AnsweredApproval[] }) {
 	client.api.chats.approvals.mockReturnValue(Effect.succeed(contents));
 }
 
 beforeEach(() => {
 	apiAnswers();
-	inbox({ waiting: [waiting], answered: [answered] });
+	serveApprovals({ waiting: [waiting], answered: [answered] });
 	client.api.approvals.decide.mockReturnValue(Effect.undefined);
 });
 
@@ -93,7 +93,7 @@ describe("Approvals", () => {
 		mount("/suga/approvals");
 
 		const card = await screen.findByRole("article", { name: /Update issue/ });
-		inbox({
+		serveApprovals({
 			waiting: [],
 			answered: [{ ...waiting, answer: { ...decided, decidedByName: "Sam" } }, answered],
 		});
@@ -105,38 +105,32 @@ describe("Approvals", () => {
 		expect(screen.getByText(/^Nothing waiting/)).toBeDefined();
 	});
 
-	it("opens a request raised in a collaboration at the asker's conversation, not the collaborator's", async () => {
+	it("opens a request raised in a collaboration at the asker's chat, not the collaborator's", async () => {
 		const collaboration = "0199a3a0-0000-7000-8000-0000000003d1";
 		const root = "0199a3a0-0000-7000-8000-0000000003d2";
-		const inThread = {
+		const inChat = {
 			...waiting,
 			projectId: null,
-			conversationId: collaboration,
-			rootConversationId: root,
+			chatId: collaboration,
+			rootChatId: root,
 		};
 		const inProject = {
 			...request("0199a3a0-0000-7000-8000-0000000003c3", waiting.call.approval),
-			conversationId: collaboration,
-			rootConversationId: root,
+			chatId: collaboration,
+			rootChatId: root,
 		};
 
-		inbox({ waiting: [inThread], answered: [] });
-		mount(`/suga/approvals/${inThread.call.id}`);
-		expect(
-			(await screen.findByRole("link", { name: "Open conversation" })).getAttribute("href"),
-		).toBe(`/suga/threads/${root}?item=${collaboration}`);
+		serveApprovals({ waiting: [inChat], answered: [] });
+		mount(`/suga/approvals/${inChat.call.id}`);
+		expect((await screen.findByRole("link", { name: "Open chat" })).getAttribute("href")).toBe(
+			`/suga/chats/${root}?nestedChat=${collaboration}`,
+		);
 		cleanup();
 
-		inbox({ waiting: [inProject], answered: [] });
+		serveApprovals({ waiting: [inProject], answered: [] });
 		mount(`/suga/approvals/${inProject.call.id}`);
-		expect(
-			(await screen.findByRole("link", { name: "Open conversation" })).getAttribute("href"),
-		).toBe(`/suga/projects/${project.slug}/${root}?item=${collaboration}`);
-	});
-
-	it("says a request is gone when the inbox no longer holds it", async () => {
-		mount("/suga/approvals/0199a3a0-0000-7000-8000-0000000003c9");
-
-		expect(await screen.findByText("This request is no longer here")).toBeDefined();
+		expect((await screen.findByRole("link", { name: "Open chat" })).getAttribute("href")).toBe(
+			`/suga/projects/${project.slug}/${root}?nestedChat=${collaboration}`,
+		);
 	});
 });

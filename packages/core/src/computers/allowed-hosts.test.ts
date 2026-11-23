@@ -2,10 +2,10 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	allowedHost,
 	blockedHost,
+	membership,
+	person,
 	projectAllowedHost,
-	user,
 	workspace,
-	workspaceMember,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
@@ -13,7 +13,7 @@ import { allowedHostsOf, reachOf, TRUSTED_HOSTS } from "./allowed-hosts.ts";
 import type { Computers } from "./computers.ts";
 
 const BLOCKS_HOSTS: Computers.Capabilities = {
-	pauseKeeps: "disk",
+	sleepKeeps: "disk",
 	credentials: "host",
 	blocksHosts: true,
 };
@@ -36,13 +36,13 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 		);
 		const [owner] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({ name: "Sam", email: `hosts-${suffix}@example.com` })
 				.returning(),
 		);
 		if (!space || !owner) throw new Error("fixture");
 		workspaceId = space.id;
-		await onDatabase((db) => db.insert(workspaceMember).values({ workspaceId, userId: owner.id }));
+		await onDatabase((db) => db.insert(membership).values({ workspaceId, personId: owner.id }));
 		const aProject = async (name: string) => {
 			const made = await onDatabase((db) =>
 				seedProject(db, { workspaceId, name, slug: name.toLowerCase() }),
@@ -103,7 +103,7 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 		expect(hosts).toContain("example.org");
 	});
 
-	it("keeps out a blocked domain's subdomains", async () => {
+	it("keeps out a blocked host's subdomains", async () => {
 		await allowForProject(builders, "www.pastebin.com");
 		await allowForProject(builders, "*.pastebin.com");
 		await block("pastebin.com");
@@ -114,20 +114,20 @@ describe.skipIf(!process.env.DATABASE_URL)("allowed hosts, against Postgres", ()
 		expect(hosts).not.toContain("*.pastebin.com");
 	});
 
-	it("gives a project on the allowlist the hosts allowed it", async () => {
+	it("gives a project allowed hosts only the hosts allowed it", async () => {
 		await allowForProject(builders, "builders.example.com");
 
 		const reach = await runOnPostgres(
-			reachOf(builders, { networkMode: "allowlist", capabilities: BLOCKS_HOSTS }),
+			reachOf(builders, { networkMode: "allowed-hosts-only", capabilities: BLOCKS_HOSTS }),
 		);
 
 		expect(reach).toEqual({
-			kind: "allowlist",
+			kind: "allowed-hosts-only",
 			hosts: expect.arrayContaining([...TRUSTED_HOSTS, "builders.example.com"]),
 		});
 	});
 
-	it("opens every host but the blocked ones, with a blocked domain's subdomains", async () => {
+	it("opens every host but the blocked ones, with a blocked host's subdomains", async () => {
 		await allowForProject(builders, "builders.example.com");
 		await block("pastebin.com");
 		await block("*.example.org");

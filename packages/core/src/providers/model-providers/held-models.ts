@@ -5,7 +5,7 @@ import { query, transaction } from "../../database/database.ts";
 import { bot, providerModel, workspace } from "../../database/schema.ts";
 import type { UserFacing } from "../../user-message.ts";
 import { offeredModels } from "./model-provider-reads.ts";
-import { defaultModelOf, ModelNotEnabled } from "./model-provider-repository.ts";
+import { defaultModelOf, ModelNotEnabled } from "./model-provider-store.ts";
 
 /**
  * A workspace's models are held by its default, which new bots start on, and

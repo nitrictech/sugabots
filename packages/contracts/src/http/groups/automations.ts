@@ -115,7 +115,7 @@ export class AutomationsApi extends HttpApiGroup.make("automations").add(
 	// says. A delivery id, such as `Idempotency-Key`, makes a retry land on
 	// the run the first delivery started. Slack's URL check is answered
 	// with its challenge, and starts nothing.
-	HttpApiEndpoint.post("webhook", "/hooks/triggers/:triggerId", {
+	HttpApiEndpoint.post("webhook", "/webhooks/triggers/:triggerId", {
 		params: { triggerId: Schema.String },
 		payload: Schema.Json,
 		success: webhookAnswers,

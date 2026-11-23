@@ -1,6 +1,6 @@
 import type { Automation } from "@sugabots/contracts";
 import { Conflict, InternalServerError } from "@sugabots/contracts/http";
-import { automationTriggers, type TestConnection } from "@sugabots/contracts/testing";
+import { automationTriggers, type TestConnector } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
@@ -15,7 +15,7 @@ import {
 	open,
 	pendingAnswer,
 	personalAssistant,
-	serveConnections,
+	serveConnectors,
 	triager,
 } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
@@ -74,7 +74,7 @@ async function openModels() {
 	return screen.findByRole("menu");
 }
 
-function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
+function linearConnector(over: Partial<TestConnector> = {}): TestConnector {
 	return {
 		id: "0199a3a0-0000-7000-8000-0000000000f1",
 		workspaceId: linear.workspaceId,
@@ -106,18 +106,18 @@ function linearConnection(over: Partial<TestConnection> = {}): TestConnection {
 	};
 }
 
-/** Opens the bot's look by clicking its face, as a person would. */
-async function openLook() {
-	fireEvent.click(await screen.findByRole("button", { name: "Change look" }));
-	return screen.findByRole("dialog", { name: `${linear.name}'s look` });
+/** Opens the bot's avatar by clicking its face, as a person would. */
+async function openAvatar() {
+	fireEvent.click(await screen.findByRole("button", { name: "Change avatar" }));
+	return screen.findByRole("dialog", { name: `${linear.name}'s avatar` });
 }
 
 describe("what everybody sees", () => {
-	it("shows the bot as a contact card: its name first, and a way to change its look", async () => {
+	it("shows the bot as a contact card: its name first, and a way to change its avatar", async () => {
 		mount(page);
 
 		expect(await screen.findByRole("heading", { name: linear.name })).toBeDefined();
-		expect(screen.getByRole("button", { name: "Change look" })).toBeDefined();
+		expect(screen.getByRole("button", { name: "Change avatar" })).toBeDefined();
 		expect(screen.queryByRole("tab")).toBeNull();
 	});
 
@@ -145,26 +145,26 @@ describe("what everybody sees", () => {
 		expect(within(tools).getByRole("switch", { name: "Turn off Web search" })).toBeDefined();
 	});
 
-	it("shows the bot's connections, to be changed on its Connections page", async () => {
-		serveConnections(
-			linearConnection(),
-			linearConnection({ id: "0199a3a0-0000-7000-8000-0000000000f9", name: "Wiki", tools: [] }),
+	it("shows the bot's connectors, to be changed on its Connectors page", async () => {
+		serveConnectors(
+			linearConnector(),
+			linearConnector({ id: "0199a3a0-0000-7000-8000-0000000000f9", name: "Wiki", tools: [] }),
 		);
 		mount(page);
 
-		const connections = await screen.findByRole("region", { name: "Connections" });
-		expect(await within(connections).findByText("Linear")).toBeDefined();
-		// A connection that gives the bot no tools gives it nothing to list.
-		expect(within(connections).queryByText("Wiki")).toBeNull();
-		expect(within(connections).queryByRole("switch")).toBeNull();
-		const manage = within(connections).getByRole("link", { name: "Manage" });
-		expect(manage.getAttribute("href")).toBe(`/suga/bots/${linear.handle}/connections`);
+		const connectors = await screen.findByRole("region", { name: "Connectors" });
+		expect(await within(connectors).findByText("Linear")).toBeDefined();
+		// A connector that gives the bot no tools gives it nothing to list.
+		expect(within(connectors).queryByText("Wiki")).toBeNull();
+		expect(within(connectors).queryByRole("switch")).toBeNull();
+		const manage = within(connectors).getByRole("link", { name: "Manage" });
+		expect(manage.getAttribute("href")).toBe(`/suga/bots/${linear.handle}/connectors`);
 	});
 });
 
-describe("a member", () => {
+describe("an editor", () => {
 	beforeEach(() => {
-		apiAnswers({ role: "member" });
+		apiAnswers({ role: "editor" });
 	});
 
 	it("says web search is off while the workspace has none", async () => {
@@ -181,19 +181,19 @@ describe("a member", () => {
 
 		await screen.findByRole("heading", { name: linear.name });
 		expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
-		expect(screen.queryByRole("button", { name: "Change look" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Change avatar" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Delete bot" })).toBeNull();
 	});
 });
 
 describe("your Personal Assistant", () => {
-	it("offers only its look, its connections and its automations to change", async () => {
+	it("offers only its avatar, its connectors and its automations to change", async () => {
 		onWideScreen();
 		mount(`/suga/bots/${personalAssistant.handle}/settings`);
 
 		expect(await screen.findByRole("textbox", { name: "Name" })).toBeDefined();
-		expect(screen.getByRole("button", { name: "Change look" })).toBeDefined();
-		expect(screen.getByRole("region", { name: "Connections" })).toBeDefined();
+		expect(screen.getByRole("button", { name: "Change avatar" })).toBeDefined();
+		expect(screen.getByRole("region", { name: "Connectors" })).toBeDefined();
 		const settings = screen.getByRole("region", { name: "Settings" });
 		expect(within(settings).getByRole("link", { name: /^Automations/ })).toBeDefined();
 		expect(screen.queryByRole("button", { name: /^Model/ })).toBeNull();
@@ -232,7 +232,7 @@ describe("a viewer", () => {
 		mount(page);
 
 		await screen.findByRole("heading", { name: linear.name });
-		expect(screen.queryByRole("button", { name: "Change look" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Change avatar" })).toBeNull();
 		expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Delete bot" })).toBeNull();
 	});
@@ -246,7 +246,7 @@ describe("an admin", () => {
 		);
 		mount(page);
 
-		// Its settings' row, not the Automations beside its threads.
+		// Its settings' row, not the Automations beside its chats.
 		const settings = await screen.findByRole("region", { name: "Settings" });
 		const row = await within(settings).findByRole("link", { name: /^Automations/ });
 		await waitFor(() => expect(within(row).getByText("2")).toBeDefined());
@@ -333,59 +333,59 @@ describe("an admin", () => {
 	});
 
 	it("saves its colour, shape and eyes together from its face, on Save", async () => {
-		answers({ color: "rose", face: "wink", shape: "star" });
+		answers({ color: "rose", eyes: "wink", shape: "star" });
 		mount(page);
 
-		const look = await openLook();
-		const save = within(look).getByRole("button", { name: "Save" });
+		const avatar = await openAvatar();
+		const save = within(avatar).getByRole("button", { name: "Save" });
 		expect(save.hasAttribute("disabled")).toBe(true);
-		fireEvent.click(within(look).getByRole("radio", { name: "rose" }));
-		fireEvent.click(within(look).getByRole("radio", { name: "star" }));
-		fireEvent.click(within(look).getByRole("tab", { name: "Eyes" }));
-		fireEvent.click(within(look).getByRole("radio", { name: "wink" }));
+		fireEvent.click(within(avatar).getByRole("radio", { name: "rose" }));
+		fireEvent.click(within(avatar).getByRole("radio", { name: "star" }));
+		fireEvent.click(within(avatar).getByRole("tab", { name: "Eyes" }));
+		fireEvent.click(within(avatar).getByRole("radio", { name: "wink" }));
 		expect(client.api.bots.update).not.toHaveBeenCalled();
 
 		fireEvent.click(save);
 		await waitFor(() =>
 			expect(client.api.bots.update).toHaveBeenCalledWith({
 				params: { botId: linear.id },
-				payload: { color: "rose", shape: "star", face: "wink" },
+				payload: { color: "rose", shape: "star", eyes: "wink" },
 			}),
 		);
 		expect(client.api.bots.update).toHaveBeenCalledOnce();
 		await waitFor(() =>
-			expect(screen.queryByRole("dialog", { name: `${linear.name}'s look` })).toBeNull(),
+			expect(screen.queryByRole("dialog", { name: `${linear.name}'s avatar` })).toBeNull(),
 		);
 	});
 
-	it("drops the look's picks when it is closed without saving", async () => {
+	it("drops the avatar's picks when it is closed without saving", async () => {
 		mount(page);
 
-		let look = await openLook();
-		fireEvent.click(within(look).getByRole("radio", { name: "rose" }));
-		fireEvent.click(within(look).getByRole("button", { name: "Cancel" }));
+		let avatar = await openAvatar();
+		fireEvent.click(within(avatar).getByRole("radio", { name: "rose" }));
+		fireEvent.click(within(avatar).getByRole("button", { name: "Cancel" }));
 		await waitFor(() =>
-			expect(screen.queryByRole("dialog", { name: `${linear.name}'s look` })).toBeNull(),
+			expect(screen.queryByRole("dialog", { name: `${linear.name}'s avatar` })).toBeNull(),
 		);
 
-		look = await openLook();
-		const color = within(look).getByRole("radio", { name: linear.color });
+		avatar = await openAvatar();
+		const color = within(avatar).getByRole("radio", { name: linear.color });
 		expect((color as HTMLInputElement).checked).toBe(true);
 		expect(client.api.bots.update).not.toHaveBeenCalled();
 	});
 
-	it("keeps the look's picks open and says why when saving them fails", async () => {
+	it("keeps the avatar's picks open and says why when saving them fails", async () => {
 		client.api.bots.update.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Unavailable` })),
 		);
 		mount(page);
 
-		const look = await openLook();
-		fireEvent.click(within(look).getByRole("radio", { name: "rose" }));
-		fireEvent.click(within(look).getByRole("button", { name: "Save" }));
+		const avatar = await openAvatar();
+		fireEvent.click(within(avatar).getByRole("radio", { name: "rose" }));
+		fireEvent.click(within(avatar).getByRole("button", { name: "Save" }));
 
-		expect(await within(look).findByRole("alert")).toBeDefined();
-		expect((within(look).getByRole("radio", { name: "rose" }) as HTMLInputElement).checked).toBe(
+		expect(await within(avatar).findByRole("alert")).toBeDefined();
+		expect((within(avatar).getByRole("radio", { name: "rose" }) as HTMLInputElement).checked).toBe(
 			true,
 		);
 	});

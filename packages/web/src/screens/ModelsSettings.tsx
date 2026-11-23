@@ -1,14 +1,14 @@
 import {
+	type BuiltInProvider,
+	type BuiltInProviderId,
+	builtInProviders,
+	builtInSignsIn,
 	effectiveCapabilities,
 	type ModelProvider,
-	type ProviderPreset,
-	type ProviderPresetId,
-	presetSignsIn,
-	providerCatalog,
+	providerBuiltIn,
 	providerIsConnected,
 	providerIsReady,
 	providerIsUsable,
-	providerPreset,
 	signInServiceNames,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -56,7 +56,7 @@ import { API_FORMATS, BackToModels, ProviderTile } from "./ProviderSettings.tsx"
  * The providers most people connect, listed whether or not they are, each
  * with Connect until it is. Other providers are listed once connected.
  */
-const POPULAR_PRESETS: readonly ProviderPresetId[] = [
+const POPULAR_BUILT_INS: readonly BuiltInProviderId[] = [
 	"openrouter",
 	"anthropic",
 	"openai",
@@ -71,33 +71,33 @@ export function ModelsSettings() {
 	const backToModels = useBackToHere("Models");
 	const providers = useModelProviders();
 	const may = useWorkspacePermissions();
-	// `true` for the whole list; a preset for Connect beside that provider.
-	const [adding, setAdding] = useState<ProviderPresetId | true>();
+	// `true` for the whole list; a built-in provider for Connect beside that provider.
+	const [adding, setAdding] = useState<BuiltInProviderId | true>();
 	const navigate = useNavigate();
 	const all = providers.data ?? [];
-	const byPreset = new Map(all.map((provider) => [provider.preset, provider]));
+	const byBuiltIn = new Map(all.map((provider) => [provider.builtIn, provider]));
 	const others = all.filter(
 		(provider) =>
-			(provider.preset === null || !POPULAR_PRESETS.includes(provider.preset)) &&
-			(providerIsConnected(provider) || provider.preset === null),
+			(provider.builtIn === null || !POPULAR_BUILT_INS.includes(provider.builtIn)) &&
+			(providerIsConnected(provider) || provider.builtIn === null),
 	);
-	const connectedPopular = (presetId: ProviderPresetId) => {
-		const provider = byPreset.get(presetId);
+	const connectedPopular = (builtInId: BuiltInProviderId) => {
+		const provider = byBuiltIn.get(builtInId);
 		return provider && providerIsConnected(provider) ? provider : undefined;
 	};
 	// Working ones lead, then failed, disabled and not connected, each the popular ones in
 	// their order and then the rest; the popular ones that could be connected follow.
 	const connected = [
-		...POPULAR_PRESETS.flatMap((presetId) => connectedPopular(presetId) ?? []),
+		...POPULAR_BUILT_INS.flatMap((builtInId) => connectedPopular(builtInId) ?? []),
 		...others,
 	].toSorted(
 		(a, b) =>
-			CONNECTION_STATE_ORDER.indexOf(connectionState(a)) -
-			CONNECTION_STATE_ORDER.indexOf(connectionState(b)),
+			PROVIDER_STATE_ORDER.indexOf(providerStateOf(a)) -
+			PROVIDER_STATE_ORDER.indexOf(providerStateOf(b)),
 	);
 	// Nothing until the list arrives: a popular provider would read Not connected whether it is or not.
 	const toConnect = providers.data
-		? POPULAR_PRESETS.filter((presetId) => !connectedPopular(presetId))
+		? POPULAR_BUILT_INS.filter((builtInId) => !connectedPopular(builtInId))
 		: [];
 	const providerLink = (provider: ModelProvider) => (
 		<Link
@@ -115,23 +115,23 @@ export function ModelsSettings() {
 		>
 			<SettingsGroup label="Defaults">
 				<DefaultModelRow providers={all} />
-				{may.configureBuiltInBots && <SystemModelRow providers={all} />}
+				{may.chooseSystemModel && <SystemModelRow providers={all} />}
 			</SettingsGroup>
 			<SettingsGroup label="Providers">
 				{providers.error && <SettingsRowAlert>{failureMessage(providers.error)}</SettingsRowAlert>}
 				{connected.map((provider) => (
 					<ProviderRow key={provider.id} provider={provider} render={providerLink(provider)} />
 				))}
-				{toConnect.map((presetId) => {
-					const preset = providerPreset(presetId);
+				{toConnect.map((builtInId) => {
+					const builtIn = providerBuiltIn(builtInId);
 					return (
 						<SettingsRow
-							key={presetId}
-							icon={<ProviderTile name={preset.name} preset={presetId} />}
-							label={preset.name}
+							key={builtInId}
+							icon={<ProviderTile name={builtIn.name} builtIn={builtInId} />}
+							label={builtIn.name}
 							sub="Not connected"
 							trailing={
-								<SettingsRowButton onClick={() => setAdding(presetId)}>Connect</SettingsRowButton>
+								<SettingsRowButton onClick={() => setAdding(builtInId)}>Connect</SettingsRowButton>
 							}
 						/>
 					);
@@ -139,7 +139,7 @@ export function ModelsSettings() {
 				<SettingsRow
 					icon={<SettingsAddMark />}
 					label={<span className="text-muted-foreground">Add a provider</span>}
-					sub="Any OpenAI-compatible endpoint, or one on your own machine"
+					sub="Any server that speaks OpenAI's API format, or one on your own machine"
 					chevron
 					onClick={() => setAdding(true)}
 				/>
@@ -174,13 +174,13 @@ function ProviderRow({
 	provider: ModelProvider;
 	render: React.ReactElement;
 }) {
-	const state = connectionState(provider);
+	const state = providerStateOf(provider);
 	return (
 		<SettingsRow
-			icon={<ProviderTile name={provider.name} preset={provider.preset} />}
+			icon={<ProviderTile name={provider.name} builtIn={provider.builtIn} />}
 			label={provider.name}
 			sub={subLine(state, provider)}
-			trailing={<ConnectionBadge state={state} preset={provider.preset} />}
+			trailing={<ProviderStateBadge state={state} builtIn={provider.builtIn} />}
 			chevron
 			render={render}
 		/>
@@ -192,22 +192,22 @@ function ProviderRow({
  * but its last test failed, such as a key that was rejected; connected but
  * switched off, so bots can't use it until it is switched on; or not connected.
  */
-const CONNECTION_STATE_ORDER = ["connected", "failed", "disabled", "not_connected"] as const;
-type ConnectionState = (typeof CONNECTION_STATE_ORDER)[number];
+const PROVIDER_STATE_ORDER = ["connected", "failed", "disabled", "not_connected"] as const;
+type ProviderState = (typeof PROVIDER_STATE_ORDER)[number];
 
-function connectionState(provider: ModelProvider): ConnectionState {
+function providerStateOf(provider: ModelProvider): ProviderState {
 	if (!providerIsConnected(provider)) return "not_connected";
 	if (provider.status === "error") return "failed";
 	if (!provider.active) return "disabled";
 	return "connected";
 }
 
-function ConnectionBadge({
+function ProviderStateBadge({
 	state,
-	preset,
+	builtIn,
 }: {
-	state: ConnectionState;
-	preset: ModelProvider["preset"];
+	state: ProviderState;
+	builtIn: ModelProvider["builtIn"];
 }) {
 	switch (state) {
 		case "connected":
@@ -215,7 +215,7 @@ function ConnectionBadge({
 		case "failed":
 			return (
 				<SettingsStatusBadge tone="failed">
-					{presetSignsIn(preset) ? "Sign-in failed" : "Connection failed"}
+					{builtInSignsIn(builtIn) ? "Sign-in failed" : "Didn't answer"}
 				</SettingsStatusBadge>
 			);
 		case "disabled":
@@ -226,17 +226,19 @@ function ConnectionBadge({
 }
 
 /** Under a provider's name: what it is connected with, or what it needs. */
-function subLine(state: ConnectionState, provider: ModelProvider): string {
+function subLine(state: ProviderState, provider: ModelProvider): string {
 	if (state === "not_connected") return "Not connected";
 	if (state === "failed") {
-		return presetSignsIn(provider.preset) ? "Sign in again to use it" : "Enter a new key to use it";
+		return builtInSignsIn(provider.builtIn)
+			? "Sign in again to use it"
+			: "Enter a new key to use it";
 	}
 	return credentialLine(provider);
 }
 
 /** What a connected provider is connected with. */
 function credentialLine(provider: ModelProvider): string {
-	if (presetSignsIn(provider.preset)) return "Signed in";
+	if (builtInSignsIn(provider.builtIn)) return "Signed in";
 	if (provider.hasApiKey) return "API key set";
 	return "No key needed";
 }
@@ -299,7 +301,7 @@ function SystemModelRow({ providers }: { providers: readonly ModelProvider[] }) 
 	return (
 		<DefaultRow
 			label="Compaction"
-			description="Used to compact long conversations for a bot with no model of its own"
+			description="Used to compact long chats for a bot with no model of its own"
 			model={chosenModelName(providers, current)}
 			render={<Link from="/$workspace" to="./settings/providers/system" state={backToModels} />}
 		/>
@@ -335,7 +337,7 @@ export function DefaultModelSettings() {
 
 /**
  * One model for everything Sugabots does behind the scenes, which is
- * compacting long conversations for a bot with no model of its own. Choosing
+ * compacting long chats for a bot with no model of its own. Choosing
  * it sets it for every system bot at once.
  */
 export function SystemModelSettings() {
@@ -345,7 +347,7 @@ export function SystemModelSettings() {
 	return (
 		<ModelChoicePage
 			title="Compaction"
-			description="The model Sugabots uses behind the scenes to compact long conversations, for a bot with no model of its own. A fast, cheap model works best."
+			description="The model Sugabots uses behind the scenes to compact long chats, for a bot with no model of its own. A fast, cheap model works best."
 			current={systemBots.data?.find((bot) => bot.key === "compact")?.model ?? null}
 			pending={compact.isPending}
 			choose={(modelId) =>
@@ -404,17 +406,17 @@ function ModelChoicePage({
 	);
 }
 
-type Choice = { preset: ProviderPreset; existing?: ModelProvider } | "custom";
+type Choice = { builtIn: BuiltInProvider; existing?: ModelProvider } | "custom";
 
 /**
  * Adding a provider, in two steps inside one dialog: which one, then what it
- * needs. The ones every workspace starts with (`seededPresets`) already exist, so adding one
+ * needs. The ones every workspace starts with (`seededBuiltIns`) already exist, so adding one
  * of them gives the existing record its key rather than making another.
  */
 export function AddProviderDialog(props: {
 	providers: readonly ModelProvider[];
 	/** A provider to open on, as Connect beside it does, with Back to the whole list. */
-	startWith?: ProviderPresetId;
+	startWith?: BuiltInProviderId;
 	done: () => void;
 	onAdded: (provider: ModelProvider) => Promise<void>;
 }) {
@@ -432,24 +434,24 @@ function AddProviderSteps({
 	onAdded,
 }: {
 	providers: readonly ModelProvider[];
-	startWith?: ProviderPresetId;
+	startWith?: BuiltInProviderId;
 	done: () => void;
 	onAdded: (provider: ModelProvider) => Promise<void>;
 }) {
-	const byPreset = new Map(
+	const byBuiltIn = new Map(
 		providers
-			.filter((provider) => provider.preset !== null)
-			.map((provider) => [provider.preset as ProviderPresetId, provider]),
+			.filter((provider) => provider.builtIn !== null)
+			.map((provider) => [provider.builtIn as BuiltInProviderId, provider]),
 	);
 	const [choice, setChoice] = useState<Choice | undefined>(() =>
 		startWith
-			? { preset: providerPreset(startWith), existing: byPreset.get(startWith) }
+			? { builtIn: providerBuiltIn(startWith), existing: byBuiltIn.get(startWith) }
 			: undefined,
 	);
 	// Ollama is on in every workspace from the start, so being reachable is not
 	// enough to leave it out: it has to have listed models.
-	const available = providerCatalog.filter((preset) => {
-		const existing = byPreset.get(preset.id);
+	const available = builtInProviders.filter((builtIn) => {
+		const existing = byBuiltIn.get(builtIn.id);
 		return !existing || !providerIsReady(existing);
 	});
 
@@ -458,8 +460,8 @@ function AddProviderSteps({
 	}
 	if (choice) {
 		return (
-			<PresetStep
-				preset={choice.preset}
+			<BuiltInStep
+				builtIn={choice.builtIn}
 				existing={choice.existing}
 				onBack={() => setChoice(undefined)}
 				onAdded={onAdded}
@@ -468,29 +470,29 @@ function AddProviderSteps({
 	}
 
 	const groups = [
-		{ label: "Popular", presets: available.filter((preset) => preset.hosting === "remote") },
+		{ label: "Popular", builtIns: available.filter((builtIn) => builtIn.hosting === "remote") },
 		{
 			label: "On your own machine",
-			presets: available.filter((preset) => preset.hosting === "local"),
+			builtIns: available.filter((builtIn) => builtIn.hosting === "local"),
 		},
-	].filter((group) => group.presets.length > 0);
+	].filter((group) => group.builtIns.length > 0);
 
 	return (
 		<DialogFormStep onSubmit={(event) => event.preventDefault()}>
 			<DialogFormHeader title="Add provider" />
 			<DialogFormBody>
-				{/* The catalog runs longer than a short window, so the list scrolls inside the dialog. */}
+				{/* The built-in providers run longer than a short window, so the list scrolls inside the dialog. */}
 				<DialogFormScroll height="picker-tall">
 					{groups.map((group) => (
 						<SettingsGroup key={group.label} label={group.label}>
-							{group.presets.map((preset) => (
+							{group.builtIns.map((builtIn) => (
 								<SettingsRow
-									key={preset.id}
-									icon={<ProviderTile name={preset.name} preset={preset.id} />}
-									label={preset.name}
-									sub={firstSentence(preset.hint)}
+									key={builtIn.id}
+									icon={<ProviderTile name={builtIn.name} builtIn={builtIn.id} />}
+									label={builtIn.name}
+									sub={firstSentence(builtIn.hint)}
 									chevron
-									onClick={() => setChoice({ preset, existing: byPreset.get(preset.id) })}
+									onClick={() => setChoice({ builtIn, existing: byBuiltIn.get(builtIn.id) })}
 								/>
 							))}
 						</SettingsGroup>
@@ -515,24 +517,24 @@ function AddProviderSteps({
 	);
 }
 
-function PresetStep({
-	preset,
+function BuiltInStep({
+	builtIn,
 	existing,
 	onBack,
 	onAdded,
 }: {
-	preset: ProviderPreset;
+	builtIn: BuiltInProvider;
 	existing?: ModelProvider;
 	onBack: () => void;
 	onAdded: (provider: ModelProvider) => Promise<void>;
 }) {
 	const actions = useProviderActions();
 	const [apiKey, setApiKey] = useState("");
-	const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? preset.baseUrl);
+	const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? builtIn.baseUrl);
 	const [error, setError] = useState<unknown>();
-	const local = preset.hosting === "local";
-	const requiresApiKey = preset.credential === "api-key";
-	const signInService = preset.credential === "sign-in" ? preset.signIn : undefined;
+	const local = builtIn.hosting === "local";
+	const requiresApiKey = builtIn.credential === "api-key";
+	const signInService = builtIn.credential === "sign-in" ? builtIn.signIn : undefined;
 	const signsIn = signInService !== undefined;
 	const typedBaseUrl = parseProviderBaseUrl(baseUrl);
 	const ready = (!requiresApiKey || apiKey !== "") && (!local || typedBaseUrl !== undefined);
@@ -559,9 +561,9 @@ function PresetStep({
 						},
 					})
 				: await actions.create.mutateAsync({
-						preset: preset.id,
+						builtIn: builtIn.id,
 						apiKey: apiKey || undefined,
-						...(local && typedBaseUrl !== preset.baseUrl ? { baseUrl: typedBaseUrl } : {}),
+						...(local && typedBaseUrl !== builtIn.baseUrl ? { baseUrl: typedBaseUrl } : {}),
 					});
 			await onAdded(added);
 		} catch (cause) {
@@ -571,9 +573,9 @@ function PresetStep({
 
 	return (
 		<DialogFormStep onSubmit={submit}>
-			<DialogFormHeader title={preset.name} onBack={onBack} backDisabled={pending} />
+			<DialogFormHeader title={builtIn.name} onBack={onBack} backDisabled={pending} />
 			<DialogFormBody>
-				<SettingsGroup note={preset.hint}>
+				<SettingsGroup note={builtIn.hint}>
 					{signInService && (
 						<SettingsRow
 							label={`${signInServiceNames[signInService]} account`}
@@ -585,7 +587,7 @@ function PresetStep({
 							label="Server URL"
 							value={baseUrl}
 							onChange={setBaseUrl}
-							placeholder={preset.baseUrl}
+							placeholder={builtIn.baseUrl}
 							mono
 						/>
 					)}
@@ -696,7 +698,7 @@ function CustomProviderStep({
 	);
 }
 
-/** A preset's hint is a line or two; the picker has room for what comes before the first stop. */
+/** A built-in provider's hint is a line or two; the picker has room for what comes before the first stop. */
 function firstSentence(text: string): string {
 	const stop = text.indexOf(". ");
 	return stop === -1 ? text.replace(/\.$/, "") : text.slice(0, stop);

@@ -1,9 +1,9 @@
 import { botPalettes } from "@sugabots/avatars";
 import {
 	type BotColor,
-	type BotFace,
+	type BotEyes,
 	type BotShape,
-	providerPreset,
+	providerBuiltIn,
 	type UsageMonth,
 	type WorkspaceUsage,
 } from "@sugabots/contracts";
@@ -38,7 +38,7 @@ import { ProviderTile } from "./ProviderSettings.tsx";
 
 /**
  * What the workspace's models cost, a month at a time: the total and each
- * day's spend, then the month broken down by bot or by model. Amounts
+ * day's cost, then the month broken down by bot or by model. Amounts
  * are estimates from each provider's published prices; a request that could
  * not be priced is counted, not guessed at.
  */
@@ -62,7 +62,7 @@ export function UsageSettings({
 				<Alert>{failureMessage(usage.error)}</Alert>
 			) : usage.data && timeZone ? (
 				<>
-					<SpendSummary
+					<UsageSummary
 						usage={usage.data}
 						today={dateIn(now, timeZone)}
 						stale={usage.isPlaceholderData}
@@ -110,7 +110,7 @@ function MonthStepper({
 }
 
 /** The month's total beside the way to another month, and a bar for each of its days. */
-function SpendSummary({
+function UsageSummary({
 	usage,
 	today,
 	stale,
@@ -126,7 +126,7 @@ function SpendSummary({
 	const last = usage.days.at(-1);
 	return (
 		<section
-			aria-label={`Spend in ${longMonthLabel(usage.month)}`}
+			aria-label={`Usage in ${longMonthLabel(usage.month)}`}
 			aria-busy={stale}
 			className={cn(SETTINGS_CARD, "-mt-2 flex flex-col gap-5 p-5")}
 		>
@@ -242,7 +242,7 @@ const breakdownViews: readonly { value: BreakdownView; label: string }[] = [
 	{ value: "model", label: "Model" },
 ];
 
-/** One line of a breakdown: what the spend was for, and how much. */
+/** One line of a breakdown: what the cost was for, and how much. */
 interface Line {
 	key: string;
 	icon: ReactNode;
@@ -251,10 +251,10 @@ interface Line {
 	/** The bar's colour, as a CSS colour. */
 	color: string;
 	usd: number;
-	unpricedRequests: number;
+	unknownCostRequests: number;
 }
 
-const SYSTEM_BOTS_WORK = "Routing, compaction, model tests";
+const SYSTEM_BOTS_WORK = "Compaction, model tests";
 
 const PERSONAL_ASSISTANTS_WORK = "Everyone's, together";
 
@@ -276,7 +276,7 @@ function Breakdown({ usage, stale }: { usage: WorkspaceUsage; stale: boolean }) 
 					onChange={setView}
 				/>
 			}
-			note={footnote(usage.unpricedRequests)}
+			note={footnote(usage.unknownCostRequests)}
 		>
 			{lines.length === 0 ? (
 				<p
@@ -299,7 +299,7 @@ function Breakdown({ usage, stale }: { usage: WorkspaceUsage; stale: boolean }) 
 }
 
 function BreakdownLine({ line, largest }: { line: Line; largest: number }) {
-	const unknown = line.usd === 0 && line.unpricedRequests > 0;
+	const unknown = line.usd === 0 && line.unknownCostRequests > 0;
 	return (
 		<li className="flex min-h-14 min-w-0 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 sm:gap-5">
 			<span className="flex min-w-0 flex-wide basis-0 items-center gap-3 sm:flex-1">
@@ -340,11 +340,11 @@ type ModelUsage = WorkspaceUsage["models"][number];
 
 /**
  * A colour for each provider, by the order its first model comes in the
- * breakdown, which is by spend: the provider spent most on gets the first.
+ * breakdown, which is by cost: the provider that cost most gets the first.
  * Every model through one provider shares its colour; past eight they repeat.
  */
 function providerColors(models: readonly ModelUsage[]): (model: ModelUsage) => string {
-	const providerOf = (model: ModelUsage) => model.preset ?? model.providerName ?? "removed";
+	const providerOf = (model: ModelUsage) => model.builtIn ?? model.providerName ?? "removed";
 	const order = [...new Set(models.map(providerOf))];
 	return (model) => {
 		const hue = PROVIDER_HUES[order.indexOf(providerOf(model)) % PROVIDER_HUES.length] ?? "blue";
@@ -353,7 +353,7 @@ function providerColors(models: readonly ModelUsage[]): (model: ModelUsage) => s
 }
 
 function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
-	const spent = (line: Line) => line.usd > 0 || line.unpricedRequests > 0;
+	const spent = (line: Line) => line.usd > 0 || line.unknownCostRequests > 0;
 	// Each is its own person's, so they are shown together, never one by one.
 	const personalAssistants: Line = {
 		key: "personal-assistants",
@@ -381,11 +381,11 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 			return withSystemBots(
 				usage.bots.map((bot) => ({
 					key: bot.botId,
-					icon: <BotIcon color={bot.color} face={bot.face} shape={bot.shape} name={bot.name} />,
+					icon: <BotIcon color={bot.color} eyes={bot.eyes} shape={bot.shape} name={bot.name} />,
 					label: bot.name ?? "Deleted bot",
 					color: bot.color ? botPalettes[bot.color].face : NEUTRAL_BAR,
 					usd: bot.usd,
-					unpricedRequests: bot.unpricedRequests,
+					unknownCostRequests: bot.unknownCostRequests,
 				})),
 			);
 		case "model": {
@@ -394,15 +394,15 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 				const label = modelName({ displayName: model.displayName, modelId: model.model });
 				const providerName =
 					model.providerName ??
-					(model.preset ? providerPreset(model.preset).name : "Removed provider");
+					(model.builtIn ? providerBuiltIn(model.builtIn).name : "Removed provider");
 				return {
 					key: `${model.model}:${model.providerName}`,
-					icon: <ProviderTile name={providerName} preset={model.preset} />,
+					icon: <ProviderTile name={providerName} builtIn={model.builtIn} />,
 					label,
 					sub: providerName,
 					color: colorOf(model),
 					usd: model.usd,
-					unpricedRequests: model.unpricedRequests,
+					unknownCostRequests: model.unknownCostRequests,
 				};
 			});
 		}
@@ -411,17 +411,17 @@ function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
 
 function BotIcon({
 	color,
-	face,
+	eyes,
 	shape,
 	name,
 }: {
 	color: BotColor | null;
-	face: BotFace | null;
+	eyes: BotEyes | null;
 	shape: BotShape | null;
 	name: string | null;
 }) {
 	return color ? (
-		<BotAvatar color={color} face={face ?? undefined} shape={shape ?? "circle"} size={24} />
+		<BotAvatar color={color} eyes={eyes ?? undefined} shape={shape ?? "circle"} size={24} />
 	) : (
 		<FacelessTile name={name ?? "Deleted bot"} />
 	);
@@ -434,10 +434,10 @@ function FacelessTile({ name }: { name: string }) {
 	);
 }
 
-function footnote(unpricedRequests: number): string {
-	const unpriced =
-		unpricedRequests === 0
+function footnote(unknownCostRequests: number): string {
+	const unknownCost =
+		unknownCostRequests === 0
 			? ""
-			: ` ${countOf(unpricedRequests, "request", "requests")} couldn't be priced and ${unpricedRequests === 1 ? "isn't" : "aren't"} included.`;
-	return `Estimated from each provider's published prices.${unpriced} Your provider bills you directly.`;
+			: ` ${countOf(unknownCostRequests, "request", "requests")} ${unknownCostRequests === 1 ? "has" : "have"} an unknown cost and ${unknownCostRequests === 1 ? "isn't" : "aren't"} included.`;
+	return `Estimated from each provider's published prices.${unknownCost} Your provider bills you directly.`;
 }

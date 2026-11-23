@@ -17,9 +17,9 @@ export const NOTIFICATION_LEVEL_LABELS: Record<NotificationLevel, string> = {
 
 /** What each level notifies about, under the choice of one. */
 export const NOTIFICATION_LEVEL_NOTES: Record<NotificationLevel, string> = {
-	all: "Every new message in the conversations you can see, and approvals that wait on you.",
+	all: "Every new message in the chats you can see, and approvals that wait on you.",
 	mentions:
-		"Messages that mention you, a bot's answers to you, replies in conversations you're part of, and approvals that wait on you.",
+		"Messages that mention you, a bot's answers to you, replies in chats you're part of, and approvals that wait on you.",
 	nothing: "No notifications, wherever you are.",
 };
 

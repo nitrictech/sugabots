@@ -1,5 +1,5 @@
 import { FilePages } from "@sugabots/core/files/pages";
-import { Installation } from "@sugabots/core/installation/installation";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
@@ -15,8 +15,8 @@ const withPages = (contentOrigin: string | undefined = CONTENT_ORIGIN) =>
 	createTestApp(
 		Layer.mergeAll(
 			Layer.succeed(
-				Installation.Service,
-				Installation.fromUrls({
+				ServerSettings.Service,
+				ServerSettings.fromUrls({
 					isProduction: false,
 					publicUrl: BASE_URL,
 					webAppUrl: WEB_ORIGIN,

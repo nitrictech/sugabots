@@ -18,7 +18,7 @@ import { Egress } from "../providers/network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../providers/tested-configuration.ts";
 import type { UserFacing } from "../user-message.ts";
 import { toComputerProvider } from "./computer-provider-reads.ts";
-import { ComputerProviderRepository } from "./computer-provider-repository.ts";
+import { ComputerProviderStore } from "./computer-provider-store.ts";
 import { Computers } from "./computers.ts";
 import { pinnedToDigest } from "./image-digest.ts";
 import { ProjectComputers } from "./project-computers.ts";
@@ -46,7 +46,7 @@ export interface Interface {
 		provider: NewComputerProvider;
 	}) => Effect.Effect<
 		ComputerProvider,
-		AuthorizationDenied | UrlNotAllowed | ComputerProviderRepository.ComputerProviderIncomplete,
+		AuthorizationDenied | UrlNotAllowed | ComputerProviderStore.ComputerProviderIncomplete,
 		CurrentActor.Service
 	>;
 	readonly update: (input: {
@@ -58,8 +58,8 @@ export interface Interface {
 		| AuthorizationDenied
 		| ComputerProviderNotFound
 		| UrlNotAllowed
-		| ComputerProviderRepository.ComputerProviderIncomplete
-		| ComputerProviderRepository.ComputerProviderPresetFixed,
+		| ComputerProviderStore.ComputerProviderIncomplete
+		| ComputerProviderStore.ComputerProviderBuiltInFixed,
 		CurrentActor.Service
 	>;
 	/**
@@ -116,7 +116,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ComputerProviderSetup");
 	const authorization = yield* Authorization.Service;
-	const providers = yield* ComputerProviderRepository.Service;
+	const providers = yield* ComputerProviderStore.Service;
 	const projectComputers = yield* ProjectComputers.Service;
 	const computers = yield* Computers.Service;
 	const egress = yield* Egress.Service;
@@ -126,7 +126,7 @@ export const make = Effect.gen(function* () {
 
 	const requireAllowedUrls = (settings: ComputerProviderSettings | undefined) =>
 		Effect.forEach(
-			settings ? ComputerProviderRepository.addressesIn(settings) : [],
+			settings ? ComputerProviderStore.addressesIn(settings) : [],
 			(url) => requireAllowedUrl(egress, url),
 			{ discard: true },
 		);
@@ -162,9 +162,9 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId, actor } = yield* managed(workspace);
 					// Checked as it will be stored, with the usual address filled in.
-					yield* requireAllowedUrls(ComputerProviderRepository.withUsualAddress(provider.settings));
+					yield* requireAllowedUrls(ComputerProviderStore.withUsualAddress(provider.settings));
 					return toComputerProvider(
-						yield* providers.create(workspaceId, { createdById: actor.userId, provider }),
+						yield* providers.create(workspaceId, { createdById: actor.personId, provider }),
 					);
 				}),
 			),
@@ -178,8 +178,7 @@ export const make = Effect.gen(function* () {
 					const before = yield* requireProvider(workspaceId, providerId);
 					const updated = yield* providers.update(workspaceId, providerId, changes);
 					if (!updated) return yield* new ComputerProviderNotFound();
-					const modeOf = (row: typeof before) =>
-						ComputerProviderRepository.networkModeIn(row.settings);
+					const modeOf = (row: typeof before) => ComputerProviderStore.networkModeIn(row.settings);
 					if (modeOf(updated) !== modeOf(before)) {
 						yield* projectComputers.applyNetwork({ workspaceId });
 					}
@@ -194,7 +193,7 @@ export const make = Effect.gen(function* () {
 					const { workspaceId } = yield* managed(workspace);
 					yield* requireProvider(workspaceId, providerId);
 					if (yield* projectComputers.anyMadeBy(workspaceId, providerId)) {
-						const configured = yield* providers.connection(workspaceId, providerId);
+						const configured = yield* providers.access(workspaceId, providerId);
 						if (!configured) return yield* new ComputersNotDestroyed({ cause: "incomplete" });
 						yield* projectComputers
 							.destroyAllMadeBy(workspaceId, configured)
@@ -216,8 +215,8 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId } = yield* managed(workspace);
 					const row = yield* requireProvider(workspaceId, providerId);
-					const configured = yield* providers.connection(workspaceId, providerId);
-					const templates = configured && computers.forConnection(configured.connection).templates;
+					const configured = yield* providers.access(workspaceId, providerId);
+					const templates = configured && computers.forAccess(configured.access).templates;
 					if (!templates) return undefined;
 					// A template Sugabots didn't build, though it has the name, may be
 					// from any image, so it counts as missing until prepared here.
@@ -233,8 +232,8 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId } = yield* managed(workspace);
 					yield* requireProvider(workspaceId, providerId);
-					const configured = yield* providers.connection(workspaceId, providerId);
-					const templates = configured && computers.forConnection(configured.connection).templates;
+					const configured = yield* providers.access(workspaceId, providerId);
+					const templates = configured && computers.forAccess(configured.access).templates;
 					if (!templates) return yield* new NoTemplates();
 					const pinned = yield* Effect.promise(() =>
 						pinnedToDigest(COMPUTER_IMAGE, egress.providers).catch(() => undefined),
@@ -252,7 +251,7 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const { workspaceId } = yield* managed(workspace);
 					yield* requireProvider(workspaceId, providerId);
-					const configured = yield* providers.connection(workspaceId, providerId);
+					const configured = yield* providers.access(workspaceId, providerId);
 					if (!configured) {
 						return {
 							reachable: false,
@@ -261,7 +260,7 @@ export const make = Effect.gen(function* () {
 						};
 					}
 					const started = yield* Clock.currentTimeMillis;
-					const failure = yield* computers.forConnection(configured.connection).check.pipe(
+					const failure = yield* computers.forAccess(configured.access).check.pipe(
 						Effect.as(undefined),
 						Effect.catchTag("ComputerUnavailable", () =>
 							Effect.succeed(
@@ -291,7 +290,7 @@ export const layerNoDeps = Layer.effect(Service, make);
 export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
-		ComputerProviderRepository.layer,
+		ComputerProviderStore.layer,
 		ProjectComputers.layer,
 		Computers.layer,
 	]),

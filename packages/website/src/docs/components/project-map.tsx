@@ -13,22 +13,22 @@ const parts = {
 	people: {
 		label: "People",
 		explanation:
-			"Everyone in the project sees its threads and files, and anyone in it but a viewer can invite more people. Anyone can find a public project and join it; a private one is invitation only.",
+			"Everyone in the project sees its chats and files, and anyone in it but a viewer can invite more people. Anyone can find a public project and join it; a private one is invitation only.",
 	},
 	bots: {
 		label: "Bots",
 		explanation:
-			"Public bots, added by the project's people. Its lead bot answers its threads; the others answer when mentioned, or when you reply to them, and any of them can ask another bot for help.",
+			"Public bots, added by the project's people. Its lead bot answers its chats; the others answer when mentioned, or when you reply to them, and any of them can ask another bot for help.",
 	},
-	threads: {
-		label: "Threads",
+	chats: {
+		label: "Chats",
 		explanation:
-			"The project's threads, listed in its own sidebar, the most recently active first. The project is made of them: each is one conversation about one piece of work, with all its people and bots.",
+			"The project's chats, listed in its own sidebar, the most recently active first. The project is made of them: each is one chat about one piece of work, with all its people and bots.",
 	},
 	files: {
 		label: "Files",
 		explanation:
-			"Everything uploaded or made in the project's threads, kept in one place for the whole project.",
+			"Everything uploaded or made in the project's chats, kept in one place for the whole project.",
 	},
 } as const;
 
@@ -91,12 +91,12 @@ export function ProjectMap() {
 						))}
 					</div>
 				</Region>
-				<Region part="threads" picked={picked}>
+				<Region part="chats" picked={picked}>
 					<div className="flex flex-col gap-2">
-						{["Lisbon trip", "Nan's birthday", "Bins rota"].map((thread) => (
-							<span key={thread} className="flex items-center gap-2 text-sm">
+						{["Lisbon trip", "Nan's birthday", "Bins rota"].map((chat) => (
+							<span key={chat} className="flex items-center gap-2 text-sm">
 								<MessagesSquareIcon className="size-4 text-muted-foreground" />
-								{thread}
+								{chat}
 							</span>
 						))}
 					</div>

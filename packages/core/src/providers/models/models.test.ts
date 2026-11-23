@@ -52,7 +52,7 @@ vi.mock("ai", async (importOriginal) => {
 });
 
 import { APICallError, TypeValidationError } from "ai";
-import type { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
+import type { ModelProviderStore } from "../model-providers/model-provider-store.ts";
 import { Models } from "./models.ts";
 import { resolvedModel } from "./testing.ts";
 
@@ -84,7 +84,7 @@ describe("models", () => {
 						Effect.succeed(
 							resolvedModel({
 								providerId: "provider-id",
-								preset: null,
+								builtIn: null,
 								baseUrl: "https://models.example/v1",
 								apiFormat,
 								apiKey: "secret",
@@ -102,7 +102,7 @@ describe("models", () => {
 				Effect.scoped(
 					model.stream({
 						workspaceId: "workspace-id",
-						activity: { purpose: "provider-check" },
+						purpose: { name: "model-test" },
 						model: "model-id",
 						system: "",
 						messages: [],
@@ -118,7 +118,7 @@ describe("models", () => {
 
 	const prompt = {
 		workspaceId: "workspace-id",
-		activity: { purpose: "provider-check" },
+		purpose: { name: "model-test" },
 		system: "",
 		messages: [],
 		maxSteps: 1,
@@ -139,7 +139,7 @@ describe("models", () => {
 						Effect.succeed(
 							resolvedModel({
 								providerId: "provider-id",
-								preset: null,
+								builtIn: null,
 								baseUrl,
 								apiFormat,
 								headers: {},
@@ -161,16 +161,16 @@ describe("models", () => {
 		},
 	);
 
-	const endpoint = {
+	const access = {
 		providerId: "provider-id",
-		preset: null,
+		builtIn: null,
 		baseUrl: "https://models.example/v1",
 		apiFormat: "openai" as const,
 		apiKey: "secret",
 		headers: {},
 		configurationUpdatedAt: new Date(),
 	};
-	const modelResolving = (resolved: ModelProviderRepository.ResolvedModel) =>
+	const modelResolving = (resolved: ModelProviderStore.ResolvedModel) =>
 		Models.make({
 			modelProviders: {
 				renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
@@ -185,7 +185,7 @@ describe("models", () => {
 			Effect.flatMap(
 				model.stream({
 					workspaceId: "workspace-id",
-					activity: { purpose: "provider-check" },
+					purpose: { name: "model-test" },
 					model: "model-id",
 					system: "",
 					messages: [],
@@ -196,7 +196,7 @@ describe("models", () => {
 		);
 
 	it("says a provider has no key, rather than that the model was switched off", async () => {
-		const model = modelResolving({ ...resolvedModel(endpoint), endpoint: undefined });
+		const model = modelResolving({ ...resolvedModel(access), access: undefined });
 
 		const failure = await run(Effect.flip(ask(model)));
 
@@ -220,7 +220,7 @@ describe("models", () => {
 			};
 		}) as never);
 
-		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(endpoint)))));
+		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(access)))));
 
 		expect(failure).toMatchObject({ _tag: "ProviderOverloaded", isRetryable: true });
 	});
@@ -274,7 +274,7 @@ describe("models", () => {
 	])("says a request failed during %s", async (_, events, stage) => {
 		streaming(events);
 
-		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(endpoint)))));
+		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(access)))));
 
 		expect(failure).toMatchObject({ stage });
 	});
@@ -293,7 +293,7 @@ describe("models", () => {
 					Effect.succeed(
 						resolvedModel({
 							providerId: "provider-id",
-							preset: "chatgpt",
+							builtIn: "chatgpt",
 							baseUrl: "https://chatgpt.com/backend-api/codex",
 							apiFormat: "openai",
 							headers: {},
@@ -311,7 +311,7 @@ describe("models", () => {
 			Effect.scoped(
 				model.stream({
 					workspaceId: "workspace-id",
-					activity: { purpose: "provider-check" },
+					purpose: { name: "model-test" },
 					model: "gpt-5.5",
 					system: "You are Suga.",
 					messages: [{ role: "user", content: "Hello" }],

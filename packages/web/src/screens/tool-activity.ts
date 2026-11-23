@@ -1,7 +1,7 @@
 import type { ToolCallPart } from "@sugabots/contracts";
 
 /*
- * How a reply's tool calls stand and are timed where the conversation shows them:
+ * How a reply's tool calls stand and are timed where the chat shows them:
  * the tool line above the reply and an approval card among its bubbles. What
  * they are called is `@/lib/tool-names.ts`.
  */

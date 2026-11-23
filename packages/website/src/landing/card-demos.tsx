@@ -1,5 +1,5 @@
 import { StillBotFace } from "@sugabots/avatars";
-import type { ProviderPresetId } from "@sugabots/contracts";
+import type { BuiltInProviderId } from "@sugabots/contracts";
 import { providerLogos } from "@sugabots/provider-logos";
 import { cn } from "cn";
 import { CheckIcon, XIcon } from "lucide-react";
@@ -15,7 +15,7 @@ const demoArea =
 	"relative flex h-68 flex-col rounded-xl border border-landing-line bg-landing-page sm:h-64";
 
 /** Gary asks, Growth Desk drafts, and Lorraine replies; the visitor can add their own 👍 to the draft. */
-export function ThreadDemo() {
+export function ChatDemo() {
 	const [reacted, setReacted] = useState(false);
 
 	return (
@@ -29,7 +29,7 @@ export function ThreadDemo() {
 			<MessageRow
 				author={cast.growthDesk}
 				time="6:03"
-				text="Drafted. It’s in the thread with their usage numbers."
+				text="Drafted. It’s in the chat with their usage numbers."
 			>
 				<button
 					type="button"
@@ -182,7 +182,7 @@ interface ModelChoice {
 	job: string;
 	model: string;
 	provider: string;
-	preset: ProviderPresetId;
+	builtIn: BuiltInProviderId;
 }
 
 const modelChoices: readonly ModelChoice[] = [
@@ -191,28 +191,28 @@ const modelChoices: readonly ModelChoice[] = [
 		job: "Drafts replies, posts and invites",
 		model: "ChatGPT",
 		provider: "OpenAI",
-		preset: "chatgpt",
+		builtIn: "chatgpt",
 	},
 	{
 		bot: cast.researcher,
 		job: "Reads the long stuff so you don’t have to",
 		model: "Claude",
 		provider: "Anthropic",
-		preset: "anthropic",
+		builtIn: "anthropic",
 	},
 	{
 		bot: cast.inboxSorter,
 		job: "Triage, reminders and quick jobs",
 		model: "Gemini Flash",
 		provider: "Google",
-		preset: "gemini",
+		builtIn: "gemini",
 	},
 	{
 		bot: cast.journal,
 		job: "Private notes that stay private",
 		model: "Llama",
 		provider: "Ollama, local",
-		preset: "ollama",
+		builtIn: "ollama",
 	},
 ];
 
@@ -269,7 +269,7 @@ export function ModelsDemo() {
 					</span>
 					{/* One width for every model, wide enough for the longest, so they line up down the card. */}
 					<span className="flex w-34 shrink-0 items-center gap-2 rounded-lg border border-landing-frame bg-landing-raised px-2.5 py-1.5">
-						<ProviderMark preset={choice.preset} />
+						<ProviderMark builtIn={choice.builtIn} />
 						<span className="flex min-w-0 flex-col leading-tight">
 							<span className="truncate text-xs font-medium text-landing-text">{choice.model}</span>
 							<span className="truncate text-xs text-landing-faint">{choice.provider}</span>
@@ -282,8 +282,8 @@ export function ModelsDemo() {
 }
 
 /** A provider's logo in its version for dark backgrounds, since the landing page is always dark. */
-function ProviderMark({ preset }: { preset: ProviderPresetId }) {
-	const logo = providerLogos[preset];
+function ProviderMark({ builtIn }: { builtIn: BuiltInProviderId }) {
+	const logo = providerLogos[builtIn];
 	return (
 		<img
 			src={logo.dark ?? logo.light}

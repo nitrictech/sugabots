@@ -1,6 +1,6 @@
 import type {
 	AutomationTrigger,
-	ConnectionKind,
+	ConnectorKind,
 	RepositoryEvent,
 	WebhookAuthKind,
 	WebhookHmacAlgorithm,
@@ -10,7 +10,7 @@ import type {
 
 /*
  * What an automation's triggers are called where they are set up: the kinds of
- * trigger, a webhook's senders and how it checks them, and the events at a
+ * trigger, a webhook's source and how it checks them, and the events at a
  * repository.
  */
 
@@ -20,8 +20,8 @@ export interface TriggerKindChoice {
 	readonly kind: TriggerKind;
 	readonly label: string;
 	readonly sub: string;
-	/** The kind of connection the bot needs for it, for an integration's trigger. */
-	readonly connection?: ConnectionKind;
+	/** The kind of connector the bot needs for it, for a connector's trigger. */
+	readonly connector?: ConnectorKind;
 }
 
 /** Every kind of trigger, Sugabots' own first, in the order the dialog lists them. */
@@ -32,14 +32,14 @@ export const TRIGGER_KINDS: readonly TriggerKindChoice[] = [
 		kind: "github",
 		label: "GitHub",
 		sub: "When something happens on a repository: pull requests, issues, checks, pushes",
-		connection: "github",
+		connector: "github",
 	},
 ];
 
 /** A way of checking a webhook's caller that isn't a known source's own signature. */
 export type WebhookGenericKind = Exclude<WebhookAuthKind, WebhookSource>;
 
-/** "generic" for any sender, else the source whose own way of signing is known. */
+/** "generic" for any caller, else the source whose own way of signing is known. */
 export type WebhookSourceChoice = "generic" | WebhookSource;
 
 export const WEBHOOK_SOURCE_LABELS: Record<WebhookSourceChoice, string> = {

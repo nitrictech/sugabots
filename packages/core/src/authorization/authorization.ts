@@ -23,7 +23,7 @@ import {
 } from "./permissions.ts";
 
 /**
- * Whether the current actor may take an action, asked by every use case
+ * Whether the current actor may take an action, asked by every operation
  * before it touches what the action is about.
  *
  * The facts come from `access.ts` and the decisions from `permissions.ts`.
@@ -80,8 +80,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"workspace",
 				Effect.gen(function* () {
-					const { userId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => workspaceStandingFor(db, workspaceRef, userId));
+					const { personId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => workspaceStandingFor(db, workspaceRef, personId));
 					if (!standing) return yield* new ResourceHidden({ resource: "workspace" });
 					if (!mayInWorkspace(standing.actor, permission)) {
 						return yield* new ActionForbidden({ permission });
@@ -94,8 +94,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"project",
 				Effect.gen(function* () {
-					const { userId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => projectStandingFor(db, projectId, userId));
+					const { personId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => projectStandingFor(db, projectId, personId));
 					return yield* decideInProject(standing, permission, "project");
 				}),
 			),
@@ -104,8 +104,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"projectFound",
 				Effect.gen(function* () {
-					const { userId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => projectStandingFor(db, projectId, userId));
+					const { personId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => projectStandingFor(db, projectId, personId));
 					if (!standing?.actor.workspaceRole)
 						return yield* new ResourceHidden({ resource: "project" });
 					return standing;
@@ -116,8 +116,8 @@ export const make = Effect.gen(function* () {
 			operation(
 				"bot",
 				Effect.gen(function* () {
-					const { userId } = yield* CurrentActor.Service;
-					const standing = yield* query((db) => botStandingFor(db, botId, userId));
+					const { personId } = yield* CurrentActor.Service;
+					const standing = yield* query((db) => botStandingFor(db, botId, personId));
 					if (!standing) return yield* new ResourceHidden({ resource: "bot" });
 					if (standing.may(permission)) return standing;
 					return yield* standing.may("bot.read")

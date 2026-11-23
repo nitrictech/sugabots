@@ -1,18 +1,18 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { ComputerCredentials } from "@sugabots/core/computers/computer-credentials";
-import { Credentials } from "@sugabots/core/credentials/credentials";
+import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
 import { bot as botTable, type project, workspace } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
-import { Installation } from "@sugabots/core/installation/installation";
 import { Egress } from "@sugabots/core/providers/network/egress";
-import { BotRepository } from "@sugabots/core/workspaces/bots/bot-repository";
+import { Secrets } from "@sugabots/core/secrets/secrets";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
 import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { ProjectRepository } from "@sugabots/core/workspaces/projects/project-repository";
+import { ProjectStore } from "@sugabots/core/workspaces/projects/project-store";
+import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, type SQL } from "drizzle-orm";
 import { Effect, Layer } from "effect";
@@ -35,14 +35,14 @@ const EMAIL = "dev@sugabots.local";
 const PASSWORD = "development";
 
 const seed = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
-	if (installation.isProduction) {
+	const serverSettings = yield* ServerSettings.Service;
+	if (serverSettings.isProduction) {
 		return yield* Effect.die(new Error("The development seed cannot run in production."));
 	}
 	const membership = yield* Membership.Service;
 	const personalAssistants = yield* PersonalAssistants.Service;
-	const projects = yield* ProjectRepository.Service;
-	const bots = yield* BotRepository.Service;
+	const projects = yield* ProjectStore.Service;
+	const bots = yield* BotStore.Service;
 	const personId = yield* ensureAccount({ name: "Development", email: EMAIL, password: PASSWORD });
 
 	// Made the way the app makes one, so it has its system bots, search
@@ -52,23 +52,23 @@ const seed = Effect.gen(function* () {
 	const workspaceId = yield* membership
 		.create({ details: { name: "Development", slug: "dev" } })
 		.pipe(
-			CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(personId)),
+			CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(personId)),
 			Effect.map((created) => created.id),
 			Effect.catchTag("SlugTaken", () => idOf(workspace, eq(workspace.slug, "dev"))),
 		);
 	// The seed stands in for setting it up, so it opens straight into the app.
-	yield* Onboarding.recordSetupCompleted(workspaceId);
+	yield* WorkspaceSetup.recordSetUp(workspaceId);
 
 	// Already made with a new workspace; this makes it when a run before
 	// the Personal Assistant existed made the workspace.
-	yield* personalAssistants.provision({ workspaceId, userId: personId });
+	yield* personalAssistants.provision({ workspaceId, personId: personId });
 
 	const model = "claude-sonnet-4-20250514";
 	for (const seedling of [
 		{
 			name: "Linear Handler",
 			color: "green" as const,
-			face: "pill" as const,
+			eyes: "pill" as const,
 			shape: "squircle" as const,
 			description: "Reads and writes Linear on the team's behalf.",
 			visibility: "private" as const,
@@ -77,7 +77,7 @@ const seed = Effect.gen(function* () {
 		{
 			name: "Issue Triager",
 			color: "purple" as const,
-			face: "dot" as const,
+			eyes: "dot" as const,
 			shape: "hexagon" as const,
 			description: "Sorts incoming issues every weekday morning.",
 			visibility: "private" as const,
@@ -86,7 +86,7 @@ const seed = Effect.gen(function* () {
 		{
 			name: "Customer Research",
 			color: "orange" as const,
-			face: "arc" as const,
+			eyes: "arc" as const,
 			shape: "blob" as const,
 			description: "Digs through calls and notes for what customers asked for.",
 			visibility: "public" as const,
@@ -134,19 +134,19 @@ seed.pipe(
 			Authentication.layer,
 			Membership.layer,
 			PersonalAssistants.layer,
-			ProjectRepository.layer,
-			BotRepository.layer,
+			ProjectStore.layer,
+			BotStore.layer,
 		).pipe(
 			Layer.provideMerge(
 				Layer.mergeAll(
 					Ids.layer,
-					Credentials.layer,
+					Secrets.layer,
 					// Leaving and deleting go through the bots' computers; the seed never makes one.
 					Egress.layer,
-					ComputerCredentials.none,
+					ComputerSignIn.none,
 					seedAccountsLayer,
 					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
-				).pipe(Layer.provideMerge(Installation.layer), Layer.provideMerge(databaseLayer)),
+				).pipe(Layer.provideMerge(ServerSettings.layer), Layer.provideMerge(databaseLayer)),
 			),
 		),
 	),

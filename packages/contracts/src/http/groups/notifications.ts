@@ -13,7 +13,7 @@ import { Session } from "../middleware.ts";
 
 /**
  * The signed-in person's notifications: what they are notified about, and
- * which conversation they are looking at.
+ * which chat they are looking at.
  */
 const place = { kind: notificationPlaceKindSchema, id: uuidSchema };
 

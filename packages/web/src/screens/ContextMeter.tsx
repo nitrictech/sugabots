@@ -1,8 +1,8 @@
-import type { ConversationContext } from "@sugabots/contracts";
+import type { ChatContext } from "@sugabots/contracts";
 import { cn } from "cn";
 
 /** How much of the bot's short-term memory the chat fills, as a whole percentage. */
-export function usedPercentOf(context: ConversationContext): number {
+export function usedPercentOf(context: ChatContext): number {
 	return Math.round(Math.min(context.usedTokens / context.windowTokens, 1) * 100);
 }
 
@@ -12,7 +12,7 @@ export function usedPercentOf(context: ConversationContext): number {
  * messages are folded into the summary. A compaction since that reply leaves
  * the figure out of date until the next one, so the bar fades.
  */
-export function ContextMeter({ context }: { context: ConversationContext }) {
+export function ContextMeter({ context }: { context: ChatContext }) {
 	const { measuredAt, windowTokens, compactionLineTokens, compactedAt } = context;
 	const compactedSinceMeasured = compactedAt !== null && compactedAt > measuredAt;
 	const usedPercent = usedPercentOf(context);

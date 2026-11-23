@@ -5,12 +5,12 @@ import { capabilitiesNamed, discoveredModel } from "./dialect.ts";
 import { anthropic, dialectFor, ollama, openaiCompatible, openrouter } from "./index.ts";
 
 describe("capabilitiesNamed", () => {
-	const named = capabilitiesNamed({ tools: "tools", thinking: "reasoning" });
+	const named = capabilitiesNamed({ tools: "tools", thinking: "thinking" });
 
 	it("translates the words it knows and drops the rest", () => {
 		expect(Schema.decodeSync(named)(["completion", "tools", "thinking", "hot"])).toEqual([
 			"tools",
-			"reasoning",
+			"thinking",
 		]);
 	});
 
@@ -22,32 +22,32 @@ describe("capabilitiesNamed", () => {
 });
 
 describe("dialectFor", () => {
-	it("reads a preset in the dialect it names", () => {
+	it("reads a built-in provider in the dialect it names", () => {
 		expect(
-			dialectFor({ preset: "ollama", baseUrl: "http://127.0.0.1:11434/v1", apiFormat: "openai" }),
+			dialectFor({ builtIn: "ollama", baseUrl: "http://127.0.0.1:11434/v1", apiFormat: "openai" }),
 		).toBe(ollama);
 		expect(
 			dialectFor({
-				preset: "anthropic",
+				builtIn: "anthropic",
 				baseUrl: "https://api.anthropic.com",
 				apiFormat: "anthropic",
 			}),
 		).toBe(anthropic);
 		expect(
-			dialectFor({ preset: "openai", baseUrl: "https://api.openai.com/v1", apiFormat: "openai" }),
+			dialectFor({ builtIn: "openai", baseUrl: "https://api.openai.com/v1", apiFormat: "openai" }),
 		).toBe(openaiCompatible);
 	});
 
 	it("reads a custom provider by its wire format, and by its host where that says more", () => {
 		expect(
-			dialectFor({ preset: null, baseUrl: "https://proxy.example/v1", apiFormat: "anthropic" }),
+			dialectFor({ builtIn: null, baseUrl: "https://proxy.example/v1", apiFormat: "anthropic" }),
 		).toBe(anthropic);
 		expect(
-			dialectFor({ preset: null, baseUrl: "https://openrouter.ai/api/v1", apiFormat: "openai" }),
+			dialectFor({ builtIn: null, baseUrl: "https://openrouter.ai/api/v1", apiFormat: "openai" }),
 		).toBe(openrouter);
 		expect(
 			dialectFor({
-				preset: null,
+				builtIn: null,
 				baseUrl: "https://api.groq.com/openai/v1",
 				apiFormat: "openai",
 			}),
@@ -187,8 +187,8 @@ describe("discovery decoding parity", () => {
 			capabilities: ["tools", "vision"],
 		});
 		model.displayName = null;
-		model.capabilities.push("reasoning");
-		expect(model.capabilities).toEqual(["tools", "vision", "reasoning"]);
+		model.capabilities.push("thinking");
+		expect(model.capabilities).toEqual(["tools", "vision", "thinking"]);
 	});
 
 	it("rejects numeric context lengths outside the contract", () => {
@@ -230,7 +230,7 @@ describe("discovery decoding parity", () => {
 				supported_parameters: ["tools", "reasoning"],
 				context_length: 8192,
 			}).capabilities,
-		).toEqual(["tools", "reasoning", "vision", "audio", "images"]);
+		).toEqual(["tools", "thinking", "vision", "audio", "images"]);
 	});
 
 	it("does not discard valid architecture metadata beside malformed metadata", () => {

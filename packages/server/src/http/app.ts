@@ -1,7 +1,7 @@
 import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contracts/http";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
-import { Installation } from "@sugabots/core/installation/installation";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { userText } from "@sugabots/errors";
 import { Clock, Effect, Layer, type Types } from "effect";
 import {
@@ -21,14 +21,12 @@ import { automationRoutes } from "../routes/automations/routes.ts";
 import { botRoutes } from "../routes/bots/routes.ts";
 import { chatRoutes } from "../routes/chats/routes.ts";
 import { computerProviderRoutes } from "../routes/computer-providers/routes.ts";
-import { connectionRoutes } from "../routes/connections/routes.ts";
-import { conversationRoutes } from "../routes/conversations/routes.ts";
+import { connectorRoutes } from "../routes/connectors/routes.ts";
 import { eventRoutes } from "../routes/events/routes.ts";
 import { fileRoutes } from "../routes/files/routes.ts";
-import { gitHubConnectionRoutes, gitHubWebhookRoutes } from "../routes/github/routes.ts";
+import { gitHubConnectorRoutes, gitHubWebhookRoutes } from "../routes/github/routes.ts";
 import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
 import { notificationRoutes } from "../routes/notifications/routes.ts";
-import { onboardingRoutes } from "../routes/onboarding/routes.ts";
 import { projectComputerRoutes } from "../routes/project-computer/routes.ts";
 import { projectRoutes } from "../routes/projects/routes.ts";
 import { referralRoutes } from "../routes/referrals/routes.ts";
@@ -36,6 +34,7 @@ import { searchProviderRoutes } from "../routes/search-providers/routes.ts";
 import { systemRoutes } from "../routes/system/routes.ts";
 import { systemBotRoutes } from "../routes/system-bots/routes.ts";
 import { usageRoutes } from "../routes/usage/routes.ts";
+import { workspaceSetupRoutes } from "../routes/workspace-setup/routes.ts";
 import { workspaceRoutes } from "../routes/workspaces/routes.ts";
 import { ServerApi } from "./api.ts";
 import { contentPageRoutes, onlyPagesOnContentHost } from "./content-pages.ts";
@@ -68,9 +67,9 @@ const betterAuthRoutes = Layer.effectDiscard(
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
- * The routes take their services from the layer's context: the use cases and
- * views in `HttpServices`, and the database, installation, sessions and event
- * bus in `ApiInfrastructure`. Each use case authorizes the person the
+ * The routes take their services from the layer's context: the operations and
+ * views in `HttpServices`, and the database, server settings, sessions and event
+ * bus in `ApiInfrastructure`. Each operation authorizes the person the
  * request's session belongs to, so no middleware decides access.
  * `createTestApp` in `app.test-support.ts` drives the same routes with fakes.
  */
@@ -81,22 +80,21 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 				systemRoutes,
 				workspaceRoutes,
 				eventRoutes,
-				onboardingRoutes,
+				workspaceSetupRoutes,
 				projectRoutes,
 				systemBotRoutes,
 				modelProviderRoutes,
 				searchProviderRoutes,
 				computerProviderRoutes,
 				projectComputerRoutes,
-				gitHubConnectionRoutes,
+				gitHubConnectorRoutes,
 				gitHubWebhookRoutes,
-				connectionRoutes,
+				connectorRoutes,
 				fileRoutes,
 				botRoutes,
 				chatRoutes,
 				automationRoutes,
 				approvalRoutes,
-				conversationRoutes,
 				usageRoutes,
 				referralRoutes,
 				notificationRoutes,
@@ -112,7 +110,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 	HttpRouter.provideRequest(Layer.effectContext(Effect.context<Database>())),
 	Layer.provide(
 		HttpRouter.middleware(
-			Effect.map(Installation.Service, ({ trustedOrigins, contentOrigin }) =>
+			Effect.map(ServerSettings.Service, ({ trustedOrigins, contentOrigin }) =>
 				everyRequest(trustedOrigins, contentOrigin),
 			),
 			{ global: true },
@@ -122,12 +120,12 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 
 /**
  * What the API is built on besides the core services: the database each
- * request runs against, the installation's addresses, who holds a session,
+ * request runs against, the server's addresses, who holds a session,
  * the bus the streams listen on, and the platform the router serves from.
  */
 type ApiInfrastructure =
 	| Database
-	| Installation.Service
+	| ServerSettings.Service
 	| Authentication.Service
 	| EventBus.Service
 	| HttpRouter.HttpRouter

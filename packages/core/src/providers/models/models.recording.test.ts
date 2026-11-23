@@ -2,7 +2,7 @@ import { jsonSchema, tool } from "ai";
 import { Effect, ManagedRuntime } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelRequests } from "../../accounting/model-requests.ts";
-import { withImages } from "../../conversations/tools/images.ts";
+import { withImages } from "../../chats/tools/images.ts";
 import { effectRunner } from "../../database/database.ts";
 import { noDatabase } from "../../database/testing.ts";
 import type { ProviderIdentity } from "../model-providers/dialects/index.ts";
@@ -15,10 +15,10 @@ const run = effectRunner(ManagedRuntime.make(noDatabase));
 
 const PROVIDER_ID = "0199a3a0-0000-7000-8000-000000000001";
 
-const activity: ModelRequests.Activity = {
-	purpose: "bot-turn",
+const purpose: ModelRequests.RequestPurpose = {
+	name: "bot-turn",
 	botId: "0199a3a0-0000-7000-8000-000000000003",
-	conversationId: "0199a3a0-0000-7000-8000-000000000004",
+	chatId: "0199a3a0-0000-7000-8000-000000000004",
 	turnId: "0199a3a0-0000-7000-8000-000000000005",
 };
 
@@ -60,7 +60,7 @@ type Recorded = ModelRequests.Started &
 	Partial<Omit<ModelRequests.Ending, "outcome">> & { outcome: ModelRequests.Outcome };
 
 const OPENAI = {
-	preset: "openai",
+	builtIn: "openai",
 	baseUrl: "https://api.openai.com/v1",
 	apiFormat: "openai",
 } satisfies ProviderIdentity;
@@ -112,7 +112,7 @@ function modelAnswering(
 
 const input: Models.StreamRequest = {
 	workspaceId: "0199a3a0-0000-7000-8000-000000000006",
-	activity,
+	purpose,
 	model: "gpt-test",
 	system: "You are a test.",
 	messages: [{ role: "user", content: "Look it up." }],
@@ -152,10 +152,10 @@ describe("recording model requests", () => {
 		expect(recorded).toMatchObject([
 			{
 				workspaceId: input.workspaceId,
-				activity,
+				purpose,
 				step: 0,
 				providerId: PROVIDER_ID,
-				preset: "openai",
+				builtIn: "openai",
 				model: "gpt-test",
 				outcome: "completed",
 				usage: { inputTokens: 1_000, outputTokens: 20 },
@@ -242,7 +242,7 @@ describe("a rate-limited provider", () => {
 });
 
 describe("a response at its step limit", () => {
-	it("tells its last model call to answer, changing nothing earlier calls sent", async () => {
+	it("tells its last model request to answer, changing nothing earlier calls sent", async () => {
 		const { model, sent } = modelAnswering([toolCall, reply]);
 
 		const { text } = await answer(model, { ...input, maxSteps: 2 });
@@ -267,7 +267,7 @@ describe("a response at its step limit", () => {
 describe("images a tool returns", () => {
 	it("reach a model through OpenRouter in a message after the tool's result", async () => {
 		const { model, sent } = modelAnswering([toolCall, reply], {
-			preset: "openrouter",
+			builtIn: "openrouter",
 			baseUrl: "https://openrouter.ai/api/v1",
 			apiFormat: "openai",
 		});
@@ -327,7 +327,7 @@ describe("prompt caching", () => {
 
 	it("marks the system text, the history's end and each step's newest message for Anthropic", async () => {
 		const { model, sent } = modelAnswering([() => new Response("Unavailable", { status: 503 })], {
-			preset: "anthropic",
+			builtIn: "anthropic",
 			baseUrl: "https://api.anthropic.com",
 			apiFormat: "anthropic",
 		});
@@ -346,7 +346,7 @@ describe("prompt caching", () => {
 
 	it("moves the newest message's mark on each step, keeping the history's", async () => {
 		const { model, sent } = modelAnswering([toolCall, reply], {
-			preset: "openrouter",
+			builtIn: "openrouter",
 			baseUrl: "https://openrouter.ai/api/v1",
 			apiFormat: "openai",
 		});
@@ -374,7 +374,7 @@ describe("prompt caching", () => {
 				{ prompt_tokens: 1_000, completion_tokens: 20 },
 			);
 		const { model, sent } = modelAnswering([parallelToolCalls, reply], {
-			preset: "openrouter",
+			builtIn: "openrouter",
 			baseUrl: "https://openrouter.ai/api/v1",
 			apiFormat: "openai",
 		});
@@ -389,7 +389,7 @@ describe("prompt caching", () => {
 		["OpenAI", OPENAI, "gpt-test"],
 		[
 			"OpenRouter's other models",
-			{ preset: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiFormat: "openai" },
+			{ builtIn: "openrouter", baseUrl: "https://openrouter.ai/api/v1", apiFormat: "openai" },
 			"openai/gpt-test",
 		],
 	] satisfies Array<[string, ProviderIdentity, string]>)(
@@ -406,7 +406,7 @@ describe("prompt caching", () => {
 
 describe("Gemini", () => {
 	const GEMINI = {
-		preset: "gemini",
+		builtIn: "gemini",
 		baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
 		apiFormat: "openai",
 	} satisfies ProviderIdentity;

@@ -102,25 +102,25 @@ describe("estimateCost", () => {
 		expect(estimate).toEqual({ _tag: "Priced", usd: 0 });
 	});
 
-	it("leaves a request unpriced when the provider did not report its tokens", () => {
+	it("leaves a request's cost unknown when the provider did not report its tokens", () => {
 		const rates = ratesFromModelsDev(cachingModel);
 		expect(estimateCost(usage({ outputTokens: 10 }), rates)).toEqual({
-			_tag: "Unpriced",
+			_tag: "UnknownCost",
 			reason: "usage-not-reported",
 		});
 		expect(estimateCost(usage({ inputTokens: 10 }), rates)).toEqual({
-			_tag: "Unpriced",
+			_tag: "UnknownCost",
 			reason: "usage-not-reported",
 		});
 	});
 
-	it("leaves a request unpriced when its counts contradict each other", () => {
+	it("leaves a request's cost unknown when its counts contradict each other", () => {
 		const rates = ratesFromModelsDev(cachingModel);
 		expect(
 			estimateCost(usage({ inputTokens: 10, cacheReadTokens: 20, outputTokens: 0 }), rates),
-		).toEqual({ _tag: "Unpriced", reason: "usage-inconsistent" });
+		).toEqual({ _tag: "UnknownCost", reason: "usage-inconsistent" });
 		expect(
 			estimateCost(usage({ inputTokens: 0, outputTokens: 10, reasoningTokens: 20 }), rates),
-		).toEqual({ _tag: "Unpriced", reason: "usage-inconsistent" });
+		).toEqual({ _tag: "UnknownCost", reason: "usage-inconsistent" });
 	});
 });

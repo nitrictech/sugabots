@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { sessionUserSchema } from "./api.ts";
+import { signedInPersonSchema } from "./api.ts";
 import { emailSchema } from "./email.ts";
 import { slugSchema } from "./projects.ts";
 import { timeZoneSchema } from "./time-zones.ts";
@@ -7,7 +7,7 @@ import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
 import { assignableWorkspaceRoleSchema, workspaceRoleSchema } from "./workspaces.ts";
 
-/** Unique across the installation. */
+/** Unique across the server. */
 const workspaceSlugSchema = slugSchema;
 
 export const workspaceSchema = Schema.Struct({
@@ -22,7 +22,7 @@ export const workspaceSchema = Schema.Struct({
 	 */
 	timeZone: Schema.String,
 	/** When its setup was finished, or null while it is still being set up. */
-	setupCompletedAt: Schema.NullOr(isoTimestampSchema),
+	setUpAt: Schema.NullOr(isoTimestampSchema),
 });
 export type Workspace = typeof workspaceSchema.Type;
 
@@ -54,21 +54,21 @@ export type WorkspaceTimeZone = typeof workspaceTimeZoneSchema.Type;
 export const workspaceTimeZoneChangeSchema = Schema.Struct({ timeZone: timeZoneSchema });
 
 /** `id` is the membership, which role changes and removal address. */
-export const workspaceMemberSchema = Schema.Struct({
+export const membershipSchema = Schema.Struct({
 	id: uuidSchema,
 	role: workspaceRoleSchema,
-	user: sessionUserSchema,
+	person: signedInPersonSchema,
 	joinedAt: isoTimestampSchema,
 });
-export type WorkspaceMember = typeof workspaceMemberSchema.Type;
+export type Membership = typeof membershipSchema.Type;
 
-export const workspaceMemberUpdateSchema = Schema.Struct({ role: assignableWorkspaceRoleSchema });
+export const roleChangeSchema = Schema.Struct({ role: assignableWorkspaceRoleSchema });
 
-/** Who the owner hands the workspace to: one of its members, by membership id. */
-export const ownershipTransferSchema = Schema.Struct({ memberId: uuidSchema });
+/** Who the owner hands the workspace over to: a person in it, by their membership's id. */
+export const ownershipHandOverSchema = Schema.Struct({ membershipId: uuidSchema });
 
 /** How many days an invitation can be accepted for after it is sent or sent again. */
-export const INVITE_LIFETIME_DAYS = 2;
+export const INVITATION_LIFETIME_DAYS = 2;
 
 /** An invitation still waiting to be accepted. */
 export const workspaceInvitationSchema = Schema.Struct({

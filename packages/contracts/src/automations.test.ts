@@ -67,7 +67,7 @@ describe("Automation contracts", () => {
 			).toBe("Success");
 		},
 	);
-	it("accepts a webhook that runs only the calls meeting its conditions", () => {
+	it("accepts a webhook that runs only the calls passing its tests", () => {
 		expect(
 			Schema.decodeUnknownResult(newAutomationSchema)({
 				name: "Incoming",
@@ -96,9 +96,9 @@ describe("Automation contracts", () => {
 		["a blank secret", { secret: "   " }],
 		["a delivery id header name with a space", { deliveryIdHeader: "Request ID" }],
 		["a blank delivery id header name", { deliveryIdHeader: "  " }],
-		["a condition without a path", { filter: [{ path: " ", oneOf: ["create"] }] }],
-		["a condition path with an empty key", { filter: [{ path: "data..id", oneOf: ["a"] }] }],
-		["a condition accepting nothing", { filter: [{ path: "action", oneOf: [] }] }],
+		["a test without a path", { filter: [{ path: " ", oneOf: ["create"] }] }],
+		["a test path with an empty key", { filter: [{ path: "data..id", oneOf: ["a"] }] }],
+		["a test accepting nothing", { filter: [{ path: "action", oneOf: [] }] }],
 	])("rejects a webhook with %s", (_, webhook) => {
 		expect(
 			Schema.decodeUnknownResult(newAutomationSchema)({

@@ -59,7 +59,7 @@ export const NothingChosen = meta.story({
 	play: async ({ canvas }) => {
 		const level = await canvas.findByRole("group", { name: "Notify me about" });
 		await expect(within(level).getByRole("radio", { name: "Mentions and replies" })).toBeChecked();
-		await expect(canvas.getByText(/replies in conversations you're part of/)).toBeInTheDocument();
+		await expect(canvas.getByText(/replies in chats you're part of/)).toBeInTheDocument();
 		if (firstProject) {
 			await expect(
 				canvas.getByRole("button", { name: `Notifications for ${firstProject.name}` }),
@@ -78,7 +78,7 @@ export const ChoosingEverything = meta.story({
 		const level = await canvas.findByRole("group", { name: "Notify me about" });
 		await userEvent.click(within(level).getByRole("radio", { name: "Everything" }));
 		await expect(
-			await canvas.findByText(/Every new message in the conversations you can see/),
+			await canvas.findByText(/Every new message in the chats you can see/),
 		).toBeInTheDocument();
 		await expect(within(level).getByRole("radio", { name: "Everything" })).toBeChecked();
 	},

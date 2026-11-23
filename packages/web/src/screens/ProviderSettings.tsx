@@ -1,19 +1,19 @@
 import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
 	type Bot,
+	type BuiltInProviderId,
+	builtInSignInService,
+	builtInSignsIn,
 	effectiveCapabilities,
 	type ModelProvider,
 	type ProviderModel,
 	type ProviderModelCapability,
-	type ProviderPresetId,
 	type ProviderSwitchOff,
-	presetSignInService,
-	presetSignsIn,
+	providerBuiltIn,
 	providerIsUsable,
 	providerLacksCredential,
 	providerModelCapabilityCatalog,
-	providerPreset,
-	seededPresets,
+	seededBuiltIns,
 	type WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
@@ -100,24 +100,24 @@ import { ProviderFieldRow, savedKeyMask, valueText } from "./provider-field-row.
  */
 
 /**
- * A provider's tile: its official logo for a preset, and its first letter for
+ * A provider's tile: its official logo for a built-in provider, and its first letter for
  * a custom provider, which has only a name.
  */
 export function ProviderTile({
 	name,
-	preset,
+	builtIn,
 	size = 28,
 }: {
 	name: string;
-	preset: ProviderPresetId | null;
+	builtIn: BuiltInProviderId | null;
 	size?: 28 | 44;
 }) {
 	const large = size === 44;
 	const tile = large ? "size-11 rounded-xl border-0 bg-chip text-sm" : undefined;
-	if (!preset) return <LetterTile name={name} className={tile} />;
+	if (!builtIn) return <LetterTile name={name} className={tile} />;
 	return (
 		<SettingsRowIcon className={tile}>
-			<ProviderLogo preset={preset} className={large ? "size-5.5" : "size-3.5"} />
+			<ProviderLogo builtIn={builtIn} className={large ? "size-5.5" : "size-3.5"} />
 		</SettingsRowIcon>
 	);
 }
@@ -133,7 +133,7 @@ function BotFaces({ bots }: { bots: readonly Bot[] }) {
 				<BotAvatar
 					key={bot.id}
 					color={bot.color}
-					face={bot.face}
+					eyes={bot.eyes}
 					shape={bot.shape}
 					size={22}
 					ringed={{ color: "var(--settings-card)", width: 2 }}
@@ -249,7 +249,7 @@ function OtherBotsList({ bots }: { bots: readonly Bot[] }) {
 		>
 			{bots.map((bot) => (
 				<li key={bot.id} className="flex items-center gap-1.5">
-					<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
+					<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={16} />
 					<span className="truncate">{bot.name}</span>
 				</li>
 			))}
@@ -282,10 +282,8 @@ function NamedBotFace({ bot, size }: { bot: Bot; size: number }) {
 				// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
 				tabIndex={0}
 				className="focus-ring flex rounded-full"
-				onPointerEnter={() => face.current?.play("hop")}
-				onFocus={(event) =>
-					event.currentTarget.matches(":focus-visible") && face.current?.play("hop")
-				}
+				onPointerEnter={() => face.current?.hop()}
+				onFocus={(event) => event.currentTarget.matches(":focus-visible") && face.current?.hop()}
 			>
 				<TurnTakingAvatar bot={bot} size={size} faceRef={face} />
 			</span>
@@ -354,11 +352,11 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const router = useRouter();
 	const { leaveForPage } = useLeave();
 	const [disconnecting, setDisconnecting] = useState(false);
-	const preset = provider.preset === null ? null : providerPreset(provider.preset);
+	const builtIn = provider.builtIn === null ? null : providerBuiltIn(provider.builtIn);
 	// The ones every workspace starts with cannot be deleted, so disconnecting
 	// one takes its key or sign-in away and switches it off, and adding it again brings it back.
-	const seeded = provider.preset !== null && seededPresets.includes(provider.preset);
-	const signsIn = presetSignsIn(provider.preset);
+	const seeded = provider.builtIn !== null && seededBuiltIns.includes(provider.builtIn);
+	const signsIn = builtInSignsIn(provider.builtIn);
 	const disconnect = seeded ? actions.update : actions.remove;
 	const disconnectPending = disconnect.isPending || actions.signOut.isPending;
 	const disconnectError = disconnect.error ?? actions.signOut.error;
@@ -437,10 +435,10 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 		<SettingsPage
 			back={<BackToModels />}
 			backOnWide
-			hero={<ProviderTile name={provider.name} preset={provider.preset} size={44} />}
+			hero={<ProviderTile name={provider.name} builtIn={provider.builtIn} size={44} />}
 			title={provider.name}
 			description={[
-				// A preset every workspace starts with was seeded, not added: its date is when the
+				// A built-in provider every workspace starts with was seeded, not added: its date is when the
 				// workspace got it, not when anybody connected it.
 				!seeded && `Added ${formatTimeAfterVerb(new Date(provider.createdAt), new Date())}`,
 				provider.connectedBy && `Connected by ${provider.connectedBy.name}`,
@@ -478,7 +476,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 					}
 				/>
 			</SettingsGroup>
-			<Connection provider={provider} local={preset?.hosting === "local"} />
+			<ProviderAccessGroup provider={provider} local={builtIn?.hosting === "local"} />
 			<Models provider={provider} />
 			<SettingsDanger
 				label={`Disconnect ${provider.name}`}
@@ -545,17 +543,17 @@ export function BackToModels() {
  * subscription a sign-in; one you run is its address and an optional key; a custom one also
  * says which API it speaks.
  */
-function Connection({ provider, local }: { provider: ModelProvider; local: boolean }) {
+function ProviderAccessGroup({ provider, local }: { provider: ModelProvider; local: boolean }) {
 	const actions = useProviderActions();
-	const custom = provider.preset === null;
-	const signInService = presetSignInService(provider.preset);
+	const custom = provider.builtIn === null;
+	const signInService = builtInSignInService(provider.builtIn);
 	const error = actions.update.error ?? actions.test.error;
 	const tested = actions.test.data;
 	const held = useHoldersOf(offeredModelsOf(provider));
 
 	return (
 		<SettingsGroup
-			label="Connection"
+			label="Access"
 			note={
 				// The result sits beside the button, so a test never moves what is below it.
 				<span className="flex items-center gap-2.5">
@@ -566,7 +564,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 						onClick={() => actions.test.mutate({ providerId: provider.id })}
 					>
 						{actions.test.isPending && <RefreshCw className="animate-spin" />}
-						Test connection
+						Test provider
 					</Button>
 					{!actions.test.isPending && (
 						<TestOutcome
@@ -622,7 +620,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 }
 
 /**
- * How the last test went, as a dot and a few words beside Test connection:
+ * How the last test went, as a dot and a few words beside Test provider:
  * green for working, red with the reason for not. A reason too long for the
  * line is cut short, and given whole when pointed at.
  */
@@ -637,7 +635,7 @@ function TestOutcome({
 	if (reachable === undefined) return null;
 	return (
 		<SettingsTestOutcome good={reachable}>
-			{reachable ? "Connection successful" : (error ?? "It did not answer.")}
+			{reachable ? "Provider answered" : (error ?? "Provider didn't answer.")}
 		</SettingsTestOutcome>
 	);
 }
@@ -915,7 +913,7 @@ function SettingMoveRows({
 			{held.systemBots && (
 				<SettingsRow
 					label="Compaction"
-					sub="Compacting long conversations"
+					sub="Compacting long chats"
 					trailing={
 						<MoveToMenu
 							label="Move compaction to"
@@ -1147,7 +1145,7 @@ const capabilityIcons: Record<ProviderModelCapability, LucideIcon> = {
 	vision: Eye,
 	images: Image,
 	audio: Mic,
-	reasoning: Brain,
+	thinking: Brain,
 	embeddings: Grid2X2,
 };
 
@@ -1221,8 +1219,8 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const shown = searchModels(provider.models, needle).sort(
 		(a, b) => Number(onWhenOpened.has(b.id)) - Number(onWhenOpened.has(a.id)),
 	);
-	const error = actions.setModel.error ?? actions.fetchModels.error;
-	const custom = provider.preset === null;
+	const error = actions.setModel.error ?? actions.discoverModels.error;
+	const custom = provider.builtIn === null;
 
 	/**
 	 * Switches the model off, or asks where its bots, new bots or compaction go
@@ -1247,10 +1245,10 @@ function Models({ provider }: { provider: ModelProvider }) {
 				<Button
 					variant="link"
 					size="text"
-					disabled={actions.fetchModels.isPending || providerLacksCredential(provider)}
-					onClick={() => actions.fetchModels.mutate({ providerId: provider.id })}
+					disabled={actions.discoverModels.isPending || providerLacksCredential(provider)}
+					onClick={() => actions.discoverModels.mutate({ providerId: provider.id })}
 				>
-					{actions.fetchModels.isPending ? "Refreshing…" : "Refresh list"}
+					{actions.discoverModels.isPending ? "Refreshing…" : "Refresh list"}
 				</Button>
 			}
 			note="Only switched-on models show up when choosing a bot's model."

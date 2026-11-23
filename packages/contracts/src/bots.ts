@@ -46,11 +46,11 @@ export type BotColor = typeof botColorSchema.Type;
  * Geometry rather than an upload, so a bot created at run time has an
  * avatar without anybody drawing one.
  */
-export const botFaces = ["pill", "dot", "arc", "square", "wink"] as const;
+export const botEyes = ["pill", "dot", "arc", "square", "wink"] as const;
 
-export const botFaceSchema = Schema.Literals(botFaces);
+export const botEyesSchema = Schema.Literals(botEyes);
 
-export type BotFace = typeof botFaceSchema.Type;
+export type BotEyes = typeof botEyesSchema.Type;
 
 /**
  * The outline that colour fills, in the order a shape picker shows them. Like
@@ -127,7 +127,7 @@ export function handleFromName(name: string): string {
  * The system bots the product ships: bots the system calls rather than ones a
  * workspace writes. One of each per workspace, serving every bot in it.
  *
- * The keys live here so the API, the settings screens and a model trial all
+ * The keys live here so the API, the settings screens and a model test all
  * name the same system bot, and adding one is a compile error everywhere it has
  * to be handled rather than a string to remember.
  */
@@ -143,7 +143,7 @@ export const botPermissionsSchema = Schema.Struct({
 	/** Change its name, look, model, instructions, tools and visibility. */
 	update: Schema.Boolean,
 	delete: Schema.Boolean,
-	/** Read and write in its threads. False for a private bot an admin only sees listed. */
+	/** Read and write in its chats. False for a private bot an admin only sees listed. */
 	talk: Schema.Boolean,
 	/** What the person may do with what its default project holds. */
 	resources: resourcePermissionsSchema,
@@ -158,14 +158,14 @@ export const botSchema = Schema.Struct({
 	handle: handleSchema,
 	description: Schema.NullOr(Schema.String),
 	color: botColorSchema,
-	face: botFaceSchema,
+	eyes: botEyesSchema,
 	shape: botShapeSchema,
 	/**
 	 * Which model answers. `null` when nobody has chosen one, or somebody has
 	 * cleared it — the bot's turns then refuse rather than run on a guess.
 	 */
 	model: Schema.NullOr(modelIdSchema),
-	/** The system prompt. Empty until somebody writes one. */
+	/** The bot's instructions. Empty until somebody writes them. */
 	prompt: Schema.String,
 	/**
 	 * The built-in tools switched off for this bot, by key. A list of what is
@@ -199,8 +199,8 @@ export const botSchema = Schema.Struct({
 	/** Whether the person asking pinned it to their sidebar. */
 	pinned: Schema.Boolean,
 	/**
-	 * Its hidden default project, which holds its own threads, files,
-	 * computer, connections and automations: their routes are the project's.
+	 * Its hidden default project, which holds its own chats, files,
+	 * computer, connectors and automations: their routes are the project's.
 	 */
 	defaultProjectId: uuidSchema,
 	permissions: botPermissionsSchema,
@@ -234,7 +234,7 @@ export const newBotSchema = Schema.Struct({
 		Schema.NullOr(Schema.String.check(Schema.isMaxLength(DESCRIPTION_MAX_LENGTH))),
 	),
 	color: Schema.optional(botColorSchema),
-	face: Schema.optional(botFaceSchema),
+	eyes: Schema.optional(botEyesSchema),
 	shape: Schema.optional(botShapeSchema),
 	model: modelIdSchema,
 	prompt: Schema.optional(Schema.String.check(Schema.isMaxLength(PROMPT_MAX_LENGTH))),

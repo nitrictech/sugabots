@@ -1,9 +1,9 @@
 import { type GitHubTrigger, REPOSITORY_EVENTS, type RepositoryEvent } from "@sugabots/contracts";
 import { Check } from "lucide-react";
 import { REPOSITORY_EVENT_LABELS } from "@/lib/automation-trigger-words.ts";
-import { useConnections } from "@/lib/connections.ts";
+import { useConnectors } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { useConnectionRepositories } from "@/lib/github-connections.ts";
+import { useConnectorRepositories } from "@/lib/github-connectors.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Note } from "@/ui/note.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
@@ -19,7 +19,7 @@ const DEFAULT_REPOSITORY_EVENTS: readonly RepositoryEvent[] = ["pull_request_ope
 
 /** A repository trigger as written, before its repository is chosen. */
 export interface RepositoryDraft {
-	repository: Pick<GitHubTrigger, "connectionId" | "repository"> | undefined;
+	repository: Pick<GitHubTrigger, "connectorId" | "repository"> | undefined;
 	events: readonly RepositoryEvent[];
 }
 
@@ -52,25 +52,25 @@ export function RepositoryGroups({
 	draft: RepositoryDraft;
 	onChange: (draft: RepositoryDraft) => void;
 }) {
-	const connections = useConnections(projectId);
-	const connectionId = connections.data?.find((one) => one.kind === "github")?.id;
-	const { repositories } = useConnectionRepositories(projectId, connectionId);
-	if (connections.isPending) return null;
-	if (connections.isError) return <Alert>{failureMessage(connections.error)}</Alert>;
-	if (connectionId && repositories.isPending) return null;
+	const connectors = useConnectors(projectId);
+	const connectorId = connectors.data?.find((one) => one.kind === "github")?.id;
+	const { repositories } = useConnectorRepositories(projectId, connectorId);
+	if (connectors.isPending) return null;
+	if (connectors.isError) return <Alert>{failureMessage(connectors.error)}</Alert>;
+	if (connectorId && repositories.isPending) return null;
 	if (repositories.isError) return <Alert>{failureMessage(repositories.error)}</Alert>;
-	const choices = connectionId ? (repositories.data?.repositories ?? []) : [];
-	if (!connectionId || choices.length === 0) {
+	const choices = connectorId ? (repositories.data?.repositories ?? []) : [];
+	if (!connectorId || choices.length === 0) {
 		return (
 			<Note>
 				{ownerName} isn't connected to any GitHub repositories yet. Someone who manages its
-				connections can connect GitHub on its Connections page.
+				connectors can connect GitHub on its Connectors page.
 			</Note>
 		);
 	}
 	const chosen = draft.repository;
 	const isChosen = (choice: (typeof choices)[number]) =>
-		connectionId === chosen?.connectionId &&
+		connectorId === chosen?.connectorId &&
 		choice.repository.toLowerCase() === chosen.repository.toLowerCase();
 	return (
 		<>
@@ -87,7 +87,7 @@ export function RepositoryGroups({
 						onClick={() =>
 							onChange({
 								...draft,
-								repository: { connectionId, repository: choice.repository },
+								repository: { connectorId, repository: choice.repository },
 							})
 						}
 					/>

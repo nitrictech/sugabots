@@ -5,7 +5,7 @@ import {
 	WEBHOOK_SOURCES,
 	type WebhookAuth,
 	type WebhookAuthKind,
-	type WebhookCondition,
+	type WebhookFilterTest,
 	type WebhookSource,
 	webhookSecretLongEnough,
 } from "@sugabots/contracts";
@@ -30,7 +30,7 @@ import {
 } from "@/lib/automations.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { resourcePermissions } from "@/lib/resource-owner.tsx";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import {
@@ -44,12 +44,12 @@ import type { PlacedAutomation } from "./AutomationEditor.tsx";
 import { FilterGroup } from "./AutomationWebhookFilter.tsx";
 
 /*
- * How a webhook automation checks who calls it: the sender it comes from, which
- * for a known source needs only that sender's signing secret, or, for any
- * other sender, the auth it asks for and what that needs; then its secret.
+ * How a webhook automation checks who calls it: the webhook source it comes from, which
+ * needs only that source's signing secret, or, for any
+ * other caller, the auth it asks for and what that needs; then its secret.
  */
 
-/** What a webhook starts with until somebody chooses: a signature, which most senders make. */
+/** What a webhook starts with until somebody chooses: a signature, which most callers make. */
 const DEFAULT_WEBHOOK_AUTH: WebhookAuth = {
 	kind: "hmac",
 	header: "X-Signature",
@@ -92,7 +92,7 @@ export interface WebhookDraft {
 	/** Blank for none, so the address alone runs it. */
 	secret: string;
 	/** What a call must meet to run it; none runs every call. */
-	filter: readonly WebhookCondition[];
+	filter: readonly WebhookFilterTest[];
 }
 
 export const NEW_WEBHOOK: WebhookDraft = {
@@ -103,8 +103,8 @@ export const NEW_WEBHOOK: WebhookDraft = {
 };
 
 /**
- * Whether a secret can be saved for `auth`: a source's, however long its
- * sender made it; one made up for a generic webhook, long enough to be hard
+ * Whether a secret can be saved for `auth`: a source's, however long the
+ * source made it; one made up for a generic webhook, long enough to be hard
  * to guess; or none, left empty.
  */
 export function secretReady(auth: WebhookAuth, secret: string): boolean {
@@ -117,7 +117,7 @@ export const SECRET_TOO_SHORT_NOTE = `A secret needs at least ${MIN_WEBHOOK_SECR
 
 /** What the note under a webhook says for an automation without a secret. */
 export const NO_SECRET_NOTE =
-	"With no secret, anyone who has the address can run it. Add one so only the sender can.";
+	"With no secret, anyone who has the address can run it. Add one so only the caller you expect can.";
 
 /** What a caller must do to be let in, for the note under the webhook's rows. */
 export function authNote(auth: WebhookAuth): string {
@@ -190,7 +190,7 @@ export function NewWebhookGroups({
  * An existing webhook trigger's groups: its address and where it comes from,
  * then its auth and delivery id header, which save as they change, and its secret, under a note of
  * what a caller must send, or, while it has no secret, that nothing is asked
- * of them, and its filter, whose conditions are saved explicitly.
+ * of them, and its filter, whose tests are saved explicitly.
  */
 export function WebhookGroups({
 	placed,
@@ -205,11 +205,11 @@ export function WebhookGroups({
 	placed: PlacedAutomation;
 	triggerId: string;
 	auth: WebhookAuth;
-	filter: readonly WebhookCondition[];
+	filter: readonly WebhookFilterTest[];
 	onChangeAuth: (auth: WebhookAuth) => void;
 	deliveryIdHeader: string | null | undefined;
 	onChangeDeliveryIdHeader: (deliveryIdHeader: string | null) => void;
-	onChangeFilter: (filter: WebhookCondition[]) => Promise<unknown>;
+	onChangeFilter: (filter: WebhookFilterTest[]) => Promise<unknown>;
 }) {
 	const { automation, owner } = placed;
 	const canManage = resourcePermissions(owner).manageAutomations;
@@ -259,7 +259,7 @@ export function WebhookGroups({
 }
 
 function webhookAddress(triggerId: string): string {
-	return `${apiBaseUrl}/hooks/triggers/${triggerId}`;
+	return `${apiBaseUrl}/webhooks/triggers/${triggerId}`;
 }
 
 /**
@@ -357,7 +357,7 @@ const SOURCE_OPTIONS = (Object.keys(WEBHOOK_SOURCE_LABELS) as WebhookSourceChoic
 	}),
 );
 
-/** Where the webhook comes from: a known source, each with its logo, or Generic for any other sender. */
+/** Where the webhook comes from: a known source, each with its logo, or Generic for any other caller. */
 function SourceRow({
 	auth,
 	onChange,
@@ -381,7 +381,7 @@ function SourceRow({
 /** A source's logo, or a webhook's for Generic. */
 function SourceMark({ source }: { source: WebhookSourceChoice }) {
 	if (source !== "generic") {
-		return <ConnectionMark presetId={source} name={WEBHOOK_SOURCE_LABELS[source]} size="md" />;
+		return <ConnectorMark markId={source} name={WEBHOOK_SOURCE_LABELS[source]} size="md" />;
 	}
 	return (
 		<span
@@ -495,7 +495,7 @@ function SecretGroup({
 
 /**
  * A secret as a field, typed or pasted in, such as the signing secret a
- * sender made. It shows hidden until Show, and can be copied. `field` is
+ * webhook source made. It shows hidden until Show, and can be copied. `field` is
  * spread onto the input: its value and how it changes, and for a saved
  * secret, `useCommittedDraft`'s saving when it is left.
  */

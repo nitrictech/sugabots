@@ -9,9 +9,9 @@ import type { BlobStore } from "./blob-store.ts";
  * that rolled back.
  *
  * Rows come from database triggers as well as from code: deleting a
- * `conversation` or a `file` a bot wrote, however it happens, queues its
- * folder (see the `conversation_blob_deletion` trigger in the migration that
- * made the `conversation` table, and the `file_blob_deletion` trigger in the
+ * `chat` or a `file` a bot wrote, however it happens, queues its
+ * folder (see the `chat_blob_deletion` trigger in the migration that
+ * made the `chat` table, and the `file_blob_deletion` trigger in the
  * one that made the `file` table).
  */
 export const blobDeletion = pgTable("blob_deletion", {

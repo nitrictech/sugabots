@@ -36,7 +36,7 @@ describe("when a provider was added", () => {
 		const gateway = {
 			...openai,
 			id: "0199a3a0-0000-7000-8000-0000000000cf",
-			preset: null,
+			builtIn: null,
 			name: "Company gateway",
 			connectedBy: {
 				id: "0199a3a0-0000-7000-8000-0000000000c1",
@@ -51,7 +51,7 @@ describe("when a provider was added", () => {
 		expect(await screen.findByText(/^Added .+ · Connected by Sam$/)).toBeDefined();
 	});
 
-	it("is not said for a preset every workspace starts with, which nobody added", async () => {
+	it("is not said for a built-in provider every workspace starts with, which nobody added", async () => {
 		client.api.modelProviders.list.mockReturnValue(
 			Effect.succeed([
 				{
@@ -94,7 +94,7 @@ describe("a model's capabilities", () => {
 	const gateway = {
 		...openai,
 		id: "0199a3a0-0000-7000-8000-0000000000cf",
-		preset: null,
+		builtIn: null,
 		name: "Company gateway",
 	};
 
@@ -115,7 +115,7 @@ describe("a model's capabilities", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "What gpt-5 can do" }));
 		const dialog = await screen.findByRole("dialog", { name: "What it can do" });
 		// gpt-5 reports tools, vision and images: those can go off, the rest are not offered.
-		expect(within(dialog).queryByRole("switch", { name: "Reasoning" })).toBeNull();
+		expect(within(dialog).queryByRole("switch", { name: "Thinking" })).toBeNull();
 		fireEvent.click(within(dialog).getByRole("switch", { name: "Vision" }));
 		fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
@@ -151,7 +151,7 @@ describe("switching off a model bots run on", () => {
 				models: [opus, sonnet].map((modelId) => ({
 					providerId: anthropic.id,
 					providerName: anthropic.name,
-					providerPreset: "anthropic" as const,
+					providerBuiltIn: "anthropic" as const,
 					modelId,
 					displayName: null,
 					capabilities: ["tools" as const],
@@ -201,7 +201,7 @@ describe("switching off a provider whose models bots run on", () => {
 		const offered = (providerId: string, modelId: string) => ({
 			providerId,
 			providerName: providerId === anthropic.id ? anthropic.name : openai.name,
-			providerPreset: null,
+			providerBuiltIn: null,
 			modelId,
 			displayName: null,
 			capabilities: ["tools" as const],
@@ -248,7 +248,7 @@ describe("switching off the model system bots run on", () => {
 				models: [opus, sonnet].map((modelId) => ({
 					providerId: anthropic.id,
 					providerName: anthropic.name,
-					providerPreset: "anthropic" as const,
+					providerBuiltIn: "anthropic" as const,
 					modelId,
 					displayName: null,
 					capabilities: ["tools" as const],

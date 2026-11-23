@@ -1,4 +1,4 @@
-import type { Bot, Connection, Project } from "@sugabots/contracts";
+import type { Bot, Connector, Project } from "@sugabots/contracts";
 import { linkOptions } from "@tanstack/react-router";
 
 /*
@@ -8,17 +8,12 @@ import { linkOptions } from "@tanstack/react-router";
  * an address by hand and the address can change here alone. Each result spreads
  * into a `Link` or goes to `navigate` from a page under `/$workspace`.
  *
- * Pages outside a workspace (onboarding, the OAuth return) name one
- * themselves, and links by fixed key or conversation id are written in place.
+ * Pages outside a workspace (workspace setup, the OAuth return) name one
+ * themselves, and links by fixed key or chat id are written in place.
  */
 
 type ProjectRef = Pick<Project, "slug">;
 type BotRef = Pick<Bot, "handle">;
-
-/** What is new across the workspace. */
-export function inboxLink() {
-	return linkOptions({ from: "/$workspace", to: "./inbox" });
-}
 
 /** Every project the person could open or join. */
 export function projectsLink() {
@@ -30,7 +25,7 @@ export function botsLink() {
 	return linkOptions({ from: "/$workspace", to: "./bots" });
 }
 
-/** A project, which opens its newest thread, or says it has none yet. */
+/** A project, which opens its newest chat, or says it has none yet. */
 export function projectLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
@@ -39,13 +34,13 @@ export function projectLink(project: ProjectRef) {
 	});
 }
 
-/** A bot's own page: on a phone, its threads and pages; on a wider screen, starting a thread with it. */
+/** A bot's own page: on a phone, its chats and pages; on a wider screen, starting a chat with it. */
 export function botLink(bot: BotRef) {
 	return linkOptions({ from: "/$workspace", to: "./bots/$bot", params: { bot: bot.handle } });
 }
 
-/** Starting a thread with a bot, from its first message. */
-export function botNewThreadLink(bot: BotRef) {
+/** Starting a chat with a bot, from its first message. */
+export function botNewChatLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./bots/$bot/new",
@@ -53,8 +48,8 @@ export function botNewThreadLink(bot: BotRef) {
 	});
 }
 
-/** Starting a thread in a project, from its first message. */
-export function projectNewThreadLink(project: ProjectRef) {
+/** Starting a chat in a project, from its first message. */
+export function projectNewChatLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
 		to: "./projects/$project/new",
@@ -160,13 +155,13 @@ export function botNewAutomationLink(bot: BotRef) {
 
 /**
  * An automation's own page, where it is set up; its feed, where its runs post,
- * is opened first when it has none yet. With `itemPage`, one of its runs, by
- * the run's conversation, is the page instead.
+ * is opened first when it has none yet. With `nestedChatPage`, one of its runs, by
+ * the run's chat, is the page instead.
  */
 export function botAutomationFeedLink(
 	bot: BotRef,
 	automationId: string,
-	search: { itemPage?: string } = {},
+	search: { nestedChatPage?: string } = {},
 ) {
 	return linkOptions({
 		from: "/$workspace",
@@ -198,7 +193,7 @@ export function projectNewAutomationLink(project: ProjectRef) {
 export function projectAutomationFeedLink(
 	project: ProjectRef,
 	automationId: string,
-	search: { itemPage?: string } = {},
+	search: { nestedChatPage?: string } = {},
 ) {
 	return linkOptions({
 		from: "/$workspace",
@@ -209,122 +204,98 @@ export function projectAutomationFeedLink(
 }
 
 /** The services a bot is connected to: its default project's. */
-export function botConnectionsLink(bot: BotRef) {
+export function botConnectorsLink(bot: BotRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./bots/$bot/connections",
+		to: "./bots/$bot/connectors",
 		params: { bot: bot.handle },
 	});
 }
 
-/** One of a bot's connections, on its own page. */
-export function botConnectionLink(bot: BotRef, connection: Pick<Connection, "id">) {
+/** One of a bot's connectors, on its own page. */
+export function botConnectorLink(bot: BotRef, connector: Pick<Connector, "id">) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./bots/$bot/connections/$connection",
-		params: { bot: bot.handle, connection: connection.id },
+		to: "./bots/$bot/connectors/$connector",
+		params: { bot: bot.handle, connector: connector.id },
 	});
 }
 
 /** The services a project is connected to. */
-export function projectConnectionsLink(project: ProjectRef) {
+export function projectConnectorsLink(project: ProjectRef) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./projects/$project/connections",
+		to: "./projects/$project/connectors",
 		params: { project: project.slug },
 	});
 }
 
-/** One of a project's connections, on its own page. */
-export function projectConnectionLink(project: ProjectRef, connection: Pick<Connection, "id">) {
+/** One of a project's connectors, on its own page. */
+export function projectConnectorLink(project: ProjectRef, connector: Pick<Connector, "id">) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./projects/$project/connections/$connection",
-		params: { project: project.slug, connection: connection.id },
+		to: "./projects/$project/connectors/$connector",
+		params: { project: project.slug, connector: connector.id },
 	});
 }
 
-/** An automation run or collaboration opened from Inbox as a page of its own. */
-export function inboxItemPageLink(rootConversationId: string, itemConversationId: string) {
-	return linkOptions({
-		from: "/$workspace",
-		to: "./inbox/$conversation",
-		params: { conversation: rootConversationId },
-		search: { itemPage: itemConversationId },
-	});
-}
-
-/** A message opened from Inbox in its conversation, jumped to, beside the list. */
-export function inboxMessageLink(rootConversationId: string, messageId: string) {
-	return linkOptions({
-		from: "/$workspace",
-		to: "./inbox/$conversation",
-		params: { conversation: rootConversationId },
-		search: { message: messageId },
-	});
-}
-
-/** What a conversation's address keeps open beside it. */
-export interface ConversationLinkSearch {
-	item?: string;
+/** What a chat's address keeps open beside it. */
+export interface ChatLinkSearch {
+	nestedChat?: string;
 	file?: string;
 }
 
-function projectThreadLink(
-	project: ProjectRef,
-	conversationId: string,
-	search: ConversationLinkSearch,
-) {
+function projectChatLink(project: ProjectRef, chatId: string, search: ChatLinkSearch) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./projects/$project/$conversation",
-		params: { project: project.slug, conversation: conversationId },
+		to: "./projects/$project/$chat",
+		params: { project: project.slug, chat: chatId },
 		search,
 	});
 }
 
-function botThreadLink(bot: BotRef, conversationId: string, search: ConversationLinkSearch) {
+function botChatLink(bot: BotRef, chatId: string, search: ChatLinkSearch) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./bots/$bot/threads/$conversation",
-		params: { bot: bot.handle, conversation: conversationId },
+		to: "./bots/$bot/chats/$chat",
+		params: { bot: bot.handle, chat: chatId },
 		search,
 	});
 }
 
 /**
- * A bot's thread by its conversation's id alone, for a caller that does not know
+ * A bot's chat by its chat's id alone, for a caller that does not know
  * which bot it belongs to; the route finds the bot and goes on to its address.
  */
-export function threadByIdLink(conversationId: string, search: ConversationLinkSearch = {}) {
+export function chatByIdLink(chatId: string, search: ChatLinkSearch = {}) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./threads/$conversation",
-		params: { conversation: conversationId },
+		to: "./chats/$chat",
+		params: { chat: chatId },
 		search,
 	});
 }
 
 /**
- * A conversation where it belongs: a project's thread, or a
- * bot's thread, with `item` open beside it, or `file` open large. Called
+ * A chat where it belongs: a project's chat, or a
+ * bot's chat, with `nestedChat` open beside it, or `file` open large. Called
  * with either, it is either; a caller holding one or the other branches.
  */
-export function conversationLink(
-	place: { project: ProjectRef; conversationId: string },
-	search?: ConversationLinkSearch,
-): ReturnType<typeof projectThreadLink>;
-export function conversationLink(
-	place: { bot: BotRef; conversationId: string },
-	search?: ConversationLinkSearch,
-): ReturnType<typeof botThreadLink>;
-export function conversationLink(
-	place: { project: ProjectRef; conversationId: string } | { bot: BotRef; conversationId: string },
-	search: ConversationLinkSearch = {},
+export function chatLink(
+	place: { project: ProjectRef; chatId: string },
+	search?: ChatLinkSearch,
+): ReturnType<typeof projectChatLink>;
+export function chatLink(
+	place: { bot: BotRef; chatId: string },
+	search?: ChatLinkSearch,
+): ReturnType<typeof botChatLink>;
+export function chatLink(
+	place: { project: ProjectRef; chatId: string } | { bot: BotRef; chatId: string },
+	search: ChatLinkSearch = {},
 ) {
 	return "project" in place
-		? projectThreadLink(place.project, place.conversationId, search)
-		: botThreadLink(place.bot, place.conversationId, search);
+		? projectChatLink(place.project, place.chatId, search)
+		: botChatLink(place.bot, place.chatId, search);
 }
 
 /** A bot's settings: its look, model, instructions and tools. */
@@ -345,11 +316,11 @@ export function botComputerLink(bot: BotRef) {
 	});
 }
 
-/** A person's page among the workspace's members, by their membership's id. */
-export function memberSettingsLink(membership: { id: string }) {
+/** A person's page among the workspace's people, by their membership's id. */
+export function personSettingsLink(membership: { id: string }) {
 	return linkOptions({
 		from: "/$workspace",
-		to: "./settings/members/$member",
-		params: { member: membership.id },
+		to: "./settings/people/$membership",
+		params: { membership: membership.id },
 	});
 }

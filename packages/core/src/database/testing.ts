@@ -4,9 +4,9 @@ import { type Context, Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { onTestFinished } from "vitest";
 import { BlobStore } from "../blob-store/blob-store.ts";
-import { Credentials } from "../credentials/credentials.ts";
 import { Ids } from "../ids/ids.ts";
-import { Installation } from "../installation/installation.ts";
+import { Secrets } from "../secrets/secrets.ts";
+import { ServerSettings } from "../server-settings/server-settings.ts";
 import {
 	Database,
 	type Executor,
@@ -21,7 +21,7 @@ import {
 } from "./database.ts";
 
 /**
- * A real database, for the repository and service tests.
+ * A real database, for the store and service tests.
  *
  * Such a test is about what the SQL does. `onPostgres(service)` hands back the
  * same service with its methods returning promises, so a case reads
@@ -40,10 +40,10 @@ import {
  */
 export const testInfrastructure = Layer.mergeAll(
 	BlobStore.layer,
-	Layer.succeed(Credentials.Service, Credentials.fromKey(Buffer.alloc(32).toString("base64"))),
+	Layer.succeed(Secrets.Service, Secrets.fromKey(Buffer.alloc(32).toString("base64"))),
 	Layer.succeed(
-		Installation.Service,
-		Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
+		ServerSettings.Service,
+		ServerSettings.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
 	),
 ).pipe(Layer.provideMerge(Ids.layer), Layer.provideMerge(layer));
 

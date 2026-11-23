@@ -1,10 +1,10 @@
 import { MAX_ATTACHMENT_BYTES } from "@sugabots/contracts";
-import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
-import { ConversationFiles } from "@sugabots/core/files/conversation-files";
+import { ChatFiles } from "@sugabots/core/chats/chats/chat-files";
+import { ChatFileStore } from "@sugabots/core/files/chat-file-store";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
-import { createTestApp, identifiedBy, type UserResolver } from "../../http/app.test-support.ts";
+import { createTestApp, identifiedBy, type PersonResolver } from "../../http/app.test-support.ts";
 
 /**
  * The routes that upload a chat's files and serve them back, over doubles of
@@ -14,7 +14,7 @@ import { createTestApp, identifiedBy, type UserResolver } from "../../http/app.t
 const CHAT = "0199a3a0-0000-7000-8000-000000000401";
 const FILE = "0199a3a0-0000-7000-8000-000000000501";
 
-const resolveUser: UserResolver = async () => ({
+const resolvePerson: PersonResolver = async () => ({
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Sam",
 	email: "sam@example.com",
@@ -22,9 +22,9 @@ const resolveUser: UserResolver = async () => ({
 });
 
 const app = (files: Partial<ChatFiles.Interface>) =>
-	createTestApp(Layer.merge(identifiedBy(resolveUser), unimplemented(ChatFiles.Service, files)));
+	createTestApp(Layer.merge(identifiedBy(resolvePerson), unimplemented(ChatFiles.Service, files)));
 
-const signedIn = { authorization: "Bearer member" };
+const signedIn = { authorization: "Bearer sam" };
 
 /** A `read` that finds one file, with `bytes` as its content. */
 const serving = (file: { name: string; contentType: string; bytes: Uint8Array }) =>
@@ -38,7 +38,7 @@ const serving = (file: { name: string; contentType: string; bytes: Uint8Array })
 						size: file.bytes.byteLength,
 						stream: Stream.succeed(file.bytes),
 					})
-				: Effect.fail(new ConversationFiles.FileNotFound({ fileId })),
+				: Effect.fail(new ChatFileStore.FileNotFound({ fileId })),
 	});
 
 describe("uploading a chat file", () => {
@@ -47,13 +47,13 @@ describe("uploading a chat file", () => {
 		const name = encodeURIComponent("notes été.txt");
 		const type = encodeURIComponent("text/plain; charset=utf-8");
 		const response = await app({
-			upload: ({ conversationId, name, type, stream }) =>
+			upload: ({ chatId, name, type, stream }) =>
 				Effect.gen(function* () {
 					const chunks = yield* Stream.runCollect(stream).pipe(Effect.orDie);
-					kept = { conversationId, name, type, text: Buffer.concat(chunks).toString() };
+					kept = { chatId, name, type, text: Buffer.concat(chunks).toString() };
 					return { id: FILE, name, contentType: type ?? "", size: 5 };
 				}),
-		}).request(`/conversations/${CHAT}/files?name=${name}&type=${type}`, {
+		}).request(`/chats/${CHAT}/files?name=${name}&type=${type}`, {
 			method: "POST",
 			headers: signedIn,
 			body: "hello",
@@ -61,7 +61,7 @@ describe("uploading a chat file", () => {
 
 		expect(response.status).toBe(201);
 		expect(kept).toEqual({
-			conversationId: CHAT,
+			chatId: CHAT,
 			name: "notes été.txt",
 			type: "text/plain; charset=utf-8",
 			text: "hello",
@@ -86,7 +86,7 @@ describe("uploading a chat file", () => {
 					size: 0,
 				});
 			},
-		}).request(`/conversations/${CHAT}/files?name=notes.md`, {
+		}).request(`/chats/${CHAT}/files?name=notes.md`, {
 			method: "POST",
 			headers: signedIn,
 			body: "# notes",
@@ -98,7 +98,7 @@ describe("uploading a chat file", () => {
 
 	it("refuses a type that could break out of the file's header", async () => {
 		const type = encodeURIComponent("text/plain\r\nset-cookie: a=b");
-		const response = await app({}).request(`/conversations/${CHAT}/files?name=a.txt&type=${type}`, {
+		const response = await app({}).request(`/chats/${CHAT}/files?name=a.txt&type=${type}`, {
 			method: "POST",
 			headers: signedIn,
 			body: "a",
@@ -108,7 +108,7 @@ describe("uploading a chat file", () => {
 	});
 
 	it("refuses a file that says it is over the limit before reading it", async () => {
-		const response = await app({}).request(`/conversations/${CHAT}/files?name=huge.zip`, {
+		const response = await app({}).request(`/chats/${CHAT}/files?name=huge.zip`, {
 			method: "POST",
 			headers: {
 				...signedIn,
@@ -131,10 +131,10 @@ describe("removing an unsent upload", () => {
 				removed = input;
 				return Effect.void;
 			},
-		}).request(`/conversations/${CHAT}/files/${FILE}`, { method: "DELETE", headers: signedIn });
+		}).request(`/chats/${CHAT}/files/${FILE}`, { method: "DELETE", headers: signedIn });
 
 		expect(response.status).toBe(204);
-		expect(removed).toEqual({ conversationId: CHAT, fileId: FILE });
+		expect(removed).toEqual({ chatId: CHAT, fileId: FILE });
 	});
 });
 
@@ -144,7 +144,7 @@ describe("serving a chat file", () => {
 			name: "chart.png",
 			contentType: "image/png",
 			bytes: new Uint8Array([137, 80, 78, 71]),
-		}).request(`/conversations/${CHAT}/files/${FILE}`, { headers: signedIn });
+		}).request(`/chats/${CHAT}/files/${FILE}`, { headers: signedIn });
 
 		expect(response.status).toBe(200);
 		expect(response.headers.get("content-type")).toBe("image/png");
@@ -161,7 +161,7 @@ describe("serving a chat file", () => {
 			name: "résumé.html",
 			contentType: "text/html",
 			bytes: new TextEncoder().encode("<script>alert(1)</script>"),
-		}).request(`/conversations/${CHAT}/files/${FILE}`, { headers: signedIn });
+		}).request(`/chats/${CHAT}/files/${FILE}`, { headers: signedIn });
 
 		expect(response.headers.get("content-disposition")).toBe(
 			`attachment; filename="r_sum_.html"; filename*=UTF-8''r%C3%A9sum%C3%A9.html`,
@@ -174,7 +174,7 @@ describe("serving a chat file", () => {
 			name: "chart.png",
 			contentType: "image/png",
 			bytes: new Uint8Array(),
-		}).request(`/conversations/${CHAT}/files/0199a3a0-0000-7000-8000-000000000599`, {
+		}).request(`/chats/${CHAT}/files/0199a3a0-0000-7000-8000-000000000599`, {
 			headers: signedIn,
 		});
 

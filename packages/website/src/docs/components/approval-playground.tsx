@@ -30,7 +30,7 @@ function outcomeOf(setting: ApprovalSetting): Outcome {
 
 const outcomeText: Record<Outcome, string> = {
 	refused: "The call is refused, and the bot is told the tool is off.",
-	waits: "The call waits in the thread until someone who's allowed to answer it does.",
+	waits: "The call waits in the chat until someone who's allowed to answer it does.",
 	runs: "The tool is allowed, so it runs straight away.",
 };
 

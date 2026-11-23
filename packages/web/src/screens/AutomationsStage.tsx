@@ -1,4 +1,4 @@
-import type { Bot, SessionUser } from "@sugabots/contracts";
+import type { Bot, SignedInPerson } from "@sugabots/contracts";
 import { Plus, RefreshCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useOpenAutomationFeed } from "@/lib/chats.ts";
@@ -10,35 +10,35 @@ import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { IconTile } from "@/ui/icon-tile.tsx";
 import { NewAutomationPage } from "./AutomationEditor.tsx";
-import { ConversationChat } from "./ConversationChat.tsx";
+import { ChatPane } from "./ChatPane.tsx";
 import type { StagedChange } from "./staged.ts";
 
 interface AutomationsStageProps {
 	bot: Bot;
-	user: SessionUser;
+	signedIn: SignedInPerson;
 	view: AutomationsView;
 	onViewChange: (view: AutomationsView) => void;
-	/** Opens something else beside the bot's thread, such as a file from an automation's feed. */
+	/** Opens something else beside the bot's chat, such as a file from an automation's feed. */
 	onStagedChange: StagedChange;
 	onClose: () => void;
 }
 
-/** Which of a bot's automations are open beside its thread: all of them, one, or a new one being made. */
+/** Which of a bot's automations are open beside its chat: all of them, one, or a new one being made. */
 export type AutomationsView =
 	| { kind: "list" }
 	| { kind: "automation"; automationId: string }
 	| { kind: "new" };
 
 /**
- * A bot's automations, open large beside its thread as its computer is: all of
+ * A bot's automations, open large beside its chat as its computer is: all of
  * them, each opening its own feed in their place, or a new one being made.
  * An automation or a new one is a level inside the list, and the Back before its
- * name returns to the list, so the bot's thread stays in view throughout.
+ * name returns to the list, so the bot's chat stays in view throughout.
  * Escape goes back up a level at a time, as the Back does, then closes it.
  */
 export function AutomationsStage({
 	bot,
-	user,
+	signedIn,
 	view,
 	onViewChange,
 	onStagedChange,
@@ -51,7 +51,7 @@ export function AutomationsStage({
 			<AutomationFeed
 				key={view.automationId}
 				bot={bot}
-				user={user}
+				signedIn={signedIn}
 				automationId={view.automationId}
 				onStagedChange={onStagedChange}
 				parent={parent}
@@ -138,7 +138,7 @@ function AutomationList({
 					bot.permissions.resources.manageAutomations
 						? {
 								newAutomation: <button type="button" onClick={onNew} />,
-								// Not linked: the bot's thread is already open beside this panel.
+								// Not linked: the bot's chat is already open beside this panel.
 								whoToAsk: bot.name,
 							}
 						: undefined
@@ -168,14 +168,14 @@ function AutomationList({
  */
 function AutomationFeed({
 	bot,
-	user,
+	signedIn,
 	automationId,
 	onStagedChange,
 	parent,
 	trailing,
 }: {
 	bot: Bot;
-	user: SessionUser;
+	signedIn: SignedInPerson;
 	automationId: string;
 	onStagedChange: StagedChange;
 	/** The bot's automations, which the Back before the automation's name returns to. */
@@ -184,10 +184,10 @@ function AutomationFeed({
 }) {
 	const opened = useOpenAutomationFeed(bot.defaultProjectId, automationId);
 	const keys = usePanelKeys<HTMLElement>(parent.onBack);
-	const [itemConversationId, setItemConversationId] = useState<string>();
+	const [nestedChatId, setNestedChatId] = useState<string>();
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	return (
-		// In place of the list, and like it, covering the thread on a phone; there
+		// In place of the list, and like it, covering the chat on a phone; there
 		// while its feed opens, so it holds the focus from the start.
 		<section
 			aria-label="Automation"
@@ -200,12 +200,12 @@ function AutomationFeed({
 				</EmptyState>
 			) : (
 				opened.data && (
-					<ConversationChat
-						conversationPlace={{ bot }}
-						conversationId={opened.data.id}
-						user={user}
-						itemConversationId={itemConversationId}
-						onItemChange={setItemConversationId}
+					<ChatPane
+						chatLocation={{ bot }}
+						chatId={opened.data.id}
+						signedIn={signedIn}
+						nestedChatId={nestedChatId}
+						onNestedChatChange={setNestedChatId}
 						place={{ kind: "own", detailsOpen, onDetailsChange: setDetailsOpen, parent, trailing }}
 						onStagedChange={onStagedChange}
 					/>

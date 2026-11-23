@@ -1,9 +1,9 @@
 import type { Bot, NamedPerson } from "@sugabots/contracts";
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { type Actor, botPermissions } from "../../authorization/permissions.ts";
-import { personJson } from "../../conversations/repository/participants.ts";
+import { personJson } from "../../chats/store/participants.ts";
 import type * as schema from "../../database/schema.ts";
-import { pinnedBot, project, user, workspaceMember } from "../../database/schema.ts";
+import { membership, person, pinnedBot, project } from "../../database/schema.ts";
 import { outerColumn } from "../../database/sql.ts";
 
 /**
@@ -29,9 +29,9 @@ export function defaultProjectIdOf(botId: SQLWrapper): SQL<string> {
 	return sql<string>`(select owned.id from ${project} as owned where owned.default_of_bot_id = ${outerColumn(botId)})`;
 }
 
-/** SQL for whether the person `userId` pinned the bot `botId` names, to select beside it for {@link toBot}. */
-export function pinnedBy(botId: SQLWrapper, userId: string): SQL<boolean> {
-	return sql<boolean>`exists (select 1 from ${pinnedBot} where ${pinnedBot.botId} = ${botId} and ${pinnedBot.userId} = ${userId})`;
+/** SQL for whether the person `personId` pinned the bot `botId` names, to select beside it for {@link toBot}. */
+export function pinnedBy(botId: SQLWrapper, personId: string): SQL<boolean> {
+	return sql<boolean>`exists (select 1 from ${pinnedBot} where ${pinnedBot.botId} = ${botId} and ${pinnedBot.personId} = ${personId})`;
 }
 
 /**
@@ -43,13 +43,13 @@ export function creatorOf(bot: {
 	createdById: SQLWrapper;
 	workspaceId: SQLWrapper;
 }): SQL<NamedPerson | null> {
-	return sql<NamedPerson | null>`(select ${personJson} from ${workspaceMember} inner join ${user} on ${user.id} = ${workspaceMember.userId} where ${workspaceMember.workspaceId} = ${bot.workspaceId} and ${workspaceMember.userId} = ${bot.createdById})`;
+	return sql<NamedPerson | null>`(select ${personJson} from ${membership} inner join ${person} on ${person.id} = ${membership.personId} where ${membership.workspaceId} = ${bot.workspaceId} and ${membership.personId} = ${bot.createdById})`;
 }
 
 /**
  * The row as the API returns it to `viewer`: timestamps as ISO strings, what
  * they may do with it, and whether they pinned it. `defaultProjectId` is its
- * default project's, whose routes hold its computer, connections and
+ * default project's, whose routes hold its computer, connectors and
  * automations; `createdBy` is {@link creatorOf} its `createdById`.
  */
 export function toBot(
@@ -63,7 +63,7 @@ export function toBot(
 		handle: row.handle,
 		description: row.description,
 		color: row.color,
-		face: row.face,
+		eyes: row.eyes,
 		shape: row.shape,
 		model: row.model,
 		prompt: row.prompt,

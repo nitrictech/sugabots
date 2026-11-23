@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { usePeopleReachingProject } from "@/lib/projects.ts";
 import { createQueryClient } from "@/lib/query.ts";
-import { useUpdateWorkspaceMemberRole } from "@/lib/workspace.ts";
+import { useChangeRole } from "@/lib/workspace.ts";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -23,12 +23,12 @@ afterEach(() => {
 describe("changing what somebody may do", () => {
 	it("refreshes who reaches a project after a workspace role change", async () => {
 		client.api.projects.listPeople.mockReturnValue(Effect.succeed([]));
-		client.api.workspaces.updateMember.mockReturnValue(Effect.succeed(undefined));
+		client.api.workspaces.changeRole.mockReturnValue(Effect.succeed(undefined));
 		const queries = createQueryClient();
 		const { result } = renderHook(
 			() => ({
 				people: usePeopleReachingProject(projectId),
-				changeRole: useUpdateWorkspaceMemberRole(workspaceId),
+				changeRole: useChangeRole(workspaceId),
 			}),
 			{
 				wrapper: ({ children }: { children: ReactNode }) => (
@@ -39,7 +39,9 @@ describe("changing what somebody may do", () => {
 		await waitFor(() => expect(result.current.people.isSuccess).toBe(true));
 		client.api.projects.listPeople.mockReturnValue(Effect.succeed([juno]));
 
-		await act(() => result.current.changeRole.mutateAsync({ memberId: juno.id, role: "admin" }));
+		await act(() =>
+			result.current.changeRole.mutateAsync({ membershipId: juno.id, role: "admin" }),
+		);
 
 		await waitFor(() => expect(result.current.people.data).toEqual([juno]));
 	});

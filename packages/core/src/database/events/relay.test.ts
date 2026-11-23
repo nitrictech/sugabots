@@ -16,7 +16,7 @@ import { EventStore } from "./store.ts";
  */
 describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses", () => {
 	let store: EventStore.Interface;
-	const stream = `conversation:relay-${Date.now()}` as const satisfies EventStream;
+	const stream = `chat:relay-${Date.now()}` as const satisfies EventStream;
 	const buses: EventBus.Interface[] = [];
 
 	beforeAll(async () => {
@@ -70,16 +70,13 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 		await listening();
 		const heardByReader = collect(reader, 1);
 		const heardByWriter = collect(writer, 1);
-		const seq = await store.append(
-			stream,
-			streamEvent("conversation.changed", { conversationId: "t" }),
-		);
+		const seq = await store.append(stream, streamEvent("chat.changed", { chatId: "t" }));
 
 		await writer.publishCommitted([
-			{ stream, seq, event: streamEvent("conversation.changed", { conversationId: "t" }) },
+			{ stream, seq, event: streamEvent("chat.changed", { chatId: "t" }) },
 		]);
 
-		expect(await heardByReader).toMatchObject([{ seq, event: { type: "conversation.changed" } }]);
+		expect(await heardByReader).toMatchObject([{ seq, event: { type: "chat.changed" } }]);
 		expect(await heardByWriter).toHaveLength(1);
 		// Nothing else arrives: the writer does not hear its own notice back.
 		await new Promise((resolve) => setTimeout(resolve, 200));
@@ -93,10 +90,10 @@ describe.skipIf(!process.env.DATABASE_URL)("the event relay, between two buses",
 
 		await writer.publish(
 			stream,
-			streamEvent("message.delta", { conversationId: "t", messageId: "m", offset: 0, text: "hi" }),
+			streamEvent("message.delta", { chatId: "t", messageId: "m", offset: 0, text: "hi" }),
 		);
 		const large = streamEvent("message.completed", {
-			conversationId: "t",
+			chatId: "t",
 			messageId: "m",
 			status: "complete",
 			content: "x".repeat(9_000),

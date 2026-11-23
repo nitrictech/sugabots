@@ -14,7 +14,7 @@ vi.mock("@/api.ts", () => import("@/test-client.ts"));
 const bot = {
 	name: "Linear Handler",
 	color: "green" as const,
-	face: "pill" as const,
+	eyes: "pill" as const,
 	shape: "circle" as const,
 };
 
@@ -34,7 +34,7 @@ function asking(
 		output: null,
 		status: "awaiting_approval",
 		error: null,
-		mutating: true,
+		writeOrDelete: true,
 		atOffset: 0,
 		startedAt: "2026-09-18T09:00:00.000Z",
 		finishedAt: null,
@@ -49,9 +49,9 @@ function show(call: ToolCallPart, canApprove = true) {
 			<ToolApprovalCard
 				call={shown}
 				bot={bot}
-				conversationId="0199a3a0-0000-7000-8000-0000000000b2"
+				chatId="0199a3a0-0000-7000-8000-0000000000b2"
 				canApprove={canApprove}
-				look={{ name: "Linear", presetId: "linear" }}
+				connector={{ name: "Linear", markId: "linear" }}
 			/>
 		</QueryClientProvider>
 	);

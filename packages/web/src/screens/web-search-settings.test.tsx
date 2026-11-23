@@ -12,7 +12,7 @@ const route = client.api.searchProviders;
 const brave: SearchProvider = {
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	workspaceId: linear.workspaceId,
-	preset: "brave",
+	builtIn: "brave",
 	name: "Brave Search",
 	baseUrl: "https://api.search.brave.com/res/v1",
 	enabled: false,
@@ -28,7 +28,7 @@ const keyed: SearchProvider = {
 };
 const exa: SearchProvider = {
 	...brave,
-	preset: "exa",
+	builtIn: "exa",
 	name: "Exa",
 	baseUrl: "https://api.exa.ai",
 	status: "untested",
@@ -65,7 +65,7 @@ describe("the Web search settings", () => {
 
 		await waitFor(() => expect(route.replace).toHaveBeenCalledOnce());
 		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
-			payload: { preset: "exa", enabled: true },
+			payload: { builtIn: "exa", enabled: true },
 		});
 		await waitFor(async () =>
 			expect((await searchSwitch()).getAttribute("aria-checked")).toBe("true"),
@@ -77,7 +77,7 @@ describe("the Web search settings", () => {
 	});
 
 	it("changes provider from the list, keeping the switch as it was", async () => {
-		const searxng = { ...exa, preset: "searxng" as const, name: "SearXNG" };
+		const searxng = { ...exa, builtIn: "searxng" as const, name: "SearXNG" };
 		route.get.mockReturnValue(Effect.succeed({ provider: exa }));
 		route.replace.mockImplementation(() => {
 			route.get.mockReturnValue(Effect.succeed({ provider: searxng }));
@@ -90,7 +90,7 @@ describe("the Web search settings", () => {
 
 		await waitFor(() => expect(route.replace).toHaveBeenCalledOnce());
 		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
-			payload: { preset: "searxng", enabled: true },
+			payload: { builtIn: "searxng", enabled: true },
 		});
 		expect(await screen.findByRole("heading", { name: "SearXNG" })).toBeDefined();
 	});
@@ -109,7 +109,7 @@ describe("the Web search settings", () => {
 		// The API refuses a provider that is on without a key, so the swap turns the web off.
 		await waitFor(() => expect(route.replace).toHaveBeenCalledOnce());
 		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
-			payload: { preset: "brave", enabled: false },
+			payload: { builtIn: "brave", enabled: false },
 		});
 		expect(await screen.findByRole("heading", { name: "Brave Search" })).toBeDefined();
 		const power = await searchSwitch();
@@ -178,8 +178,8 @@ describe("the Web search settings", () => {
 		expect(await screen.findByText("Search works")).toBeDefined();
 	});
 
-	it("tells a member the pane is for administrators", async () => {
-		apiAnswers({ role: "member" });
+	it("tells an editor the pane is for administrators", async () => {
+		apiAnswers({ role: "editor" });
 		mount("/suga/settings/search");
 
 		expect(

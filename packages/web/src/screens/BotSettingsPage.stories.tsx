@@ -1,16 +1,16 @@
-import type { Automation, ConnectionTool } from "@sugabots/contracts";
-import type { TestConnection } from "@sugabots/contracts/testing";
+import type { Automation, ConnectorTool } from "@sugabots/contracts";
+import type { TestConnector } from "@sugabots/contracts/testing";
 import { automationTriggers, type TestAutomationTrigger } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue, storyBots } from "@/shell/story-fixtures.ts";
-import { appHandlers, connectionHandlers, StoryApp, storyModel } from "../story-app.tsx";
+import { appHandlers, connectorHandlers, StoryApp, storyModel } from "../story-app.tsx";
 
 /*
- * A bot's settings, a page of its own beside its threads: its contact card,
+ * A bot's settings, a page of its own beside its chats: its contact card,
  * with its profile, model and instructions edited in place, its tools,
- * connections and automations, and on a phone Back to the bot.
+ * connectors and automations, and on a phone Back to the bot.
  *
  * Handlers a story adds with `msw.use` are tried before the meta's, so each
  * story answers only what it is about.
@@ -27,7 +27,7 @@ const models = [
 		...storyModel,
 		providerId: "0199a3a0-0000-7000-8000-000000000202",
 		providerName: "OpenAI",
-		providerPreset: "openai",
+		providerBuiltIn: "openai",
 		modelId: "gpt-5",
 		displayName: "GPT-5",
 	},
@@ -35,7 +35,7 @@ const models = [
 		...storyModel,
 		providerId: "0199a3a0-0000-7000-8000-000000000203",
 		providerName: "Ollama",
-		providerPreset: "ollama",
+		providerBuiltIn: "ollama",
 		modelId: "qwen3.5:4b",
 		displayName: "Qwen 3.5 4B",
 	},
@@ -53,13 +53,13 @@ const bots = storyBots.map((bot) =>
 		: bot,
 );
 
-function connection(
+function connector(
 	n: number,
 	name: string,
 	handle: string,
 	url: string,
-	tools: ConnectionTool[],
-): TestConnection {
+	tools: ConnectorTool[],
+): TestConnector {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000006${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
@@ -82,12 +82,12 @@ function connection(
 	};
 }
 
-const projectTools: TestConnection[] = [
-	connection(1, "HubSpot", "hubspot", "https://mcp.hubspot.com/mcp", [
+const projectTools: TestConnector[] = [
+	connector(1, "HubSpot", "hubspot", "https://mcp.hubspot.com/mcp", [
 		{ name: "search_contacts", description: "Find contacts", readOnly: true, destructive: false },
 		{ name: "update_deal", description: "Change a deal", readOnly: false, destructive: false },
 	]),
-	connection(2, "Gmail", "gmail", "https://gmail.mcp.example.com/mcp", [
+	connector(2, "Gmail", "gmail", "https://gmail.mcp.example.com/mcp", [
 		{ name: "read_inbox", description: "Read email", readOnly: true, destructive: false },
 		{ name: "send_email", description: "Send an email", readOnly: false, destructive: false },
 	]),
@@ -142,7 +142,7 @@ const meta = preview.meta({
 
 /**
  * Growth Desk's contact card, its Settings page: its
- * face, with the pencil that changes its look, and the way to message it,
+ * face, with the pencil that changes its avatar, and the way to message it,
  * about, tools and automations.
  */
 export const ContactCard = meta.story({
@@ -150,7 +150,7 @@ export const ContactCard = meta.story({
 		await expect(await canvas.findByRole("heading", { name: growthDesk.name })).toBeInTheDocument();
 		await expect(canvas.getByRole("heading", { name: "Settings", level: 1 })).toBeInTheDocument();
 		await expect(canvas.getByRole("heading", { name: "Built-in tools" })).toBeInTheDocument();
-		await expect(canvas.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
+		await expect(canvas.getByRole("heading", { name: "Connectors" })).toBeInTheDocument();
 		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(growthDesk.name);
 		await expect(canvas.getByRole("textbox", { name: "Description" })).toBeInTheDocument();
 		// No computers are set up for the workspace, so the bot's is off and can't be turned on.
@@ -166,15 +166,15 @@ export const ContactCard = meta.story({
 });
 
 /**
- * The look, opened by clicking the bot's face: the bot on a faint tint of its
+ * The avatar, opened by clicking the bot's face: the bot on a faint tint of its
  * colour, its shape, eyes and colour beside it, and Save, which waits for a
  * change.
  */
-export const Look = meta.story({
+export const Avatar = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Change look" }));
+		await userEvent.click(await canvas.findByRole("button", { name: "Change avatar" }));
 		const dialog = await within(document.body).findByRole("dialog", {
-			name: `${growthDesk.name}'s look`,
+			name: `${growthDesk.name}'s avatar`,
 		});
 		await expect(within(dialog).getByRole("tab", { name: "Shape" })).toBeInTheDocument();
 		await expect(within(dialog).getByRole("group", { name: "Colour" })).toBeInTheDocument();
@@ -198,8 +198,8 @@ export const ModelPage = meta.story({
 	},
 });
 
-/** A member of the workspace who may not change the bot. */
-function memberHandlers() {
+/** An editor in the workspace, who may not change the bot. */
+function editorHandlers() {
 	return appHandlers({
 		models,
 		bots: bots.map((bot) => ({
@@ -211,19 +211,19 @@ function memberHandlers() {
 				resources: {
 					...bot.permissions.resources,
 					manageAutomations: false,
-					manageConnections: false,
+					manageConnectors: false,
 					manageComputer: false,
 				},
 			},
 		})),
-		role: "member",
+		role: "editor",
 	});
 }
 
-/** The model for a member: stated, not a menu to choose from. */
-export const MemberModelPage = meta.story({
+/** The model for an editor: stated, not a menu to choose from. */
+export const EditorModelPage = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...memberHandlers());
+		msw.use(...editorHandlers());
 	},
 	play: async ({ canvas }) => {
 		await expect(
@@ -240,20 +240,20 @@ export const InstructionsPage = meta.story({
 	},
 });
 
-/** A bot with its connections, each with how many tools it can use, and its two automations counted, with the way to its Automations page. */
+/** A bot with its connectors, each with how many tools it can use, and its two automations counted, with the way to its Automations page. */
 export const ToolsAndAutomations = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			...connectionHandlers(projectTools),
+			...connectorHandlers(projectTools),
 			http.get(`${API}/projects/:projectId/automations`, () => HttpResponse.json(automations)),
 		);
 	},
 	play: async ({ canvas }) => {
-		const connections = await canvas.findByRole("region", { name: "Connections" });
-		await expect(await within(connections).findByText("HubSpot")).toBeInTheDocument();
-		await expect(within(connections).getAllByText("2 tools")).not.toHaveLength(0);
-		await expect(within(connections).queryByRole("switch")).toBeNull();
-		// Its settings' row, not the Automations beside its threads.
+		const connectors = await canvas.findByRole("region", { name: "Connectors" });
+		await expect(await within(connectors).findByText("HubSpot")).toBeInTheDocument();
+		await expect(within(connectors).getAllByText("2 tools")).not.toHaveLength(0);
+		await expect(within(connectors).queryByRole("switch")).toBeNull();
+		// Its settings' row, not the Automations beside its chats.
 		const settings = canvas.getByRole("region", { name: "Settings" });
 		const automationsRow = within(settings).getByRole("link", { name: /^Automations/ });
 		await waitFor(() => expect(within(automationsRow).getByText("2")).toBeInTheDocument());
@@ -264,15 +264,15 @@ export const ToolsAndAutomations = meta.story({
 	},
 });
 
-/** A member who may not change the bot: its settings stated rather than editable. */
-export const Member = meta.story({
+/** An editor, who may not change the bot: its settings stated rather than editable. */
+export const Editor = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...memberHandlers());
+		msw.use(...editorHandlers());
 	},
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: growthDesk.name })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Delete bot" })).toBeNull();
-		await expect(canvas.queryByRole("button", { name: "Change look" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Change avatar" })).toBeNull();
 		await expect(canvas.queryByRole("button", { name: "New bot" })).toBeNull();
 	},
 });

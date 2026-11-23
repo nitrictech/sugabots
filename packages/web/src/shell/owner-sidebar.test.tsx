@@ -1,5 +1,5 @@
-import type { ProjectThread } from "@sugabots/contracts";
-import { listedThread } from "@sugabots/contracts/testing";
+import type { ProjectChat } from "@sugabots/contracts";
+import { listedChat } from "@sugabots/contracts/testing";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,78 +22,77 @@ afterEach(() => {
 
 describe("a project's own sidebar", () => {
 	const project = projects[0] as (typeof projects)[number];
-	const thread: ProjectThread = {
-		kind: "project_thread",
+	const chat: ProjectChat = {
+		kind: "project_chat",
 		id: "0199a3a0-0000-7000-8000-0000000000e1",
 		workspaceId: workspace.id,
 		projectId: project.id,
 		botId: null,
 		title: "Pricing page",
-		archivedAt: null,
-		doneAt: null,
+		resolvedAt: null,
 		createdAt: "2026-09-18T08:00:00.000Z",
 		updatedAt: "2026-09-18T08:00:00.000Z",
 	};
 
-	it("moves a thread marked done under Done, which opens to show it", async () => {
+	it("moves a chat marked resolved under Resolved, which opens to show it", async () => {
 		onWideScreen();
-		let doneAt: string | null = null;
-		client.api.chats.threads.mockImplementation(() =>
-			Effect.succeed({ threads: [listedThread({ ...thread, doneAt })], automations: [] }),
+		let resolvedAt: string | null = null;
+		client.api.chats.projectChats.mockImplementation(() =>
+			Effect.succeed({ chats: [listedChat({ ...chat, resolvedAt })], automations: [] }),
 		);
-		client.api.chats.markDone.mockImplementation(() => {
-			doneAt = "2026-09-19T08:00:00.000Z";
+		client.api.chats.markResolved.mockImplementation(() => {
+			resolvedAt = "2026-09-19T08:00:00.000Z";
 			return Effect.succeed(undefined);
 		});
 		mount(`/suga/projects/${project.slug}/files`);
 
-		const work = await screen.findByRole("region", { name: "Threads" });
-		fireEvent.click(await within(work).findByRole("button", { name: `Done: ${thread.title}` }));
+		const work = await screen.findByRole("region", { name: "Chats" });
+		fireEvent.click(await within(work).findByRole("button", { name: `Resolve: ${chat.title}` }));
 
-		fireEvent.click(await screen.findByRole("button", { name: /^Done\s*1$/, expanded: false }));
-		const done = await screen.findByRole("region", { name: "Done" });
-		expect(within(done).getByRole("button", { name: `Reopen: ${thread.title}` })).toBeDefined();
-		// Threads holds only what is still open, so with none it is gone.
-		const threads = screen.queryByRole("region", { name: "Threads" });
+		fireEvent.click(await screen.findByRole("button", { name: /^Resolved\s*1$/, expanded: false }));
+		const resolved = await screen.findByRole("region", { name: "Resolved" });
+		expect(within(resolved).getByRole("button", { name: `Reopen: ${chat.title}` })).toBeDefined();
+		// Chats holds only what is still open, so with none it is gone.
+		const chats = screen.queryByRole("region", { name: "Chats" });
 		expect(
-			threads && within(threads).queryByRole("link", { name: new RegExp(thread.title) }),
+			chats && within(chats).queryByRole("link", { name: new RegExp(chat.title) }),
 		).toBeFalsy();
 	});
 
-	it("says what each thread's bots are doing: working, waiting on an approval, or done unread", async () => {
+	it("says what each chat's bots are doing: working, waiting on an approval, or replied unread", async () => {
 		onWideScreen();
 		const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 		const titled = (title: string, suffix: string) => ({
-			...thread,
+			...chat,
 			id: `0199a3a0-0000-7000-8000-0000000000${suffix}`,
 			title,
 		});
-		client.api.chats.threads.mockImplementation(() =>
+		client.api.chats.projectChats.mockImplementation(() =>
 			Effect.succeed({
-				threads: [
-					listedThread(titled("Deploy", "f1"), {
-						activity: { kind: "working", since: minutesAgo(20) },
+				chats: [
+					listedChat(titled("Deploy", "f1"), {
+						status: { kind: "working", since: minutesAgo(20) },
 					}),
-					listedThread(titled("Refund", "f2"), {
-						activity: { kind: "waiting", since: minutesAgo(2) },
+					listedChat(titled("Refund", "f2"), {
+						status: { kind: "waiting", since: minutesAgo(2) },
 					}),
-					listedThread(titled("Report", "f3"), {
-						activity: { kind: "finished", at: minutesAgo(1) },
+					listedChat(titled("Report", "f3"), {
+						status: { kind: "replied", at: minutesAgo(1) },
 					}),
-					listedThread(titled("Lunch", "f4")),
+					listedChat(titled("Lunch", "f4")),
 				],
 				automations: [],
 			}),
 		);
 		mount(`/suga/projects/${project.slug}/files`);
 
-		const work = await screen.findByRole("region", { name: "Threads" });
+		const work = await screen.findByRole("region", { name: "Chats" });
 		const row = async (title: string) =>
 			within(work).findByRole("link", { name: new RegExp(`^${title}`) });
 		expect((await row("Deploy")).textContent).toContain("Working 20m");
 		expect((await row("Refund")).textContent).toContain("Waiting 2m");
-		expect((await row("Report")).textContent).toContain("Done");
+		expect((await row("Report")).textContent).toContain("Replied");
 		const quiet = (await row("Lunch")).textContent;
-		expect(quiet).not.toMatch(/Working|Waiting|Done/);
+		expect(quiet).not.toMatch(/Working|Waiting|Replied/);
 	});
 });

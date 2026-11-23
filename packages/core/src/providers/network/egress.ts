@@ -10,17 +10,17 @@ import {
 	type RequestInit as UndiciRequestInit,
 	fetch as undiciFetch,
 } from "undici";
-import { Installation } from "../../installation/installation.ts";
+import { ServerSettings } from "../../server-settings/server-settings.ts";
 import type { UserFacing } from "../../user-message.ts";
 
-/** The clients the API reaches the outside world with, each under this installation's egress policy. */
+/** The clients the API reaches the outside world with, each under this server's egress policy. */
 export interface Interface {
 	/** For model providers and model discovery: a client bound to one provider's base URL. */
 	readonly providers: EgressHttpClients;
-	/** Checks an address a workspace gives for a provider or connection, under the providers' policy. */
+	/** Checks an address a workspace gives for a provider or connector, under the providers' policy. */
 	readonly validateProviderUrl: (url: string) => Effect.Effect<void, EgressRefused>;
 	/**
-	 * Unbound, under the providers' policy. A connection's sign-in goes wherever
+	 * Unbound, under the providers' policy. A connector's sign-in goes wherever
 	 * its authorization server says: its well-known documents, then often
 	 * another host.
 	 */
@@ -33,14 +33,14 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 /**
  * Reads the two policies: the addresses a workspace gives, for its model and
- * search providers and its connections, may be plain HTTP or on a local network
+ * search providers and its connectors, may be plain HTTP or on a local network
  * outside production unless `ALLOW_UNSAFE_WORKSPACE_URLS` says otherwise, and
  * `web_fetch` may not unless `ALLOW_PRIVATE_WEB_FETCH_NETWORK` says it may.
  * The clients close when the layer does.
  */
 export const make = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
-	const allowUnsafeWorkspaceUrls = yield* unsafeWorkspaceUrls(!installation.isProduction);
+	const serverSettings = yield* ServerSettings.Service;
+	const allowUnsafeWorkspaceUrls = yield* unsafeWorkspaceUrls(!serverSettings.isProduction);
 	const allowPrivateWebFetchNetwork = yield* Config.Boolean("ALLOW_PRIVATE_WEB_FETCH_NETWORK").pipe(
 		Config.withDefault(false),
 	);
@@ -63,7 +63,7 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(Service, make);
 
 /**
- * How the API reaches the outside world: `fetch`, with this installation's
+ * How the API reaches the outside world: `fetch`, with this server's
  * egress policy already applied. Every destination is resolved first and its
  * addresses checked against the private and reserved ranges, the connection is
  * pinned to the addresses that passed, and redirects are never followed on the
@@ -210,13 +210,13 @@ export function createEgressHttpClient({
 }
 
 /**
- * One connection pool under the installation's network policy, handed out
- * bound to the provider it was asked for. The policy is the installation's
+ * One connection pool under the server's network policy, handed out
+ * bound to the provider it was asked for. The policy is the server's
  * because it is a question about who runs it: a self-hosted install on a
- * trusted network may reach anything on it, a hosted one serving many tenants
- * may not let one tenant's provider reach another's, or the host's own
+ * trusted network may reach anything on it, a hosted one serving many workspaces
+ * may not let one workspace's provider reach another's, or the host's own
  * services. What software answers at the address — Ollama, vLLM, a gateway —
- * says nothing about that, so no preset is exempt.
+ * says nothing about that, so no built-in provider is exempt.
  *
  * The binding is what makes the policy hold: the client goes to an SDK that
  * builds its own request paths, so a client refuses to leave the base URL of
@@ -270,12 +270,12 @@ const EGRESS_REFUSAL_USER_MESSAGES: Record<EgressRefusal, UserText> = {
 	outsideBaseUrl: userText`That address isn't under the configured address, so Sugabots won't send its credentials there. Use an address that starts with the configured address.`,
 	unresolved: userText`Sugabots couldn't find a server with that name. Check the address is spelled correctly, and that the name can be looked up from wherever Sugabots runs.`,
 	invalidAddress: userText`That server's name points to an address Sugabots can't connect to. Check the address, or the server's DNS records.`,
-	privateNetwork: userText`That address is on a local or private network, which this installation doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.`,
+	privateNetwork: userText`That address is on a local or private network, which this server doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.`,
 	invalidUrl: userText`That isn't a complete web address. Check it starts with https:// and has no spaces.`,
 	notHttp: userText`Sugabots only connects to web addresses. Use one that starts with https://.`,
 	credentials: userText`That address has a username or password in it, which Sugabots won't send in an address. Remove them, and give the credential as an access token instead.`,
 	fragment: userText`That address has a # part, which is never sent to the server. Remove the # and everything after it.`,
-	notHttps: userText`That address uses plain HTTP, which this installation doesn't connect to, so keys and messages aren't sent unencrypted. Use the server's https:// address, or ask whoever runs Sugabots to allow plain HTTP.`,
+	notHttps: userText`That address uses plain HTTP, which this server doesn't connect to, so keys and messages aren't sent unencrypted. Use the server's https:// address, or ask whoever runs Sugabots to allow plain HTTP.`,
 };
 
 function requireUrlUnderBase(value: string, baseUrl: string) {
@@ -431,7 +431,7 @@ function closedWithLayer<A extends { close(): Promise<void> }>(create: () => A) 
 }
 
 const UNSAFE_WORKSPACE_URLS = "ALLOW_UNSAFE_WORKSPACE_URLS";
-/** The deprecated name for `UNSAFE_WORKSPACE_URLS`, still read so existing installations keep working. */
+/** The deprecated name for `UNSAFE_WORKSPACE_URLS`, still read so existing servers keep working. */
 const DEPRECATED_UNSAFE_WORKSPACE_URLS = "ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK";
 
 /**

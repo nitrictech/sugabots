@@ -50,7 +50,7 @@ export const chatgpt: ProviderDialect = {
 					// Every model Codex offers is made to work through tools: it reasons and calls them.
 					capabilities: [
 						"tools",
-						"reasoning",
+						"thinking",
 						...(entry.input_modalities.includes("image") ? (["vision"] as const) : []),
 					],
 					contextLength: entry.context_window,

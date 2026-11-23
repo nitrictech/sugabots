@@ -2,14 +2,14 @@ export * as Membership from "./membership.ts";
 
 import {
 	type AssignableWorkspaceRole,
-	INVITE_LIFETIME_DAYS,
+	INVITATION_LIFETIME_DAYS,
 	type InvitationPreview,
+	type Membership,
 	type NewWorkspace,
 	type NewWorkspaceInvitation,
 	type Workspace,
 	type WorkspaceDetails,
 	type WorkspaceInvitation,
-	type WorkspaceMember,
 	type WorkspacePermissions,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
@@ -40,15 +40,15 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
-import { bot, user, workspace, workspaceInvite, workspaceMember } from "../../database/schema.ts";
+import { bot, invitation, membership, person, workspace } from "../../database/schema.ts";
 import { Email } from "../../email/email.ts";
 import { Ids, isUuid } from "../../ids/ids.ts";
-import { Installation } from "../../installation/installation.ts";
 import { offeredModels } from "../../providers/model-providers/model-provider-reads.ts";
-import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
-import { SearchProviderRepository } from "../../providers/search-providers/search-provider-repository.ts";
+import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
+import { SearchProviderStore } from "../../providers/search-providers/search-provider-store.ts";
+import { ServerSettings } from "../../server-settings/server-settings.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { BotRepository } from "../bots/bot-repository.ts";
+import { BotStore } from "../bots/bot-store.ts";
 import { PersonalAssistants } from "../bots/personal-assistants.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
 
@@ -69,7 +69,7 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Its projects, bots, conversations and providers go with it, and its members
+	 * Its projects, bots, chats and providers go with it, and its people
 	 * lose it. What its models cost stays on the ledger. The owner's alone.
 	 * Its projects' computers are destroyed first, since their records go with
 	 * it: when a provider can't be reached, or a computer is made meanwhile,
@@ -97,19 +97,19 @@ export interface Interface {
 		AuthorizationDenied,
 		CurrentActor.Service
 	>;
-	readonly members: (
+	readonly memberships: (
 		input: InWorkspace,
-	) => Effect.Effect<readonly WorkspaceMember[], AuthorizationDenied, CurrentActor.Service>;
+	) => Effect.Effect<readonly Membership[], AuthorizationDenied, CurrentActor.Service>;
 	/** Making or unmaking an administrator is the owner's alone. The owner's own role is fixed. */
 	readonly changeRole: (
-		input: InWorkspace & { memberId: string; role: AssignableWorkspaceRole },
+		input: InWorkspace & { membershipId: string; role: AssignableWorkspaceRole },
 	) => Effect.Effect<void, AuthorizationDenied | OwnerStays, CurrentActor.Service>;
 	/**
 	 * Their Personal Assistant, pins and project memberships go with them. Only the owner
 	 * removes an administrator, and nobody removes the owner.
 	 */
 	readonly remove: (
-		input: InWorkspace & { memberId: string },
+		input: InWorkspace & { membershipId: string },
 	) => Effect.Effect<
 		void,
 		| AuthorizationDenied
@@ -118,7 +118,7 @@ export interface Interface {
 		| ProjectComputers.ComputerMadeMeanwhile,
 		CurrentActor.Service
 	>;
-	/** The owner stays until they have transferred ownership. */
+	/** The owner stays until they have handed ownership over. */
 	readonly leave: (
 		input: InWorkspace,
 	) => Effect.Effect<
@@ -130,11 +130,11 @@ export interface Interface {
 		CurrentActor.Service
 	>;
 	/**
-	 * Makes the member the workspace's owner, and the owner an administrator,
+	 * Makes the membership's person the workspace's owner, and the owner an administrator,
 	 * together. Handing it to the owner changes nothing.
 	 */
-	readonly transferOwnership: (
-		input: InWorkspace & { memberId: string },
+	readonly handOverOwnership: (
+		input: InWorkspace & { membershipId: string },
 	) => Effect.Effect<void, AuthorizationDenied, CurrentActor.Service>;
 	/** The invitations still waiting to be accepted. */
 	readonly invitations: (
@@ -144,7 +144,7 @@ export interface Interface {
 		input: InWorkspace & { invitation: NewWorkspaceInvitation },
 	) => Effect.Effect<
 		WorkspaceInvitation,
-		AuthorizationDenied | AlreadyMember | AlreadyInvited,
+		AuthorizationDenied | AlreadyInWorkspace | AlreadyInvited,
 		CurrentActor.Service
 	>;
 	readonly cancelInvitation: (
@@ -187,40 +187,42 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const accounts = yield* Accounts.Service;
 	const email = yield* Email.Service;
-	const installation = yield* Installation.Service;
+	const serverSettings = yield* ServerSettings.Service;
 	const sender = yield* Email.transactionalSender;
 	const personalAssistants = yield* PersonalAssistants.Service;
-	const bots = yield* BotRepository.Service;
+	const bots = yield* BotStore.Service;
 	const projectComputers = yield* ProjectComputers.Service;
 
 	/**
-	 * Takes the member out, which cascades to their Personal Assistant, pins
+	 * Removes the membership, which cascades to their Personal Assistant, pins
 	 * and project memberships. Their assistant's computer is destroyed first:
 	 * its record is the only way to find the machine, so when the provider
-	 * can't be reached, or a computer is made meanwhile, the member stays, to
+	 * can't be reached, or a computer is made meanwhile, the membership stays, to
 	 * try again.
 	 */
-	const deleteMember = (member: { id: string; workspaceId: string; userId: string }) =>
+	const deleteMembership = (removed: { id: string; workspaceId: string; personId: string }) =>
 		Effect.gen(function* () {
 			const [assistant] = yield* query((db) =>
 				db
 					.select({ id: bot.id })
 					.from(bot)
-					.where(and(eq(bot.workspaceId, member.workspaceId), eq(bot.assistantOf, member.userId)))
+					.where(
+						and(eq(bot.workspaceId, removed.workspaceId), eq(bot.assistantOf, removed.personId)),
+					)
 					.limit(1),
 			);
 			if (assistant) {
 				const assistantProject = {
-					workspaceId: member.workspaceId,
+					workspaceId: removed.workspaceId,
 					projectId: yield* defaultProjectOf(assistant.id),
 				};
 				yield* projectComputers.destroy(assistantProject);
 				yield* ProjectComputers.lockWithoutComputer(assistantProject);
 			}
-			yield* query((db) => db.delete(workspaceMember).where(eq(workspaceMember.id, member.id)));
+			yield* query((db) => db.delete(membership).where(eq(membership.id, removed.id)));
 		});
-	const searchProviders = yield* SearchProviderRepository.Service;
-	const modelProviders = yield* ModelProviderRepository.Service;
+	const searchProviders = yield* SearchProviderStore.Service;
+	const modelProviders = yield* ModelProviderStore.Service;
 	const ids = yield* Ids.Service;
 
 	/**
@@ -248,18 +250,18 @@ export const make = Effect.gen(function* () {
 	 * default model, or on another the workspace offers while it does not offer
 	 * that one.
 	 */
-	const provisionJoining = (workspaceId: string, userId: string) =>
+	const provisionJoining = (workspaceId: string, personId: string) =>
 		Effect.gen(function* () {
 			const { models, defaultModel } = yield* offeredModels(workspaceId);
 			// The default goes unoffered while a failed test has its provider off.
 			const model = models.some((offered) => offered.modelId === defaultModel)
 				? defaultModel
 				: models[0]?.modelId;
-			if (!model) return yield* personalAssistants.provision({ workspaceId, userId });
-			return yield* personalAssistants.provisionWithModel({ workspaceId, userId, model }).pipe(
+			if (!model) return yield* personalAssistants.provision({ workspaceId, personId });
+			return yield* personalAssistants.provisionWithModel({ workspaceId, personId, model }).pipe(
 				// Switched off since it was read: start on none, as while the workspace offers none.
 				Effect.catchTag("ModelNotEnabled", () =>
-					personalAssistants.provision({ workspaceId, userId }),
+					personalAssistants.provision({ workspaceId, personId }),
 				),
 			);
 		});
@@ -275,15 +277,15 @@ export const make = Effect.gen(function* () {
 				db
 					.select({
 						workspaceName: workspace.name,
-						inviterName: user.name,
-						inviterEmail: user.email,
+						inviterName: person.name,
+						inviterEmail: person.email,
 					})
 					.from(workspace)
-					.innerJoin(user, eq(user.id, inviterId))
+					.innerJoin(person, eq(person.id, inviterId))
 					.where(eq(workspace.id, workspaceId)),
 			);
 			if (!details) return yield* Effect.die(new Error("The invitation's workspace is missing"));
-			const link = `${installation.webAppUrl}/invite/${encodeURIComponent(invitationId)}`;
+			const link = `${serverSettings.webAppUrl}/invitations/${encodeURIComponent(invitationId)}`;
 			yield* afterCommit(
 				Effect.orDie(
 					email.send({
@@ -300,14 +302,14 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		workspaces: operation(
 			"workspaces",
-			Effect.flatMap(CurrentActor.Service, ({ userId }) =>
+			Effect.flatMap(CurrentActor.Service, ({ personId }) =>
 				query((db) =>
 					db
 						.select(workspaceColumns)
-						.from(workspaceMember)
-						.innerJoin(workspace, eq(workspace.id, workspaceMember.workspaceId))
-						.where(eq(workspaceMember.userId, userId))
-						.orderBy(asc(workspaceMember.createdAt)),
+						.from(membership)
+						.innerJoin(workspace, eq(workspace.id, membership.workspaceId))
+						.where(eq(membership.personId, personId))
+						.orderBy(asc(membership.createdAt)),
 				),
 			).pipe(Effect.map((rows) => rows.map(workspaceView))),
 		),
@@ -316,7 +318,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"create",
 				Effect.gen(function* () {
-					const { userId } = yield* CurrentActor.Service;
+					const { personId } = yield* CurrentActor.Service;
 					yield* requireSlugUnlikeUuid(input.details.slug);
 					if (input.details.timeZone !== undefined) {
 						yield* requireTimeZoneKnownToPostgres(input.details.timeZone);
@@ -329,14 +331,12 @@ export const make = Effect.gen(function* () {
 							);
 							if (!created) return yield* Effect.die(new Error("The workspace was not created"));
 							yield* query((db) =>
-								db
-									.insert(workspaceMember)
-									.values({ workspaceId: created.id, userId, role: "owner" }),
+								db.insert(membership).values({ workspaceId: created.id, personId, role: "owner" }),
 							);
-							yield* bots.ensureSystemBots({ workspaceId: created.id, createdById: userId });
-							yield* searchProviders.provisionDefault(created.id, userId);
-							yield* modelProviders.seedPresets(created.id);
-							yield* personalAssistants.provision({ workspaceId: created.id, userId });
+							yield* bots.ensureSystemBots({ workspaceId: created.id, createdById: personId });
+							yield* searchProviders.provisionDefault(created.id, personId);
+							yield* modelProviders.seedBuiltInProviders(created.id);
+							yield* personalAssistants.provision({ workspaceId: created.id, personId });
 							return workspaceView(created);
 						}),
 					);
@@ -397,23 +397,28 @@ export const make = Effect.gen(function* () {
 				})),
 			),
 
-		members: (input) =>
+		memberships: (input) =>
 			operation(
-				"members",
+				"memberships",
 				Effect.gen(function* () {
 					const standing = yield* authorization.workspace(input.workspace, "workspace.read");
 					const rows = yield* query((db) =>
 						db
 							.select({
-								id: workspaceMember.id,
-								role: workspaceMember.role,
-								user: { id: user.id, email: user.email, name: user.name, image: user.image },
-								joinedAt: workspaceMember.createdAt,
+								id: membership.id,
+								role: membership.role,
+								person: {
+									id: person.id,
+									email: person.email,
+									name: person.name,
+									image: person.image,
+								},
+								joinedAt: membership.createdAt,
 							})
-							.from(workspaceMember)
-							.innerJoin(user, eq(user.id, workspaceMember.userId))
-							.where(eq(workspaceMember.workspaceId, standing.workspaceId))
-							.orderBy(asc(workspaceMember.createdAt)),
+							.from(membership)
+							.innerJoin(person, eq(person.id, membership.personId))
+							.where(eq(membership.workspaceId, standing.workspaceId))
+							.orderBy(asc(membership.createdAt)),
 					);
 					return rows.map((row) => ({ ...row, joinedAt: row.joinedAt.toISOString() }));
 				}),
@@ -422,9 +427,9 @@ export const make = Effect.gen(function* () {
 		changeRole: (input) =>
 			operation(
 				"changeRole",
-				underMembershipLock(input.workspace, "workspace.members.manage", (standing) =>
+				underMembershipLock(input.workspace, "workspace.people.manage", (standing) =>
 					Effect.gen(function* () {
-						const target = yield* memberIn(standing.workspaceId, input.memberId);
+						const target = yield* membershipIn(standing.workspaceId, input.membershipId);
 						if (target.role === "owner") return yield* new OwnerStays();
 						if (target.role === "admin" || input.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
@@ -432,10 +437,7 @@ export const make = Effect.gen(function* () {
 						// Promoting puts them in every project people made, by the
 						// `administrator_projects` trigger; demoting leaves their projects as they are.
 						yield* query((db) =>
-							db
-								.update(workspaceMember)
-								.set({ role: input.role })
-								.where(eq(workspaceMember.id, target.id)),
+							db.update(membership).set({ role: input.role }).where(eq(membership.id, target.id)),
 						);
 					}),
 				),
@@ -444,14 +446,14 @@ export const make = Effect.gen(function* () {
 		remove: (input) =>
 			operation(
 				"remove",
-				underMembershipLock(input.workspace, "workspace.members.manage", (standing) =>
+				underMembershipLock(input.workspace, "workspace.people.manage", (standing) =>
 					Effect.gen(function* () {
-						const target = yield* memberIn(standing.workspaceId, input.memberId);
+						const target = yield* membershipIn(standing.workspaceId, input.membershipId);
 						if (target.role === "owner") return yield* new OwnerStays();
 						if (target.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
-						yield* deleteMember({ ...target, workspaceId: standing.workspaceId });
+						yield* deleteMembership({ ...target, workspaceId: standing.workspaceId });
 					}),
 				),
 			),
@@ -461,52 +463,49 @@ export const make = Effect.gen(function* () {
 				"leave",
 				underMembershipLock(input.workspace, "workspace.read", (standing) =>
 					Effect.gen(function* () {
-						const { userId } = standing.actor;
+						const { personId } = standing.actor;
 						const [own] = yield* query((db) =>
 							db
-								.select({ id: workspaceMember.id, role: workspaceMember.role })
-								.from(workspaceMember)
+								.select({ id: membership.id, role: membership.role })
+								.from(membership)
 								.where(
 									and(
-										eq(workspaceMember.workspaceId, standing.workspaceId),
-										eq(workspaceMember.userId, userId),
+										eq(membership.workspaceId, standing.workspaceId),
+										eq(membership.personId, personId),
 									),
 								),
 						);
 						if (!own) return yield* new ResourceHidden({ resource: "workspace" });
 						if (own.role === "owner") return yield* new OwnerStays();
-						yield* deleteMember({ id: own.id, workspaceId: standing.workspaceId, userId });
+						yield* deleteMembership({ id: own.id, workspaceId: standing.workspaceId, personId });
 					}),
 				),
 			),
 
-		transferOwnership: (input) =>
+		handOverOwnership: (input) =>
 			operation(
-				"transferOwnership",
-				underMembershipLock(input.workspace, "workspace.ownership.transfer", (standing) =>
+				"handOverOwnership",
+				underMembershipLock(input.workspace, "workspace.ownership.handOver", (standing) =>
 					Effect.gen(function* () {
-						const target = yield* memberIn(standing.workspaceId, input.memberId);
+						const target = yield* membershipIn(standing.workspaceId, input.membershipId);
 						if (target.role === "owner") return;
-						// The owner steps down first: `workspace_member_owner_idx` allows
+						// The owner steps down first: `membership_owner_idx` allows
 						// one owner, and would refuse the new one while the old one stands.
 						// The new owner joins every project people made by the
 						// `administrator_projects` trigger, as an admin would.
 						yield* query((db) =>
 							db
-								.update(workspaceMember)
+								.update(membership)
 								.set({ role: "admin" })
 								.where(
 									and(
-										eq(workspaceMember.workspaceId, standing.workspaceId),
-										eq(workspaceMember.role, "owner"),
+										eq(membership.workspaceId, standing.workspaceId),
+										eq(membership.role, "owner"),
 									),
 								),
 						);
 						yield* query((db) =>
-							db
-								.update(workspaceMember)
-								.set({ role: "owner" })
-								.where(eq(workspaceMember.id, target.id)),
+							db.update(membership).set({ role: "owner" }).where(eq(membership.id, target.id)),
 						);
 					}),
 				),
@@ -520,19 +519,19 @@ export const make = Effect.gen(function* () {
 					const rows = yield* query((db) =>
 						db
 							.select({
-								id: workspaceInvite.id,
-								email: workspaceInvite.email,
-								role: workspaceInvite.role,
-								expiresAt: workspaceInvite.expiresAt,
+								id: invitation.id,
+								email: invitation.email,
+								role: invitation.role,
+								expiresAt: invitation.expiresAt,
 							})
-							.from(workspaceInvite)
+							.from(invitation)
 							.where(
 								and(
-									eq(workspaceInvite.workspaceId, standing.workspaceId),
-									eq(workspaceInvite.status, "pending"),
+									eq(invitation.workspaceId, standing.workspaceId),
+									eq(invitation.status, "pending"),
 								),
 							)
-							.orderBy(asc(workspaceInvite.createdAt)),
+							.orderBy(asc(invitation.createdAt)),
 					);
 					return rows.map(invitationView);
 				}),
@@ -541,27 +540,27 @@ export const make = Effect.gen(function* () {
 		invite: (input) =>
 			operation(
 				"invite",
-				underMembershipLock(input.workspace, "workspace.members.manage", (standing) =>
+				underMembershipLock(input.workspace, "workspace.people.manage", (standing) =>
 					Effect.gen(function* () {
 						if (input.invitation.role === "admin") {
 							yield* requireWorkspacePermission(standing, "workspace.admins.manage");
 						}
 						const workspaceId = standing.workspaceId;
-						const inviterId = standing.actor.userId;
+						const inviterId = standing.actor.personId;
 						const address = input.invitation.email.toLowerCase();
-						const [member] = yield* query((db) =>
+						const [existing] = yield* query((db) =>
 							db
-								.select({ id: workspaceMember.id })
-								.from(workspaceMember)
-								.innerJoin(user, eq(user.id, workspaceMember.userId))
+								.select({ id: membership.id })
+								.from(membership)
+								.innerJoin(person, eq(person.id, membership.personId))
 								.where(
 									and(
-										eq(workspaceMember.workspaceId, workspaceId),
-										eq(sql`lower(${user.email})`, address),
+										eq(membership.workspaceId, workspaceId),
+										eq(sql`lower(${person.email})`, address),
 									),
 								),
 						);
-						if (member) return yield* new AlreadyMember();
+						if (existing) return yield* new AlreadyInWorkspace();
 
 						const now = yield* DateTime.now;
 						const expiresAt = DateTime.toDate(
@@ -569,14 +568,14 @@ export const make = Effect.gen(function* () {
 						);
 						const [outstanding] = yield* query((db) =>
 							db
-								.select({ id: workspaceInvite.id })
-								.from(workspaceInvite)
+								.select({ id: invitation.id })
+								.from(invitation)
 								.where(
 									and(
-										eq(workspaceInvite.workspaceId, workspaceId),
-										eq(workspaceInvite.email, address),
-										eq(workspaceInvite.status, "pending"),
-										gt(workspaceInvite.expiresAt, DateTime.toDate(now)),
+										eq(invitation.workspaceId, workspaceId),
+										eq(invitation.email, address),
+										eq(invitation.status, "pending"),
+										gt(invitation.expiresAt, DateTime.toDate(now)),
 									),
 								),
 						);
@@ -585,9 +584,9 @@ export const make = Effect.gen(function* () {
 						const [row] = outstanding
 							? yield* query((db) =>
 									db
-										.update(workspaceInvite)
+										.update(invitation)
 										.set({ role: input.invitation.role, expiresAt, inviterId })
-										.where(eq(workspaceInvite.id, outstanding.id))
+										.where(eq(invitation.id, outstanding.id))
 										.returning(),
 								)
 							: yield* Effect.flatMap(
@@ -597,7 +596,7 @@ export const make = Effect.gen(function* () {
 									(id) =>
 										query((db) =>
 											db
-												.insert(workspaceInvite)
+												.insert(invitation)
 												.values({
 													id,
 													workspaceId,
@@ -622,28 +621,23 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const hidden = new ResourceHidden({ resource: "invitation" });
 					if (!isUuid(input.invitationId)) return yield* hidden;
-					const [invitation] = yield* query((db) =>
+					const [pending] = yield* query((db) =>
 						db
-							.select({ workspaceId: workspaceInvite.workspaceId })
-							.from(workspaceInvite)
-							.where(
-								and(
-									eq(workspaceInvite.id, input.invitationId),
-									eq(workspaceInvite.status, "pending"),
-								),
-							),
+							.select({ workspaceId: invitation.workspaceId })
+							.from(invitation)
+							.where(and(eq(invitation.id, input.invitationId), eq(invitation.status, "pending"))),
 					);
-					if (!invitation) return yield* hidden;
+					if (!pending) return yield* hidden;
 					// A workspace the actor is not in is hidden, so an invitation to it
 					// is answered exactly as one that does not exist.
 					yield* authorization
-						.workspace(invitation.workspaceId, "workspace.members.manage")
+						.workspace(pending.workspaceId, "workspace.people.manage")
 						.pipe(Effect.catchTag("ResourceHidden", () => Effect.fail(hidden)));
 					yield* query((db) =>
 						db
-							.update(workspaceInvite)
+							.update(invitation)
 							.set({ status: "canceled" })
-							.where(eq(workspaceInvite.id, input.invitationId)),
+							.where(eq(invitation.id, input.invitationId)),
 					);
 				}),
 			),
@@ -652,14 +646,14 @@ export const make = Effect.gen(function* () {
 			operation(
 				"invitation",
 				Effect.gen(function* () {
-					const { userId } = yield* CurrentActor.Service;
-					const invitation = yield* invitationFor(userId, input.invitationId);
-					if (invitation.status === "accepted") return invitation;
+					const { personId } = yield* CurrentActor.Service;
+					const found = yield* invitationFor(personId, input.invitationId);
+					if (found.status === "accepted") return found;
 					return {
 						status: "pending" as const,
-						workspaceName: invitation.workspaceName,
-						inviterName: invitation.inviterName,
-						role: invitation.role,
+						workspaceName: found.workspaceName,
+						inviterName: found.inviterName,
+						role: found.role,
 					};
 				}),
 			),
@@ -669,30 +663,30 @@ export const make = Effect.gen(function* () {
 				"accept",
 				transaction(
 					Effect.gen(function* () {
-						const { userId } = yield* CurrentActor.Service;
-						const invitation = yield* invitationFor(userId, input.invitationId);
-						if (invitation.status === "accepted") return { workspaceId: invitation.workspaceId };
-						if (accounts.requireEmailVerification && !invitation.inviteeVerified) {
+						const { personId } = yield* CurrentActor.Service;
+						const found = yield* invitationFor(personId, input.invitationId);
+						if (found.status === "accepted") return { workspaceId: found.workspaceId };
+						if (accounts.requireEmailVerification && !found.inviteeVerified) {
 							return yield* new EmailUnverified();
 						}
 						yield* query((db) =>
 							Effect.gen(function* () {
 								yield* db
-									.insert(workspaceMember)
+									.insert(membership)
 									.values({
-										workspaceId: invitation.workspaceId,
-										userId,
-										role: invitation.role,
+										workspaceId: found.workspaceId,
+										personId,
+										role: found.role,
 									})
 									.onConflictDoNothing();
 								yield* db
-									.update(workspaceInvite)
+									.update(invitation)
 									.set({ status: "accepted" })
-									.where(eq(workspaceInvite.id, input.invitationId));
+									.where(eq(invitation.id, input.invitationId));
 							}),
 						);
-						yield* provisionJoining(invitation.workspaceId, userId);
-						return { workspaceId: invitation.workspaceId };
+						yield* provisionJoining(found.workspaceId, personId);
+						return { workspaceId: found.workspaceId };
 					}),
 				),
 			),
@@ -705,9 +699,9 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([
 		Authorization.layer,
 		PersonalAssistants.layer,
-		BotRepository.layer,
-		SearchProviderRepository.layer,
-		ModelProviderRepository.layer,
+		BotStore.layer,
+		SearchProviderStore.layer,
+		ModelProviderStore.layer,
 		ProjectComputers.layer,
 	]),
 );
@@ -742,11 +736,14 @@ export class TimeZoneUnknown extends Data.TaggedError("TimeZoneUnknown") impleme
 /** The owner cannot be demoted, removed or leave: ownership has to be handed on first. */
 export class OwnerStays extends Data.TaggedError("OwnerStays") implements UserFacing {
 	get userMessage() {
-		return userText`The owner stays until they transfer ownership to somebody else`;
+		return userText`The owner stays until they hand ownership over to somebody else`;
 	}
 }
 
-export class AlreadyMember extends Data.TaggedError("AlreadyMember") implements UserFacing {
+export class AlreadyInWorkspace
+	extends Data.TaggedError("AlreadyInWorkspace")
+	implements UserFacing
+{
 	get userMessage() {
 		return userText`They are already in this workspace`;
 	}
@@ -776,16 +773,14 @@ const workspaceColumns = {
 	name: workspace.name,
 	slug: workspace.slug,
 	timeZone: workspace.timeZone,
-	setupCompletedAt: workspace.setupCompletedAt,
+	setUpAt: workspace.setUpAt,
 };
 
-function workspaceView(
-	row: Omit<Workspace, "setupCompletedAt"> & { setupCompletedAt: Date | null },
-): Workspace {
-	return { ...row, setupCompletedAt: row.setupCompletedAt?.toISOString() ?? null };
+function workspaceView(row: Omit<Workspace, "setUpAt"> & { setUpAt: Date | null }): Workspace {
+	return { ...row, setUpAt: row.setUpAt?.toISOString() ?? null };
 }
 
-const INVITATION_LIFETIME = Duration.days(INVITE_LIFETIME_DAYS);
+const INVITATION_LIFETIME = Duration.days(INVITATION_LIFETIME_DAYS);
 
 function requireSlugUnlikeUuid(slug: string) {
 	return isUuid(slug) ? Effect.fail(new SlugShapedLikeUuid()) : Effect.void;
@@ -808,7 +803,7 @@ export function requireTimeZoneKnownToPostgres(timeZone: string) {
  * Serialises membership changes with each other and with deleting the
  * workspace, so a transfer of ownership cannot cross another change to the
  * same people. The lock lets rows that refer to the workspace still be added,
- * so its threads, runs, projects and bots aren't held up while a member's
+ * so its chats, runs, projects and bots aren't held up while a membership's
  * removal waits on their Personal Assistant's computer at its provider.
  */
 function lockWorkspace(workspaceId: string) {
@@ -821,20 +816,20 @@ function lockWorkspace(workspaceId: string) {
 	);
 }
 
-function memberIn(workspaceId: string, memberId: string) {
+function membershipIn(workspaceId: string, membershipId: string) {
 	return Effect.flatMap(
 		query((db) =>
 			db
 				.select({
-					id: workspaceMember.id,
-					role: workspaceMember.role,
-					userId: workspaceMember.userId,
+					id: membership.id,
+					role: membership.role,
+					personId: membership.personId,
 				})
-				.from(workspaceMember)
-				.where(and(eq(workspaceMember.id, memberId), eq(workspaceMember.workspaceId, workspaceId))),
+				.from(membership)
+				.where(and(eq(membership.id, membershipId), eq(membership.workspaceId, workspaceId))),
 		),
-		([member]) =>
-			member ? Effect.succeed(member) : Effect.fail(new ResourceHidden({ resource: "member" })),
+		([found]) =>
+			found ? Effect.succeed(found) : Effect.fail(new ResourceHidden({ resource: "membership" })),
 	);
 }
 
@@ -850,65 +845,65 @@ function requireWorkspacePermission(standing: WorkspaceStanding, permission: Wor
 
 /**
  * The invitation `invitationId`, locked for an enclosing transaction, when
- * `userId` is the person it was sent to: pending and unexpired, or accepted
+ * `personId` is the person it was sent to: pending and unexpired, or accepted
  * while they are still in its workspace, so its link leads back in. Anything
  * else is hidden, so a link cannot be probed, and leaving a workspace ends
  * what its link can do.
  */
-function invitationFor(userId: string, invitationId: string) {
+function invitationFor(personId: string, invitationId: string) {
 	return Effect.gen(function* () {
 		const now = yield* DateTime.nowAsDate;
-		const [invitation] = yield* query((db) =>
+		const [found] = yield* query((db) =>
 			db
 				.select({
-					status: workspaceInvite.status,
-					stillIn: workspaceMember.id,
-					workspaceId: workspaceInvite.workspaceId,
-					email: workspaceInvite.email,
-					role: workspaceInvite.role,
+					status: invitation.status,
+					stillIn: membership.id,
+					workspaceId: invitation.workspaceId,
+					email: invitation.email,
+					role: invitation.role,
 					workspaceName: workspace.name,
-					inviterName: user.name,
+					inviterName: person.name,
 				})
-				.from(workspaceInvite)
-				.innerJoin(workspace, eq(workspace.id, workspaceInvite.workspaceId))
-				.innerJoin(user, eq(user.id, workspaceInvite.inviterId))
+				.from(invitation)
+				.innerJoin(workspace, eq(workspace.id, invitation.workspaceId))
+				.innerJoin(person, eq(person.id, invitation.inviterId))
 				.leftJoin(
-					workspaceMember,
+					membership,
 					and(
-						eq(workspaceMember.workspaceId, workspaceInvite.workspaceId),
-						eq(workspaceMember.userId, userId),
+						eq(membership.workspaceId, invitation.workspaceId),
+						eq(membership.personId, personId),
 					),
 				)
 				.where(
 					and(
-						eq(workspaceInvite.id, invitationId),
+						eq(invitation.id, invitationId),
 						or(
-							and(eq(workspaceInvite.status, "pending"), gt(workspaceInvite.expiresAt, now)),
-							eq(workspaceInvite.status, "accepted"),
+							and(eq(invitation.status, "pending"), gt(invitation.expiresAt, now)),
+							eq(invitation.status, "accepted"),
 						),
 					),
 				)
-				.for("update", { of: workspaceInvite }),
+				.for("update", { of: invitation }),
 		);
 		const hidden = new ResourceHidden({ resource: "invitation" });
-		if (!invitation) return yield* hidden;
-		if (invitation.status === "accepted" && invitation.stillIn === null) return yield* hidden;
+		if (!found) return yield* hidden;
+		if (found.status === "accepted" && found.stillIn === null) return yield* hidden;
 		const [invitee] = yield* query((db) =>
 			db
-				.select({ email: user.email, emailVerified: user.emailVerified })
-				.from(user)
-				.where(eq(user.id, userId)),
+				.select({ email: person.email, emailVerified: person.emailVerified })
+				.from(person)
+				.where(eq(person.id, personId)),
 		);
-		if (invitee?.email.toLowerCase() !== invitation.email) return yield* new NotTheInvitee();
-		if (invitation.status === "accepted") {
-			return { status: "accepted" as const, workspaceId: invitation.workspaceId };
+		if (invitee?.email.toLowerCase() !== found.email) return yield* new NotTheInvitee();
+		if (found.status === "accepted") {
+			return { status: "accepted" as const, workspaceId: found.workspaceId };
 		}
 		return {
 			status: "pending" as const,
-			workspaceId: invitation.workspaceId,
-			role: invitation.role,
-			workspaceName: invitation.workspaceName,
-			inviterName: invitation.inviterName,
+			workspaceId: found.workspaceId,
+			role: found.role,
+			workspaceName: found.workspaceName,
+			inviterName: found.inviterName,
 			inviteeVerified: invitee.emailVerified,
 		};
 	});

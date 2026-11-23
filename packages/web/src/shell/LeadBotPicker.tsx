@@ -16,7 +16,7 @@ function useLeadableBots(): readonly Bot[] {
 }
 
 /**
- * Choosing a project's lead bot, which answers its threads unless people
+ * Choosing a project's lead bot, which answers its chats unless people
  * mention another: one of the workspace's public bots, added to the project
  * if it isn't in it yet.
  */
@@ -42,7 +42,7 @@ export function LeadBotPicker({
 				{lead ? (
 					<>
 						<span aria-hidden>
-							<BotAvatar color={lead.color} face={lead.face} shape={lead.shape} size={20} />
+							<BotAvatar color={lead.color} eyes={lead.eyes} shape={lead.shape} size={20} />
 						</span>
 						<span className="min-w-0 flex-1 truncate">{lead.name}</span>
 					</>
@@ -56,15 +56,22 @@ export function LeadBotPicker({
 					<DropdownMenuItem disabled>No public bots yet.</DropdownMenuItem>
 				) : (
 					leadable.map((bot) => (
-						<DropdownMenuItem key={bot.id} onClick={() => onChange(bot.id)}>
-							<span aria-hidden>
-								<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={22} />
-							</span>
-							<span className="min-w-0 flex-1 truncate">{bot.name}</span>
-						</DropdownMenuItem>
+						<BotMenuItem key={bot.id} bot={bot} onClick={() => onChange(bot.id)} />
 					))
 				)}
 			</DropdownMenuContent>
 		</DropdownMenu>
+	);
+}
+
+/** A bot in a menu of bots to pick from: its face, then its name. */
+export function BotMenuItem({ bot, onClick }: { bot: Bot; onClick: () => void }) {
+	return (
+		<DropdownMenuItem onClick={onClick}>
+			<span aria-hidden>
+				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={22} />
+			</span>
+			<span className="min-w-0 flex-1 truncate">{bot.name}</span>
+		</DropdownMenuItem>
 	);
 }

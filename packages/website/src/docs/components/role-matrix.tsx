@@ -16,7 +16,7 @@ const roleLabels = Object.fromEntries(
 
 /** Who can do what, with a role to pick out. */
 export function RoleMatrix() {
-	const [picked, setPicked] = useState<WorkspaceRole>("member");
+	const [picked, setPicked] = useState<WorkspaceRole>("editor");
 	return (
 		<div className="my-8 flex flex-col gap-4">
 			<ChoiceChips

@@ -1,5 +1,5 @@
 import type { LivelyFace } from "@sugabots/avatars";
-import type { Bot, NotificationSettings, ProjectMarker } from "@sugabots/contracts";
+import type { AttentionMark, Bot, NotificationSettings } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { useRef } from "react";
@@ -13,12 +13,12 @@ import { TurnTakingAvatar } from "@/shell/Bot.tsx";
 import { type Attention, AttentionDot, ProblemMark } from "@/ui/attention-dot.tsx";
 import { sidebarRow } from "@/ui/sidebar-row.ts";
 
-/** How a bot stands for the viewer, as the sidebar marks it: its default project's marker. */
-export type BotStanding = ProjectMarker & { bot: Bot };
+/** How a bot stands for the viewer, as the sidebar marks it: its default project's attention mark. */
+export type BotStanding = AttentionMark & { bot: Bot };
 
 /**
- * A bot on one line, which opens its page: its threads on a phone, and
- * starting a thread with it on a wider screen. At its end, what is new in it,
+ * A bot on one line, which opens its page: its chats on a phone, and
+ * starting a chat with it on a wider screen. At its end, what is new in it,
  * and beside that an alert while something is wrong that its settings or
  * automations set right. Right-clicked, it offers its notifications.
  */
@@ -46,7 +46,7 @@ export function SidebarBot({
 					{...botLink(bot)}
 					aria-current={selected ? "page" : undefined}
 					onDoubleClick={hideSidebar}
-					onPointerEnter={() => face.current?.play("hop")}
+					onPointerEnter={() => face.current?.hop()}
 					className={cn(sidebarRow({ selected, phone: true }), attention && "text-foreground")}
 				>
 					<span style={ownerMarkTransition(bot.id)} className="flex shrink-0">
@@ -77,7 +77,7 @@ export function SidebarBot({
 const END_SLOT = "grid w-5.5 shrink-0 place-items-center";
 
 /** What waits on the viewer in a bot or project. */
-type Waiting = Pick<ProjectMarker, "unreadMessages" | "needsApproval">;
+type Waiting = Pick<AttentionMark, "unreadMessages" | "needsApproval">;
 
 /** Whether a bot or project holds something the viewer has not seen: unread messages, or a decision. */
 export function hasNews({ unreadMessages, needsApproval }: Waiting): boolean {
@@ -105,8 +105,8 @@ export function attentionOf({
  * the row's bold name, so they are only counted for a screen reader.
  */
 export function RowAttention({ className, ...waiting }: Waiting & { className?: string }) {
-	const marker = attentionOf(waiting);
-	if (!marker) return null;
-	if (marker.attention === "unread") return <span className="sr-only">{marker.label}</span>;
-	return <AttentionDot attention="needsYou" label={marker.label} className={className} />;
+	const mark = attentionOf(waiting);
+	if (!mark) return null;
+	if (mark.attention === "unread") return <span className="sr-only">{mark.label}</span>;
+	return <AttentionDot attention="needsYou" label={mark.label} className={className} />;
 }

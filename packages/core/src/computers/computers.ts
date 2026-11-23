@@ -9,8 +9,8 @@ import { fromE2b } from "./implementations/e2b.ts";
 import { fromOpenSandbox } from "./implementations/opensandbox.ts";
 
 export interface Interface {
-	/** The provider a workspace's connection describes. */
-	readonly forConnection: (connection: Connection) => Provider;
+	/** The provider a workspace's provider access describes. */
+	readonly forAccess: (access: ProviderAccess) => Provider;
 }
 
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Computers") {}
@@ -18,12 +18,12 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const ids = yield* Ids.Service;
 	return Service.of({
-		forConnection: (connection) => {
-			switch (connection.provider) {
+		forAccess: (access) => {
+			switch (access.provider) {
 				case "e2b":
-					return fromE2b(connection, ids);
+					return fromE2b(access, ids);
 				case "opensandbox":
-					return fromOpenSandbox(connection, ids);
+					return fromOpenSandbox(access, ids);
 			}
 		},
 	});
@@ -37,7 +37,7 @@ export const layer = layerNoDeps;
  * Makes and reaches the machines of one provider account.
  *
  * A provider knows nothing about bots, turns or leases: which computer belongs
- * to what, and when one may be paused, is decided above it.
+ * to what, and when one may sleep, is decided above it.
  */
 export interface Provider {
 	readonly capabilities: Capabilities;
@@ -45,7 +45,7 @@ export interface Provider {
 	readonly networkMode: ComputerNetworkMode;
 	/**
 	 * For a provider that makes computers from a template it builds from an
-	 * image, as E2B does: building the connection's template. Absent for one
+	 * image, as E2B does: building the provider access's template. Absent for one
 	 * that takes an image as it is, as OpenSandbox does.
 	 */
 	readonly templates?: TemplateBuilds;
@@ -57,18 +57,18 @@ export interface Provider {
 	 */
 	readonly create: (spec: Spec) => Effect.Effect<Computer, Unavailable>;
 	/**
-	 * The computer with this id, resumed first if it was paused. `resumed` says
-	 * whether it was, so the bot can be told what a pause may have stopped.
+	 * The computer with this id, resumed first if it was asleep. `resumed` says
+	 * whether it was, so the bot can be told what sleeping may have stopped.
 	 */
 	readonly open: (id: ComputerId) => Effect.Effect<Opened, Missing | Stopped | Unavailable>;
 	/**
 	 * How the computer stands at the provider, without resuming it. One that
-	 * stopped with its work kept apart counts as paused, since opening it
+	 * stopped with its work kept apart counts as asleep, since opening it
 	 * carries on from its files; one that stopped without is missing.
 	 */
 	readonly info: (id: ComputerId) => Effect.Effect<Info, Missing | Unavailable>;
 	/** Stops the computer costing compute until it is opened again. */
-	readonly pause: (id: ComputerId) => Effect.Effect<void, Missing | Unavailable>;
+	readonly sleep: (id: ComputerId) => Effect.Effect<void, Missing | Unavailable>;
 	/**
 	 * Throws the computer away with everything in it, except work kept apart
 	 * from it. One that is already gone counts as destroyed.
@@ -77,7 +77,7 @@ export interface Provider {
 }
 
 interface TemplateBuilds {
-	/** Starts building the connection's template from `image`, replacing what it was built from before. */
+	/** Starts building the provider access's template from `image`, replacing what it was built from before. */
 	readonly build: (image: string) => Effect.Effect<TemplateBuild, Unavailable>;
 	/** How the template stands after `build`, the last one started. */
 	readonly status: (build: TemplateBuild) => Effect.Effect<TemplateStatus, Unavailable>;
@@ -92,7 +92,7 @@ export interface TemplateBuild {
 export type TemplateStatus = "missing" | "building" | "ready" | "failed";
 
 export interface Info {
-	readonly state: "running" | "paused";
+	readonly state: "running" | "asleep";
 	/**
 	 * Whether its {@link WORKSPACE_DIRECTORY} is kept apart from it, so a new
 	 * computer made with the same {@link Spec.workName} carries on with that
@@ -103,10 +103,10 @@ export interface Info {
 
 export interface Capabilities {
 	/**
-	 * What survives a pause: `memory` keeps running programs, `disk` keeps
+	 * What survives sleep: `memory` keeps running programs, `disk` keeps
 	 * only files, so programs have stopped by the time a computer is opened.
 	 */
-	readonly pauseKeeps: "memory" | "disk";
+	readonly sleepKeeps: "memory" | "disk";
 	/**
 	 * How it can add credentials to the computer's requests outside the
 	 * computer, so nothing in it ever holds them: `none`, by `host` alone, or
@@ -122,9 +122,9 @@ export interface Capabilities {
 }
 
 /** What a workspace's settings say about reaching its provider. */
-export type Connection = E2bConnection | OpenSandboxConnection;
+export type ProviderAccess = E2bAccess | OpenSandboxAccess;
 
-export interface E2bConnection {
+export interface E2bAccess {
 	readonly provider: "e2b";
 	readonly apiKey: Redacted.Redacted;
 	/**
@@ -139,7 +139,7 @@ export interface E2bConnection {
 	readonly networkMode: ComputerNetworkMode;
 }
 
-export interface OpenSandboxConnection {
+export interface OpenSandboxAccess {
 	readonly provider: "opensandbox";
 	/** The server's address, such as http://localhost:8090. */
 	readonly baseUrl: string;
@@ -180,10 +180,10 @@ export interface Opened {
 /** Where bots work. It belongs to the bots' user. */
 export const WORKSPACE_DIRECTORY = "/workspace";
 
-/** Where each conversation's folder is, named by the conversation's id. */
-export const CONVERSATIONS_DIRECTORY = `${WORKSPACE_DIRECTORY}/conversations`;
+/** Where each chat's folder is, named by the chat's id. */
+export const CHATS_DIRECTORY = `${WORKSPACE_DIRECTORY}/chats`;
 
-/** Where each bot's home is, named by the bot's id. */
+/** Where each bot's home folder is, named by the bot's id. */
 export const BOTS_DIRECTORY = `${WORKSPACE_DIRECTORY}/bots`;
 
 export interface Computer {
@@ -224,7 +224,7 @@ export interface Computer {
 	readonly endpoint: (port: number) => Effect.Effect<Endpoint, Unavailable>;
 	/**
 	 * Replaces what it may connect to and the credentials added to its
-	 * requests, while it runs and after a pause. Connections Sugabots makes to
+	 * requests, while it runs and after sleeping. Connections Sugabots makes to
 	 * it are not affected.
 	 */
 	readonly setNetwork: (network: Network) => Effect.Effect<void, Unavailable>;
@@ -248,13 +248,13 @@ interface Network {
 
 /**
  * What a computer may connect to, by its provider's {@link Provider.networkMode}:
- * only the `hosts` on an allowlist, or everything but its `blockedHosts`,
+ * only its `hosts` when allowed hosts only, or everything but its `blockedHosts`,
  * which are empty unless its {@link Capabilities.blocksHosts}. A
  * host is a domain name or a leading wildcard such as `*.example.com`, which
  * leaves the domain itself out.
  */
 export type Reach =
-	| { readonly kind: "allowlist"; readonly hosts: readonly string[] }
+	| { readonly kind: "allowed-hosts-only"; readonly hosts: readonly string[] }
 	| { readonly kind: "open"; readonly blockedHosts: readonly string[] };
 
 /**
@@ -323,7 +323,7 @@ interface FileStart {
 /** The provider could not be reached, refused the request, or failed doing it. */
 export class Unavailable
 	extends Data.TaggedError("ComputerUnavailable")<{
-		provider: Connection["provider"];
+		provider: ProviderAccess["provider"];
 		cause: unknown;
 		/** What went wrong, when the provider said something people can act on. */
 		reason?: UserText;
@@ -337,17 +337,17 @@ export class Unavailable
 
 /** The provider no longer has the computer. */
 export class Missing extends Data.TaggedError("ComputerMissing")<{
-	provider: Connection["provider"];
+	provider: ProviderAccess["provider"];
 	computerId: ComputerId;
 }> {}
 
 /**
- * The computer stopped without being paused, as when its host shut down, and
+ * The computer stopped without being put to sleep, as when its host shut down, and
  * the provider can't start it again. Its work is kept apart from it, for a new
  * computer made with the same {@link Spec.workName}.
  */
 export class Stopped extends Data.TaggedError("ComputerStopped")<{
-	provider: Connection["provider"];
+	provider: ProviderAccess["provider"];
 	computerId: ComputerId;
 }> {}
 

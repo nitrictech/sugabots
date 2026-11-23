@@ -11,7 +11,7 @@ const call = (tool: string, status: ToolCallPart["status"]): ToolCallPart => ({
 	output: null,
 	status,
 	error: null,
-	mutating: true,
+	writeOrDelete: true,
 	atOffset: 0,
 	startedAt: "2026-10-01T08:10:00.000Z",
 	finishedAt: null,

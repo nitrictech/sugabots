@@ -16,20 +16,20 @@ import { removeWorkVolumes } from "./testing.ts";
 const env = process.env;
 
 /** E2B, or E2B Embed when its endpoints are set, from the environment. */
-const e2b: Computers.E2bConnection | undefined = env.E2B_API_KEY
+const e2b: Computers.E2bAccess | undefined = env.E2B_API_KEY
 	? {
 			provider: "e2b",
 			apiKey: Redacted.make(env.E2B_API_KEY),
 			template: "base",
 			size: COMPUTER_E2B_DEFAULT_SIZE,
-			networkMode: "allowlist",
+			networkMode: "allowed-hosts-only",
 			...(env.E2B_API_URL && env.E2B_SANDBOX_URL
 				? { endpoints: { apiUrl: env.E2B_API_URL, sandboxUrl: env.E2B_SANDBOX_URL } }
 				: {}),
 		}
 	: undefined;
 
-const connections: ReadonlyArray<[string, Computers.Connection | undefined]> = [
+const accesses: ReadonlyArray<[string, Computers.ProviderAccess | undefined]> = [
 	[
 		"OpenSandbox",
 		env.OPENSANDBOX_URL && env.OPENSANDBOX_API_KEY
@@ -40,7 +40,7 @@ const connections: ReadonlyArray<[string, Computers.Connection | undefined]> = [
 					// Debian with Python, for a web server to reach.
 					image: "python:3.13-slim",
 					size: COMPUTER_OPENSANDBOX_DEFAULT_SIZE,
-					networkMode: "allowlist",
+					networkMode: "allowed-hosts-only",
 				}
 			: undefined,
 	],
@@ -49,7 +49,7 @@ const connections: ReadonlyArray<[string, Computers.Connection | undefined]> = [
 
 const SPEC: Computers.Spec = {
 	labels: { "sugabots.test": "computers.test.ts" },
-	reach: { kind: "allowlist", hosts: ["example.com"] },
+	reach: { kind: "allowed-hosts-only", hosts: ["example.com"] },
 	// This run's own, so removing its volume afterwards can't affect another run.
 	workName: `provider-${crypto.randomUUID()}`,
 };
@@ -80,14 +80,14 @@ function failureTag(exit: Exit.Exit<unknown, { _tag: string }>) {
 	return failure ? failure.error._tag : Cause.pretty(exit.cause);
 }
 
-describe.each(connections)("%s computers", (_, connection) => {
+describe.each(accesses)("%s computers", (_, access) => {
 	afterAll(() => {
-		if (connection?.provider === "opensandbox") removeWorkVolumes([SPEC.workName]);
+		if (access?.provider === "opensandbox") removeWorkVolumes([SPEC.workName]);
 	});
 
-	describe.skipIf(!connection)("against the service", () => {
+	describe.skipIf(!access)("against the service", () => {
 		const provider = Effect.map(Computers.Service, (computers) =>
-			computers.forConnection(connection as Computers.Connection),
+			computers.forAccess(access as Computers.ProviderAccess),
 		);
 		let computer: Computers.Computer;
 		const reaches = async (host: string) =>
@@ -111,7 +111,7 @@ describe.each(connections)("%s computers", (_, connection) => {
 				expect([await reaches("example.com"), await reaches("github.com")]).toEqual([true, false]);
 				await run(
 					computer.setNetwork({
-						reach: { kind: "allowlist", hosts: ["github.com"] },
+						reach: { kind: "allowed-hosts-only", hosts: ["github.com"] },
 						credentials: [],
 						environment: {},
 					}),
@@ -123,7 +123,7 @@ describe.each(connections)("%s computers", (_, connection) => {
 		);
 
 		it(
-			"reaches every host when open, but the blocked ones where it can block, and goes back to its allowlist",
+			"reaches every host when open, but the blocked ones where it can block, and goes back to allowed hosts only",
 			async () => {
 				const { blocksHosts } = (await run(provider)).capabilities;
 				await run(
@@ -135,10 +135,10 @@ describe.each(connections)("%s computers", (_, connection) => {
 				);
 				const open = [await reaches("example.com"), await reaches("github.com")];
 				await run(computer.setNetwork({ reach: SPEC.reach, credentials: [], environment: {} }));
-				const allowlisted = [await reaches("example.com"), await reaches("github.com")];
+				const allowedHostsOnly = [await reaches("example.com"), await reaches("github.com")];
 
 				expect(open).toEqual([true, !blocksHosts]);
-				expect(allowlisted).toEqual([true, false]);
+				expect(allowedHostsOnly).toEqual([true, false]);
 			},
 			SLOW,
 		);
@@ -154,7 +154,7 @@ describe.each(connections)("%s computers", (_, connection) => {
 
 				await run(
 					computer.setNetwork({
-						reach: { kind: "allowlist", hosts: ["httpbin.org"] },
+						reach: { kind: "allowed-hosts-only", hosts: ["httpbin.org"] },
 						credentials: [
 							{
 								host: "httpbin.org",
@@ -183,9 +183,9 @@ describe.each(connections)("%s computers", (_, connection) => {
 			const execution = await run(computer.exec("pwd; id -u", EXEC));
 
 			expect(execution.exitCode).toBe(0);
-			const [directory, userId] = execution.stdout.text.trim().split("\n");
+			const [directory, personId] = execution.stdout.text.trim().split("\n");
 			expect(directory).toBe(Computers.WORKSPACE_DIRECTORY);
-			expect(userId).not.toBe("0");
+			expect(personId).not.toBe("0");
 		});
 
 		it("answers a failing command with its exit code and output", async () => {
@@ -317,23 +317,23 @@ describe.each(connections)("%s computers", (_, connection) => {
 				const info = (id: Computers.ComputerId) => run(Effect.flatMap(provider, (p) => p.info(id)));
 
 				const running = await info(made.id);
-				await run(Effect.flatMap(provider, (p) => p.pause(made.id)));
+				await run(Effect.flatMap(provider, (p) => p.sleep(made.id)));
 				const paused = await info(made.id);
 				await run(Effect.flatMap(provider, (p) => p.destroy(made.id)));
 
 				expect(running.state).toBe("running");
-				expect(paused.state).toBe("paused");
+				expect(paused.state).toBe("asleep");
 			},
 			SLOW,
 		);
 
 		it(
-			"keeps files across a pause, and says when opening resumed it",
+			"keeps files across sleep, and says when opening resumed it",
 			async () => {
 				await run(computer.exec("echo kept > kept.txt", EXEC));
 
 				const running = await run(Effect.flatMap(provider, (p) => p.open(computer.id)));
-				await run(Effect.flatMap(provider, (p) => p.pause(computer.id)));
+				await run(Effect.flatMap(provider, (p) => p.sleep(computer.id)));
 				const paused = await run(Effect.flatMap(provider, (p) => p.open(computer.id)));
 				computer = paused.computer;
 
@@ -345,12 +345,12 @@ describe.each(connections)("%s computers", (_, connection) => {
 		);
 	});
 
-	describe.skipIf(!connection)("a destroyed computer", () => {
+	describe.skipIf(!access)("a destroyed computer", () => {
 		it(
 			"is missing, and destroying it again succeeds",
 			async () => {
 				const computers = Effect.map(Computers.Service, (s) =>
-					s.forConnection(connection as Computers.Connection),
+					s.forAccess(access as Computers.ProviderAccess),
 				);
 				const made = await run(Effect.flatMap(computers, (p) => p.create(SPEC)));
 
@@ -370,17 +370,17 @@ describe.each(connections)("%s computers", (_, connection) => {
 
 describe.skipIf(!e2b)("E2B templates, against the service", () => {
 	/** The environment's E2B with its own template. */
-	const withTemplate = (template: string): Computers.E2bConnection => ({
-		...(e2b as Computers.E2bConnection),
+	const withTemplate = (template: string): Computers.E2bAccess => ({
+		...(e2b as Computers.E2bAccess),
 		template,
 	});
 
 	it("builds a template from an image, then makes computers from it", async () => {
-		const connection: Computers.E2bConnection = {
+		const access: Computers.E2bAccess = {
 			...withTemplate(`sugabots-test-${Date.now()}`),
 			size: { cpuCount: 2, memoryGiB: 2 },
 		};
-		const provider = await run(Effect.map(Computers.Service, (s) => s.forConnection(connection)));
+		const provider = await run(Effect.map(Computers.Service, (s) => s.forAccess(access)));
 		const templates = provider.templates;
 		if (!templates) throw new Error("E2B builds templates");
 
@@ -406,7 +406,7 @@ describe.skipIf(!e2b)("E2B templates, against the service", () => {
 
 	it("says so when the workspace's template hasn't been built", async () => {
 		const provider = await run(
-			Effect.map(Computers.Service, (s) => s.forConnection(withTemplate("sugabots-never-built"))),
+			Effect.map(Computers.Service, (s) => s.forAccess(withTemplate("sugabots-never-built"))),
 		);
 
 		const exit = await runExit(provider.create(SPEC));

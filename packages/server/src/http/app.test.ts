@@ -1,23 +1,23 @@
 import { healthResponseSchema, meSchema } from "@sugabots/contracts";
-import { Turns } from "@sugabots/core/conversations/turns/turns";
+import { Turns } from "@sugabots/core/chats/turns/turns";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import type { UserResolver } from "./app.test-support.ts";
-import { createTestApp, identifiedBy, installationWithWebAppAt } from "./app.test-support.ts";
+import type { PersonResolver } from "./app.test-support.ts";
+import { createTestApp, identifiedBy, serverSettingsWithWebAppAt } from "./app.test-support.ts";
 import { MAX_JSON_BODY_BYTES } from "./validation.ts";
 
-const user = {
+const signedIn = {
 	id: "0199a3a0-0000-7000-8000-0000000000ff",
 	email: "sam@example.com",
 	name: "Sam",
 	image: null,
 };
 
-const resolveUser: UserResolver = async (headers) =>
-	headers.get("authorization") === "Bearer good-token" ? user : null;
+const resolvePerson: PersonResolver = async (headers) =>
+	headers.get("authorization") === "Bearer good-token" ? signedIn : null;
 
-const app = createTestApp(identifiedBy(resolveUser));
+const app = createTestApp(identifiedBy(resolvePerson));
 
 describe("GET /health", () => {
 	it("answers without a token", async () => {
@@ -38,19 +38,19 @@ describe("GET /health", () => {
 });
 
 describe("GET /me", () => {
-	it("returns the user behind the token", async () => {
+	it("returns the signed-in person behind the token", async () => {
 		const response = await app.request("/me", {
 			headers: { authorization: "Bearer good-token" },
 		});
 
 		expect(response.status).toBe(200);
-		expect(Schema.decodeUnknownSync(meSchema)(await response.json()).user).toEqual(user);
+		expect(Schema.decodeUnknownSync(meSchema)(await response.json()).person).toEqual(signedIn);
 	});
 
-	it("returns the user behind a Better Auth cookie when Authorization is absent", async () => {
+	it("returns the signed-in person behind a Better Auth cookie when Authorization is absent", async () => {
 		const cookieApp = createTestApp(
 			identifiedBy(async (headers) =>
-				headers.get("cookie") === "better-auth.session_token=cookie-token" ? user : null,
+				headers.get("cookie") === "better-auth.session_token=cookie-token" ? signedIn : null,
 			),
 		);
 
@@ -59,13 +59,13 @@ describe("GET /me", () => {
 		});
 
 		expect(response.status).toBe(200);
-		expect(Schema.decodeUnknownSync(meSchema)(await response.json()).user).toEqual(user);
+		expect(Schema.decodeUnknownSync(meSchema)(await response.json()).person).toEqual(signedIn);
 	});
 
 	it("does not fall back to a cookie when an invalid bearer token is present", async () => {
 		const cookieApp = createTestApp(
 			identifiedBy(async (headers) =>
-				headers.get("cookie") === "better-auth.session_token=cookie-token" ? user : null,
+				headers.get("cookie") === "better-auth.session_token=cookie-token" ? signedIn : null,
 			),
 		);
 
@@ -149,7 +149,7 @@ describe("JSON body limit", () => {
 
 describe("cors", () => {
 	it("allows the web origin to authenticate and resume an event stream", async () => {
-		const app = createTestApp(identifiedBy(resolveUser));
+		const app = createTestApp(identifiedBy(resolvePerson));
 
 		const response = await app.request("/workspaces/example/events", {
 			method: "OPTIONS",
@@ -176,11 +176,11 @@ describe("cookie request origins", () => {
 	const trustedOrigin = "https://app.example.com";
 	const cookieApp = createTestApp(
 		Layer.mergeAll(
-			installationWithWebAppAt(trustedOrigin),
+			serverSettingsWithWebAppAt(trustedOrigin),
 			identifiedBy(async (headers) =>
 				headers.get("cookie") === "better-auth.session_token=cookie-token" ||
 				headers.get("authorization") === "Bearer good-token"
-					? user
+					? signedIn
 					: null,
 			),
 			unimplemented(Turns.Controls, { decide: () => Effect.void }),

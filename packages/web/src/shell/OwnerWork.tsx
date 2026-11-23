@@ -1,19 +1,19 @@
-import type { ListedThread, Run, ThreadActivity } from "@sugabots/contracts";
+import type { ChatStatus, ListedChat, Run } from "@sugabots/contracts";
 import { useSearch } from "@tanstack/react-router";
 import { cn } from "cn";
 import {
 	Check,
 	ChevronDown,
-	CircleCheck,
 	Clock,
 	LoaderCircle,
 	MessageSquare,
+	Reply,
 	RotateCcw,
 	Zap,
 } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { useProjectRuns } from "@/lib/automations.ts";
-import { lastMovedAt, needsViewer, useProjectThreads, useSetDone } from "@/lib/chats.ts";
+import { lastMovedAt, needsViewer, useProjectChats, useSetResolved } from "@/lib/chats.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { countOf } from "@/lib/name-list.ts";
 import { useNow } from "@/lib/now.ts";
@@ -30,13 +30,13 @@ import { matchesSearch } from "@/ui/search-field.tsx";
 import { sidebarRow } from "@/ui/sidebar-row.ts";
 import { Tooltip } from "@/ui/tooltip.tsx";
 
-/** How many of a section's threads or runs show before View all. */
+/** How many of a section's chats or runs show before View all. */
 const ENTRIES_SHOWN = 8;
 
 /**
- * A bot's or a project's work: the threads that need the viewer, then its
- * open threads and its automations' runs, each newest first under a heading
- * that folds it away, and its done threads at the foot, folded until opened,
+ * A bot's or a project's work: the chats that need the viewer, then its
+ * open chats and its automations' runs, each newest first under a heading
+ * that folds it away, and its resolved chats at the foot, folded until opened,
  * with `className` styling the scrolling part above them. `search` narrows every part to what has
  * it in a title or a name, and unfolds everything it finds. `work` is
  * `useOwnerWork(owner)`, read once by the page that shows it.
@@ -44,40 +44,39 @@ const ENTRIES_SHOWN = 8;
 export function OwnerWork({
 	owner,
 	work,
-	selectedConversationId,
+	selectedChatId,
 	search = "",
 	className,
 }: {
 	owner: ResourceOwner;
 	work: OwnerWorkList;
-	/** The thread open, marked in the list. */
-	selectedConversationId: string | undefined;
+	/** The chat open, marked in the list. */
+	selectedChatId: string | undefined;
 	search?: string;
 	className?: string;
 }) {
-	const userId = useSession().user?.id;
+	const personId = useSession().person?.id;
 	const searching = search.trim() !== "";
 	// A run open as a page of its automation's, marked in the list.
-	const openRun = useSearch({ strict: false, select: (params) => params.itemPage });
-	const { threads, runs } = work;
-	const needsYou = threads.filter((row) => needsViewer(row) && threadMatches(row, search));
-	const open = threads
+	const openRun = useSearch({ strict: false, select: (params) => params.nestedChatPage });
+	const { chats, runs } = work;
+	const needsYou = chats.filter((row) => needsViewer(row) && chatMatches(row, search));
+	const open = chats
 		.filter(
-			(row) =>
-				row.conversation.doneAt === null && !needsYou.includes(row) && threadMatches(row, search),
+			(row) => row.chat.resolvedAt === null && !needsYou.includes(row) && chatMatches(row, search),
 		)
 		.toSorted((a, b) => lastMovedAt(b) - lastMovedAt(a));
 	// Newest first, as the API lists them.
 	const shownRuns = runs.filter((run) => matchesSearch([run.automationName], search));
-	const done = threads
-		.filter((row) => row.conversation.doneAt !== null && threadMatches(row, search))
+	const resolved = chats
+		.filter((row) => row.chat.resolvedAt !== null && chatMatches(row, search))
 		.toSorted((a, b) => lastMovedAt(b) - lastMovedAt(a));
 	const nothing =
-		!work.threadsFailed &&
+		!work.chatsFailed &&
 		needsYou.length === 0 &&
 		open.length === 0 &&
 		shownRuns.length === 0 &&
-		done.length === 0;
+		resolved.length === 0;
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div className={cn("flex flex-col gap-3", className)}>
@@ -86,12 +85,8 @@ export function OwnerWork({
 						<h2 className="m-0 px-2 pb-1 font-normal text-subtle-foreground text-xs">Needs you</h2>
 						<ul className="m-0 flex list-none flex-col gap-px p-0">
 							{needsYou.map((row) => (
-								<li key={row.conversation.id}>
-									<NeedsYouRow
-										row={row}
-										owner={owner}
-										selected={row.conversation.id === selectedConversationId}
-									/>
+								<li key={row.chat.id}>
+									<NeedsYouRow row={row} owner={owner} selected={row.chat.id === selectedChatId} />
 								</li>
 							))}
 						</ul>
@@ -101,24 +96,24 @@ export function OwnerWork({
 				{nothing && (
 					<p className="m-0 flex h-8 items-center gap-2.5 pr-1.5 pl-2 text-sm text-subtle-foreground">
 						<MessageSquare aria-hidden size={15} strokeWidth={1.75} className="shrink-0" />
-						{searching ? "Nothing matches" : "No threads yet"}
+						{searching ? "Nothing matches" : "No chats yet"}
 					</p>
 				)}
-				{(open.length > 0 || work.threadsFailed) && (
+				{(open.length > 0 || work.chatsFailed) && (
 					<WorkSection
-						title="Threads"
+						title="Chats"
 						icon={<MessageSquare />}
 						entries={open}
 						searching={searching}
-						note={work.threadsFailed ? "Could not load these threads." : undefined}
+						note={work.chatsFailed ? "Could not load these chats." : undefined}
 					>
 						{(row) => (
-							<li key={row.conversation.id}>
-								<ThreadEntry
+							<li key={row.chat.id}>
+								<ChatEntry
 									row={row}
 									owner={owner}
-									userId={userId}
-									selected={row.conversation.id === selectedConversationId}
+									personId={personId}
+									selected={row.chat.id === selectedChatId}
 								/>
 							</li>
 						)}
@@ -133,30 +128,30 @@ export function OwnerWork({
 					>
 						{(run) => (
 							<li key={run.id}>
-								<RunEntry run={run} owner={owner} selected={run.conversationId === openRun} />
+								<RunEntry run={run} owner={owner} selected={run.chatId === openRun} />
 							</li>
 						)}
 					</WorkSection>
 				)}
 			</div>
-			{/* Done threads fold away at the foot, under everything still going. */}
-			{done.length > 0 && (
+			{/* Resolved chats fold away at the foot, under everything still going. */}
+			{resolved.length > 0 && (
 				<div className="shrink-0 border-border border-t px-3 py-1">
 					<WorkSection
-						title="Done"
+						title="Resolved"
 						icon={<Check />}
-						entries={done}
+						entries={resolved}
 						searching={searching}
 						startsOpen={false}
 						listClassName="max-h-72 overflow-y-auto"
 					>
 						{(row) => (
-							<li key={row.conversation.id}>
-								<DoneEntry
+							<li key={row.chat.id}>
+								<ResolvedEntry
 									row={row}
 									owner={owner}
-									userId={userId}
-									selected={row.conversation.id === selectedConversationId}
+									personId={personId}
+									selected={row.chat.id === selectedChatId}
 								/>
 							</li>
 						)}
@@ -259,20 +254,20 @@ function WorkSection<Entry>({
 }
 
 /**
- * The threads of a bot or project, those not archived, done ones among them,
+ * The chats of a bot or project, resolved ones among them,
  * and the latest runs of its automations, with whether one of its automations
  * is failing (see `AutomationListStatus.failing`).
  */
 export function useOwnerWork(owner: ResourceOwner): OwnerWorkList {
-	const list = useProjectThreads(resourceProjectId(owner));
+	const list = useProjectChats(resourceProjectId(owner));
 	const runs = useProjectRuns(resourceProjectId(owner));
 	// Without how it stands, for somebody who may not read its runs, one that paused itself is still failing.
 	const automationFailing = (list.data?.automations ?? []).some(
 		(row) => row.status?.failing ?? row.automation.pausedAfterFailures,
 	);
 	return {
-		threads: list.data?.threads ?? [],
-		threadsFailed: list.isError,
+		chats: list.data?.chats ?? [],
+		chatsFailed: list.isError,
 		runs,
 		automationFailing,
 	};
@@ -280,19 +275,19 @@ export function useOwnerWork(owner: ResourceOwner): OwnerWorkList {
 
 /** What `useOwnerWork` reads for a bot or a project. */
 type OwnerWorkList = {
-	threads: readonly ListedThread[];
-	threadsFailed: boolean;
+	chats: readonly ListedChat[];
+	chatsFailed: boolean;
 	runs: Run[];
 	automationFailing: boolean;
 };
 
-/** A thread waiting on the viewer, on one line: a dot, then its title. */
+/** A chat waiting on the viewer, on one line: a dot, then its title. */
 function NeedsYouRow({
 	row,
 	owner,
 	selected,
 }: {
-	row: ListedThread;
+	row: ListedChat;
 	owner: ResourceOwner;
 	selected: boolean;
 }) {
@@ -300,7 +295,7 @@ function NeedsYouRow({
 	return (
 		<OwnerLink
 			owner={owner}
-			to={{ page: "thread", conversationId: row.conversation.id }}
+			to={{ page: "chat", chatId: row.chat.id }}
 			aria-current={selected ? "page" : undefined}
 			onDoubleClick={hideSidebar}
 			className={sidebarRow({ selected, radius: "md" })}
@@ -308,7 +303,7 @@ function NeedsYouRow({
 			<span className="grid w-3 shrink-0 place-items-center">
 				<AttentionDot attention="needsYou" />
 			</span>
-			<span className="min-w-0 flex-1 truncate">{row.conversation.title}</span>
+			<span className="min-w-0 flex-1 truncate">{row.chat.title}</span>
 			<span className="sr-only">
 				{row.needsApproval ? ", needs your approval" : ", mentions you"}
 			</span>
@@ -317,43 +312,43 @@ function NeedsYouRow({
 }
 
 /**
- * One of the open threads, on three lines: how many messages it holds, with
+ * One of the open chats, on three lines: how many messages it holds, with
  * when it last moved at the end; its title; then the faces of who is talking
  * in it, with what its bots are doing at the end, left out when there is
- * neither. Pointed at, Done takes the time's place.
+ * neither. Pointed at, Resolve takes the time's place.
  */
-function ThreadEntry({
+function ChatEntry({
 	row,
 	owner,
-	userId,
+	personId,
 	selected,
 }: {
-	row: ListedThread;
+	row: ListedChat;
 	owner: ResourceOwner;
-	userId: string | undefined;
+	personId: string | undefined;
 	selected: boolean;
 }) {
 	const hideSidebar = useHideSidebar();
-	const setDone = useSetDone(row.conversation.id);
-	const { conversation } = row;
+	const setResolved = useSetResolved(row.chat.id);
+	const { chat } = row;
 	const people = row.participants.filter((participant) => participant.kind === "person");
 	const talking =
 		people.length === 0
 			? "No one yet"
-			: people.map((person) => (person.id === userId ? "You" : person.name)).join(", ");
+			: people.map((person) => (person.id === personId ? "You" : person.name)).join(", ");
 	const unread = row.unreadMessages > 0;
 	const movedAt = new Date(lastMovedAt(row));
 	return (
-		// The row is its link; Done sits over the link's corner, as a button can't be inside a link.
-		<div className="group/thread relative">
+		// The row is its link; Resolve sits over the link's corner, as a button can't be inside a link.
+		<div className="group/chat relative">
 			<OwnerLink
 				owner={owner}
-				to={{ page: "thread", conversationId: conversation.id }}
+				to={{ page: "chat", chatId: chat.id }}
 				aria-current={selected ? "page" : undefined}
 				onDoubleClick={hideSidebar}
 				className={cn(
 					"focus-ring flex min-w-0 flex-col gap-1 rounded-md px-2 py-2 transition-colors",
-					selected ? "bg-row-selected" : "group-hover/thread:bg-row-hover",
+					selected ? "bg-row-selected" : "group-hover/chat:bg-row-hover",
 				)}
 			>
 				{/* First to be read, so the link is named by it; shown under the count and time. */}
@@ -363,30 +358,30 @@ function ThreadEntry({
 						unread ? "font-semibold text-foreground" : "text-soft-foreground",
 					)}
 				>
-					{conversation.title}
+					{chat.title}
 				</span>
 				<span className="order-1 flex h-5 min-w-0 items-center justify-between gap-2">
 					<MessageCount count={row.messageCount} />
-					{/* Its place goes to Done while the row is pointed at, so it is held as wide as Done. */}
+					{/* Its place goes to Resolve while the row is pointed at, so it is held as wide as Resolve. */}
 					<time
 						dateTime={movedAt.toISOString()}
-						className="flex h-5 min-w-14 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums group-has-focus-visible/thread:invisible group-hover/thread:invisible [@media(hover:none)]:invisible"
+						className="flex h-5 min-w-17 shrink-0 items-center justify-end text-subtle-foreground text-xs tabular-nums group-has-focus-visible/chat:invisible group-hover/chat:invisible [@media(hover:none)]:invisible"
 					>
 						{formatListTime(movedAt, new Date())}
 					</time>
 				</span>
 				{/* Who is talking, by their names, for whoever can't see the faces. */}
 				<span className="sr-only">{talking}</span>
-				{(row.activity || people.length > 0) && (
+				{(row.status || people.length > 0) && (
 					<span className="order-3 flex h-4 min-w-0 items-center justify-between gap-1.5">
 						{people.length > 0 && (
 							<span aria-hidden className="flex shrink-0">
 								<ParticipantFaces participants={people} shown={4} size={16} surface="var(--rail)" />
 							</span>
 						)}
-						{row.activity && (
+						{row.status && (
 							<span className="ml-auto flex min-w-0">
-								<ThreadActivityLabel activity={row.activity} />
+								<ChatStatusLabel status={row.status} />
 							</span>
 						)}
 					</span>
@@ -395,12 +390,12 @@ function ThreadEntry({
 			<Button
 				variant="ghost"
 				size="sm"
-				disabled={setDone.isPending}
-				onClick={() => setDone.mutate(true)}
-				aria-label={`Done: ${conversation.title}`}
-				className="absolute top-1.5 right-0.5 h-6 gap-1 px-1.5 font-normal text-subtle-foreground text-xs tabular-nums opacity-0 transition-opacity group-has-focus-visible/thread:opacity-100 group-hover/thread:opacity-100 [@media(hover:none)]:opacity-100"
+				disabled={setResolved.isPending}
+				onClick={() => setResolved.mutate(true)}
+				aria-label={`Resolve: ${chat.title}`}
+				className="absolute top-1.5 right-0.5 h-6 gap-1 px-1.5 font-normal text-subtle-foreground text-xs tabular-nums opacity-0 transition-opacity group-has-focus-visible/chat:opacity-100 group-hover/chat:opacity-100 [@media(hover:none)]:opacity-100"
 			>
-				Done
+				Resolve
 				<Check aria-hidden strokeWidth={2.25} className="size-3" />
 			</Button>
 		</div>
@@ -408,42 +403,42 @@ function ThreadEntry({
 }
 
 /**
- * A done thread, kept quiet: who is in it, its title and when it last moved, on
+ * A resolved chat, kept quiet: who is in it, its title and when it last moved, on
  * one line, the rest said when it is pointed at. Pointed at, Reopen takes
  * the time's place.
  */
-function DoneEntry({
+function ResolvedEntry({
 	row,
 	owner,
-	userId,
+	personId,
 	selected,
 }: {
-	row: ListedThread;
+	row: ListedChat;
 	owner: ResourceOwner;
-	userId: string | undefined;
+	personId: string | undefined;
 	selected: boolean;
 }) {
 	const hideSidebar = useHideSidebar();
-	const setDone = useSetDone(row.conversation.id);
+	const setResolved = useSetResolved(row.chat.id);
 	const people = row.participants.filter((participant) => participant.kind === "person");
-	const talking = people.map((person) => (person.id === userId ? "You" : person.name)).join(", ");
+	const talking = people.map((person) => (person.id === personId ? "You" : person.name)).join(", ");
 	const movedAt = new Date(lastMovedAt(row));
 	const about = [talking, countOf(row.messageCount, "message", "messages")]
 		.filter(Boolean)
 		.join(" · ");
 	return (
-		<div className="group/thread relative">
+		<div className="group/chat relative">
 			<Tooltip label={about} side="right" align="start">
 				<OwnerLink
 					owner={owner}
-					to={{ page: "thread", conversationId: row.conversation.id }}
+					to={{ page: "chat", chatId: row.chat.id }}
 					aria-current={selected ? "page" : undefined}
 					onDoubleClick={hideSidebar}
 					className={cn(
 						sidebarRow({ selected, radius: "md" }),
 						// Shaded while Reopen, over its end, is pointed at too.
 						!selected &&
-							"text-subtle-foreground hover:text-soft-foreground group-hover/thread:bg-row-hover group-hover/thread:text-soft-foreground",
+							"text-subtle-foreground hover:text-soft-foreground group-hover/chat:bg-row-hover group-hover/chat:text-soft-foreground",
 					)}
 				>
 					<span aria-hidden className="flex shrink-0 opacity-70">
@@ -453,21 +448,21 @@ function DoneEntry({
 							<MessageSquare size={14} strokeWidth={1.75} />
 						)}
 					</span>
-					<span className="min-w-0 flex-1 truncate">{row.conversation.title}</span>
+					<span className="min-w-0 flex-1 truncate">{row.chat.title}</span>
 					{/* Its place goes to Reopen while the row is pointed at. */}
 					<time
 						dateTime={movedAt.toISOString()}
-						className="shrink-0 text-xs tabular-nums group-has-focus-visible/thread:invisible group-hover/thread:invisible [@media(hover:none)]:invisible"
+						className="shrink-0 text-xs tabular-nums group-has-focus-visible/chat:invisible group-hover/chat:invisible [@media(hover:none)]:invisible"
 					>
 						{formatListTime(movedAt, new Date())}
 					</time>
 				</OwnerLink>
 			</Tooltip>
 			<IconButton
-				label={`Reopen: ${row.conversation.title}`}
-				disabled={setDone.isPending}
-				onClick={() => setDone.mutate(false)}
-				className="absolute top-1 right-1 rounded-md text-subtle-foreground opacity-0 transition-opacity group-has-focus-visible/thread:opacity-100 group-hover/thread:opacity-100 [@media(hover:none)]:opacity-100"
+				label={`Reopen: ${row.chat.title}`}
+				disabled={setResolved.isPending}
+				onClick={() => setResolved.mutate(false)}
+				className="absolute top-1 right-1 rounded-md text-subtle-foreground opacity-0 transition-opacity group-has-focus-visible/chat:opacity-100 group-hover/chat:opacity-100 [@media(hover:none)]:opacity-100"
 			>
 				<RotateCcw aria-hidden strokeWidth={2} />
 			</IconButton>
@@ -485,7 +480,7 @@ function RunEntry({ run, owner, selected }: { run: Run; owner: ResourceOwner; se
 	return (
 		<OwnerLink
 			owner={owner}
-			to={{ page: "automation", automationId: run.automationId, itemPage: run.conversationId }}
+			to={{ page: "automation", automationId: run.automationId, nestedChatPage: run.chatId }}
 			aria-current={selected ? "page" : undefined}
 			onDoubleClick={hideSidebar}
 			className={cn(
@@ -515,29 +510,29 @@ function RunEntry({ run, owner, selected }: { run: Run; owner: ResourceOwner; se
 	);
 }
 
-/** Whether a thread's title, or the name of somebody in it, has `search` in it, whatever its case. */
-function threadMatches(row: ListedThread, search: string): boolean {
+/** Whether a chat's title, or the name of somebody in it, has `search` in it, whatever its case. */
+function chatMatches(row: ListedChat, search: string): boolean {
 	return matchesSearch(
-		[row.conversation.title, ...row.participants.map((participant) => participant.name)],
+		[row.chat.title, ...row.participants.map((participant) => participant.name)],
 		search,
 	);
 }
 
 /**
- * What a thread's bots are doing, as its row says it: "Working 20m" with a
+ * What a chat's bots are doing, as its row says it: "Working 20m" with a
  * spinner while a turn works on a reply, "Waiting 2m" with a clock while one
- * waits on an approval, each counting up a minute at a time; or a green Done
- * once a bot finished a reply the viewer has not read.
+ * waits on an approval, each counting up a minute at a time; or a green
+ * Replied once a bot finished a reply the viewer has not read.
  */
-function ThreadActivityLabel({ activity }: { activity: ThreadActivity }) {
+function ChatStatusLabel({ status }: { status: ChatStatus }) {
 	const label = "flex min-w-0 items-center gap-1 text-xs tabular-nums";
-	switch (activity.kind) {
+	switch (status.kind) {
 		case "working":
 			return (
 				<span className={cn(label, "text-working")}>
 					<LoaderCircle aria-hidden className="size-3 shrink-0 motion-safe:animate-spin" />
 					<span className="truncate">
-						Working <Elapsed since={activity.since} />
+						Working <Elapsed since={status.since} />
 					</span>
 				</span>
 			);
@@ -546,15 +541,15 @@ function ThreadActivityLabel({ activity }: { activity: ThreadActivity }) {
 				<span className={cn(label, "text-subtle-foreground")}>
 					<Clock aria-hidden className="size-3 shrink-0" />
 					<span className="truncate">
-						Waiting <Elapsed since={activity.since} />
+						Waiting <Elapsed since={status.since} />
 					</span>
 				</span>
 			);
-		case "finished":
+		case "replied":
 			return (
 				<span className={cn(label, "text-success-text")}>
-					<CircleCheck aria-hidden className="size-3 shrink-0" />
-					Done
+					<Reply aria-hidden className="size-3 shrink-0" />
+					Replied
 				</span>
 			);
 	}
@@ -581,7 +576,7 @@ function formatElapsedMinutes(ms: number): string {
 	return `${Math.floor(hours / HOURS_IN_DAY)}d`;
 }
 
-/** How many messages a thread holds, as a quiet count with a speech mark. */
+/** How many messages a chat holds, as a quiet count with a speech mark. */
 function MessageCount({ count }: { count: number }) {
 	return (
 		<span className="flex shrink-0 items-center gap-1 text-subtle-foreground text-xs tabular-nums">

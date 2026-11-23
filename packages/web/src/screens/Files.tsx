@@ -11,7 +11,7 @@ import { useNavigate, useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Check, ChevronDown, Download, FileText, Link2, Paperclip, Trash2 } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef, useState } from "react";
-import { conversationFileUrl } from "@/lib/conversation-files.ts";
+import { chatFileUrl } from "@/lib/chat-files.ts";
 import { API_DID_NOT_ANSWER, failureMessage } from "@/lib/failure.ts";
 import { fileSizeLabel } from "@/lib/file-looks.ts";
 import { useDeleteFile, useFile, useFiles, useFileVersions } from "@/lib/files.ts";
@@ -63,7 +63,7 @@ function authorName(author: FileAuthor): string {
 }
 
 /**
- * The files uploaded or made in a project's threads, or in a bot's, newest
+ * The files uploaded or made in a project's chats, or in a bot's, newest
  * first: the files bots wrote, with the one chosen open beside them at
  * its current version or the one `version` names, and the files sent on
  * messages, which open on their own.
@@ -252,7 +252,7 @@ function WrittenFileRow({
 
 /**
  * A file sent on a message: its name, size, who sent it and when. It opens
- * where the conversation serves it, as the message's own link does.
+ * where the chat serves it, as the message's own link does.
  */
 function MessageFileRow({ file, now }: { file: MessageFileSummary; now: Date }) {
 	const sentBy = file.sentBy ?? (file.kind === "upload" ? "Someone who left" : REMOVED_BOT);
@@ -260,13 +260,7 @@ function MessageFileRow({ file, now }: { file: MessageFileSummary; now: Date }) 
 		<FileRow
 			look="list"
 			className="focus-ring transition-colors hover:bg-message-hover"
-			render={
-				<a
-					href={conversationFileUrl(file.conversationId, file.id)}
-					target="_blank"
-					rel="noreferrer"
-				/>
-			}
+			render={<a href={chatFileUrl(file.chatId, file.id)} target="_blank" rel="noreferrer" />}
 			icon={
 				<IconTile size="md">
 					<Paperclip size={16} strokeWidth={1.75} />

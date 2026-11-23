@@ -5,46 +5,48 @@ description: Work a project's lead bot does on its own, on its routines or whene
 
 An automation is work a project's [lead bot](/docs/projects) does on its own:
 "every weekday at 8, sort the inbox" or "when the shop gets an order, draft a
-thank-you". The lead bot does it without being asked, in a thread of the
+thank-you". The lead bot does it without being asked, in a chat of the
 project, on the project's computer and with the project's
-[connections](/docs/connections) as well as its own. It posts what it found in
-the **automation feed**, the automation's own conversation in the project,
+[connectors](/docs/connectors) as well as its own. It posts what it found in
+the **automation feed**, the automation's own chat in the project,
 where its runs are listed too.
 
 A bot's own automations are those of its hidden default project, which it
-leads, so they run on its own computer with its own connections. They're in the
+leads, so they run on its own computer with its own connectors. They're in the
 bot's **Automations**.
 
 Whoever may change the project makes and changes its automations, and switches
 them on or off: for the own automations of a bot people made, its creator, the
 owner and admins; for a project people made, the owner and admins. Anyone in the
 project, or who can talk to the bot, can see them and, except viewers, choose
-**Run now**.
+**Start a run**.
 
 A [Personal Assistant](/docs/bots#your-personal-assistant)'s automations are its person's,
 whatever their role, so a viewer manages their own assistant's too: they make
-and change them, switch them on or off, choose **Run now**, and answer the
+and change them, switch them on or off, choose **Start a run**, and answer the
 approvals their runs ask for. Nobody else sees them, not even the owner or an
 admin.
 
 ## Who runs it
 
 Each run is done by the project's lead bot when it starts. Choose another lead,
-and the next run is that bot's.
+and the next run is that bot's. Whoever made the bot doing a run answers the
+approvals it asks for, if they're in the project and not a viewer, as do the
+owner and admins; see [who can answer](/docs/tools-and-approvals#who-can-answer).
 
 ## Make an automation
 
 Choose **New automation**, then fill in:
 
-- **Instructions**: what to do each time, written like you'd ask in a thread.
+- **Instructions**: what to do each time, written like you'd ask in a chat.
 - **Routines**: when it runs on a timetable. Choose **Add routine** for each
   one.
 - **Triggers**: events that start it. Choose **Add trigger** for each one: a
   **Webhook**, or **GitHub** when the project has a
-  [GitHub app](/docs/connections).
+  [GitHub app](/docs/connectors).
 
 An automation can have several of each, such as two routines and a webhook, and
-one with none runs only when someone chooses **Run now**.
+one with none runs only when someone chooses **Start a run**.
 
 ## Where the result goes
 
@@ -80,8 +82,8 @@ runs twice at the same time.
 ## Ask the bot
 
 Whoever manages a project's automations can also ask a bot in one of its
-threads: "check in with me every morning at 9" or "move the inbox sweep to 10".
-In its own threads, that's the bot's own automations; in a project's thread, the
+chats: "check in with me every morning at 9" or "move the inbox sweep to 10".
+In its own chats, that's the bot's own automations; in a project's chat, the
 project's, which the project's lead bot runs. It sets up, changes or pauses
 their routines, in the workspace's timezone, and links to the automation in its
 reply. Once an automation has more than one routine or trigger, its routine is
@@ -109,10 +111,10 @@ so it isn't taken as orders. The caller proves it holds the secret the way the
 webhook's **Source** and **Auth** say:
 
 - **GitHub**, **Stripe**, **Slack** or **Linear**: paste the signing secret the
-  sender made, and add the address in the sender, which signs each call itself.
+  source made, and add the address in the source, which signs each call itself.
   Slack's address check is answered for you.
-- **Generic**, for any other sender, with one **Auth**:
-  - **HMAC**: the sender signs the raw body with the secret and sends the digest in
+- **Generic**, for any other caller, with one **Auth**:
+  - **HMAC**: the caller signs the raw body with the secret and sends the digest in
     the **Header** you name. Pick SHA-1, SHA-256 or SHA-512, and hex or base64. A
     leading `sha256=` is fine.
   - **Bearer**: `Authorization: Bearer <secret>`.
@@ -126,27 +128,27 @@ least 16 characters. A webhook with no secret is run by anyone who has its addre
 For example, with **Bearer** auth:
 
 ```sh
-curl -X POST "https://sugabots.example.com/api/hooks/triggers/<trigger id>" \
+curl -X POST "https://sugabots.example.com/api/webhooks/triggers/<trigger id>" \
   -H "Authorization: Bearer <secret>" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: order-1042" \
   -d '{"order": 1042, "customer": "Sam"}'
 ```
 
-A sender that signs, such as Sentry, needs no custom headers. Choose **Generic**,
+A caller that signs, such as Sentry, needs no custom headers. Choose **Generic**,
 **HMAC**, SHA-256 and hex, set the **Header** to `Sentry-Hook-Signature`, and
 paste the integration's client secret as the secret.
 
-Some senders call about everything, such as every change to every issue. In the
-webhook trigger's **Filter** group, choose **Add condition** to run the automation
-only for calls you want. Without conditions, every authenticated call can run it.
+Some callers call about everything, such as every change to every issue. In the
+webhook trigger's **Filter** group, choose **Add test** to run the automation
+only for calls you want. Without tests, every authenticated call can run it.
 
-Each condition has a **JSON path**, with keys joined by dots, and one or more
+Each test has a **JSON path**, with keys joined by dots, and one or more
 **Accepted value** fields. Choose **Add value** for another alternative, then
-**Save condition**. Every condition must match, but any accepted value within a
-condition is enough. **Cancel condition** discards that edit. If a save fails,
+**Save test**. Every test must pass, but any accepted value within a
+test is enough. **Cancel test** discards that edit. If a save fails,
 the draft stays available to retry. When adding a webhook trigger, save or cancel
-its condition before choosing **Add trigger**.
+its test before choosing **Add trigger**.
 
 Values match exactly: commas, spaces and line breaks belong to the value rather
 than separating alternatives. An empty value matches an empty string. Numbers
@@ -155,21 +157,21 @@ object or `null` doesn't match a value.
 
 Where a path crosses a list, any matching item counts. For example,
 `data.labels.name` with the accepted value `10x` matches an issue that has that
-label among others. Each condition searches the list independently.
+label among others. Each test searches the list independently.
 
 For example, to run only when Linear creates an issue labelled `10x`, save these
-three conditions:
+three tests:
 
 - **JSON path** `type`, **Accepted value** `Issue`
 - **JSON path** `action`, **Accepted value** `create`
 - **JSON path** `data.labels.name`, **Accepted value** `10x`
 
 Linear sends `update` when a label is added to an existing issue, so these
-conditions don't match it. Accepting `update` would also match other changes to
-an issue that already has the label; these conditions don't test what changed.
+tests don't pass it. Accepting `update` would also match other changes to
+an issue that already has the label; these tests don't check what changed.
 
-A filter allows at most 10 conditions, each with at most 20 accepted values.
-Paths and values can each be at most 200 characters. Remove every condition to
+A filter allows at most 10 tests, each with at most 20 accepted values.
+Paths and values can each be at most 200 characters. Remove every test to
 stop filtering calls. Changing authentication or the delivery ID header keeps
 the filter, and a copied automation keeps its filter too.
 
@@ -194,7 +196,7 @@ with `409`. Where the id comes from depends on the **Source**:
   until you change it. Clear it, and every call starts a run.
 
 With no id, or when the header is missing, every call starts a run. A generic
-webhook with an explicit header reads nothing else, so a sender that names its
+webhook with an explicit header reads nothing else, so a caller that names its
 deliveries another way, such as `Svix-Id` or `X-Shopify-Webhook-Id`, needs its
 header named here. Authentication headers cannot be used as delivery IDs.
 
@@ -215,7 +217,7 @@ and let the bot spot the repeat from the alert itself.
 
 ## Runs
 
-Each run has a thread of its own with everything the bot did, and shows in the
+Each run has a chat of its own with everything the bot did, and shows in the
 automation feed as a line like "Morning inbox sweep ran". A posted
 result links back to its run, under the message. A run that fails or is
 stopped posts nothing; its line says what happened. If a run needs an

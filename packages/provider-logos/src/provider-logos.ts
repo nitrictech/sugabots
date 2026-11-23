@@ -1,4 +1,4 @@
-import type { ProviderPresetId } from "@sugabots/contracts";
+import type { BuiltInProviderId } from "@sugabots/contracts";
 import anthropic from "../logos/anthropic.svg";
 import anthropicDark from "../logos/anthropic-dark.svg";
 import cerebras from "../logos/cerebras.svg";
@@ -48,7 +48,7 @@ interface ProviderLogoAsset {
 
 const FETCHED = "2026-09-25";
 
-export const providerLogos: Record<ProviderPresetId, ProviderLogoAsset> = {
+export const providerLogos: Record<BuiltInProviderId, ProviderLogoAsset> = {
 	anthropic: {
 		light: anthropic,
 		dark: anthropicDark,

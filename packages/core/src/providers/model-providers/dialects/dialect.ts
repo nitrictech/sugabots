@@ -1,8 +1,8 @@
 import {
+	type BuiltInProviderId,
 	newProviderModelSchema,
 	type ProviderApiFormat,
 	type ProviderModelCapability,
-	type ProviderPresetId,
 	providerModelCapabilitySchema,
 } from "@sugabots/contracts";
 import type { LanguageModel, ModelMessage } from "ai";
@@ -17,7 +17,7 @@ import type { EgressHttpClient } from "../../network/egress.ts";
  * somewhere: a key sent in a header of its own, a listing that pages, a
  * native API beside the compatible one that says what the listing leaves
  * out. A dialect is that departure written as code, one file beside this one
- * per provider that has one, so a preset can name it and the code that talks
+ * per provider that has one, so a built-in provider can name it and the code that talks
  * to a provider never asks which one it is.
  *
  * A dialect handles discovery (listing a provider's models and reading their
@@ -33,12 +33,12 @@ export interface DiscoveredModel {
 }
 
 /**
- * The part of a provider's connection that says which provider it is: the
- * preset it was made from, or, for a custom endpoint, where it is and what it
+ * The part of a provider's access that says which provider it is: the
+ * built-in provider it was made from, or, for a custom model provider, where it is and what it
  * claims to speak.
  */
 export interface ProviderIdentity {
-	preset: ProviderPresetId | null;
+	builtIn: BuiltInProviderId | null;
 	baseUrl: string;
 	apiFormat: ProviderApiFormat;
 }

@@ -13,7 +13,7 @@ import { AddedHostRow, AddHostRow } from "./ComputerNetworkSettings.tsx";
 /**
  * What the owner's computer may connect to: the hosts the workspace allows
  * every computer, and the project's own, added here or by allowing a bot's
- * request in a thread, which only someone who manages the owner's computer
+ * request in a chat, which only someone who manages the owner's computer
  * may change.
  */
 export function ProjectComputerNetworkSettings({ owner }: { owner: ResourceOwner }) {
@@ -46,7 +46,7 @@ export function ProjectComputerNetworkSettings({ owner }: { owner: ResourceOwner
 		<>
 			<SettingsGroup
 				label="Network"
-				note={`This ${ownerWord}'s computer connects to the workspace's hosts and these. When it needs another, a bot asks in a thread, and ${canManage ? "you can allow it there" : `someone who manages the ${ownerWord} decides`}.`}
+				note={`This ${ownerWord}'s computer connects to the workspace's hosts and these. When it needs another, a bot asks in a chat, and ${canManage ? "you can allow it there" : `someone who manages the ${ownerWord} decides`}.`}
 			>
 				{addedHosts.map((added) => (
 					<AddedHostRow

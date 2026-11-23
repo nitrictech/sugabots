@@ -16,7 +16,7 @@ import { Tooltip } from "@/ui/tooltip.tsx";
  * a project is open beside it: the viewer's Personal Assistant first, then
  * each project they are in as its tile, then their bots as faces. Each opens where it
  * leads; the bot or project open is shaded, and a dot marks what is new or
- * waits on the viewer. Their threads are in the sidebar beside it. A phone has
+ * waits on the viewer. Their chats are in the sidebar beside it. A phone has
  * no rail. Its top is left clear for the button that puts the sidebar away,
  * as the sidebar's is.
  */
@@ -63,7 +63,7 @@ export function IconRail({
 									label={standing.project.name}
 									render={<Link {...projectLink(standing.project)} />}
 									current={standing.project.slug === currentProjectSlug}
-									marker={attentionOf(standing)}
+									attentionMark={attentionOf(standing)}
 								>
 									<span style={ownerMarkTransition(standing.project.id)} className="flex">
 										<ProjectInitial project={standing.project} size="nav" />
@@ -97,9 +97,9 @@ function BotPlace({ standing, current }: { standing: BotStanding; current: boole
 	return (
 		<RailItem
 			label={standing.bot.name}
-			render={<Link {...botLink(standing.bot)} onPointerEnter={() => face.current?.play("hop")} />}
+			render={<Link {...botLink(standing.bot)} onPointerEnter={() => face.current?.hop()} />}
 			current={current}
-			marker={attentionOf(standing)}
+			attentionMark={attentionOf(standing)}
 		>
 			<span style={ownerMarkTransition(standing.bot.id)} className="flex">
 				<TurnTakingAvatar bot={standing.bot} size={OWNER_MARK_SIZE_PX} faceRef={face} />
@@ -126,20 +126,20 @@ const RAIL_LIST = "m-0 flex list-none flex-col items-center gap-px p-0";
 
 /**
  * One place on the rail: `children` as its mark, named by a tooltip, shaded
- * while it is open, with a dot at its corner for `marker`.
+ * while it is open, with a dot at its corner for `attentionMark`.
  */
 function RailItem({
 	label,
 	render,
 	current,
-	marker,
+	attentionMark,
 	children,
 }: {
 	label: string;
 	render: ReactElement;
 	/** Whether it is the bot or project open. */
 	current: boolean;
-	marker: ReturnType<typeof attentionOf>;
+	attentionMark: ReturnType<typeof attentionOf>;
 	children: ReactNode;
 }) {
 	const link = useRender({
@@ -157,11 +157,11 @@ function RailItem({
 					{children}
 					<span className="sr-only">
 						{label}
-						{marker && `, ${marker.label}`}
+						{attentionMark && `, ${attentionMark.label}`}
 					</span>
-					{marker && (
+					{attentionMark && (
 						<AttentionDot
-							attention={marker.attention}
+							attention={attentionMark.attention}
 							className="absolute top-0.5 right-0.5 size-2 ring-2 ring-rail"
 						/>
 					)}

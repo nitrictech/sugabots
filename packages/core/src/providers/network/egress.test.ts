@@ -157,7 +157,7 @@ describe("provider http clients", () => {
 	const local = { baseUrl: "http://127.0.0.1:11434/v1" };
 	const remote = { baseUrl: "https://models.example/v1" };
 
-	it("reaches a private address when the installation allows it", async () => {
+	it("reaches a private address when the server allows it", async () => {
 		const dispatch = vi.fn<EgressDispatch>(async () => new Response("ok"));
 		const clients = httpClients({ allowPrivateNetwork: true, lookup: publicDns, fetch: dispatch });
 

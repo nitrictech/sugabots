@@ -22,7 +22,7 @@ const writer = { botId: growthDesk.id, name: growthDesk.name };
 
 const plan: WrittenFileSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
-	conversationId: "0199a3a0-0000-7000-8000-0000000000e1",
+	chatId: "0199a3a0-0000-7000-8000-0000000000e1",
 	kind: "document",
 	title: "Q4 outreach plan",
 	version: 3,
@@ -33,7 +33,7 @@ const plan: WrittenFileSummary = {
 
 const dashboard: WrittenFileSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000000f2",
-	conversationId: "0199a3a0-0000-7000-8000-0000000000e1",
+	chatId: "0199a3a0-0000-7000-8000-0000000000e1",
 	kind: "html",
 	title: "Pipeline by stage",
 	version: 1,
@@ -44,7 +44,7 @@ const dashboard: WrittenFileSummary = {
 
 const brief: MessageFileSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000000f3",
-	conversationId: "0199a3a0-0000-7000-8000-0000000000e1",
+	chatId: "0199a3a0-0000-7000-8000-0000000000e1",
 	kind: "upload",
 	name: "Account list.csv",
 	contentType: "text/csv",
@@ -96,7 +96,7 @@ const meta = preview.meta({
 	title: "Views/Files",
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
-	// The workspace's answers, for what is unread in Inbox beside a phone's Back.
+	// The workspace's answers, for the counts and lists around the files.
 	beforeEach({ msw }) {
 		msw.use(...appHandlers());
 	},
@@ -132,7 +132,7 @@ export const List = meta.story({
 		await expect(sent).toHaveTextContent("47 KB, Kim Lee");
 		await expect(sent).toHaveAttribute(
 			"href",
-			expect.stringContaining(`/conversations/${brief.conversationId}/files/${brief.id}`),
+			expect.stringContaining(`/chats/${brief.chatId}/files/${brief.id}`),
 		);
 		const earlier = canvas.getByRole("region", { name: "Earlier this week" });
 		await expect(within(earlier).getByText(/A removed bot$/)).toBeVisible();
@@ -301,7 +301,7 @@ const written = (tool: string, file: WrittenFileSummary): ToolCallPart => ({
 	},
 	status: "completed",
 	error: null,
-	mutating: true,
+	writeOrDelete: true,
 	atOffset: 0,
 	startedAt: "2026-10-01T08:10:00.000Z",
 	finishedAt: "2026-10-01T08:10:01.000Z",
@@ -311,7 +311,7 @@ const written = (tool: string, file: WrittenFileSummary): ToolCallPart => ({
  * Under a bot's tool line, a file its reply wrote, read from the call's
  * result and fetched at that version: only its name until it is expanded.
  */
-export const InAConversation = meta.story({
+export const InAChat = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			http.get(`${import.meta.env.VITE_API_URL}/files/:fileId/versions/3`, () =>
@@ -338,9 +338,9 @@ export const InAConversation = meta.story({
  * On a phone, where a card is too narrow for its name and its buttons in one
  * row, the buttons drop below the name, which shows whole.
  */
-export const InAConversationOnAPhone = meta.story({
-	beforeEach: InAConversation.input.beforeEach,
-	render: InAConversation.input.render,
+export const InAChatOnAPhone = meta.story({
+	beforeEach: InAChat.input.beforeEach,
+	render: InAChat.input.render,
 	globals: { viewport: { value: "mobile1" } },
 	play: async ({ canvas }) => {
 		const maker = canvas.getByText("Document by Growth Desk");

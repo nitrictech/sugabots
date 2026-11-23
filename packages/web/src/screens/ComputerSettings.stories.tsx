@@ -22,9 +22,9 @@ const api = (path: string) => `${import.meta.env.VITE_API_URL}${path}`;
 const opensandbox: ComputerProvider = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
 	workspaceId: storyWorkspace.id,
-	preset: "opensandbox",
+	builtIn: "opensandbox",
 	name: "OpenSandbox",
-	settings: { preset: "opensandbox", serverUrl: "http://localhost:8090" },
+	settings: { builtIn: "opensandbox", serverUrl: "http://localhost:8090" },
 	enabled: false,
 	status: "missing_key",
 	hasApiKey: false,
@@ -138,15 +138,15 @@ export const InUse = meta.story({
 const savedChanges = fn<(changes: ComputerProviderUpdate) => void>();
 
 /**
- * OpenSandbox open to every host but the blocked ones. Going back to the
- * allowlist saves it in the provider's settings.
+ * OpenSandbox open to every host but the blocked ones. Going back to
+ * allowed hosts only saves it in the provider's settings.
  */
 export const OpenNetwork = meta.story({
 	beforeEach({ msw }) {
 		savedChanges.mockClear();
 		const provider: ComputerProvider = {
 			...opensandbox,
-			settings: { ...opensandbox.settings, preset: "opensandbox", networkMode: "open" },
+			settings: { ...opensandbox.settings, builtIn: "opensandbox", networkMode: "open" },
 			enabled: true,
 			hasApiKey: true,
 			status: "connected",
@@ -165,13 +165,13 @@ export const OpenNetwork = meta.story({
 		await expect(await canvas.findByRole("radio", { name: "Open" })).toBeChecked();
 		await expect(await canvas.findByText(/Any host but the blocked ones/)).toBeInTheDocument();
 
-		await userEvent.click(canvas.getByRole("radio", { name: "Allowlist" }));
+		await userEvent.click(canvas.getByRole("radio", { name: "Allowed hosts only" }));
 		await waitFor(() =>
 			expect(savedChanges).toHaveBeenCalledWith({
 				settings: {
-					preset: "opensandbox",
+					builtIn: "opensandbox",
 					serverUrl: "http://localhost:8090",
-					networkMode: "allowlist",
+					networkMode: "allowed-hosts-only",
 				},
 			}),
 		);
@@ -190,9 +190,9 @@ export const SwitchingProvider = meta.story({
 				{
 					...opensandbox,
 					id: "0199a3a0-0000-7000-8000-0000000000f2",
-					preset: "e2b",
+					builtIn: "e2b",
 					name: "E2B",
-					settings: { preset: "e2b" },
+					settings: { builtIn: "e2b" },
 					hasApiKey: true,
 					status: "untested",
 				},
@@ -219,9 +219,9 @@ export const E2bTemplateMissing = meta.story({
 				{
 					...opensandbox,
 					id: "0199a3a0-0000-7000-8000-0000000000f2",
-					preset: "e2b",
+					builtIn: "e2b",
 					name: "E2B",
-					settings: { preset: "e2b" },
+					settings: { builtIn: "e2b" },
 					hasApiKey: true,
 					status: "untested",
 				},
@@ -245,9 +245,9 @@ export const E2bTemplateReady = meta.story({
 				{
 					...opensandbox,
 					id: "0199a3a0-0000-7000-8000-0000000000f2",
-					preset: "e2b",
+					builtIn: "e2b",
 					name: "E2B",
-					settings: { preset: "e2b" },
+					settings: { builtIn: "e2b" },
 					hasApiKey: true,
 					status: "connected",
 				},
@@ -267,7 +267,7 @@ export const OpenSandboxCustomSize = meta.story({
 			answers([
 				{
 					...opensandbox,
-					settings: { ...opensandbox.settings, preset: "opensandbox", cpuCount: 4, memoryGiB: 8 },
+					settings: { ...opensandbox.settings, builtIn: "opensandbox", cpuCount: 4, memoryGiB: 8 },
 					hasApiKey: true,
 					status: "connected",
 				},
@@ -288,9 +288,9 @@ export const E2bCustomSize = meta.story({
 				{
 					...opensandbox,
 					id: "0199a3a0-0000-7000-8000-0000000000f2",
-					preset: "e2b",
+					builtIn: "e2b",
 					name: "E2B",
-					settings: { preset: "e2b", cpuCount: 4, memoryGiB: 8 },
+					settings: { builtIn: "e2b", cpuCount: 4, memoryGiB: 8 },
 					hasApiKey: true,
 					status: "connected",
 				},

@@ -6,7 +6,7 @@ import { fromFileSystem } from "./implementations/filesystem.ts";
 import { fromPostgres } from "./implementations/postgres.ts";
 
 /**
- * Bytes kept under path-like keys, such as `threads/<conversationId>/files/<fileId>`,
+ * Bytes kept under path-like keys, such as `chats/<chatId>/files/<fileId>`,
  * for any feature that stores files. The store knows nothing of who owns a
  * blob: each feature keeps its own records, points at blobs by key, and
  * deletes its blobs itself when what owns them goes, usually with
@@ -41,8 +41,8 @@ export interface Interface {
 	/** Removes what is stored under `key`, if anything is. */
 	readonly delete: (key: Key) => Effect.Effect<void, Failure>;
 	/**
-	 * Every blob under `prefix`, at any depth, ordered by key. `threads/a`
-	 * covers `threads/a/files/1` but not `threads/ab`.
+	 * Every blob under `prefix`, at any depth, ordered by key. `chats/a`
+	 * covers `chats/a/files/1` but not `chats/ab`.
 	 */
 	readonly list: (prefix: Key) => Effect.Effect<readonly Entry[], Failure>;
 	/** Removes every blob under `prefix`, matched as `list` matches it. */
@@ -66,7 +66,7 @@ export const make = Effect.gen(function* () {
 
 export const layerNoDeps = Layer.effect(Service, make);
 
-/** The database and `Ids` are infrastructure the entry point provides. */
+/** The database and `Ids` are infrastructure the server provides. */
 export const layer = layerNoDeps.pipe(Layer.provide(NodeFileSystem.layer));
 
 /** A blob's path, made by `key`. */

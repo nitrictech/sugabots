@@ -6,8 +6,8 @@ import {
 	AutomationTriggerKindChanged,
 	AutomationTriggerNotFound,
 	WebhookDeliveryIdHeaderRejected,
-} from "@sugabots/core/conversations/automations/automation";
-import { Automations } from "@sugabots/core/conversations/automations/automations";
+} from "@sugabots/core/chats/automations/automation";
+import { Automations } from "@sugabots/core/chats/automations/automations";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -21,7 +21,7 @@ const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000006";
 const PROJECT_ID = "0199a3a0-0000-7000-8000-000000000007";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000008";
 const RUN_ID = "0199a3a0-0000-7000-8000-000000000004";
-const CONVERSATION_ID = "0199a3a0-0000-7000-8000-000000000005";
+const CHAT_ID = "0199a3a0-0000-7000-8000-000000000005";
 
 const GOOD_AUTHORIZATION = "Bearer good-secret";
 
@@ -43,7 +43,7 @@ function webhookApp() {
 		}
 		return Effect.succeed({
 			kind: "run" as const,
-			run: { runId: RUN_ID, conversationId: CONVERSATION_ID, duplicate: false },
+			run: { runId: RUN_ID, chatId: CHAT_ID, duplicate: false },
 		});
 	});
 	return {
@@ -65,7 +65,7 @@ function deliver(
 		"content-type": options.contentType ?? "application/json",
 	};
 	if (options.authorization) headers.authorization = options.authorization;
-	return app.request(options.path ?? `/hooks/triggers/${TRIGGER_ID}`, {
+	return app.request(options.path ?? `/webhooks/triggers/${TRIGGER_ID}`, {
 		method: "POST",
 		headers,
 		body: options.body ?? JSON.stringify({ orderId: 42 }),
@@ -122,7 +122,7 @@ describe("Automation webhooks", () => {
 		const invalid = await deliver(app, { authorization: "Bearer wrong-secret" });
 		const unknown = await deliver(app, {
 			authorization: GOOD_AUTHORIZATION,
-			path: `/hooks/triggers/${OTHER_TRIGGER_ID}`,
+			path: `/webhooks/triggers/${OTHER_TRIGGER_ID}`,
 		});
 
 		expect([missing.status, invalid.status, unknown.status]).toEqual([401, 401, 401]);
@@ -189,21 +189,21 @@ function appAs(services: { automations?: Partial<Automations.Interface> } = {}) 
 const session = { authorization: "Bearer session", "content-type": "application/json" };
 
 /** The actor a double was called as, alongside what it was given. */
-const asked = <Input>(calls: Array<{ input: Input; userId: string }>, input: Input) =>
-	Effect.map(CurrentActor.Service, ({ userId }) => {
-		calls.push({ input, userId });
+const asked = <Input>(calls: Array<{ input: Input; personId: string }>, input: Input) =>
+	Effect.map(CurrentActor.Service, ({ personId }) => {
+		calls.push({ input, personId });
 	});
 
 describe("an automation's runs", () => {
 	it("starts a run by hand as the person asking", async () => {
-		const calls: Array<{ input: unknown; userId: string }> = [];
+		const calls: Array<{ input: unknown; personId: string }> = [];
 		const requestId = "0199a3a0-0000-7000-8000-0000000000c1";
 		const response = await appAs({
 			automations: {
 				run: (input) =>
 					Effect.as(asked(calls, input), {
 						runId: RUN_ID,
-						conversationId: CONVERSATION_ID,
+						chatId: CHAT_ID,
 						duplicate: false,
 					}),
 			},
@@ -215,7 +215,10 @@ describe("an automation's runs", () => {
 
 		expect(response.status).toBe(202);
 		expect(calls).toEqual([
-			{ input: { projectId: PROJECT_ID, automationId: AUTOMATION_ID, requestId }, userId: USER_ID },
+			{
+				input: { projectId: PROJECT_ID, automationId: AUTOMATION_ID, requestId },
+				personId: USER_ID,
+			},
 		]);
 	});
 
@@ -238,7 +241,7 @@ describe("an automation's triggers", () => {
 	const triggerPath = `/projects/${PROJECT_ID}/automations/${AUTOMATION_ID}/triggers/${TRIGGER_ID}`;
 
 	it("changes the trigger in the path, as the person asking", async () => {
-		const calls: Array<{ input: unknown; userId: string }> = [];
+		const calls: Array<{ input: unknown; personId: string }> = [];
 		const input = { kind: "webhook" as const, auth: { kind: "bearer" as const } };
 		const response = await appAs({
 			automations: {
@@ -257,7 +260,7 @@ describe("an automation's triggers", () => {
 					trigger: { projectId: PROJECT_ID, automationId: AUTOMATION_ID, triggerId: TRIGGER_ID },
 					changed: input,
 				},
-				userId: USER_ID,
+				personId: USER_ID,
 			},
 		]);
 	});

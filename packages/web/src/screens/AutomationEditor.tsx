@@ -195,7 +195,7 @@ interface DraftedTrigger {
 /**
  * A copy of the automation in the same project, paused so the two don't both run.
  * A webhook copy keeps its filter but has its own address and a new secret, so a
- * secret its sender made has to be pasted into it again. A repository copy runs on the
+ * secret its webhook source made has to be pasted into it again. A repository copy runs on the
  * same repository and events.
  */
 export function copyOf(automation: Automation, siblingNames: readonly string[]): NewAutomation {
@@ -222,7 +222,7 @@ function copiedTrigger(trigger: AutomationTrigger): AutomationTriggerInput {
 		case "github":
 			return {
 				kind: "github",
-				connectionId: trigger.connectionId,
+				connectorId: trigger.connectorId,
 				repository: trigger.repository,
 				events: trigger.events,
 			};

@@ -580,11 +580,11 @@ export function SettingsRadioMark({ checked }: { checked: boolean }) {
 }
 
 /** A pick-one row's look, for a `<label>` around a hidden radio: the row lifts under the pointer and rings when focused. */
-export const SETTINGS_RADIO_ROW =
+const SETTINGS_RADIO_ROW =
 	"flex min-h-14 cursor-pointer items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover active:bg-row-selected has-focus-visible:shadow-(--ring-shadow) has-disabled:cursor-default";
 
 /** One choice in a `SettingsRadioList`. */
-export interface SettingsRadioOption<Id extends string> {
+interface SettingsRadioOption<Id extends string> {
 	id: Id;
 	name: string;
 	description: string;
@@ -669,7 +669,7 @@ export function SettingsTestOutcome({ good, children }: { good: boolean; childre
 /**
  * A row's state as a small pill with a dot: green for something working
  * (Connected), grey for something set up but switched off (Disabled), red for
- * something whose last check failed (Connection failed).
+ * something whose last check failed (Didn't answer).
  */
 export function SettingsStatusBadge({
 	tone = "working",
@@ -754,7 +754,7 @@ export function SettingsDanger({
 }: {
 	/** What the action does, in full: Delete project. */
 	label: string;
-	/** What follows from it: Removes its bots, conversations and files. */
+	/** What follows from it: Removes its bots, chats and files. */
 	description: ReactNode;
 	/** The button's own word, short beside the label: Delete. */
 	action: string;

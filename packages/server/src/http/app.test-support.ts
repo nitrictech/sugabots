@@ -1,36 +1,36 @@
-import type { SessionUser } from "@sugabots/contracts";
+import type { SignedInPerson } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { Automations } from "@sugabots/core/chats/automations/automations";
+import { ChatDetailsView } from "@sugabots/core/chats/chat-details-view";
+import { ChatFiles } from "@sugabots/core/chats/chats/chat-files";
+import { ChatView } from "@sugabots/core/chats/chats/chat-view";
+import { Chats } from "@sugabots/core/chats/chats/chats";
+import { Reactions } from "@sugabots/core/chats/reactions/reactions";
+import { DesktopViewer } from "@sugabots/core/chats/tools/browser/viewer";
+import { Turns } from "@sugabots/core/chats/turns/turns";
 import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
 import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
 import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
-import { Automations } from "@sugabots/core/conversations/automations/automations";
-import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
-import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
-import { Chats } from "@sugabots/core/conversations/chats/chats";
-import { ConversationView } from "@sugabots/core/conversations/conversation-view";
-import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
-import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
-import { Turns } from "@sugabots/core/conversations/turns/turns";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Files } from "@sugabots/core/files/files";
 import { FilePages } from "@sugabots/core/files/pages";
-import { Installation } from "@sugabots/core/installation/installation";
 import { Notifications } from "@sugabots/core/notifications/notifications";
-import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
-import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
-import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
+import { ConnectorSetup } from "@sugabots/core/providers/connectors/connector-setup";
+import { GitHubApps } from "@sugabots/core/providers/connectors/github/github-app";
+import { GitHubConnectors } from "@sugabots/core/providers/connectors/github/github-connectors";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
 import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
 import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
+import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
 import { Effect, Layer } from "effect";
 import { Cookies, HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "../auth/authentication.ts";
@@ -52,7 +52,11 @@ export interface TestApp {
 }
 
 /** What a case may replace: the routes' services and what the API is built on. */
-type TestServices = HttpServices | Authentication.Service | Installation.Service | EventBus.Service;
+type TestServices =
+	| HttpServices
+	| Authentication.Service
+	| ServerSettings.Service
+	| EventBus.Service;
 
 /**
  * The complete route table, built by `apiLayer` as the server builds it, over
@@ -84,19 +88,19 @@ export function testRoutes<Provided extends TestServices = never>(
 	);
 }
 
-/** `Authentication` asking `resolveUser` who holds a request's credentials. */
-export function identifiedBy(resolveUser: UserResolver): Layer.Layer<Authentication.Service> {
+/** `Authentication` asking `resolvePerson` who holds a request's credentials. */
+export function identifiedBy(resolvePerson: PersonResolver): Layer.Layer<Authentication.Service> {
 	return Layer.succeed(Authentication.Service, {
 		handler: () => Effect.succeed(new Response(null, { status: 404 })),
-		identify: identifyFromResolver(resolveUser),
+		identify: identifyFromResolver(resolvePerson),
 	});
 }
 
-/** The test installation, with its web app at `webAppUrl`. */
-export function installationWithWebAppAt(webAppUrl: string): Layer.Layer<Installation.Service> {
+/** The test server, with its web app at `webAppUrl`. */
+export function serverSettingsWithWebAppAt(webAppUrl: string): Layer.Layer<ServerSettings.Service> {
 	return Layer.succeed(
-		Installation.Service,
-		Installation.fromUrls({ isProduction: false, publicUrl: BASE_URL, webAppUrl }),
+		ServerSettings.Service,
+		ServerSettings.fromUrls({ isProduction: false, publicUrl: BASE_URL, webAppUrl }),
 	);
 }
 
@@ -107,14 +111,14 @@ export function installationWithWebAppAt(webAppUrl: string): Layer.Layer<Install
  */
 const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(Accounts.Service),
-	// `/me` answers with these beside the user; a case about them supplies its own.
+	// `/me` answers with these beside the signed-in person; a case about them supplies its own.
 	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
 	unimplemented(ProjectAdministration.Service),
 	unimplemented(WorkspaceTimeZone.Service),
 	unimplemented(Files.Service),
 	unimplemented(FilePages.Service),
 	unimplemented(BotAdministration.Service),
-	unimplemented(Onboarding.Service),
+	unimplemented(WorkspaceSetup.Service),
 	unimplemented(ModelProviderSetup.Service),
 	unimplemented(SearchProviderSetup.Service),
 	unimplemented(ComputerProviderSetup.Service),
@@ -122,33 +126,33 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(DesktopViewer.Service),
 	unimplemented(ProjectComputerSetup.Service),
 	unimplemented(GitHubApps.Service),
-	unimplemented(GitHubConnections.Service),
-	unimplemented(ConnectionSetup.Service),
+	unimplemented(GitHubConnectors.Service),
+	unimplemented(ConnectorSetup.Service),
 	unimplemented(Usage.Service),
 	unimplemented(Notifications.Service),
 	unimplemented(Chats.Service),
 	unimplemented(ChatFiles.Service),
 	unimplemented(ChatView.Service),
 	unimplemented(Reactions.Service),
-	unimplemented(ConversationView.Service),
+	unimplemented(ChatDetailsView.Service),
 	unimplemented(Turns.Controls),
 	unimplemented(Automations.Service),
 	unimplemented(Automations.Webhooks),
-	unimplemented(Automations.ConnectionEvents),
+	unimplemented(Automations.ConnectorEvents),
 	Layer.succeed(StreamAccess.Service, closedStreamAccess),
 	identifiedBy(async () => null),
-	installationWithWebAppAt(WEB_ORIGIN),
+	serverSettingsWithWebAppAt(WEB_ORIGIN),
 	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: EventStore.inMemory() })),
 );
 
 /** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */
-export type UserResolver = (headers: Headers) => Promise<SessionUser | null>;
+export type PersonResolver = (headers: Headers) => Promise<SignedInPerson | null>;
 
 /** The `Authentication.identify` a test's resolver stands in for. */
-function identifyFromResolver(resolveUser: UserResolver) {
+function identifyFromResolver(resolvePerson: PersonResolver) {
 	return (headers: Headers) =>
 		Effect.map(
-			Effect.promise(() => resolveUser(headers)),
-			(user) => (user ? { user, refreshedCookies: Cookies.empty } : undefined),
+			Effect.promise(() => resolvePerson(headers)),
+			(person) => (person ? { person, refreshedCookies: Cookies.empty } : undefined),
 		);
 }

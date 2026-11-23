@@ -1,6 +1,6 @@
 import type { Modality, ModelCost } from "@opencode-ai/models";
 import { generatedAt, providers } from "@opencode-ai/models/snapshot";
-import type { ProviderModelCapability, ProviderPresetId } from "@sugabots/contracts";
+import type { BuiltInProviderId, ProviderModelCapability } from "@sugabots/contracts";
 import type { DiscoveredModel, ProviderIdentity } from "./dialect.ts";
 
 /**
@@ -13,7 +13,7 @@ import type { DiscoveredModel, ProviderIdentity } from "./dialect.ts";
  * out for it, and a dependency bump is what brings in new models. A provider
  * that does report something about a model is always believed over it.
  *
- * Not the catalog: that is our list of presets, this is models.dev's list of
+ * Not our built-in providers: this is models.dev's list of
  * models.
  */
 
@@ -52,10 +52,10 @@ export interface ModelRegistry {
 }
 
 /**
- * models.dev's id for each preset that it lists, where the two differ or the
+ * models.dev's id for each built-in provider that it lists, where the two differ or the
  * registry gives no address to match on. Anything else is matched by host.
  */
-const MODELS_DEV_PROVIDER: Partial<Record<ProviderPresetId, string>> = {
+const MODELS_DEV_PROVIDER: Partial<Record<BuiltInProviderId, string>> = {
 	anthropic: "anthropic",
 	openai: "openai",
 	chatgpt: "openai",
@@ -108,7 +108,7 @@ export function registryFrom(source: RegistrySource, version: string): ModelRegi
 
 	const ownEntry = (modelId: string, provider: ProviderIdentity): RegistryModel | undefined => {
 		const providerId =
-			(provider.preset && MODELS_DEV_PROVIDER[provider.preset]) ??
+			(provider.builtIn && MODELS_DEV_PROVIDER[provider.builtIn]) ??
 			providerByHost.get(new URL(provider.baseUrl).hostname);
 		return providerId ? source[providerId]?.models[modelId] : undefined;
 	};
@@ -142,7 +142,7 @@ function capabilitiesOf(modelId: string, known: RegistryModel): ProviderModelCap
 	const input = known.modalities?.input ?? [];
 	const output = known.modalities?.output ?? [];
 	if (known.tool_call) capabilities.push("tools");
-	if (known.reasoning) capabilities.push("reasoning");
+	if (known.reasoning) capabilities.push("thinking");
 	if (input.includes("image")) capabilities.push("vision");
 	if (input.includes("audio")) capabilities.push("audio");
 	if (output.includes("image")) capabilities.push("images");

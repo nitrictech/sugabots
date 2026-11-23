@@ -1,5 +1,5 @@
-import type { ConversationDetails, Message, WrittenFileSummary } from "@sugabots/contracts";
-import { listedThread, type TestConnection, testPerson } from "@sugabots/contracts/testing";
+import type { ChatDetails, Message, WrittenFileSummary } from "@sugabots/contracts";
+import { listedChat, type TestConnector, testPerson } from "@sugabots/contracts/testing";
 import { delay, HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -7,37 +7,37 @@ import { growthDesk, linearHandler, revenue, storyBots } from "@/shell/story-fix
 import {
 	appHandlers,
 	chatPath,
-	connectionHandlers,
+	connectorHandlers,
 	StoryApp,
 	storyChatDetails,
-	storyProjectThreadDetails,
-	storyProjectThreadFor,
-	storyThreadFor,
-	storyUser,
+	storyChatFor,
+	storyPerson,
+	storyProjectChatDetails,
+	storyProjectChatFor,
 	storyWorkspace,
 } from "../story-app.tsx";
 
 /*
- * A bot's thread as the app shows it: the sidebar with the projects' threads and bots beside it, the
- * header across the top, and the thread with its composer. On a phone the chat
+ * A bot's chat as the app shows it: the sidebar with the projects' chats and bots beside it, the
+ * header across the top, and the chat with its composer. On a phone the chat
  * takes the screen, under a compact header with Back to the list.
  */
 
 function said(id: string, by: "you" | "bot", text: string, at: string): Message {
-	const thread = storyThreadFor(growthDesk).id;
+	const chat = storyChatFor(growthDesk).id;
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000005${id}`,
-		conversationId: thread,
+		chatId: chat,
 		author:
 			by === "you"
-				? testPerson({ id: storyUser.id, name: storyUser.name })
+				? testPerson({ id: storyPerson.id, name: storyPerson.name })
 				: {
 						kind: "bot",
 						id: growthDesk.id,
 						name: growthDesk.name,
 						handle: growthDesk.handle,
 						color: growthDesk.color,
-						face: growthDesk.face,
+						eyes: growthDesk.eyes,
 						shape: growthDesk.shape,
 					},
 		kind: "text",
@@ -48,7 +48,7 @@ function said(id: string, by: "you" | "bot", text: string, at: string): Message 
 	};
 }
 
-const conversation: Message[] = [
+const saidInChat: Message[] = [
 	said(
 		"01",
 		"bot",
@@ -75,25 +75,25 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
-		msw.use(...appHandlers({ messages: { [growthDesk.id]: conversation } }));
+		msw.use(...appHandlers({ messages: { [growthDesk.id]: saidInChat } }));
 	},
 	render: () => <StoryApp path={chatPath(growthDesk)} />,
 });
 
-/** A bot's thread beside the sidebar, headed by its title after its bot, with Mark done in its header. */
-export const Conversation = meta.story({
+/** A bot's chat beside the sidebar, headed by its title after its bot, with Resolve in its header. */
+export const Chat = meta.story({
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(await within(log).findByText(/Drafted both/)).toBeInTheDocument();
 		await expect(
 			await canvas.findByRole("heading", { name: `Working with ${growthDesk.name}`, level: 1 }),
 		).toBeVisible();
-		await expect(canvas.getByRole("button", { name: "Mark done" })).toBeVisible();
+		await expect(canvas.getByRole("button", { name: "Resolve" })).toBeVisible();
 	},
 });
 
-/** A bot's connection whose sign-in the server refused during a turn. */
-function expiredConnection(n: number, name: string, url: string): TestConnection {
+/** A bot's connector whose sign-in the server refused during a turn. */
+function expiredConnector(n: number, name: string, url: string): TestConnector {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000007${String(n).padStart(2, "0")}`,
 		workspaceId: revenue.workspaceId,
@@ -129,16 +129,16 @@ function expiredConnection(n: number, name: string, url: string): TestConnection
 	};
 }
 
-const expiredLinear = expiredConnection(1, "Linear", "https://mcp.linear.app/mcp");
+const expiredLinear = expiredConnector(1, "Linear", "https://mcp.linear.app/mcp");
 
 /**
- * A connection whose sign-in expired: the composer says the bot can't use it,
+ * A connector whose sign-in expired: the composer says the bot can't use it,
  * with a sign-in straight from there. Closing
  * it puts it away.
  */
 export const SignInExpired = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...connectionHandlers([expiredLinear]));
+		msw.use(...connectorHandlers([expiredLinear]));
 	},
 	play: async ({ canvas }) => {
 		const said = await canvas.findByText("Growth Desk can't use Linear until you sign in again.");
@@ -151,26 +151,24 @@ export const SignInExpired = meta.story({
 	},
 });
 
-/** Several expired at once: counted rather than named, with the bot's connections a click away. */
+/** Several expired at once: counted rather than named, with the bot's connectors a click away. */
 export const SignInsExpired = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			...connectionHandlers([
+			...connectorHandlers([
 				expiredLinear,
-				expiredConnection(2, "Notion", "https://mcp.notion.com/mcp"),
-				expiredConnection(3, "Asana", "https://mcp.asana.com/sse"),
+				expiredConnector(2, "Notion", "https://mcp.notion.com/mcp"),
+				expiredConnector(3, "Asana", "https://mcp.asana.com/sse"),
 			]),
 		);
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText(
-				`${growthDesk.name} can't use 3 connections until you sign in again.`,
-			),
+			await canvas.findByText(`${growthDesk.name} can't use 3 connectors until you sign in again.`),
 		).toBeVisible();
-		await expect(canvas.getByRole("link", { name: "Open connections" })).toHaveAttribute(
+		await expect(canvas.getByRole("link", { name: "Open connectors" })).toHaveAttribute(
 			"href",
-			`/${storyWorkspace.slug}/bots/${growthDesk.handle}/connections`,
+			`/${storyWorkspace.slug}/bots/${growthDesk.handle}/connectors`,
 		);
 	},
 });
@@ -178,7 +176,7 @@ export const SignInsExpired = meta.story({
 /** Replying while a sign-in is expired: the two strips stack, the reply's nearest the draft. */
 export const SignInExpiredWhileReplying = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...connectionHandlers([expiredLinear]));
+		msw.use(...connectorHandlers([expiredLinear]));
 	},
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
@@ -196,20 +194,20 @@ export const SignInExpiredWhileReplying = meta.story({
 	},
 });
 
-/** Someone who can't manage the bot's connections is told who can fix it, with nothing to press. */
+/** Someone who can't manage the bot's connectors is told who can fix it, with nothing to press. */
 export const SignInExpiredForSomeoneWhoCannotSignIn = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			...connectionHandlers([expiredLinear]),
+			...connectorHandlers([expiredLinear]),
 			...appHandlers({
-				messages: { [growthDesk.id]: conversation },
+				messages: { [growthDesk.id]: saidInChat },
 				bots: storyBots.map((bot) =>
 					bot.id === growthDesk.id
 						? {
 								...bot,
 								permissions: {
 									...bot.permissions,
-									resources: { ...bot.permissions.resources, manageConnections: false },
+									resources: { ...bot.permissions.resources, manageConnectors: false },
 								},
 							}
 						: bot,
@@ -231,7 +229,7 @@ export const SignInExpiredForSomeoneWhoCannotSignIn = meta.story({
 export const SignInExpiredOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	beforeEach({ msw }) {
-		msw.use(...connectionHandlers([expiredLinear]));
+		msw.use(...connectorHandlers([expiredLinear]));
 	},
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("Linear's sign-in expired.")).toBeVisible();
@@ -241,13 +239,13 @@ export const SignInExpiredOnAPhone = meta.story({
 	},
 });
 
-/** A project opened from the sidebar opens its newest thread. */
-export const ProjectOpensNewestThread = meta.story({
+/** A project opened from the sidebar opens its newest chat. */
+export const ProjectOpensNewestChat = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await canvas.findByRole("log", { name: "Chat messages" });
 		await expect(canvas.getByRole("heading", { name: "Planning", level: 1 })).toBeInTheDocument();
-		const list = await canvas.findByRole("region", { name: "Threads" });
+		const list = await canvas.findByRole("region", { name: "Chats" });
 		await expect(await within(list).findByRole("link", { name: /^Planning/ })).toHaveAttribute(
 			"aria-current",
 			"page",
@@ -255,8 +253,8 @@ export const ProjectOpensNewestThread = meta.story({
 	},
 });
 
-/** The project's people, writing to each other: a thread with no bot in it, addressed to the project. */
-const projectThread: Message[] = [
+/** The project's people, writing to each other: a chat with no bot in it, addressed to the project. */
+const projectChat: Message[] = [
 	{
 		...said(
 			"21",
@@ -264,22 +262,22 @@ const projectThread: Message[] = [
 			"Northwind signed. Thanks for the push, everyone.",
 			"2026-09-18T06:12:00.000Z",
 		),
-		conversationId: storyProjectThreadFor(revenue).id,
+		chatId: storyProjectChatFor(revenue).id,
 	},
 	{
 		...said("22", "you", "Drinks on Friday?", "2026-09-18T06:13:00.000Z"),
-		conversationId: storyProjectThreadFor(revenue).id,
+		chatId: storyProjectChatFor(revenue).id,
 		author: testPerson({ id: "0199a3a0-0000-7000-8000-000000000012", name: "Jay Young" }),
 	},
 ];
 
 /**
- * A project's thread: everyone in the project, no bot, and a composer addressed to the
+ * A project's chat: everyone in the project, no bot, and a composer addressed to the
  * project; its Details hold who is in it and its files.
  */
-export const ProjectThread = meta.story({
+export const ProjectChat = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...appHandlers({ projectThreadMessages: { [revenue.id]: projectThread } }));
+		msw.use(...appHandlers({ projectChatMessages: { [revenue.id]: projectChat } }));
 	},
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
@@ -291,8 +289,8 @@ export const ProjectThread = meta.story({
 	},
 });
 
-/** A project's thread before anyone has written in it opens on its name and the project it is in. */
-export const ProjectThreadEmpty = meta.story({
+/** A project's chat before anyone has written in it opens on its name and the project it is in. */
+export const ProjectChatEmpty = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
@@ -313,10 +311,10 @@ const failingAutomation = {
 function failingAutomationHandlers() {
 	const feed = {
 		...storyChatDetails(growthDesk),
-		conversation: {
-			...storyChatDetails(growthDesk).conversation,
+		chat: {
+			...storyChatDetails(growthDesk).chat,
 			id: failingAutomation.feed,
-			rootConversationId: failingAutomation.feed,
+			rootChatId: failingAutomation.feed,
 			kind: "automation_feed" as const,
 			title: "Overnight outbound",
 		},
@@ -331,7 +329,7 @@ function failingAutomationHandlers() {
 	const run = (id: string, at: string) => ({
 		kind: "run",
 		id,
-		conversationId: id,
+		chatId: id,
 		automationName: "Overnight outbound",
 		triggerKind: "routine",
 		state: "failed",
@@ -340,8 +338,8 @@ function failingAutomationHandlers() {
 		createdAt: at,
 	});
 	return [
-		http.get(`${API}/conversations/${failingAutomation.feed}`, () => HttpResponse.json(feed)),
-		http.get(`${API}/conversations/${failingAutomation.feed}/messages`, () =>
+		http.get(`${API}/chats/${failingAutomation.feed}`, () => HttpResponse.json(feed)),
+		http.get(`${API}/chats/${failingAutomation.feed}/messages`, () =>
 			HttpResponse.json({
 				items: [
 					run(failingAutomation.runs[0] as string, "2026-09-17T06:00:00.000Z"),
@@ -362,13 +360,13 @@ function failingAutomationHandlers() {
 /** The feed is Growth Desk's own, as the automation is in its default project. */
 const failingAutomationFeed = () => (
 	<StoryApp
-		path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/threads/${failingAutomation.feed}`}
+		path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/chats/${failingAutomation.feed}`}
 	/>
 );
 
 /**
  * An automation whose last two runs failed, each its own run with why it failed;
- * the latest offers Retry and the way to fix its connection, and a line says
+ * the latest offers Retry and the way to fix its connector, and a line says
  * the automation paused itself, which its switch shows.
  */
 export const FailingAutomation = meta.story({
@@ -396,37 +394,37 @@ export const FailingAutomation = meta.story({
 });
 
 const pricingChat = {
-	...storyProjectThreadFor(revenue),
+	...storyProjectChatFor(revenue),
 	id: "0199a3a0-0000-7000-8000-00000000c9f1",
 	title: "Pricing",
 };
 
 /**
- * A project's thread goes by its own name, listed with the project's other
- * threads, and offers whoever runs the project a way to rename or archive it.
+ * A project's chat goes by its own name, listed with the project's other
+ * chats, and offers whoever runs the project a way to rename it.
  */
 export const NamedChat = meta.story({
 	beforeEach({ msw }) {
-		const details = storyProjectThreadDetails(revenue, storyBots);
+		const details = storyProjectChatDetails(revenue, storyBots);
 		msw.use(
-			http.get(`${API}/projects/${revenue.id}/threads`, () =>
+			http.get(`${API}/projects/${revenue.id}/chats`, () =>
 				HttpResponse.json({
 					automations: [],
-					threads: [listedThread(storyProjectThreadFor(revenue)), listedThread(pricingChat)],
+					chats: [listedChat(storyProjectChatFor(revenue)), listedChat(pricingChat)],
 				}),
 			),
-			http.get(`${API}/conversations/${pricingChat.id}`, () =>
+			http.get(`${API}/chats/${pricingChat.id}`, () =>
 				HttpResponse.json({
 					...details,
-					conversation: {
-						...details.conversation,
+					chat: {
+						...details.chat,
 						id: pricingChat.id,
-						rootConversationId: pricingChat.id,
+						rootChatId: pricingChat.id,
 						title: "Pricing",
 					},
 				}),
 			),
-			http.get(`${API}/conversations/${pricingChat.id}/messages`, () =>
+			http.get(`${API}/chats/${pricingChat.id}/messages`, () =>
 				HttpResponse.json({ items: [], nextCursor: null }),
 			),
 			...appHandlers(),
@@ -437,15 +435,14 @@ export const NamedChat = meta.story({
 	),
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Pricing", level: 1 })).toBeVisible();
-		const list = await canvas.findByRole("region", { name: "Threads" });
+		const list = await canvas.findByRole("region", { name: "Chats" });
 		await expect(await within(list).findByRole("link", { name: /^Pricing/ })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
 		await expect(canvas.getByRole("textbox", { name: "Message Pricing" })).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "More for Pricing" }));
-		await expect(await screen.findByRole("menuitem", { name: "Rename thread" })).toBeVisible();
-		await expect(screen.getByRole("menuitem", { name: "Archive thread" })).toBeVisible();
+		await expect(await screen.findByRole("menuitem", { name: "Rename chat" })).toBeVisible();
 	},
 });
 
@@ -453,36 +450,36 @@ export const NamedChat = meta.story({
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
 /**
- * Each thread's row says what its bots are doing, under its title: working on
- * a reply, waiting on an approval, or done with one the viewer hasn't read.
- * A thread with none of these shows only who is talking in it.
+ * Each chat's row says what its bots are doing, under its title: working on
+ * a reply, waiting on an approval, or replied with one the viewer hasn't read.
+ * A chat with none of these shows only who is talking in it.
  */
-export const ThreadActivity = meta.story({
+export const ChatStatuses = meta.story({
 	beforeEach({ msw }) {
-		const thread = storyProjectThreadFor(revenue);
+		const chat = storyProjectChatFor(revenue);
 		const titled = (title: string, suffix: string) => ({
-			...thread,
+			...chat,
 			id: `0199a3a0-0000-7000-8000-00000000c9${suffix}`,
 			title,
 		});
 		msw.use(
-			http.get(`${API}/projects/${revenue.id}/threads`, () =>
+			http.get(`${API}/projects/${revenue.id}/chats`, () =>
 				HttpResponse.json({
 					automations: [],
-					threads: [
+					chats: [
 						{
-							...listedThread(titled("Deploy the pricing page", "e1")),
-							activity: { kind: "working", since: minutesAgo(20) },
+							...listedChat(titled("Deploy the pricing page", "e1")),
+							status: { kind: "working", since: minutesAgo(20) },
 						},
 						{
-							...listedThread(titled("Refund for Acme", "e2")),
-							activity: { kind: "waiting", since: minutesAgo(2) },
+							...listedChat(titled("Refund for Acme", "e2")),
+							status: { kind: "waiting", since: minutesAgo(2) },
 						},
 						{
-							...listedThread(titled("Weekly revenue report", "e3")),
-							activity: { kind: "finished", at: minutesAgo(1) },
+							...listedChat(titled("Weekly revenue report", "e3")),
+							status: { kind: "replied", at: minutesAgo(1) },
 						},
-						listedThread(thread),
+						listedChat(chat),
 					],
 				}),
 			),
@@ -491,24 +488,26 @@ export const ThreadActivity = meta.story({
 	},
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}/files`} />,
 	play: async ({ canvas }) => {
-		const list = await canvas.findByRole("region", { name: "Threads" });
+		const list = await canvas.findByRole("region", { name: "Chats" });
 		await expect(await within(list).findByText("Working 20m")).toBeVisible();
 		await expect(within(list).getByText("Waiting 2m")).toBeVisible();
 		await expect(
-			within(within(list).getByRole("link", { name: /^Weekly revenue report/ })).getByText("Done"),
+			within(within(list).getByRole("link", { name: /^Weekly revenue report/ })).getByText(
+				"Replied",
+			),
 		).toBeVisible();
 	},
 });
 
-/** On a phone the project's thread takes the screen, with Back to the project's list. */
-export const ProjectThreadOnAPhone = meta.story({
+/** On a phone the project's chat takes the screen, with Back to the project's list. */
+export const ProjectChatOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	beforeEach({ msw }) {
-		msw.use(...appHandlers({ projectThreadMessages: { [revenue.id]: projectThread } }));
+		msw.use(...appHandlers({ projectChatMessages: { [revenue.id]: projectChat } }));
 	},
 	render: () => (
 		<StoryApp
-			path={`/${storyWorkspace.slug}/projects/${revenue.slug}/${storyProjectThreadFor(revenue).id}`}
+			path={`/${storyWorkspace.slug}/projects/${revenue.slug}/${storyProjectChatFor(revenue).id}`}
 		/>
 	),
 	play: async ({ canvas }) => {
@@ -518,7 +517,7 @@ export const ProjectThreadOnAPhone = meta.story({
 	},
 });
 
-/** On a phone a project opens on its threads to pick from, rather than on one of them. */
+/** On a phone a project opens on its chats to pick from, rather than on one of them. */
 export const ProjectOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
@@ -531,7 +530,7 @@ export const ProjectOnAPhone = meta.story({
 	},
 });
 
-/** On a phone: the thread alone, with Back to the bot it is with. */
+/** On a phone: the chat alone, with Back to the bot it is with. */
 export const Phone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
@@ -550,10 +549,10 @@ export const PhoneDetailsAfterMessages = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			// Answered by the app's own handler after the wait, once the messages are in.
-			http.get(`${API}/conversations/:conversationId`, async () => {
+			http.get(`${API}/chats/:chatId`, async () => {
 				await delay(DETAILS_DELAY_MS);
 			}),
-			...appHandlers({ messages: { [growthDesk.id]: conversation } }),
+			...appHandlers({ messages: { [growthDesk.id]: saidInChat } }),
 		);
 	},
 	play: async ({ canvas }) => {
@@ -574,12 +573,12 @@ const DETAILS_DELAY_MS = 600;
 export const ReplyToAMessage = meta.story({
 	beforeEach({ msw }) {
 		// What is sent stays in the chat, as the API keeps it, so it is there once the chat reloads.
-		const chat = [...conversation];
+		const chat = [...saidInChat];
 		msw.use(
 			...appHandlers({ messages: { [growthDesk.id]: chat } }),
-			http.post(`${API}/conversations/:conversationId/messages`, async ({ request }) => {
+			http.post(`${API}/chats/:chatId/messages`, async ({ request }) => {
 				const sent = (await request.json()) as { id: string; message: string; replyTo?: string };
-				const quoted = conversation.find((message) => message.id === sent.replyTo);
+				const quoted = saidInChat.find((message) => message.id === sent.replyTo);
 				const reply: Message = {
 					...said("10", "you", sent.message, "2026-09-18T06:08:00.000Z"),
 					id: sent.id,
@@ -622,7 +621,7 @@ export const ReplyToAMessage = meta.story({
  */
 export const ReactToAMessage = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...reactionHandlers(conversation.map((message) => ({ ...message }))));
+		msw.use(...reactionHandlers(saidInChat.map((message) => ({ ...message }))));
 	},
 	play: async ({ canvas }) => {
 		const log = await canvas.findByRole("log", { name: "Chat messages" });
@@ -668,7 +667,7 @@ function reactionHandlers(
 		onTakenBack = () => {},
 	}: { addAnswered?: Promise<void>; onTakenBack?: () => void } = {},
 ) {
-	const you = { id: storyUser.id, name: storyUser.name, at: "2026-09-18T06:09:00.000Z" };
+	const you = { id: storyPerson.id, name: storyPerson.name, at: "2026-09-18T06:09:00.000Z" };
 	const change = (messageId: string, emoji: string, reacting: boolean) => {
 		const index = chat.findIndex(({ id }) => id === messageId);
 		const message = chat[index];
@@ -724,7 +723,7 @@ let quickChange: { chat: Message[]; answerAdd: () => void; takenBack: Promise<vo
  */
 export const ChangeYourMindQuickly = meta.story({
 	beforeEach({ msw }) {
-		const chat = conversation.map((message) =>
+		const chat = saidInChat.map((message) =>
 			/Want me to draft replies/.test(message.content)
 				? { ...message, reactions: [{ emoji: "👍", people: [jay] }] }
 				: { ...message },
@@ -769,8 +768,8 @@ export const ChangeYourMindQuickly = meta.story({
 });
 
 /**
- * Opens the thread's Details once the thread has loaded, and returns them.
- * The Details button is drawn while the thread loads and drawn again once it
+ * Opens the chat's Details once the chat has loaded, and returns them.
+ * The Details button is drawn while the chat loads and drawn again once it
  * has, so it is found only after; and Details may already be open, as a wide
  * screen opens them unless this browser last closed them, so it is pressed
  * only when they are closed.
@@ -789,12 +788,12 @@ export const Details = meta.story({
 	},
 });
 
-/** On a phone, tapping the thread's title opens Details over the whole screen, header and all. */
+/** On a phone, tapping the chat's title opens Details over the whole screen, header and all. */
 export const DetailsOnAPhone = meta.story({
 	globals: { viewport: { value: "iphone12", isRotated: false } },
 	play: async ({ canvas }) => {
 		await userEvent.click(
-			await canvas.findByRole("button", { name: storyThreadFor(growthDesk).title }),
+			await canvas.findByRole("button", { name: storyChatFor(growthDesk).title }),
 		);
 		await expect(await canvas.findByRole("complementary", { name: "Details" })).toBeInTheDocument();
 	},
@@ -819,7 +818,7 @@ const asker = {
 	name: growthDesk.name,
 	handle: growthDesk.handle,
 	color: growthDesk.color,
-	face: growthDesk.face,
+	eyes: growthDesk.eyes,
 	shape: growthDesk.shape,
 };
 const asked = {
@@ -828,7 +827,7 @@ const asked = {
 	name: linearHandler.name,
 	handle: linearHandler.handle,
 	color: linearHandler.color,
-	face: linearHandler.face,
+	eyes: linearHandler.eyes,
 	shape: linearHandler.shape,
 };
 
@@ -849,7 +848,7 @@ const withCollaboration: Message[] = [
 				id: "0199a3a0-0000-7000-8000-000000000592",
 				botId: linearHandler.id,
 				botName: linearHandler.name,
-				conversationId: collaborationId,
+				chatId: collaborationId,
 				brief: "Check Sentry and open an issue if nothing is tracked",
 				status: "answered",
 				answer: "41 events in 24h, all hitting the 30s gateway limit. I opened LIN-482.",
@@ -862,7 +861,7 @@ const withCollaboration: Message[] = [
 function collabMessage(id: string, author: typeof asker, text: string, at: string): Message {
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000005${id}`,
-		conversationId: collaborationId,
+		chatId: collaborationId,
 		author,
 		kind: "text",
 		status: "complete",
@@ -872,18 +871,18 @@ function collabMessage(id: string, author: typeof asker, text: string, at: strin
 	};
 }
 
-const collaboration: ConversationDetails = {
-	conversation: {
+const collaboration: ChatDetails = {
+	chat: {
 		id: collaborationId,
 		workspaceId: growthDesk.workspaceId,
 		projectId: null,
 		botId: linearHandler.id,
-		rootConversationId: storyThreadFor(growthDesk).id,
+		rootChatId: storyChatFor(growthDesk).id,
 		kind: "collaboration",
 		title: "Check Sentry and open an issue if nothing is tracked",
 		status: "done",
-		parentConversationId: storyThreadFor(growthDesk).id,
-		doneAt: null,
+		parentChatId: storyChatFor(growthDesk).id,
+		resolvedAt: null,
 		createdAt: "2026-09-18T06:03:00.000Z",
 		updatedAt: "2026-09-18T06:05:00.000Z",
 	},
@@ -912,19 +911,19 @@ const collaboration: ConversationDetails = {
 };
 
 const collaborationHandlers = [
-	http.get(`${API}/conversations/${collaborationId}`, () => HttpResponse.json(collaboration)),
+	http.get(`${API}/chats/${collaborationId}`, () => HttpResponse.json(collaboration)),
 	...appHandlers({ messages: { [growthDesk.id]: withCollaboration } }),
 ];
 
-/** A collaboration opened from its line: the sidebar with the two bots' conversation, the chat's own on the right. */
+/** A collaboration opened from its line: the sidebar with the two bots' chat, the chat's own on the right. */
 export const Collaboration = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...collaborationHandlers);
 	},
-	render: () => <StoryApp path={`${chatPath(growthDesk)}?item=${collaborationId}`} />,
+	render: () => <StoryApp path={`${chatPath(growthDesk)}?nestedChat=${collaborationId}`} />,
 	play: async ({ canvas }) => {
 		const panel = await canvas.findByRole("complementary", {
-			name: collaboration.conversation.title,
+			name: collaboration.chat.title,
 		});
 		await expect(
 			within(panel).getByText(`${growthDesk.name} and ${linearHandler.name}`),
@@ -938,10 +937,10 @@ export const CollaborationOnAPhone = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...collaborationHandlers);
 	},
-	render: () => <StoryApp path={`${chatPath(growthDesk)}?item=${collaborationId}`} />,
+	render: () => <StoryApp path={`${chatPath(growthDesk)}?nestedChat=${collaborationId}`} />,
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByRole("complementary", { name: collaboration.conversation.title }),
+			await canvas.findByRole("complementary", { name: collaboration.chat.title }),
 		).toBeInTheDocument();
 	},
 });
@@ -961,7 +960,7 @@ const computerHandlers = (messages: Message[]) => [
 /** Growth Desk's reply in progress, having opened a page in its browser. */
 const browsing: Message = {
 	...said("90", "bot", "", "2026-09-18T06:20:00.000Z"),
-	status: "streaming",
+	status: "writing",
 	parts: [
 		{
 			type: "tool_call",
@@ -971,7 +970,7 @@ const browsing: Message = {
 			output: null,
 			status: "running",
 			error: null,
-			mutating: false,
+			writeOrDelete: false,
 			atOffset: 0,
 			startedAt: "2026-09-18T06:20:01.000Z",
 			finishedAt: null,
@@ -982,7 +981,7 @@ const browsing: Message = {
 /** The bot's computer, a card in its Details from a tablet up, which opens its desktop. */
 export const Computer = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...computerHandlers(conversation));
+		msw.use(...computerHandlers(saidInChat));
 	},
 	play: async ({ canvas }) => {
 		const details = await openDetails(canvas);
@@ -1014,7 +1013,7 @@ export const NoComputer = meta.story({
  */
 export const ComputerInUse = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...computerHandlers([...conversation, browsing]));
+		msw.use(...computerHandlers([...saidInChat, browsing]));
 	},
 	play: async ({ canvas }) => {
 		const screen = await canvas.findByRole("article", { name: `${growthDesk.name}'s screen` });
@@ -1032,7 +1031,7 @@ export const ComputerInUse = meta.story({
 
 const pricing: WrittenFileSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000005f1",
-	conversationId: storyThreadFor(growthDesk).id,
+	chatId: storyChatFor(growthDesk).id,
 	kind: "document",
 	title: "Competitor pricing",
 	version: 1,
@@ -1068,7 +1067,7 @@ const madePricing: Message = {
 			},
 			status: "completed",
 			error: null,
-			mutating: true,
+			writeOrDelete: true,
 			atOffset: 0,
 			startedAt: "2026-09-18T06:07:30.000Z",
 			finishedAt: "2026-09-18T06:08:00.000Z",
@@ -1085,7 +1084,7 @@ const fileHandlers = () => {
 		shownVersion: { number: 1, author: pricing.createdBy, createdAt: pricing.createdAt },
 	};
 	return [
-		...appHandlers({ messages: { [growthDesk.id]: [...conversation, madePricing] } }),
+		...appHandlers({ messages: { [growthDesk.id]: [...saidInChat, madePricing] } }),
 		// The bot's files, which the file opened must be among to be shown as the bot's.
 		http.get(`${API}/projects/:projectId/files`, ({ params }) =>
 			HttpResponse.json(params.projectId === growthDesk.defaultProjectId ? [pricing] : []),
@@ -1138,7 +1137,7 @@ const uploadedFileId = "0199a3a0-0000-7000-8000-000000000a51";
 let lastSent: { message: string; attachments?: string[] } | undefined;
 
 const attachmentHandlers = [
-	http.post(`${API}/conversations/:conversationId/files`, ({ request }) => {
+	http.post(`${API}/chats/:chatId/files`, ({ request }) => {
 		const query = new URL(request.url).searchParams;
 		return HttpResponse.json(
 			{
@@ -1150,7 +1149,7 @@ const attachmentHandlers = [
 			{ status: 201 },
 		);
 	}),
-	http.post(`${API}/conversations/:conversationId/messages`, async ({ request }) => {
+	http.post(`${API}/chats/:chatId/messages`, async ({ request }) => {
 		lastSent = (await request.json()) as typeof lastSent;
 		return HttpResponse.json(
 			said("61", "you", lastSent?.message ?? "", "2026-09-18T06:10:00.000Z"),
@@ -1159,7 +1158,7 @@ const attachmentHandlers = [
 			},
 		);
 	}),
-	...appHandlers({ messages: { [growthDesk.id]: conversation } }),
+	...appHandlers({ messages: { [growthDesk.id]: saidInChat } }),
 ];
 
 /**
@@ -1201,7 +1200,7 @@ export const AttachAndSend = meta.story({
 export const SendRefusedFileGone = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
-			http.post(`${API}/conversations/:conversationId/messages`, () =>
+			http.post(`${API}/chats/:chatId/messages`, () =>
 				HttpResponse.json(
 					{
 						_tag: "BadRequest",

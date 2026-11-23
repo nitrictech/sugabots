@@ -7,14 +7,14 @@ import { Computers } from "../../computers/computers.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import {
 	bot,
+	membership,
 	modelProvider,
+	person,
 	project,
 	projectBot,
 	providerModel,
-	user,
 	workspace,
 	workspaceDefaultModel,
-	workspaceMember,
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -25,15 +25,15 @@ import {
 	servedOnPostgres,
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
-import { ModelProviderRepository } from "../../providers/model-providers/model-provider-repository.ts";
+import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
 import { unimplemented } from "../../testing.ts";
 import { LeadsProjects } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
-import { ProjectRepository } from "../projects/project-repository.ts";
+import { ProjectStore } from "../projects/project-store.ts";
 import { seedProject } from "../projects/seed.test-support.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { BotAdministration } from "./bot-administration.ts";
-import { BotRepository } from "./bot-repository.ts";
+import { BotStore } from "./bot-store.ts";
 import { PersonalAssistants } from "./personal-assistants.ts";
 
 /** Bots run only on a model the workspace offers, which here is `OFFERED`. */
@@ -41,9 +41,9 @@ const OFFERED = "offered-model";
 const ALSO_OFFERED = "also-offered-model";
 
 describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
-	let bots: Promised<BotRepository.Interface>;
+	let bots: Promised<BotStore.Interface>;
 	let assistants: Promised<PersonalAssistants.Interface>;
-	let administrationAs: (userId: string) => Promised<BotAdministration.Interface>;
+	let administrationAs: (personId: string) => Promised<BotAdministration.Interface>;
 	/** The administration as the workspace's administrator. */
 	let administration: Promised<BotAdministration.Interface>;
 	let workspaceId: string;
@@ -53,15 +53,15 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 	let providerReachable = true;
 
 	beforeAll(async () => {
-		bots = await servedOnPostgres(BotRepository.Service, BotRepository.layer);
+		bots = await servedOnPostgres(BotStore.Service, BotStore.layer);
 		assistants = await servedOnPostgres(PersonalAssistants.Service, PersonalAssistants.layer);
 		administrationAs = await servedOnPostgresAs(
 			BotAdministration.Service,
 			BotAdministration.layerNoDeps.pipe(
 				Layer.provide([
 					Authorization.layer,
-					BotRepository.layer,
-					ModelProviderRepository.layer,
+					BotStore.layer,
+					ModelProviderStore.layer,
 					PersonalAssistants.layer,
 					unimplemented(ProjectComputers.Service, {
 						destroy: ({ projectId }) =>
@@ -96,18 +96,18 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 				.values({ name: stamp, slug: `models-${stamp}` })
 				.returning(),
 		);
-		const [person] = await onDatabase((db) =>
+		const [somebody] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
 				.returning(),
 		);
-		if (!space || !person) throw new Error("could not create the fixtures");
+		if (!space || !somebody) throw new Error("could not create the fixtures");
 		workspaceId = space.id;
-		creatorId = person.id;
+		creatorId = somebody.id;
 		administration = administrationAs(creatorId);
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values({ workspaceId, userId: creatorId, role: "admin" }),
+			db.insert(membership).values({ workspaceId, personId: creatorId, role: "admin" }),
 		);
 		const [provider] = await onDatabase((db) =>
 			db
@@ -155,7 +155,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			bot: { name: "Triage", model: OFFERED },
 		});
 		const [creator] = await onDatabase((db) =>
-			db.select().from(user).where(eq(user.id, creatorId)),
+			db.select().from(person).where(eq(person.id, creatorId)),
 		);
 
 		expect(made.createdBy).toEqual({
@@ -189,7 +189,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		async (model) => {
 			await expect(
 				administration.create({ workspace: workspaceId, bot: { name: "Triage", model } }),
-			).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
+			).rejects.toBeInstanceOf(ModelProviderStore.ModelNotEnabled);
 
 			expect(
 				await onDatabase((db) => db.select().from(bot).where(eq(bot.workspaceId, workspaceId))),
@@ -208,7 +208,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 
 		await expect(
 			administration.update({ botId: made.id, changes: { model: "switched-off" } }),
-		).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
+		).rejects.toBeInstanceOf(ModelProviderStore.ModelNotEnabled);
 		expect(
 			(await administration.update({ botId: made.id, changes: { model: null } })).model,
 		).toBeNull();
@@ -237,7 +237,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 				key: "compact",
 				model: "unknown-model",
 			}),
-		).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
+		).rejects.toBeInstanceOf(ModelProviderStore.ModelNotEnabled);
 		expect(
 			(
 				await administration.setSystemBotModel({
@@ -256,7 +256,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		});
 		const [viewer, stranger] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values([
 					{ name: "Lee", email: `lee-${crypto.randomUUID()}@example.com` },
 					{ name: "Kim", email: `kim-${crypto.randomUUID()}@example.com` },
@@ -265,7 +265,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		);
 		if (!viewer || !stranger) throw new Error("could not create the people");
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values({ workspaceId, userId: viewer.id, role: "viewer" }),
+			db.insert(membership).values({ workspaceId, personId: viewer.id, role: "viewer" }),
 		);
 
 		await expect(
@@ -287,38 +287,38 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		);
 	});
 
-	/** Lee, a member of the workspace. */
-	const aMember = async () => {
-		const [member] = await onDatabase((db) =>
+	/** Lee, an editor in the workspace. */
+	const anEditor = async () => {
+		const [editor] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({ name: "Lee", email: `lee-${crypto.randomUUID()}@example.com` })
 				.returning(),
 		);
-		if (!member) throw new Error("could not create the member");
+		if (!editor) throw new Error("could not create the editor");
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values({ workspaceId, userId: member.id, role: "member" }),
+			db.insert(membership).values({ workspaceId, personId: editor.id, role: "editor" }),
 		);
-		return member.id;
+		return editor.id;
 	};
 
 	it("lets only a bot's creator or an admin let it use its computer", async () => {
-		const asMember = administrationAs(await aMember());
+		const asEditor = administrationAs(await anEditor());
 		const admins = await administration.create({
 			workspace: workspaceId,
 			bot: { name: "Triage", model: OFFERED },
 		});
 
 		await expect(
-			asMember.update({ botId: admins.id, changes: { usesComputer: true } }),
+			asEditor.update({ botId: admins.id, changes: { usesComputer: true } }),
 		).rejects.toBeInstanceOf(ActionForbidden);
-		const own = await asMember.create({
+		const own = await asEditor.create({
 			workspace: workspaceId,
 			bot: { name: "Scout", model: OFFERED, usesComputer: true },
 		});
 		expect(own.usesComputer).toBe(true);
 		expect(
-			(await asMember.update({ botId: own.id, changes: { usesComputer: false } })).usesComputer,
+			(await asEditor.update({ botId: own.id, changes: { usesComputer: false } })).usesComputer,
 		).toBe(false);
 	});
 
@@ -353,9 +353,9 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		);
 		if (!launch) throw new Error("could not create the project");
 		const choosing = holdTransaction(
-			Effect.flatMap(ProjectRepository.Service, (projects) =>
+			Effect.flatMap(ProjectStore.Service, (projects) =>
 				projects.update(workspaceId, launch.id, { leadBotId: made.id }),
-			).pipe(Effect.provide(ProjectRepository.layer)),
+			).pipe(Effect.provide(ProjectStore.layer)),
 		);
 		await choosing.held;
 
@@ -368,16 +368,16 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 	});
 
 	it("pins a bot to the actor's sidebar and takes it off again", async () => {
-		const asMember = administrationAs(await aMember());
+		const asEditor = administrationAs(await anEditor());
 		const made = await administration.create({
 			workspace: workspaceId,
 			bot: { name: "Triage", model: OFFERED },
 		});
 
-		expect(await asMember.setPinned({ botId: made.id, pinned: true })).toMatchObject({
+		expect(await asEditor.setPinned({ botId: made.id, pinned: true })).toMatchObject({
 			pinned: true,
 		});
-		expect(await asMember.setPinned({ botId: made.id, pinned: false })).toMatchObject({
+		expect(await asEditor.setPinned({ botId: made.id, pinned: false })).toMatchObject({
 			pinned: false,
 		});
 		expect(await listedTo(administration, made.id)).toMatchObject({ pinned: true });
@@ -431,7 +431,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 
 			const again = await assistants.provisionWithModel({
 				workspaceId,
-				userId: creatorId,
+				personId: creatorId,
 				model: ALSO_OFFERED,
 			});
 
@@ -445,19 +445,19 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 
 		it("moves to the model named when the workspace does not offer its own", async () => {
 			// Made without a model, as for somebody joining a workspace that offers none.
-			const unassigned = await assistants.provision({ workspaceId, userId: creatorId });
+			const unassigned = await assistants.provision({ workspaceId, personId: creatorId });
 			expect(unassigned.model).toBeNull();
 
 			const moved = await assistants.provisionWithModel({
 				workspaceId,
-				userId: creatorId,
+				personId: creatorId,
 				model: ALSO_OFFERED,
 			});
 
 			expect(moved).toMatchObject({ id: unassigned.id, model: ALSO_OFFERED });
 		});
 
-		it("moves onto the model its person picks when it has none, as at onboarding", async () => {
+		it("moves onto the model its person picks when it has none, as at workspace setup", async () => {
 			const unassigned = await administration.ensureAssistant({ workspace: workspaceId });
 			expect(unassigned.model).toBeNull();
 
@@ -483,7 +483,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		it("is not made on a model the workspace does not offer", async () => {
 			await expect(
 				administration.ensureAssistant({ workspace: workspaceId, model: "switched-off" }),
-			).rejects.toBeInstanceOf(ModelProviderRepository.ModelNotEnabled);
+			).rejects.toBeInstanceOf(ModelProviderStore.ModelNotEnabled);
 		});
 
 		it("lets its person change only its name and look", async () => {
@@ -495,7 +495,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			expect(
 				await administration.update({
 					botId: assistant.id,
-					changes: { name: "Friday", color: "green", face: "square", shape: "circle" },
+					changes: { name: "Friday", color: "green", eyes: "square", shape: "circle" },
 				}),
 			).toMatchObject({ name: "Friday", color: "green" });
 			for (const changes of [
@@ -512,9 +512,9 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			}
 		});
 
-		it("is hidden from everybody but its person, an admin included", async () => {
-			const memberId = await aMember();
-			const assistant = await administrationAs(memberId).ensureAssistant({
+		it("is hidden from everybody but its somebody, an admin included", async () => {
+			const editorId = await anEditor();
+			const assistant = await administrationAs(editorId).ensureAssistant({
 				workspace: workspaceId,
 			});
 
@@ -529,7 +529,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 
 	describe("a bot the actor did not make", () => {
 		it("lets an administrator change and remove another person's public bot", async () => {
-			const made = await administrationAs(await aMember()).create({
+			const made = await administrationAs(await anEditor()).create({
 				workspace: workspaceId,
 				bot: { name: "Triage", model: OFFERED },
 			});
@@ -545,8 +545,8 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		});
 
 		it("names nobody as its creator once they have left the workspace, though they are in another", async () => {
-			const memberId = await aMember();
-			const made = await administrationAs(memberId).create({
+			const editorId = await anEditor();
+			const made = await administrationAs(editorId).create({
 				workspace: workspaceId,
 				bot: { name: "Triage", model: OFFERED },
 			});
@@ -559,15 +559,13 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			if (!elsewhere) throw new Error("could not create the other workspace");
 			await onDatabase((db) =>
 				db
-					.insert(workspaceMember)
-					.values({ workspaceId: elsewhere.id, userId: memberId, role: "member" }),
+					.insert(membership)
+					.values({ workspaceId: elsewhere.id, personId: editorId, role: "editor" }),
 			);
 			await onDatabase((db) =>
 				db
-					.delete(workspaceMember)
-					.where(
-						and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.userId, memberId)),
-					),
+					.delete(membership)
+					.where(and(eq(membership.workspaceId, workspaceId), eq(membership.personId, editorId))),
 			);
 
 			const listed = await administration.list({ workspace: workspaceId });
@@ -575,7 +573,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		});
 
 		it("lets an administrator read and change another person's private bot, but not talk to it", async () => {
-			const made = await administrationAs(await aMember()).create({
+			const made = await administrationAs(await anEditor()).create({
 				workspace: workspaceId,
 				bot: { name: "Diary", model: OFFERED, visibility: "private" },
 			});
@@ -589,8 +587,8 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 			).toMatchObject({ name: "Journal", permissions: { talk: false } });
 		});
 
-		it("lets a member use another person's public bot but not change it, and hides a private one", async () => {
-			const asMember = administrationAs(await aMember());
+		it("lets an editor use another person's public bot but not change it, and hides a private one", async () => {
+			const asEditor = administrationAs(await anEditor());
 			const shared = await administration.create({
 				workspace: workspaceId,
 				bot: { name: "Triage", model: OFFERED },
@@ -600,16 +598,16 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 				bot: { name: "Ledger", model: OFFERED, visibility: "private" },
 			});
 
-			expect(await listedTo(asMember, shared.id)).toMatchObject({
+			expect(await listedTo(asEditor, shared.id)).toMatchObject({
 				permissions: { talk: true, update: false },
 			});
 			await expect(
-				asMember.update({ botId: shared.id, changes: { name: "Mine now" } }),
+				asEditor.update({ botId: shared.id, changes: { name: "Mine now" } }),
 			).rejects.toBeInstanceOf(ActionForbidden);
-			await expect(asMember.remove({ botId: shared.id })).rejects.toBeInstanceOf(ActionForbidden);
-			expect(await listedTo(asMember, hidden.id)).toBeUndefined();
+			await expect(asEditor.remove({ botId: shared.id })).rejects.toBeInstanceOf(ActionForbidden);
+			expect(await listedTo(asEditor, hidden.id)).toBeUndefined();
 			await expect(
-				asMember.update({ botId: hidden.id, changes: { name: "Mine now" } }),
+				asEditor.update({ botId: hidden.id, changes: { name: "Mine now" } }),
 			).rejects.toBeInstanceOf(ResourceHidden);
 		});
 	});

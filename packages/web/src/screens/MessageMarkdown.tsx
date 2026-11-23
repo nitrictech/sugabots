@@ -89,7 +89,7 @@ const BREAK_LONG_WORDS = "break-words";
  * rehypeFocusableCodeBlocks makes fenced code scrollers keyboard-focusable
  * and labels them for assistive technology. Streamdown forwards these props
  * from the `code` element to its scroller. A group provides a label without
- * adding every code block in the conversation to landmark navigation.
+ * adding every code block in the chat to landmark navigation.
  */
 const rehypeFocusableCodeBlocks: Plugin<[], Root> = () => (tree) => {
 	visit(tree, "element", (node) => {
@@ -127,7 +127,7 @@ const rehypeSoftBreaks: Plugin<[], Root> = () => (tree) => {
 
 /*
  * An image is drawn as a link to it, never loaded: a bot led by planted
- * instructions could write one whose address carries the conversation, sent
+ * instructions could write one whose address carries the chat, sent
  * out as soon as anyone read the reply. Sugabots' own addresses are no
  * exception. Inside a link already, an image is only its words.
  */

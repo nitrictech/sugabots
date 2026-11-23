@@ -55,7 +55,7 @@ export const Hero = meta.story({
 				</span>
 			}
 			title="Nitric"
-			description="4 members"
+			description="4 people"
 		>
 			<SettingsGroup label="Workspace">
 				<SettingsRow label="Name" trailing={<SettingsValue>Nitric</SettingsValue>} />
@@ -66,7 +66,7 @@ export const Hero = meta.story({
 			</SettingsGroup>
 			<SettingsDanger
 				label="Delete workspace"
-				description="Removes every project, bot and conversation in Nitric."
+				description="Removes every project, bot and chat in Nitric."
 				action="Delete"
 				onClick={fn()}
 			/>
@@ -85,7 +85,7 @@ export const Listing = meta.story({
 		>
 			<SettingsGroup
 				label="Growth Desk"
-				note="Each automation posts into its own thread when it runs."
+				note="Each automation posts into its own chat when it runs."
 			>
 				<SettingsRow
 					icon={
@@ -192,7 +192,7 @@ export const RowAlert = meta.story({
 	render: () => (
 		<SettingsPage title="People">
 			<SettingsGroup label="Role">
-				<SettingsRow label="Role" trailing={<SettingsValue>Member</SettingsValue>} />
+				<SettingsRow label="Role" trailing={<SettingsValue>Editor</SettingsValue>} />
 				<SettingsRowAlert>The role could not be changed. Try again.</SettingsRowAlert>
 			</SettingsGroup>
 		</SettingsPage>

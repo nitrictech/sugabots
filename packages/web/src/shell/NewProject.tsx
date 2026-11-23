@@ -10,8 +10,8 @@ import {
 import { type FormEvent, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import { useCreateProject, useProjects } from "@/lib/projects.ts";
+import { ProjectColourPicker } from "@/shell/AvatarPicker.tsx";
 import { LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
-import { ProjectColourPicker } from "@/shell/LookPicker.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import {
@@ -77,7 +77,7 @@ export function NewProjectDialog({
 						className="size-16 rounded-2xl text-2xl"
 					/>
 				</div>
-				<SettingsGroup note="The lead bot answers the project's threads unless people mention another. You can add people and bots next.">
+				<SettingsGroup note="The lead bot answers the project's chats unless people mention another. You can add people and bots next.">
 					<SettingsFieldRow
 						label="Name"
 						value={name}

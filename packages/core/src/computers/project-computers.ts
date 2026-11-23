@@ -17,10 +17,10 @@ import { Ids } from "../ids/ids.ts";
 import { Egress } from "../providers/network/egress.ts";
 import type { UserFacing } from "../user-message.ts";
 import { reachOf } from "./allowed-hosts.ts";
-import { ComputerCredentials } from "./computer-credentials.ts";
 import { type DiskUsage, measureDisk } from "./computer-disk.ts";
 import { freeDiskSpace, SET_ASIDE_DIRECTORY } from "./computer-disk-clearing.ts";
-import { ComputerProviderRepository } from "./computer-provider-repository.ts";
+import { ComputerProviderStore } from "./computer-provider-store.ts";
+import { ComputerSignIn } from "./computer-sign-in.ts";
 import { Computers } from "./computers.ts";
 import { pinnedToDigest, withoutTag } from "./image-digest.ts";
 import type { ComputerLeaseHolderKind } from "./sql.ts";
@@ -29,11 +29,11 @@ import type { ComputerLeaseHolderKind } from "./sql.ts";
 const LEASE = Duration.seconds(90);
 /** How often a turn renews its lease, well inside {@link LEASE}. */
 export const LEASE_RENEWAL = Duration.seconds(30);
-/** How long a computer sits with no turn using it before it is paused. */
-const IDLE_BEFORE_PAUSE = Duration.minutes(5);
+/** How long a computer sits with no turn using it before it is asleep. */
+const IDLE_BEFORE_SLEEP = Duration.minutes(5);
 /** How long before its credentials expire a computer in use is given new ones. */
 const CREDENTIAL_REFRESH_MARGIN = Duration.minutes(10);
-/** How often the sweeps look for idle computers to pause, and running ones to measure. */
+/** How often the sweeps look for idle computers to put to sleep, and running ones to measure. */
 const SWEEP_INTERVAL = Duration.minutes(1);
 /** How long a running computer's disk goes before it is measured again. */
 const DISK_MEASUREMENT_INTERVAL = Duration.minutes(2);
@@ -55,7 +55,7 @@ const CLEARED_BELOW_SHARE = 0.7;
  * The only writer of `computer` and `computer_lease`: each project's one
  * computer, made the first time one of its bots needs it, then opened, and resumed, on
  * every later use. A turn using it holds a lease, and a computer no turn has
- * held for {@link IDLE_BEFORE_PAUSE} is paused, so it stops costing compute.
+ * held for {@link IDLE_BEFORE_SLEEP} is asleep, so it stops costing compute.
  * A turn waiting for a person's approval has ended its run and holds no
  * lease, so nobody pays for a computer while a person is away.
  */
@@ -67,7 +67,7 @@ export interface Interface {
 	 */
 	readonly open: (
 		project: Project,
-		provider: ComputerProviderRepository.Configured,
+		provider: ComputerProviderStore.Configured,
 		holder: Holder,
 	) => Effect.Effect<Opened, Computers.Unavailable>;
 	/**
@@ -78,22 +78,22 @@ export interface Interface {
 	/** Ends `holder`'s leases, starting the idle time of the computers it held. */
 	readonly release: (holder: Holder) => Effect.Effect<void>;
 	/**
-	 * Pauses every computer idle for {@link IDLE_BEFORE_PAUSE}, first clearing
+	 * Puts to sleep every computer idle for {@link IDLE_BEFORE_SLEEP}, first clearing
 	 * any last measured close to full to below {@link CLEARED_BELOW_SHARE}.
 	 */
-	readonly pauseIdle: Effect.Effect<void>;
+	readonly sleepIdle: Effect.Effect<void>;
 	/**
 	 * Upgrades every computer nobody has used or watched for
-	 * {@link IDLE_BEFORE_PAUSE} whose image is behind what the workspace's
+	 * {@link IDLE_BEFORE_SLEEP} whose image is behind what the workspace's
 	 * enabled provider makes computers from now, as {@link upgrade} does, and
-	 * leaves the new one paused. Only at a provider that takes images as they
+	 * leaves the new one asleep. Only at a provider that takes images as they
 	 * are; a template is left to be rebuilt and upgraded to by hand. Skips for
 	 * {@link UPGRADE_RETRY} a computer that failed to upgrade.
 	 */
 	readonly upgradeIdle: Effect.Effect<void>;
 	/**
 	 * Measures the disk of every running computer not measured for
-	 * {@link DISK_MEASUREMENT_INTERVAL}, without resuming any: a paused
+	 * {@link DISK_MEASUREMENT_INTERVAL}, without resuming any: a sleeping
 	 * computer's disk doesn't change, so its last measurement still holds.
 	 */
 	readonly measureDisks: Effect.Effect<void>;
@@ -107,11 +107,11 @@ export interface Interface {
 	 */
 	readonly destroyAllMadeBy: (
 		workspaceId: string,
-		provider: ComputerProviderRepository.Configured,
+		provider: ComputerProviderStore.Configured,
 	) => Effect.Effect<void, Computers.Unavailable>;
 	/**
 	 * Keeps the running computers of the workspace's projects, or of one
-	 * project, to the hosts each may reach now, signed in as each project is now. A paused one
+	 * project, to the hosts each may reach now, signed in as each project is now. A sleeping one
 	 * is brought up to date when it is next opened; one that can't be reached
 	 * is logged and left for then too.
 	 */
@@ -128,7 +128,7 @@ export interface Interface {
 	 */
 	readonly status: (
 		project: Project,
-		current: ComputerProviderRepository.Configured | undefined,
+		current: ComputerProviderStore.Configured | undefined,
 	) => Effect.Effect<Status>;
 	/** Destroys the project's computer and forgets it; its next use makes a new one. */
 	readonly reset: (project: Project) => Effect.Effect<void, ComputerInUse | Computers.Unavailable>;
@@ -156,7 +156,7 @@ export interface Interface {
 	 */
 	readonly upgrade: (
 		project: Project,
-		provider: ComputerProviderRepository.Configured,
+		provider: ComputerProviderStore.Configured,
 	) => Effect.Effect<void, ComputerInUse | NoComputer | UpgradeFailed | Computers.Unavailable>;
 }
 
@@ -167,12 +167,12 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const computers = yield* Computers.Service;
 	const ids = yield* Ids.Service;
-	const providers = yield* ComputerProviderRepository.Service;
-	const signIns = yield* ComputerCredentials.Service;
+	const providers = yield* ComputerProviderStore.Service;
+	const signIns = yield* ComputerSignIn.Service;
 	const egress = yield* Egress.Service;
 	const operation = yield* serviceOperations<Interface>("ProjectComputers");
 	// One change to a project's computer at a time: two turns' first commands make
-	// one computer, and the sweep never pauses one a turn is opening.
+	// one computer, and the sweep never puts to sleep one a turn is opening.
 	const changes = new Map<string, Semaphore.Semaphore>();
 	const oneAtATime = (projectId: string) => {
 		let semaphore = changes.get(projectId);
@@ -208,25 +208,25 @@ export const make = Effect.gen(function* () {
 		});
 
 	/**
-	 * The connection with an image its provider takes as it is pinned to the
+	 * The provider access with an image its provider takes as it is pinned to the
 	 * digest its tag names now, so a new computer gets that image rather than
 	 * whatever the provider's host last pulled for the tag.
 	 */
-	const pinnedConnection = (connection: Computers.Connection) =>
-		connection.provider === "opensandbox"
+	const pinnedAccess = (access: Computers.ProviderAccess) =>
+		access.provider === "opensandbox"
 			? Effect.map(
-					pinnedNow(connection.image),
-					(pinned): Computers.Connection => ({ ...connection, image: pinned ?? connection.image }),
+					pinnedNow(access.image),
+					(pinned): Computers.ProviderAccess => ({ ...access, image: pinned ?? access.image }),
 				)
-			: Effect.succeed(connection);
+			: Effect.succeed(access);
 
-	/** Whether a computer made from `madeFrom` is behind what `connection` makes computers from now. */
-	const isBehind = (madeFrom: string, connection: Computers.Connection) =>
-		connection.provider === "opensandbox"
-			? Effect.map(pinnedNow(connection.image), (pinned) =>
-					imageIsBehind(madeFrom, connection.image, pinned),
+	/** Whether a computer made from `madeFrom` is behind what `access` makes computers from now. */
+	const isBehind = (madeFrom: string, access: Computers.ProviderAccess) =>
+		access.provider === "opensandbox"
+			? Effect.map(pinnedNow(access.image), (pinned) =>
+					imageIsBehind(madeFrom, access.image, pinned),
 				)
-			: Effect.succeed(madeFrom !== imageOf(connection));
+			: Effect.succeed(madeFrom !== imageOf(access));
 
 	// When a computer that failed to upgrade on its own may be tried again, by its record's id.
 	const upgradeRetryAt = new Map<string, number>();
@@ -257,15 +257,15 @@ export const make = Effect.gen(function* () {
 	/**
 	 * Brings a running computer's network up to date, as {@link applyNetwork}
 	 * does on open. Checked again under the project's lock, so a computer the sweep
-	 * paused meanwhile isn't resumed for it.
+	 * asleep meanwhile isn't resumed for it.
 	 */
 	const applyNetworkWhileRunning = (row: ComputerRow) =>
 		oneAtATime(row.projectId)(
 			Effect.gen(function* () {
 				if (!(yield* isRecordedRunning(row))) return;
-				const configured = yield* providers.connection(row.workspaceId, row.computerProviderId);
+				const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
 				if (!configured) return;
-				const at = computers.forConnection(configured.connection);
+				const at = computers.forAccess(configured.access);
 				const { computer } = yield* at.open(row.providerComputerId);
 				yield* applyNetwork(row, computer, at);
 			}),
@@ -310,9 +310,9 @@ export const make = Effect.gen(function* () {
 	 */
 	const destroyRecordedComputer = (row: ComputerRow) =>
 		Effect.gen(function* () {
-			const configured = yield* providers.connection(row.workspaceId, row.computerProviderId);
+			const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
 			if (configured) {
-				yield* computers.forConnection(configured.connection).destroy(row.providerComputerId);
+				yield* computers.forAccess(configured.access).destroy(row.providerComputerId);
 			}
 			yield* forget(row);
 		});
@@ -334,14 +334,14 @@ export const make = Effect.gen(function* () {
 			db
 				.select({ id: computerTable.id })
 				.from(computerTable)
-				.where(and(sameComputer(row), isNull(computerTable.pausedAt))),
+				.where(and(sameComputer(row), isNull(computerTable.sleptAt))),
 		).pipe(Effect.map((rows) => rows.length > 0));
 
 	/**
-	 * Opens `row`'s computer, resuming it if it is paused, and records it
+	 * Opens `row`'s computer, resuming it if it is asleep, and records it
 	 * running, as one step that isn't stopped part-way when whoever asked goes
 	 * away: the provider finishes a resume it has started regardless, and a
-	 * computer recorded paused is one the idle sweep never pauses again. It is
+	 * computer recorded asleep is one the idle sweep never puts to sleep again. It is
 	 * recorded as just used too: another process's sweep doesn't wait for the
 	 * project's lock, and would otherwise find it idle before a lease holds it.
 	 */
@@ -352,7 +352,7 @@ export const make = Effect.gen(function* () {
 					query((db) =>
 						db
 							.update(computerTable)
-							.set({ pausedAt: null, lastUsedAt: now })
+							.set({ sleptAt: null, lastUsedAt: now })
 							.where(sameComputer(row)),
 					),
 				),
@@ -378,19 +378,19 @@ export const make = Effect.gen(function* () {
 		);
 
 	/**
-	 * Makes a computer through `connection`, from its image pinned to its
+	 * Makes a computer through `access`, from its image pinned to its
 	 * digest, and hands it to `record` with what it was made from, as one step
 	 * that isn't stopped part-way when whoever asked goes away: a computer made
 	 * but never recorded is one nothing would find to destroy. One whose
 	 * recording fails is destroyed.
 	 */
 	const madeAndRecorded = <E, R>(
-		connection: Computers.Connection,
+		access: Computers.ProviderAccess,
 		spec: Computers.Spec,
 		record: (computer: Computers.Computer, image: string) => Effect.Effect<unknown, E, R>,
 	) =>
-		Effect.flatMap(pinnedConnection(connection), (pinned) => {
-			const at = computers.forConnection(pinned);
+		Effect.flatMap(pinnedAccess(access), (pinned) => {
+			const at = computers.forAccess(pinned);
 			return Effect.uninterruptible(
 				Effect.tap(at.create(spec), (computer) =>
 					record(computer, imageOf(pinned)).pipe(
@@ -400,12 +400,12 @@ export const make = Effect.gen(function* () {
 			);
 		});
 
-	const made = (project: Project, provider: ComputerProviderRepository.Configured) =>
+	const made = (project: Project, provider: ComputerProviderStore.Configured) =>
 		Effect.gen(function* () {
 			const id = yield* ids.next;
-			const at = computers.forConnection(provider.connection);
+			const at = computers.forAccess(provider.access);
 			return yield* madeAndRecorded(
-				provider.connection,
+				provider.access,
 				yield* specFor(project, id, at),
 				(computer, image) =>
 					query((db) =>
@@ -428,10 +428,10 @@ export const make = Effect.gen(function* () {
 	 */
 	const leaveOldProvider = (workspaceId: string, providerId: string, id: Computers.ComputerId) =>
 		Effect.gen(function* () {
-			const old = yield* providers.connection(workspaceId, providerId);
+			const old = yield* providers.access(workspaceId, providerId);
 			if (!old) return;
 			yield* computers
-				.forConnection(old.connection)
+				.forAccess(old.access)
 				.destroy(id)
 				.pipe(
 					Effect.catchTag("ComputerUnavailable", (failure) =>
@@ -443,7 +443,7 @@ export const make = Effect.gen(function* () {
 				);
 		});
 
-	const opened = (project: Project, provider: ComputerProviderRepository.Configured) =>
+	const opened = (project: Project, provider: ComputerProviderStore.Configured) =>
 		Effect.gen(function* () {
 			const row = yield* recorded(project);
 			const replaced = (computer: Computers.Computer): Opened => ({
@@ -461,24 +461,24 @@ export const make = Effect.gen(function* () {
 				yield* forget(row);
 				return replaced(yield* made(project, provider));
 			}
-			const at = computers.forConnection(provider.connection);
+			const at = computers.forAccess(provider.access);
 			return yield* openedAndRecorded(at, row).pipe(
 				Effect.map(
 					({ computer, resumed }): Opened => ({
 						computer,
 						arrival: !resumed
 							? "running"
-							: at.capabilities.pauseKeeps === "disk"
+							: at.capabilities.sleepKeeps === "disk"
 								? "rebooted"
 								: "resumed",
 					}),
 				),
 				Effect.catchTag("ComputerMissing", () =>
-					Effect.map(restarted(project, row, provider.connection), replaced),
+					Effect.map(restarted(project, row, provider.access), replaced),
 				),
 				Effect.catchTag("ComputerStopped", () =>
 					Effect.map(
-						restarted(project, row, provider.connection),
+						restarted(project, row, provider.access),
 						(computer): Opened => ({ computer, arrival: "rebooted" }),
 					),
 				),
@@ -489,11 +489,11 @@ export const make = Effect.gen(function* () {
 	 * A new computer in place of one that is gone or stopped for good, made
 	 * with its work name, so it carries on with any work kept apart from it.
 	 */
-	const restarted = (project: Project, row: ComputerRow, connection: Computers.Connection) =>
+	const restarted = (project: Project, row: ComputerRow, access: Computers.ProviderAccess) =>
 		Effect.gen(function* () {
-			const at = computers.forConnection(connection);
+			const at = computers.forAccess(access);
 			const fresh = yield* madeAndRecorded(
-				connection,
+				access,
 				yield* specFor(project, row.id, at),
 				(computer, image) => moveRecord(row, row.computerProviderId, computer.id, image),
 			);
@@ -530,7 +530,7 @@ export const make = Effect.gen(function* () {
 						computerProviderId: providerId,
 						providerComputerId: computerId,
 						image,
-						pausedAt: null,
+						sleptAt: null,
 						lastUsedAt: now,
 						diskUsage: null,
 						diskMeasuredAt: null,
@@ -574,7 +574,7 @@ export const make = Effect.gen(function* () {
 		});
 
 	/**
-	 * Re-measures after clearing, since a paused computer keeps its last
+	 * Re-measures after clearing, since a sleeping computer keeps its last
 	 * measurement. Runs under the project's lock, so a turn arriving meanwhile
 	 * waits instead of finding its folder half gone.
 	 */
@@ -601,7 +601,7 @@ export const make = Effect.gen(function* () {
 			yield* recordMeasurement(row, yield* measureDisk(computer));
 		}).pipe(
 			Effect.catchTags({
-				// Pausing it finds the same, and deals with it.
+				// Putting it to sleep finds the same, and deals with it.
 				ComputerMissing: () => Effect.void,
 				ComputerStopped: () => Effect.void,
 				ComputerUnavailable: (failure) =>
@@ -620,10 +620,10 @@ export const make = Effect.gen(function* () {
 		);
 
 	/**
-	 * Pauses one idle computer, unless a turn took it since it was found idle,
+	 * Puts one idle computer to sleep, unless a turn took it since it was found idle,
 	 * clearing space on its disk first if it is filling.
 	 */
-	const pauseIfStillIdle = (row: ComputerRow, idleSince: Date, now: Date) =>
+	const sleepIfStillIdle = (row: ComputerRow, idleSince: Date, now: Date) =>
 		oneAtATime(row.projectId)(
 			Effect.gen(function* () {
 				const [still] = yield* query((db) =>
@@ -633,26 +633,29 @@ export const make = Effect.gen(function* () {
 						.where(
 							and(
 								sameComputer(row),
-								isNull(computerTable.pausedAt),
+								isNull(computerTable.sleptAt),
 								lt(computerTable.lastUsedAt, idleSince),
 								noLiveLease(now),
 							),
 						),
 				);
 				if (!still) return;
-				const configured = yield* providers.connection(row.workspaceId, row.computerProviderId);
+				const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
 				if (!configured) return;
-				const at = computers.forConnection(configured.connection);
+				const at = computers.forAccess(configured.access);
 				yield* clearDiskIfFilling(row, at);
-				yield* at.pause(row.providerComputerId).pipe(
+				yield* at.sleep(row.providerComputerId).pipe(
 					Effect.andThen(
-						query((db) => db.update(computerTable).set({ pausedAt: now }).where(sameComputer(row))),
+						query((db) => db.update(computerTable).set({ sleptAt: now }).where(sameComputer(row))),
 					),
 					Effect.catchTags({
 						// Gone at the provider: the next use makes a new one.
 						ComputerMissing: () => forget(row),
 						ComputerUnavailable: (failure) =>
-							Effect.logWarning("Could not pause an idle computer; trying again later", failure),
+							Effect.logWarning(
+								"Could not put an idle computer to sleep; trying again later",
+								failure,
+							),
 					}),
 				);
 			}),
@@ -660,16 +663,16 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Measures one computer's disk if it is running. It is opened under the
-	 * project's lock, which the pause sweep pauses under, so a computer paused
+	 * project's lock, which the sleep sweep works under, so a computer put to sleep
 	 * meanwhile is never resumed to be measured. The measuring itself runs
-	 * outside the lock, so as not to hold up turns; a computer paused while
+	 * outside the lock, so as not to hold up turns; a computer put to sleep while
 	 * it runs fails it, and keeps its last measurement.
 	 */
 	const measureDiskIfRunning = (row: ComputerRow) =>
 		Effect.gen(function* () {
-			const configured = yield* providers.connection(row.workspaceId, row.computerProviderId);
+			const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
 			if (!configured) return;
-			const at = computers.forConnection(configured.connection);
+			const at = computers.forAccess(configured.access);
 			const running = yield* oneAtATime(row.projectId)(
 				Effect.gen(function* () {
 					if (!(yield* isRecordedRunning(row))) return undefined;
@@ -732,16 +735,16 @@ export const make = Effect.gen(function* () {
 	 * makes, as {@link Interface.upgrade} describes, and destroys the old one.
 	 * The caller holds the project's lock and has checked nobody is using it.
 	 */
-	const movedToNewComputer = (row: ComputerRow, provider: ComputerProviderRepository.Configured) =>
+	const movedToNewComputer = (row: ComputerRow, provider: ComputerProviderStore.Configured) =>
 		Effect.gen(function* () {
-			const configured = yield* providers.connection(row.workspaceId, row.computerProviderId);
+			const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
 			if (!configured) {
 				return yield* new UpgradeFailed({
 					reason: userText`The computer's provider has lost its settings, so its work can't be copied. Reset it instead.`,
 				});
 			}
-			const from = computers.forConnection(configured.connection);
-			const to = computers.forConnection(provider.connection);
+			const from = computers.forAccess(configured.access);
+			const to = computers.forAccess(provider.access);
 			const destroyOld = from
 				.destroy(row.providerComputerId)
 				.pipe(
@@ -754,7 +757,7 @@ export const make = Effect.gen(function* () {
 				.pipe(Effect.catchTag("ComputerMissing", () => Effect.fail(new NoComputer())));
 			if (workKeptApart && provider.id === row.computerProviderId) {
 				const fresh = yield* madeAndRecorded(
-					provider.connection,
+					provider.access,
 					yield* specFor(row, row.id, to),
 					(computer, image) => moveRecord(row, provider.id, computer.id, image),
 				);
@@ -793,7 +796,7 @@ export const make = Effect.gen(function* () {
 				),
 			);
 			const fresh = yield* madeAndRecorded(
-				provider.connection,
+				provider.access,
 				yield* specFor(row, row.id, to),
 				(computer, image) =>
 					computer.uploadFile(archivePath, archive).pipe(
@@ -834,13 +837,13 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const provider = yield* providers.enabled(workspaceId);
 			if (!provider) return;
-			const at = computers.forConnection(provider.connection);
+			const at = computers.forAccess(provider.access);
 			if (at.templates) return;
 			for (const row of idle) {
 				// One at a provider no longer enabled moves when next opened.
 				if (row.computerProviderId !== provider.id) continue;
 				if ((upgradeRetryAt.get(row.id) ?? 0) > now.getTime()) continue;
-				if (!(yield* isBehind(row.image, provider.connection))) continue;
+				if (!(yield* isBehind(row.image, provider.access))) continue;
 				yield* upgradeIfStillIdle(row, provider, at, idleSince, now).pipe(
 					Effect.catchCause((cause) => Effect.logError("Upgrading an idle computer failed", cause)),
 					Effect.annotateLogs({ computerId: row.id }),
@@ -851,7 +854,7 @@ export const make = Effect.gen(function* () {
 	/** Upgrades one idle computer, unless someone took it since it was found. */
 	const upgradeIfStillIdle = (
 		row: ComputerRow,
-		provider: ComputerProviderRepository.Configured,
+		provider: ComputerProviderStore.Configured,
 		at: Computers.Provider,
 		idleSince: Date,
 		now: Date,
@@ -869,7 +872,7 @@ export const make = Effect.gen(function* () {
 					);
 					if (!still) return;
 					const fresh = yield* movedToNewComputer(row, provider);
-					yield* pausedUnused(row, fresh.id, at);
+					yield* sleepUnused(row, fresh.id, at);
 				}),
 			),
 		).pipe(
@@ -883,23 +886,23 @@ export const make = Effect.gen(function* () {
 
 	/**
 	 * Gives the project's record back the time `row` was last used, since nobody
-	 * has used the computer it was upgraded to, then pauses that computer. One
-	 * that can't be paused now is paused by the idle sweep, as idle as before.
+	 * has used the computer it was upgraded to, then puts that computer to sleep. One
+	 * that can't be put to sleep now is put to sleep by the idle sweep, as idle as before.
 	 */
-	const pausedUnused = (row: ComputerRow, freshId: Computers.ComputerId, at: Computers.Provider) =>
+	const sleepUnused = (row: ComputerRow, freshId: Computers.ComputerId, at: Computers.Provider) =>
 		query((db) =>
 			db
 				.update(computerTable)
 				.set({ lastUsedAt: row.lastUsedAt })
 				.where(sameComputer({ ...row, providerComputerId: freshId })),
 		).pipe(
-			Effect.andThen(at.pause(freshId)),
+			Effect.andThen(at.sleep(freshId)),
 			Effect.andThen(
 				Effect.flatMap(DateTime.nowAsDate, (now) =>
 					query((db) =>
 						db
 							.update(computerTable)
-							.set({ pausedAt: now })
+							.set({ sleptAt: now })
 							.where(sameComputer({ ...row, providerComputerId: freshId })),
 					),
 				),
@@ -908,7 +911,7 @@ export const make = Effect.gen(function* () {
 				ComputerMissing: () => Effect.void,
 				ComputerUnavailable: (failure) =>
 					Effect.logWarning(
-						"Could not pause an upgraded computer; it is paused once idle",
+						"Could not put an upgraded computer to sleep; it sleeps once idle",
 						failure,
 					),
 			}),
@@ -931,7 +934,7 @@ export const make = Effect.gen(function* () {
 						// What the workspace allows, and what the project signs in to, may
 						// have changed since the computer last ran.
 						Effect.tap(({ computer }) =>
-							applyNetwork(project, computer, computers.forConnection(provider.connection)),
+							applyNetwork(project, computer, computers.forAccess(provider.access)),
 						),
 						Effect.tap(() => lease(project, holder)),
 					),
@@ -994,25 +997,25 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		pauseIdle: operation(
-			"pauseIdle",
+		sleepIdle: operation(
+			"sleepIdle",
 			Effect.gen(function* () {
 				const now = yield* DateTime.now;
-				const idleSince = DateTime.toDateUtc(DateTime.subtractDuration(now, IDLE_BEFORE_PAUSE));
+				const idleSince = DateTime.toDateUtc(DateTime.subtractDuration(now, IDLE_BEFORE_SLEEP));
 				const idle = yield* query((db) =>
 					db
 						.select()
 						.from(computerTable)
 						.where(
 							and(
-								isNull(computerTable.pausedAt),
+								isNull(computerTable.sleptAt),
 								lt(computerTable.lastUsedAt, idleSince),
 								noLiveLease(DateTime.toDateUtc(now)),
 							),
 						),
 				);
 				for (const row of idle) {
-					yield* pauseIfStillIdle(row, idleSince, DateTime.toDateUtc(now));
+					yield* sleepIfStillIdle(row, idleSince, DateTime.toDateUtc(now));
 				}
 			}),
 		),
@@ -1026,7 +1029,7 @@ export const make = Effect.gen(function* () {
 				);
 				// A computer nobody has used since its last measurement isn't measured
 				// again. Its disk barely changes, and opening one can postpone the
-				// provider's own pause, the backstop for when ours fails.
+				// provider's own sleep, the backstop for when ours fails.
 				const usedSinceMeasured = or(
 					liveLease(DateTime.toDateUtc(now)),
 					gt(computerTable.lastUsedAt, computerTable.diskMeasuredAt),
@@ -1037,7 +1040,7 @@ export const make = Effect.gen(function* () {
 						.from(computerTable)
 						.where(
 							and(
-								isNull(computerTable.pausedAt),
+								isNull(computerTable.sleptAt),
 								or(
 									isNull(computerTable.diskMeasuredAt),
 									and(lt(computerTable.diskMeasuredAt, measuredBefore), usedSinceMeasured),
@@ -1102,7 +1105,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"destroyAllMadeBy",
 				Effect.gen(function* () {
-					const at = computers.forConnection(provider.connection);
+					const at = computers.forAccess(provider.access);
 					for (const row of yield* madeBy(workspaceId, provider.id)) {
 						yield* oneAtATime(row.projectId)(
 							at.destroy(row.providerComputerId).pipe(Effect.andThen(forget(row))),
@@ -1123,7 +1126,7 @@ export const make = Effect.gen(function* () {
 								and(
 									eq(computerTable.workspaceId, workspaceId),
 									projectId === undefined ? undefined : eq(computerTable.projectId, projectId),
-									isNull(computerTable.pausedAt),
+									isNull(computerTable.sleptAt),
 								),
 							),
 					);
@@ -1153,17 +1156,17 @@ export const make = Effect.gen(function* () {
 						peopleWatching: using.watching,
 						disk: measuredDiskOf(row),
 					};
-					const configured = yield* providers.connection(row.workspaceId, row.computerProviderId);
+					const configured = yield* providers.access(row.workspaceId, row.computerProviderId);
 					if (!configured) return { ...present, state: "unreachable", upgradeAvailable: false };
 					return yield* computers
-						.forConnection(configured.connection)
+						.forAccess(configured.access)
 						.info(row.providerComputerId)
 						.pipe(
 							Effect.flatMap((info) =>
 								Effect.map(
 									current === undefined || current.id !== row.computerProviderId
 										? Effect.succeed(current !== undefined)
-										: isBehind(row.image, current.connection),
+										: isBehind(row.image, current.access),
 									(upgradeAvailable): Status => ({
 										...present,
 										state: info.state,
@@ -1240,7 +1243,7 @@ export const make = Effect.gen(function* () {
 			"upgradeIdle",
 			Effect.gen(function* () {
 				const now = yield* DateTime.now;
-				const idleSince = DateTime.toDateUtc(DateTime.subtractDuration(now, IDLE_BEFORE_PAUSE));
+				const idleSince = DateTime.toDateUtc(DateTime.subtractDuration(now, IDLE_BEFORE_SLEEP));
 				const idle = yield* query((db) =>
 					db
 						.select()
@@ -1267,12 +1270,12 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([Computers.layer, ComputerProviderRepository.layer]),
+	Layer.provide([Computers.layer, ComputerProviderStore.layer]),
 );
 
 /**
- * Runs `pauseIdle`, `measureDisks` and `upgradeIdle` every minute, each on its
- * own so a slow measurement or upgrade never holds up a pause, for as long as
+ * Runs `sleepIdle`, `measureDisks` and `upgradeIdle` every minute, each on its
+ * own so a slow measurement or upgrade never holds up sleep, for as long as
  * the layer's scope is open.
  */
 export const sweepLayer = Layer.effectDiscard(
@@ -1289,7 +1292,7 @@ export const sweepLayer = Layer.effectDiscard(
 					Effect.withTracerEnabled(false),
 				),
 			);
-		yield* repeatedly(projectComputers.pauseIdle, "Pausing idle computers failed");
+		yield* repeatedly(projectComputers.sleepIdle, "Putting idle computers to sleep failed");
 		yield* repeatedly(projectComputers.measureDisks, "Measuring computers' disks failed");
 		yield* repeatedly(projectComputers.upgradeIdle, "Upgrading idle computers failed");
 	}),
@@ -1365,8 +1368,8 @@ export interface Opened {
 	 * How the computer came to be ready, which decides what the bot is told:
 	 * - `made`: new, with nothing in it.
 	 * - `running`: as the bot left it.
-	 * - `resumed`: paused, and back with its programs still running.
-	 * - `rebooted`: paused or stopped, and back with its files but no running
+	 * - `resumed`: asleep, and back with its programs still running.
+	 * - `rebooted`: asleep or stopped, and back with its files but no running
 	 *   programs.
 	 * - `replaced`: new, because the project's earlier one is gone with its work:
 	 *   its provider lost it, it stopped with its work on its own disk, or the
@@ -1383,7 +1386,7 @@ type Status =
 			 * `lost`: the provider no longer has it. `unreachable`: its provider
 			 * didn't answer, or has lost its settings.
 			 */
-			readonly state: "running" | "paused" | "lost" | "unreachable";
+			readonly state: "running" | "asleep" | "lost" | "unreachable";
 			/** What it was made from, as Sugabots asked for it; only when the provider answered. */
 			readonly image?: string;
 			readonly providerId: string;
@@ -1410,9 +1413,9 @@ interface ProjectDisk {
 
 const COPY_STEP = { timeout: "5 minutes", maxOutputCharacters: 4_000 } as const;
 
-/** The image or template a connection makes computers from. */
-function imageOf(connection: Computers.Connection): string {
-	return connection.provider === "e2b" ? connection.template : connection.image;
+/** The image or template a provider access makes computers from. */
+function imageOf(access: Computers.ProviderAccess): string {
+	return access.provider === "e2b" ? access.template : access.image;
 }
 
 /** A turn is using the computer, and resetting or upgrading it would pull it out from under the project. */
@@ -1531,8 +1534,8 @@ export const lockWorkspaceWithoutComputers = (
 	});
 
 /**
- * A computer was made while what it belongs to was being deleted, or its
- * member removed, so nothing was removed.
+ * A computer was made while its project was being deleted, or its provider
+ * removed, so nothing was removed.
  */
 export class ComputerMadeMeanwhile
 	extends Data.TaggedError("ComputerMadeMeanwhile")

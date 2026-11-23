@@ -15,11 +15,11 @@ import { type Database, query, serviceOperations } from "../database/database.ts
 import {
 	allowedHost,
 	blockedHost,
-	placedConversation,
+	person,
+	placedChat,
 	projectAllowedHost,
 	toolCall,
 	turn,
-	user,
 } from "../database/schema.ts";
 import type { UserFacing } from "../user-message.ts";
 import {
@@ -29,7 +29,7 @@ import {
 	projectAddedHostsOf,
 	TRUSTED_HOSTS,
 } from "./allowed-hosts.ts";
-import { ComputerProviderRepository } from "./computer-provider-repository.ts";
+import { ComputerProviderStore } from "./computer-provider-store.ts";
 import { Computers } from "./computers.ts";
 import { ProjectComputers } from "./project-computers.ts";
 
@@ -106,7 +106,7 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ComputerNetwork");
 	const authorization = yield* Authorization.Service;
 	const projectComputers = yield* ProjectComputers.Service;
-	const providers = yield* ComputerProviderRepository.Service;
+	const providers = yield* ComputerProviderStore.Service;
 	const computers = yield* Computers.Service;
 
 	const manage = (workspace: string) =>
@@ -119,10 +119,10 @@ export const make = Effect.gen(function* () {
 	const networkOf = (workspaceId: string) =>
 		Effect.map(providers.enabled(workspaceId), (enabled) => {
 			if (!enabled) return { mode: COMPUTER_NETWORK_MODE_DEFAULT, blocking: true };
-			const { networkMode, capabilities } = computers.forConnection(enabled.connection);
+			const { networkMode, capabilities } = computers.forAccess(enabled.access);
 			return {
 				mode: networkMode,
-				blocking: networkMode === "allowlist" || capabilities.blocksHosts,
+				blocking: networkMode === "allowed-hosts-only" || capabilities.blocksHosts,
 			};
 		});
 
@@ -210,7 +210,7 @@ export const make = Effect.gen(function* () {
 						yield* query((db) =>
 							db
 								.insert(allowedHost)
-								.values({ workspaceId, host, addedById: actor.userId })
+								.values({ workspaceId, host, addedById: actor.personId })
 								.onConflictDoNothing(),
 						);
 						yield* projectComputers.applyNetwork({ workspaceId });
@@ -243,7 +243,7 @@ export const make = Effect.gen(function* () {
 					const blocked = yield* query((db) =>
 						db
 							.insert(blockedHost)
-							.values({ workspaceId, host, blockedById: actor.userId })
+							.values({ workspaceId, host, blockedById: actor.personId })
 							.onConflictDoNothing()
 							.returning({ host: blockedHost.host }),
 					);
@@ -285,7 +285,7 @@ export const make = Effect.gen(function* () {
 					const by = yield* blockFor(project.workspaceId, host);
 					if (by !== undefined) return yield* new HostBlocked({ host, by });
 					if (!TRUSTED_HOSTS.includes(host)) {
-						yield* addToProject({ ...project, host, addedById: standing.actor.userId });
+						yield* addToProject({ ...project, host, addedById: standing.actor.personId });
 					}
 					return yield* projectSettingsOf(project);
 				}),
@@ -319,14 +319,14 @@ export const make = Effect.gen(function* () {
 					const [call] = yield* query((db) =>
 						db
 							.select({
-								workspaceId: placedConversation.workspaceId,
-								projectId: computerProjectIdOf(placedConversation, turn.botId),
+								workspaceId: placedChat.workspaceId,
+								projectId: computerProjectIdOf(placedChat, turn.botId),
 								approvalStatus: toolCall.approvalStatus,
 								decidedById: toolCall.decidedById,
 							})
 							.from(toolCall)
 							.innerJoin(turn, eq(turn.id, toolCall.turnId))
-							.innerJoin(placedConversation, eq(placedConversation.id, toolCall.conversationId))
+							.innerJoin(placedChat, eq(placedChat.id, toolCall.chatId))
 							.where(and(eq(toolCall.turnId, turnId), eq(toolCall.sdkToolCallId, sdkToolCallId)))
 							.limit(1),
 					);
@@ -359,7 +359,7 @@ export const layer = Layer.suspend(() =>
 		Layer.provide([
 			Authorization.layer,
 			ProjectComputers.layer,
-			ComputerProviderRepository.layer,
+			ComputerProviderStore.layer,
 			Computers.layer,
 		]),
 	),
@@ -388,18 +388,21 @@ function hostName(host: string) {
 	return UserText.unchecked(host);
 }
 
-const namesOf = (userIds: ReadonlyArray<string | null>) => {
-	const ids = [...new Set(userIds.filter((id) => id !== null))];
+const namesOf = (personIds: ReadonlyArray<string | null>) => {
+	const ids = [...new Set(personIds.filter((id) => id !== null))];
 	return Effect.map(
 		ids.length === 0
 			? Effect.succeed([])
 			: query((db) =>
-					db.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, ids)),
+					db
+						.select({ id: person.id, name: person.name })
+						.from(person)
+						.where(inArray(person.id, ids)),
 				),
 		(rows) => new Map(rows.map((row) => [row.id, row.name])),
 	);
 };
 
-function nameOf(names: ReadonlyMap<string, string>, userId: string | null) {
-	return (userId && names.get(userId)) ?? null;
+function nameOf(names: ReadonlyMap<string, string>, personId: string | null) {
+	return (personId && names.get(personId)) ?? null;
 }

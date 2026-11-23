@@ -1,0 +1,1310 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "5da026cb-09c4-44b4-8857-1c7d3fa38528",
+  "prevIds": [
+    "817c3e66-f21e-4ebb-b92e-82b7cd486317"
+  ],
+  "footprints": [
+    {
+      "statementType": "rename_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "workspace_invite"
+      ],
+      "writes": [
+        "s|tbl|public.workspace_invite",
+        "n|tbl|public.workspace_invite",
+        "n|rel|public.workspace_invite",
+        "n|type|public.workspace_invite",
+        "s|tbl|public.invitation",
+        "n|tbl|public.invitation",
+        "n|rel|public.invitation",
+        "n|type|public.invitation"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "workspace_member"
+      ],
+      "writes": [
+        "s|tbl|public.workspace_member",
+        "n|tbl|public.workspace_member",
+        "n|rel|public.workspace_member",
+        "n|type|public.workspace_member",
+        "s|tbl|public.membership",
+        "n|tbl|public.membership",
+        "n|rel|public.membership",
+        "n|type|public.membership"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "user"
+      ],
+      "writes": [
+        "s|tbl|public.user",
+        "n|tbl|public.user",
+        "n|rel|public.user",
+        "n|type|public.user",
+        "s|tbl|public.person",
+        "n|tbl|public.person",
+        "n|rel|public.person",
+        "n|type|public.person"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "chat_participant",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.chat_participant.user_id",
+        "n|col|public.chat_participant.user_id",
+        "s|col|public.chat_participant.person_id",
+        "n|col|public.chat_participant.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.chat_participant",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "chat_read",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.chat_read.user_id",
+        "n|col|public.chat_read.user_id",
+        "s|col|public.chat_read.person_id",
+        "n|col|public.chat_read.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.chat_read",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message",
+        "author_user_id"
+      ],
+      "writes": [
+        "s|col|public.message.author_user_id",
+        "n|col|public.message.author_user_id",
+        "s|col|public.message.author_person_id",
+        "n|col|public.message.author_person_id"
+      ],
+      "reads": [
+        "n|tbl|public.message",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message_reaction",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.message_reaction.user_id",
+        "n|col|public.message_reaction.user_id",
+        "s|col|public.message_reaction.person_id",
+        "n|col|public.message_reaction.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.message_reaction",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "computer",
+        "paused_at"
+      ],
+      "writes": [
+        "s|col|public.computer.paused_at",
+        "n|col|public.computer.paused_at",
+        "s|col|public.computer.slept_at",
+        "n|col|public.computer.slept_at"
+      ],
+      "reads": [
+        "n|tbl|public.computer",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "notification_override",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.notification_override.user_id",
+        "n|col|public.notification_override.user_id",
+        "s|col|public.notification_override.person_id",
+        "n|col|public.notification_override.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.notification_override",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "notification_settings",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.notification_settings.user_id",
+        "n|col|public.notification_settings.user_id",
+        "s|col|public.notification_settings.person_id",
+        "n|col|public.notification_settings.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.notification_settings",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "account",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.account.user_id",
+        "n|col|public.account.user_id",
+        "s|col|public.account.person_id",
+        "n|col|public.account.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.account",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "bot",
+        "face"
+      ],
+      "writes": [
+        "s|col|public.bot.face",
+        "n|col|public.bot.face",
+        "s|col|public.bot.eyes",
+        "n|col|public.bot.eyes"
+      ],
+      "reads": [
+        "n|tbl|public.bot",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "membership",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.membership.user_id",
+        "n|col|public.membership.user_id",
+        "s|col|public.membership.person_id",
+        "n|col|public.membership.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.membership",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "pinned_bot",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.pinned_bot.user_id",
+        "n|col|public.pinned_bot.user_id",
+        "s|col|public.pinned_bot.person_id",
+        "n|col|public.pinned_bot.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.pinned_bot",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "project_member",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.project_member.user_id",
+        "n|col|public.project_member.user_id",
+        "s|col|public.project_member.person_id",
+        "n|col|public.project_member.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.project_member",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "session",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.session.user_id",
+        "n|col|public.session.user_id",
+        "s|col|public.session.person_id",
+        "n|col|public.session.person_id"
+      ],
+      "reads": [
+        "n|tbl|public.session",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "workspace",
+        "setup_completed_at"
+      ],
+      "writes": [
+        "s|col|public.workspace.setup_completed_at",
+        "n|col|public.workspace.setup_completed_at",
+        "s|col|public.workspace.set_up_at",
+        "n|col|public.workspace.set_up_at"
+      ],
+      "reads": [
+        "n|tbl|public.workspace",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "invitation"
+      ],
+      "writes": [
+        "s|ck|public.invitation.workspace_invite_role_check",
+        "n|ck|public.invitation.workspace_invite_role_check",
+        "n|con|public.invitation.workspace_invite_role_check",
+        "s|ck|public.invitation.invitation_role_check",
+        "n|ck|public.invitation.invitation_role_check",
+        "n|con|public.invitation.invitation_role_check"
+      ],
+      "reads": [
+        "n|tbl|public.invitation",
+        "n|sch|public",
+        "e|col|public.invitation.role"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "invitation"
+      ],
+      "writes": [
+        "s|ck|public.invitation.workspace_invite_status_check",
+        "n|ck|public.invitation.workspace_invite_status_check",
+        "n|con|public.invitation.workspace_invite_status_check",
+        "s|ck|public.invitation.invitation_status_check",
+        "n|ck|public.invitation.invitation_status_check",
+        "n|con|public.invitation.invitation_status_check"
+      ],
+      "reads": [
+        "n|tbl|public.invitation",
+        "n|sch|public",
+        "e|col|public.invitation.status"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "membership"
+      ],
+      "writes": [
+        "s|ck|public.membership.workspace_member_role_check",
+        "n|ck|public.membership.workspace_member_role_check",
+        "n|con|public.membership.workspace_member_role_check",
+        "s|ck|public.membership.membership_role_check",
+        "n|ck|public.membership.membership_role_check",
+        "n|con|public.membership.membership_role_check"
+      ],
+      "reads": [
+        "n|tbl|public.membership",
+        "n|sch|public",
+        "e|col|public.membership.role"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "chat_participant",
+        "chat_participant_user_idx"
+      ],
+      "writes": [
+        "s|idx|public.chat_participant_user_idx",
+        "n|idx|public.chat_participant_user_idx",
+        "n|rel|public.chat_participant_user_idx",
+        "s|idx|public.chat_participant_person_idx",
+        "n|idx|public.chat_participant_person_idx",
+        "n|rel|public.chat_participant_person_idx"
+      ],
+      "reads": [
+        "e|tbl|public.chat_participant",
+        "n|sch|public",
+        "e|col|public.chat_participant.chat_id",
+        "e|col|public.chat_participant.person_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "chat_read",
+        "chat_read_user_chat_idx"
+      ],
+      "writes": [
+        "s|idx|public.chat_read_user_chat_idx",
+        "n|idx|public.chat_read_user_chat_idx",
+        "n|rel|public.chat_read_user_chat_idx",
+        "s|idx|public.chat_read_person_chat_idx",
+        "n|idx|public.chat_read_person_chat_idx",
+        "n|rel|public.chat_read_person_chat_idx"
+      ],
+      "reads": [
+        "e|tbl|public.chat_read",
+        "n|sch|public",
+        "e|col|public.chat_read.person_id",
+        "e|col|public.chat_read.chat_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "message_reaction",
+        "message_reaction_message_user_emoji_idx"
+      ],
+      "writes": [
+        "s|idx|public.message_reaction_message_user_emoji_idx",
+        "n|idx|public.message_reaction_message_user_emoji_idx",
+        "n|rel|public.message_reaction_message_user_emoji_idx",
+        "s|idx|public.message_reaction_message_person_emoji_idx",
+        "n|idx|public.message_reaction_message_person_emoji_idx",
+        "n|rel|public.message_reaction_message_person_emoji_idx"
+      ],
+      "reads": [
+        "e|tbl|public.message_reaction",
+        "n|sch|public",
+        "e|col|public.message_reaction.message_id",
+        "e|col|public.message_reaction.person_id",
+        "e|col|public.message_reaction.emoji"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "account",
+        "account_user_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.account_user_id_idx",
+        "n|idx|public.account_user_id_idx",
+        "n|rel|public.account_user_id_idx",
+        "s|idx|public.account_person_id_idx",
+        "n|idx|public.account_person_id_idx",
+        "n|rel|public.account_person_id_idx"
+      ],
+      "reads": [
+        "e|tbl|public.account",
+        "n|sch|public",
+        "e|col|public.account.person_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "invitation",
+        "workspace_invite_workspace_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.workspace_invite_workspace_id_idx",
+        "n|idx|public.workspace_invite_workspace_id_idx",
+        "n|rel|public.workspace_invite_workspace_id_idx",
+        "s|idx|public.invitation_workspace_id_idx",
+        "n|idx|public.invitation_workspace_id_idx",
+        "n|rel|public.invitation_workspace_id_idx"
+      ],
+      "reads": [
+        "e|tbl|public.invitation",
+        "n|sch|public",
+        "e|col|public.invitation.workspace_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "invitation",
+        "workspace_invite_email_idx"
+      ],
+      "writes": [
+        "s|idx|public.workspace_invite_email_idx",
+        "n|idx|public.workspace_invite_email_idx",
+        "n|rel|public.workspace_invite_email_idx",
+        "s|idx|public.invitation_email_idx",
+        "n|idx|public.invitation_email_idx",
+        "n|rel|public.invitation_email_idx"
+      ],
+      "reads": [
+        "e|tbl|public.invitation",
+        "n|sch|public",
+        "e|col|public.invitation.email"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "membership",
+        "workspace_member_idx"
+      ],
+      "writes": [
+        "s|idx|public.workspace_member_idx",
+        "n|idx|public.workspace_member_idx",
+        "n|rel|public.workspace_member_idx",
+        "s|idx|public.membership_idx",
+        "n|idx|public.membership_idx",
+        "n|rel|public.membership_idx"
+      ],
+      "reads": [
+        "e|tbl|public.membership",
+        "n|sch|public",
+        "e|col|public.membership.workspace_id",
+        "e|col|public.membership.person_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "membership",
+        "workspace_member_user_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.workspace_member_user_id_idx",
+        "n|idx|public.workspace_member_user_id_idx",
+        "n|rel|public.workspace_member_user_id_idx",
+        "s|idx|public.membership_person_id_idx",
+        "n|idx|public.membership_person_id_idx",
+        "n|rel|public.membership_person_id_idx"
+      ],
+      "reads": [
+        "e|tbl|public.membership",
+        "n|sch|public",
+        "e|col|public.membership.person_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "membership",
+        "workspace_member_owner_idx"
+      ],
+      "writes": [
+        "s|idx|public.workspace_member_owner_idx",
+        "n|idx|public.workspace_member_owner_idx",
+        "n|rel|public.workspace_member_owner_idx",
+        "s|idx|public.membership_owner_idx",
+        "n|idx|public.membership_owner_idx",
+        "n|rel|public.membership_owner_idx"
+      ],
+      "reads": [
+        "e|tbl|public.membership",
+        "n|sch|public",
+        "e|col|public.membership.workspace_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "person",
+        "user_email_idx"
+      ],
+      "writes": [
+        "s|idx|public.user_email_idx",
+        "n|idx|public.user_email_idx",
+        "n|rel|public.user_email_idx",
+        "s|idx|public.person_email_idx",
+        "n|idx|public.person_email_idx",
+        "n|rel|public.person_email_idx"
+      ],
+      "reads": [
+        "e|tbl|public.person",
+        "n|sch|public",
+        "e|col|public.person.email"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "person",
+        "user_referral_code_idx"
+      ],
+      "writes": [
+        "s|idx|public.user_referral_code_idx",
+        "n|idx|public.user_referral_code_idx",
+        "n|rel|public.user_referral_code_idx",
+        "s|idx|public.person_referral_code_idx",
+        "n|idx|public.person_referral_code_idx",
+        "n|rel|public.person_referral_code_idx"
+      ],
+      "reads": [
+        "e|tbl|public.person",
+        "n|sch|public",
+        "e|col|public.person.referral_code"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "person",
+        "user_referred_by_idx"
+      ],
+      "writes": [
+        "s|idx|public.user_referred_by_idx",
+        "n|idx|public.user_referred_by_idx",
+        "n|rel|public.user_referred_by_idx",
+        "s|idx|public.person_referred_by_idx",
+        "n|idx|public.person_referred_by_idx",
+        "n|rel|public.person_referred_by_idx"
+      ],
+      "reads": [
+        "e|tbl|public.person",
+        "n|sch|public",
+        "e|col|public.person.referred_by"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "project_member",
+        "project_member_user_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.project_member_user_id_idx",
+        "n|idx|public.project_member_user_id_idx",
+        "n|rel|public.project_member_user_id_idx",
+        "s|idx|public.project_member_person_id_idx",
+        "n|idx|public.project_member_person_id_idx",
+        "n|rel|public.project_member_person_id_idx"
+      ],
+      "reads": [
+        "e|tbl|public.project_member",
+        "n|sch|public",
+        "e|col|public.project_member.person_id"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "session",
+        "session_user_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.session_user_id_idx",
+        "n|idx|public.session_user_id_idx",
+        "n|rel|public.session_user_id_idx",
+        "s|idx|public.session_person_id_idx",
+        "n|idx|public.session_person_id_idx",
+        "n|rel|public.session_person_id_idx"
+      ],
+      "reads": [
+        "e|tbl|public.session",
+        "n|sch|public",
+        "e|col|public.session.person_id"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "bot"
+      ],
+      "writes": [
+        "s|fk|public.bot.bot_assistant_workspace_member_fkey",
+        "n|fk|public.bot.bot_assistant_workspace_member_fkey",
+        "n|con|public.bot.bot_assistant_workspace_member_fkey",
+        "s|fk|public.bot.bot_assistant_membership_fkey",
+        "n|fk|public.bot.bot_assistant_membership_fkey",
+        "n|con|public.bot.bot_assistant_membership_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.bot",
+        "n|sch|public",
+        "e|col|public.bot.workspace_id",
+        "e|col|public.bot.assistant_of"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "pinned_bot"
+      ],
+      "writes": [
+        "s|fk|public.pinned_bot.pinned_bot_workspace_member_fkey",
+        "n|fk|public.pinned_bot.pinned_bot_workspace_member_fkey",
+        "n|con|public.pinned_bot.pinned_bot_workspace_member_fkey",
+        "s|fk|public.pinned_bot.pinned_bot_membership_fkey",
+        "n|fk|public.pinned_bot.pinned_bot_membership_fkey",
+        "n|con|public.pinned_bot.pinned_bot_membership_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.pinned_bot",
+        "n|sch|public",
+        "e|col|public.pinned_bot.workspace_id",
+        "e|col|public.pinned_bot.person_id"
+      ]
+    },
+    {
+      "statementType": "rename_constraint",
+      "statementTarget": [
+        "table",
+        "public",
+        "project_member"
+      ],
+      "writes": [
+        "s|fk|public.project_member.project_member_workspace_member_fkey",
+        "n|fk|public.project_member.project_member_workspace_member_fkey",
+        "n|con|public.project_member.project_member_workspace_member_fkey",
+        "s|fk|public.project_member.project_member_membership_fkey",
+        "n|fk|public.project_member.project_member_membership_fkey",
+        "n|con|public.project_member.project_member_membership_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.project_member",
+        "n|sch|public",
+        "e|col|public.project_member.workspace_id",
+        "e|col|public.project_member.person_id"
+      ]
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "invitation",
+        "role"
+      ],
+      "writes": [
+        "s|colprop|public.invitation.role.default"
+      ],
+      "reads": [
+        "n|tbl|public.invitation",
+        "n|sch|public",
+        "n|col|public.invitation.role"
+      ],
+      "sqlHash": "0a57a21ad1b5d51d"
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "membership",
+        "role"
+      ],
+      "writes": [
+        "s|colprop|public.membership.role.default"
+      ],
+      "reads": [
+        "n|tbl|public.membership",
+        "n|sch|public",
+        "n|col|public.membership.role"
+      ],
+      "sqlHash": "ba5630dfd3f6802d"
+    },
+    {
+      "statementType": "recreate_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "chat_participant",
+        "chat_participant_person_idx"
+      ],
+      "writes": [
+        "s|idx|public.chat_participant_person_idx",
+        "n|idx|public.chat_participant_person_idx",
+        "e|idx|public.chat_participant_person_idx",
+        "n|rel|public.chat_participant_person_idx"
+      ],
+      "reads": [
+        "n|tbl|public.chat_participant",
+        "n|sch|public",
+        "n|col|public.chat_participant.chat_id",
+        "n|col|public.chat_participant.person_id"
+      ],
+      "sharedWrites": [],
+      "sqlHash": "8d84e26d447d8374"
+    },
+    {
+      "statementType": "recreate_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "message_reaction",
+        "message_reaction_message_person_emoji_idx"
+      ],
+      "writes": [
+        "s|idx|public.message_reaction_message_person_emoji_idx",
+        "n|idx|public.message_reaction_message_person_emoji_idx",
+        "e|idx|public.message_reaction_message_person_emoji_idx",
+        "n|rel|public.message_reaction_message_person_emoji_idx"
+      ],
+      "reads": [
+        "n|tbl|public.message_reaction",
+        "n|sch|public",
+        "n|col|public.message_reaction.message_id",
+        "n|col|public.message_reaction.person_id",
+        "n|col|public.message_reaction.emoji"
+      ],
+      "sharedWrites": [],
+      "sqlHash": "e55ed447535d5379"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "model_request"
+      ],
+      "writes": [
+        "s|ck|public.model_request.model_request_purpose_valid"
+      ],
+      "reads": [
+        "n|tbl|public.model_request",
+        "n|sch|public",
+        "n|col|public.model_request.purpose",
+        "n|col|public.model_request.model",
+        "e|col|public.model_request.purpose"
+      ],
+      "sqlHash": "b899bac12588859d"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "message"
+      ],
+      "writes": [
+        "s|ck|public.message.message_one_author"
+      ],
+      "reads": [
+        "n|tbl|public.message",
+        "n|sch|public",
+        "n|col|public.message.author_person_id",
+        "n|col|public.message.author_bot_id",
+        "n|col|public.message.automation_trigger",
+        "e|col|public.message.author_bot_id",
+        "e|col|public.message.automation_trigger"
+      ],
+      "sqlHash": "33b07b1c1e1274f2"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "chat_participant"
+      ],
+      "writes": [
+        "s|ck|public.chat_participant.chat_participant_one_identity"
+      ],
+      "reads": [
+        "n|tbl|public.chat_participant",
+        "n|sch|public",
+        "n|col|public.chat_participant.person_id",
+        "n|col|public.chat_participant.bot_id",
+        "e|col|public.chat_participant.bot_id"
+      ],
+      "sqlHash": "5ab9ce2aeaaf869b"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "invitation"
+      ],
+      "writes": [
+        "s|ck|public.invitation.invitation_role_check"
+      ],
+      "reads": [
+        "n|tbl|public.invitation",
+        "n|sch|public",
+        "n|col|public.invitation.role",
+        "e|col|public.invitation.role"
+      ],
+      "sqlHash": "5ef0049f5532a32b"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "membership"
+      ],
+      "writes": [
+        "s|ck|public.membership.membership_role_check"
+      ],
+      "reads": [
+        "n|tbl|public.membership",
+        "n|sch|public",
+        "n|col|public.membership.role",
+        "e|col|public.membership.role"
+      ],
+      "sqlHash": "eb6baa3ea5437848"
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "message_reaction"
+      ],
+      "writes": [
+        "s|ck|public.message_reaction.message_reaction_one_reactor"
+      ],
+      "reads": [
+        "n|tbl|public.message_reaction",
+        "n|sch|public",
+        "n|col|public.message_reaction.person_id",
+        "n|col|public.message_reaction.bot_id",
+        "e|col|public.message_reaction.bot_id"
+      ],
+      "sqlHash": "da7a06e8ff5a07b6"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "rename",
+      "key": "tables\u0000[\"public\",\"workspace_invite\"]",
+      "set": {
+        "name": "invitation"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "tables\u0000[\"public\",\"workspace_member\"]",
+      "set": {
+        "name": "membership"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "tables\u0000[\"public\",\"user\"]",
+      "set": {
+        "name": "person"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"chat_participant\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"chat_read\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"message\",\"author_user_id\"]",
+      "set": {
+        "name": "author_person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"message_reaction\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"computer\",\"paused_at\"]",
+      "set": {
+        "name": "slept_at"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"notification_override\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"notification_settings\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"account\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"bot\",\"face\"]",
+      "set": {
+        "name": "eyes"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"membership\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"pinned_bot\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"project_member\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"session\",\"user_id\"]",
+      "set": {
+        "name": "person_id"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"workspace\",\"setup_completed_at\"]",
+      "set": {
+        "name": "set_up_at"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "checks\u0000[\"public\",\"invitation\",\"workspace_invite_role_check\"]",
+      "set": {
+        "name": "invitation_role_check"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "checks\u0000[\"public\",\"invitation\",\"workspace_invite_status_check\"]",
+      "set": {
+        "name": "invitation_status_check"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "checks\u0000[\"public\",\"membership\",\"workspace_member_role_check\"]",
+      "set": {
+        "name": "membership_role_check"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"chat_participant_user_idx\"]",
+      "set": {
+        "name": "chat_participant_person_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"chat_read_user_chat_idx\"]",
+      "set": {
+        "name": "chat_read_person_chat_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"message_reaction_message_user_emoji_idx\"]",
+      "set": {
+        "name": "message_reaction_message_person_emoji_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"account_user_id_idx\"]",
+      "set": {
+        "name": "account_person_id_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"workspace_invite_workspace_id_idx\"]",
+      "set": {
+        "name": "invitation_workspace_id_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"workspace_invite_email_idx\"]",
+      "set": {
+        "name": "invitation_email_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"workspace_member_idx\"]",
+      "set": {
+        "name": "membership_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"workspace_member_user_id_idx\"]",
+      "set": {
+        "name": "membership_person_id_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"workspace_member_owner_idx\"]",
+      "set": {
+        "name": "membership_owner_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"user_email_idx\"]",
+      "set": {
+        "name": "person_email_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"user_referral_code_idx\"]",
+      "set": {
+        "name": "person_referral_code_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"user_referred_by_idx\"]",
+      "set": {
+        "name": "person_referred_by_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"project_member_user_id_idx\"]",
+      "set": {
+        "name": "project_member_person_id_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"session_user_id_idx\"]",
+      "set": {
+        "name": "session_person_id_idx"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "fks\u0000[\"public\",\"bot\",\"bot_assistant_workspace_member_fkey\"]",
+      "set": {
+        "name": "bot_assistant_membership_fkey"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "fks\u0000[\"public\",\"pinned_bot\",\"pinned_bot_workspace_member_fkey\"]",
+      "set": {
+        "name": "pinned_bot_membership_fkey"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "fks\u0000[\"public\",\"project_member\",\"project_member_workspace_member_fkey\"]",
+      "set": {
+        "name": "project_member_membership_fkey"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"invitation\",\"role\"]",
+      "set": {
+        "default": "'editor'"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"membership\",\"role\"]",
+      "set": {
+        "default": "'editor'"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "indexes\u0000[\"public\",\"chat_participant_person_idx\"]",
+      "set": {
+        "where": "\"person_id\" is not null"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "indexes\u0000[\"public\",\"message_reaction_message_person_emoji_idx\"]",
+      "set": {
+        "where": "\"person_id\" is not null"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"model_request\",\"model_request_purpose_valid\"]",
+      "set": {
+        "value": "\"purpose\" in ('bot-turn', 'compaction', 'model-test')"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"message\",\"message_one_author\"]",
+      "set": {
+        "value": "num_nonnulls(\"author_person_id\", \"author_bot_id\", \"automation_trigger\") = 1"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"chat_participant\",\"chat_participant_one_identity\"]",
+      "set": {
+        "value": "num_nonnulls(\"person_id\", \"bot_id\") = 1"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"invitation\",\"invitation_role_check\"]",
+      "set": {
+        "value": "\"role\" in ('admin', 'editor', 'viewer')"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"membership\",\"membership_role_check\"]",
+      "set": {
+        "value": "\"role\" in ('owner', 'admin', 'editor', 'viewer')"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"message_reaction\",\"message_reaction_one_reactor\"]",
+      "set": {
+        "value": "num_nonnulls(\"person_id\", \"bot_id\") = 1"
+      }
+    }
+  ]
+}

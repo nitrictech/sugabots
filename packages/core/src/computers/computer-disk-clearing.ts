@@ -3,13 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { type Database, query } from "../database/database.ts";
-import {
-	ACTIVE_TURN_STATUSES,
-	automationRun,
-	bot,
-	placedConversation,
-	turn,
-} from "../database/schema.ts";
+import { ACTIVE_TURN_STATUSES, automationRun, bot, placedChat, turn } from "../database/schema.ts";
 import { Computers } from "./computers.ts";
 
 /** Caches in each bot's home that clearing may remove. */
@@ -20,8 +14,8 @@ type BotCache = (typeof BOT_CACHES)[number];
 /** Something in a computer's workspace that may be cleared, and why. */
 type Clearable =
 	| {
-			readonly reason: "conversation_deleted" | "automation_run_ended" | "conversation_done";
-			readonly conversationId: string;
+			readonly reason: "chat_deleted" | "automation_run_ended" | "chat_resolved";
+			readonly chatId: string;
 	  }
 	| { readonly reason: "bot_deleted"; readonly botId: string }
 	| { readonly reason: "bot_cache"; readonly botId: string; readonly cache: BotCache };
@@ -34,9 +28,9 @@ export interface Clearing {
 	readonly stoppedAtTimeout: boolean;
 }
 
-/** Ids of the conversation folders and bot homes in a computer. */
+/** Ids of the chat folders and home folders in a computer. */
 interface WorkspaceFolders {
-	readonly conversationIds: readonly string[];
+	readonly chatIds: readonly string[];
 	readonly botIds: readonly string[];
 }
 
@@ -69,73 +63,65 @@ export function freeDiskSpace(
 }
 
 /**
- * What in `folders` may be cleared, in order: deleted conversations, deleted
- * bots' homes, ended automation runs, remaining bots' caches, then done
- * conversations, last because anything new reopens them. Conversations go oldest
- * last turn first. A conversation with an active turn is never cleared.
+ * What in `folders` may be cleared, in order: deleted chats, deleted
+ * bots' homes, ended automation runs, remaining bots' caches, then resolved
+ * chats, last because anything new reopens them. Chats go oldest
+ * last turn first. A chat with an active turn is never cleared.
  */
 export function clearingOrder(
 	workspaceId: string,
 	folders: WorkspaceFolders,
 ): Effect.Effect<readonly Clearable[], never, Database> {
 	return Effect.gen(function* () {
-		const conversations = yield* clearableConversations(workspaceId, folders.conversationIds);
+		const chats = yield* clearableChats(workspaceId, folders.chatIds);
 		const bots = yield* clearableBotFolders(workspaceId, folders.botIds);
-		// Stable, keeping conversations oldest first within each reason.
-		return [...conversations, ...bots].toSorted(
-			(a, b) => REASON_ORDER[a.reason] - REASON_ORDER[b.reason],
-		);
+		// Stable, keeping chats oldest first within each reason.
+		return [...chats, ...bots].toSorted((a, b) => REASON_ORDER[a.reason] - REASON_ORDER[b.reason]);
 	});
 }
 
 const REASON_ORDER: Record<ClearingReason, number> = {
-	conversation_deleted: 0,
+	chat_deleted: 0,
 	bot_deleted: 1,
 	automation_run_ended: 2,
 	bot_cache: 3,
-	conversation_done: 4,
+	chat_resolved: 4,
 };
 
-function clearableConversations(workspaceId: string, conversationIds: readonly string[]) {
+function clearableChats(workspaceId: string, chatIds: readonly string[]) {
 	return Effect.gen(function* () {
-		if (conversationIds.length === 0) return [];
-		const conversation = alias(placedConversation, "conversation");
+		if (chatIds.length === 0) return [];
+		const chat = alias(placedChat, "chat");
 		const found = yield* query((db) =>
 			db
 				.select({
-					id: placedConversation.id,
+					id: placedChat.id,
 					runState: automationRun.state,
-					conversationDoneAt: conversation.doneAt,
+					chatResolvedAt: chat.resolvedAt,
 					activeTurns:
 						sql<number>`count(*) filter (where ${inArray(turn.status, [...ACTIVE_TURN_STATUSES])})`.mapWith(
 							Number,
 						),
 				})
-				.from(placedConversation)
-				.leftJoin(conversation, eq(conversation.id, placedConversation.rootConversationId))
-				.leftJoin(automationRun, eq(automationRun.conversationId, placedConversation.id))
-				.leftJoin(turn, eq(turn.conversationId, placedConversation.id))
-				.where(
-					and(
-						eq(placedConversation.workspaceId, workspaceId),
-						inArray(placedConversation.id, [...conversationIds]),
-					),
-				)
-				.groupBy(placedConversation.id, conversation.doneAt, automationRun.state)
+				.from(placedChat)
+				.leftJoin(chat, eq(chat.id, placedChat.rootChatId))
+				.leftJoin(automationRun, eq(automationRun.chatId, placedChat.id))
+				.leftJoin(turn, eq(turn.chatId, placedChat.id))
+				.where(and(eq(placedChat.workspaceId, workspaceId), inArray(placedChat.id, [...chatIds])))
+				.groupBy(placedChat.id, chat.resolvedAt, automationRun.state)
 				.orderBy(sql`max(${turn.startedAt}) nulls first`),
 		);
 		const existing = new Set(found.map((row) => row.id));
-		const deleted = conversationIds
-			.filter((conversationId) => !existing.has(conversationId))
-			.map((conversationId): Clearable => ({ conversationId, reason: "conversation_deleted" }));
+		const deleted = chatIds
+			.filter((chatId) => !existing.has(chatId))
+			.map((chatId): Clearable => ({ chatId, reason: "chat_deleted" }));
 		const finished = found
 			.filter((row) => row.activeTurns === 0)
 			.flatMap((row): Clearable[] => {
 				if (row.runState && ENDED_RUN_STATES.has(row.runState)) {
-					return [{ conversationId: row.id, reason: "automation_run_ended" }];
+					return [{ chatId: row.id, reason: "automation_run_ended" }];
 				}
-				if (row.conversationDoneAt)
-					return [{ conversationId: row.id, reason: "conversation_done" }];
+				if (row.chatResolvedAt) return [{ chatId: row.id, reason: "chat_resolved" }];
 				return [];
 			});
 		return [...deleted, ...finished];
@@ -168,10 +154,10 @@ function clearableBotFolders(workspaceId: string, botIds: readonly string[]) {
 
 function pathOf(clearable: Clearable) {
 	switch (clearable.reason) {
-		case "conversation_deleted":
+		case "chat_deleted":
 		case "automation_run_ended":
-		case "conversation_done":
-			return `${Computers.CONVERSATIONS_DIRECTORY}/${clearable.conversationId}`;
+		case "chat_resolved":
+			return `${Computers.CHATS_DIRECTORY}/${clearable.chatId}`;
 		case "bot_deleted":
 			return `${Computers.BOTS_DIRECTORY}/${clearable.botId}`;
 		case "bot_cache":
@@ -189,20 +175,20 @@ const CLEARING_OPTIONS = { timeout: "2 minutes", maxOutputCharacters: 100_000 } 
 const STOP_REMOVING_AFTER_SECONDS = 90;
 
 const ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const CONVERSATION_FOLDER = new RegExp(`^${Computers.CONVERSATIONS_DIRECTORY}/(${ID})$`);
-const BOT_HOME = new RegExp(`^${Computers.BOTS_DIRECTORY}/(${ID})$`);
+const CHAT_FOLDER = new RegExp(`^${Computers.CHATS_DIRECTORY}/(${ID})$`);
+const HOME_FOLDER = new RegExp(`^${Computers.BOTS_DIRECTORY}/(${ID})$`);
 
 function workspaceFoldersIn(computer: Computers.Computer) {
 	return Effect.map(
 		computer.exec(
-			`find ${Computers.CONVERSATIONS_DIRECTORY} ${Computers.BOTS_DIRECTORY} -mindepth 1 -maxdepth 1 -type d 2>/dev/null; exit 0`,
+			`find ${Computers.CHATS_DIRECTORY} ${Computers.BOTS_DIRECTORY} -mindepth 1 -maxdepth 1 -type d 2>/dev/null; exit 0`,
 			LISTING_OPTIONS,
 		),
 		(listing): WorkspaceFolders => {
 			const paths = listing.stdout.text.split("\n");
 			return {
-				conversationIds: paths.flatMap((path) => CONVERSATION_FOLDER.exec(path)?.[1] ?? []),
-				botIds: paths.flatMap((path) => BOT_HOME.exec(path)?.[1] ?? []),
+				chatIds: paths.flatMap((path) => CHAT_FOLDER.exec(path)?.[1] ?? []),
+				botIds: paths.flatMap((path) => HOME_FOLDER.exec(path)?.[1] ?? []),
 			};
 		},
 	);

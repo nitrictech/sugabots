@@ -26,7 +26,7 @@ export function ChatLog({
 		hasNextPage: boolean;
 		isFetchingNextPage: boolean;
 	};
-	/** The top of the conversation, shown once there is nothing older to load. */
+	/** The top of the chat, shown once there is nothing older to load. */
 	intro: ReactNode;
 	/** The column the messages are in, which a header over them is measured against. */
 	columnRef?: Ref<HTMLDivElement>;

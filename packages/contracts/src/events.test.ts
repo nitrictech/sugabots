@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-	conversationUpdateEventSchema,
+	chatUpdateEventSchema,
 	EVENT_VERSION,
 	eventPayloadSchemas,
 	isDurableEventType,
@@ -31,12 +31,12 @@ describe("durability", () => {
 
 describe("envelope", () => {
 	it("stamps the version and keeps the payload", () => {
-		const event = streamEvent("conversation.created", { conversationId: "c1" });
+		const event = streamEvent("chat.created", { chatId: "c1" });
 
 		expect(event).toEqual({
 			v: EVENT_VERSION,
-			type: "conversation.created",
-			conversationId: "c1",
+			type: "chat.created",
+			chatId: "c1",
 		});
 	});
 
@@ -47,7 +47,7 @@ describe("envelope", () => {
 	it("parses an event carrying fields this version has never seen", () => {
 		const parsed = Schema.decodeSync(streamEventSchema)({
 			v: 1,
-			type: "conversation.changed",
+			type: "chat.changed",
 			surprise: true,
 		});
 
@@ -55,9 +55,9 @@ describe("envelope", () => {
 	});
 
 	it("rejects an event from a version this client cannot read", () => {
-		expect(
-			Schema.decodeUnknownResult(streamEventSchema)({ v: 2, type: "conversation.changed" })._tag,
-		).toBe("Failure");
+		expect(Schema.decodeUnknownResult(streamEventSchema)({ v: 2, type: "chat.changed" })._tag).toBe(
+			"Failure",
+		);
 	});
 
 	it("rejects an event with no type", () => {
@@ -73,12 +73,12 @@ describe("envelope", () => {
 		"tool_call.completed",
 		"turn.started",
 		"turn.completed",
-		"conversation.changed",
-		"conversation.notice",
+		"chat.changed",
+		"chat.notice",
 		"collaboration.updated",
-	])("recognizes the known conversation update %s", (type) => {
+	])("recognizes the known chat update %s", (type) => {
 		const ids = {
-			conversationId: "00000000-0000-4000-8000-000000000001",
+			chatId: "00000000-0000-4000-8000-000000000001",
 			turnId: "00000000-0000-4000-8000-000000000002",
 			botId: "00000000-0000-4000-8000-000000000003",
 		};
@@ -99,7 +99,7 @@ describe("envelope", () => {
 			"tool_call.started": { ...ids, messageId: "m1", toolCall: toolCall("running") },
 			"tool_call.completed": { ...ids, messageId: "m1", toolCall: toolCall("completed") },
 			"turn.completed": { ...ids, status: "done" },
-			"conversation.notice": { ...ids, notice: "Ada has no model chosen, so it cannot reply." },
+			"chat.notice": { ...ids, notice: "Ada has no model chosen, so it cannot reply." },
 			"collaboration.updated": {
 				...ids,
 				messageId: "00000000-0000-4000-8000-000000000004",
@@ -108,7 +108,7 @@ describe("envelope", () => {
 					id: "00000000-0000-4000-8000-000000000006",
 					botId: ids.botId,
 					botName: "Helper",
-					conversationId: "00000000-0000-4000-8000-000000000007",
+					chatId: "00000000-0000-4000-8000-000000000007",
 					brief: "Look into it",
 					status: "waiting",
 					answer: null,
@@ -118,7 +118,7 @@ describe("envelope", () => {
 		};
 
 		expect(
-			Schema.decodeUnknownResult(conversationUpdateEventSchema)({
+			Schema.decodeUnknownResult(chatUpdateEventSchema)({
 				v: EVENT_VERSION,
 				type,
 				...ids,
@@ -138,18 +138,18 @@ describe("envelope", () => {
 		const event = {
 			v: 1,
 			type: "message.delta",
-			conversationId: "00000000-0000-4000-8000-000000000001",
+			chatId: "00000000-0000-4000-8000-000000000001",
 			messageId: "m1",
 			offset: 0,
 			text: "hi",
 			extra: { future: true },
 		};
-		const parsed = Schema.decodeUnknownSync(conversationUpdateEventSchema)(event);
+		const parsed = Schema.decodeUnknownSync(chatUpdateEventSchema)(event);
 		expect(parsed).toEqual(event);
-		expect(Schema.encodeSync(conversationUpdateEventSchema)(parsed)).toEqual(event);
-		expect(
-			Schema.decodeUnknownResult(conversationUpdateEventSchema)({ ...event, offset: -1 })._tag,
-		).toBe("Failure");
+		expect(Schema.encodeSync(chatUpdateEventSchema)(parsed)).toEqual(event);
+		expect(Schema.decodeUnknownResult(chatUpdateEventSchema)({ ...event, offset: -1 })._tag).toBe(
+			"Failure",
+		);
 	});
 
 	it("keeps open empty payloads and workspace envelopes", () => {
@@ -157,23 +157,23 @@ describe("envelope", () => {
 		expect(Schema.decodeSync(eventPayloadSchemas["bot.updated"])(extras)).toEqual(extras);
 		for (const payload of [
 			{ type: "reset" },
-			{ type: "conversation.changed", conversationId: "00000000-0000-4000-8000-000000000001" },
+			{ type: "chat.changed", chatId: "00000000-0000-4000-8000-000000000001" },
 		]) {
 			const event = { v: 1, ...payload, ...extras };
 			expect(Schema.decodeUnknownSync(workspaceUpdateEventSchema)(event)).toEqual(event);
-			expect(Schema.decodeUnknownSync(conversationUpdateEventSchema)(event)).toEqual(event);
+			expect(Schema.decodeUnknownSync(chatUpdateEventSchema)(event)).toEqual(event);
 		}
 	});
 
-	it("accepts changes to a conversation's items", () => {
+	it("accepts changes to a chat's items", () => {
 		const event = {
 			v: EVENT_VERSION,
-			type: "conversation.item_changed",
-			rootConversationId: "00000000-0000-4000-8000-000000000001",
-			conversationId: "00000000-0000-4000-8000-000000000002",
+			type: "chat.item_changed",
+			rootChatId: "00000000-0000-4000-8000-000000000001",
+			chatId: "00000000-0000-4000-8000-000000000002",
 		};
 		expect(Schema.decodeUnknownResult(workspaceUpdateEventSchema)(event)._tag).toBe("Success");
-		expect(Schema.decodeUnknownResult(conversationUpdateEventSchema)(event)._tag).toBe("Success");
+		expect(Schema.decodeUnknownResult(chatUpdateEventSchema)(event)._tag).toBe("Success");
 	});
 });
 
@@ -186,7 +186,7 @@ function toolCall(status: "running" | "completed") {
 		output: status === "completed" ? { title: "Example" } : null,
 		status,
 		error: null,
-		mutating: false,
+		writeOrDelete: false,
 		atOffset: 0,
 		startedAt: "2026-09-14T00:00:00.000Z",
 		finishedAt: status === "completed" ? "2026-09-14T00:00:01.000Z" : null,
@@ -196,7 +196,7 @@ function toolCall(status: "running" | "completed") {
 function message() {
 	return {
 		id: "00000000-0000-4000-8000-000000000004",
-		conversationId: "00000000-0000-4000-8000-000000000001",
+		chatId: "00000000-0000-4000-8000-000000000001",
 		author: testPerson({ id: "00000000-0000-4000-8000-000000000005", name: "Sam" }),
 		kind: "text" as const,
 		status: "complete" as const,

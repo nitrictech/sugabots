@@ -31,7 +31,7 @@ const networkUrl = (projectId: string) =>
 	`${import.meta.env.VITE_API_URL}/projects/${projectId}/computer/network`;
 
 const network: ProjectComputerNetwork = {
-	mode: "allowlist",
+	mode: "allowed-hosts-only",
 	blocking: true,
 	workspaceHosts: [
 		{ host: "github.com", blockedBy: null },

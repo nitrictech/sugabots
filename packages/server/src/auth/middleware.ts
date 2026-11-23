@@ -1,6 +1,6 @@
 import {
 	API_BASE_PATH,
-	CurrentUser,
+	CurrentPerson,
 	Forbidden,
 	Session,
 	Unauthorized,
@@ -22,12 +22,12 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /**
  * Rejects a cookie-authenticated write whose Origin is not in `trustedOrigins`,
- * which is what stops CSRF. Routes under `/auth` and `/hooks` are exempt:
+ * which is what stops CSRF. Routes under `/auth` and `/webhooks` are exempt:
  * better-auth checks for itself, and webhooks carry no browser cookie.
  */
 export function requireCookieOrigin(trustedOrigins: readonly string[]) {
 	const trusted = new Set(trustedOrigins);
-	const exempt = [`${API_BASE_PATH}/auth/`, `${API_BASE_PATH}/hooks/`];
+	const exempt = [`${API_BASE_PATH}/auth/`, `${API_BASE_PATH}/webhooks/`];
 	return <E, R>(
 		effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 	): Effect.Effect<
@@ -85,7 +85,7 @@ export const sessionLayer = Layer.effect(
 							Effect.succeed(HttpServerResponse.mergeCookies(response, holder.refreshedCookies)),
 						);
 					}
-					return yield* Effect.provideService(httpEffect, CurrentUser, holder.user);
+					return yield* Effect.provideService(httpEffect, CurrentPerson, holder.person);
 				}),
 	),
 );
@@ -94,10 +94,10 @@ export const sessionLayer = Layer.effect(
  * Runs a handler's work as the person the request's session belongs to, the
  * actor core authorizes, for an endpoint behind `Session`.
  */
-export const asSessionUser = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-	Effect.flatMap(CurrentUser, (user) =>
-		// `Session` put the user there only once `identify` accepted the credentials.
-		effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(user.id))),
+export const asSignedInPerson = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+	Effect.flatMap(CurrentPerson, (person) =>
+		// `Session` put the person there only once `identify` accepted the credentials.
+		effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(person.id))),
 	);
 
 function bearerToken(header: string | undefined): string | undefined {

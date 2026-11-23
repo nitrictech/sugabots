@@ -56,7 +56,7 @@ export function ProjectComputerSettings({
 
 const STATE_WORDS = {
 	running: "Running",
-	paused: "Paused",
+	asleep: "Asleep",
 	lost: "Lost",
 	unreachable: "Not answering",
 } as const;
@@ -146,7 +146,7 @@ function ComputerGroup({ owner, shown }: { owner: ResourceOwner; shown: ProjectC
 				open={confirm === "reset"}
 				onOpenChange={(open) => setConfirm(open ? "reset" : undefined)}
 				title="Reset the computer?"
-				description="Everything on it is deleted: every thread's folder, each bot's home, and any work that wasn't pushed. This can't be undone."
+				description="Everything on it is deleted: every chat's folder, each bot's home, and any work that wasn't pushed. This can't be undone."
 				confirmLabel="Reset"
 				pending={actions.reset.isPending}
 				error={actions.reset.error ? failureMessage(actions.reset.error) : undefined}
@@ -161,8 +161,8 @@ function ComputerGroup({ owner, shown }: { owner: ResourceOwner; shown: ProjectC
 
 function stateNote(state: keyof typeof STATE_WORDS): string | undefined {
 	switch (state) {
-		case "paused":
-			return "Paused while nobody uses it. It wakes when a bot next needs it.";
+		case "asleep":
+			return "Asleep while nobody uses it. It wakes when a bot next needs it.";
 		case "lost":
 			return "The provider no longer has this computer. A new one is made when a bot next needs it.";
 		case "unreachable":
@@ -182,7 +182,7 @@ const DISK_NOTES = {
 
 /**
  * How full the computer's disk was when last measured, and what of it each
- * bot's home, the threads' folders and /tmp take, largest first, so whoever
+ * bot's home, the chats' folders and /tmp take, largest first, so whoever
  * looks after the computer can see what to clear before it fills.
  */
 function DiskGroup({ disk, bots }: { disk: ComputerDisk | null; bots: readonly Bot[] }) {
@@ -220,7 +220,7 @@ function DiskGroup({ disk, bots }: { disk: ComputerDisk | null; bots: readonly B
 					<SettingsRow
 						key={folder.kind === "home" ? folder.botId : folder.kind}
 						icon={
-							bot && <BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={24} />
+							bot && <BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={24} />
 						}
 						label={folderLabel(folder, bot?.name)}
 						sub={FOLDER_DESCRIPTIONS[folder.kind]}
@@ -256,8 +256,8 @@ function UnsizedRemainder({ disk }: { disk: ComputerDisk }) {
 }
 
 const FOLDER_DESCRIPTIONS = {
-	home: "Home: its tools, settings and caches, in every thread",
-	conversations: "Where the bots clone, install and build",
+	home: "Home: its tools, settings and caches, in every chat",
+	chats: "Where the bots clone, install and build",
 	temporary: "/tmp",
 } as const;
 
@@ -265,8 +265,8 @@ function folderLabel(folder: ComputerDiskFolder, botName: string | undefined) {
 	switch (folder.kind) {
 		case "home":
 			return botName ?? "A removed bot";
-		case "conversations":
-			return "Conversation folders";
+		case "chats":
+			return "Chat folders";
 		case "temporary":
 			return "Temporary files";
 	}

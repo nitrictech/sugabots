@@ -1,5 +1,5 @@
 import {
-	conversationNotificationTag,
+	chatNotificationTag,
 	type NotificationContent,
 	type NotificationLevel,
 	type NotificationPreferences,
@@ -19,7 +19,7 @@ import { MUTE_LENGTHS, type MuteLength } from "@/lib/notification-choices.ts";
 /*
  * Browser notifications, shown by Sugabots' open tabs as Slack's web app
  * shows them: what the person chose to be notified about, turning them on in
- * this browser, and telling the server which conversation this tab shows, so
+ * this browser, and telling the server which chat this tab shows, so
  * it does not notify them of what they are reading.
  */
 
@@ -208,7 +208,7 @@ function writeTurnedOn(on: boolean) {
 
 /**
  * Shows the signed-in person's notifications from this tab, while their
- * notifications are on in this browser, except those about a conversation one
+ * notifications are on in this browser, except those about a chat one
  * of their tabs is looking at, and opens what a clicked one is about here.
  */
 export function useNotificationsInThisBrowser() {
@@ -226,10 +226,10 @@ export function useNotificationsInThisBrowser() {
 				if (update.type === "presence") {
 					rememberLooking(looking, update, Date.now());
 					// Every tab showed it, so each closes its own.
-					if (update.conversationId) closeNotificationsAbout(update.conversationId);
+					if (update.chatId) closeNotificationsAbout(update.chatId);
 				} else if (
 					update.type === "notification" &&
-					update.conversationId !== lookingHere &&
+					update.chatId !== lookingHere &&
 					!someTabLooksAt(looking, update, Date.now())
 				) {
 					showFromThisTab(update, (path) => router.history.push(path));
@@ -242,29 +242,21 @@ export function useNotificationsInThisBrowser() {
 }
 
 /**
- * The conversation each of the person's tabs is looking at, if any, from any
+ * The chat each of the person's tabs is looking at, if any, from any
  * browser or device, by tab: as of its latest report, and until when that
  * counts if the tab says no more.
  */
-type LookingTabs = Map<string, { conversationId: string | null; sequence: number; until: number }>;
+type LookingTabs = Map<string, { chatId: string | null; sequence: number; until: number }>;
 
-function rememberLooking(
-	tabs: LookingTabs,
-	{ clientId, conversationId, sequence }: Presence,
-	now: number,
-) {
+function rememberLooking(tabs: LookingTabs, { clientId, chatId, sequence }: Presence, now: number) {
 	const latest = tabs.get(clientId);
 	if (latest && latest.sequence >= sequence) return;
-	tabs.set(clientId, { conversationId, sequence, until: now + PRESENCE_LIFETIME_MS });
+	tabs.set(clientId, { chatId, sequence, until: now + PRESENCE_LIFETIME_MS });
 }
 
 /** Whether one of the person's tabs is looking at what `notification` is about. */
-function someTabLooksAt(
-	tabs: LookingTabs,
-	{ conversationId }: NotificationContent,
-	now: number,
-): boolean {
-	return [...tabs.values()].some((tab) => tab.conversationId === conversationId && tab.until > now);
+function someTabLooksAt(tabs: LookingTabs, { chatId }: NotificationContent, now: number): boolean {
+	return [...tabs.values()].some((tab) => tab.chatId === chatId && tab.until > now);
 }
 
 /**
@@ -300,35 +292,35 @@ const TAB_ID = uuidv4();
 let presenceReports = 0;
 
 /**
- * The conversation this tab is looking at, known here at once, before its
+ * The chat this tab is looking at, known here at once, before its
  * report comes back over the person's stream.
  */
 let lookingHere: string | null = null;
 
-function reportPresence(conversationId: string | null) {
-	lookingHere = conversationId;
+function reportPresence(chatId: string | null) {
+	lookingHere = chatId;
 	presenceReports += 1;
 	void Effect.runPromise(
 		client.api.notifications.reportPresence({
-			payload: { clientId: TAB_ID, conversationId, sequence: presenceReports },
+			payload: { clientId: TAB_ID, chatId, sequence: presenceReports },
 		}),
 		// Best effort: a lost report only means one notification the person did not need.
 	).catch(() => {});
 }
 
-/** How often a tab showing a conversation says so again, well inside `PRESENCE_LIFETIME_MS`. */
+/** How often a tab showing a chat says so again, well inside `PRESENCE_LIFETIME_MS`. */
 const PRESENCE_INTERVAL_MS = PRESENCE_LIFETIME_MS / 3;
 
 /**
- * Tells the server this tab shows `conversationId` while the tab has focus,
+ * Tells the server this tab shows `chatId` while the tab has focus,
  * so the person is not notified of what they are reading, and closes the
  * notifications already shown for it.
  */
-export function usePresence(conversationId: string | undefined) {
+export function usePresence(chatId: string | undefined) {
 	useEffect(() => {
 		const report = () => {
 			const looking = document.visibilityState === "visible" && document.hasFocus();
-			const showing = looking && conversationId ? conversationId : null;
+			const showing = looking && chatId ? chatId : null;
 			reportPresence(showing);
 			if (showing) closeNotificationsAbout(showing);
 		};
@@ -343,13 +335,13 @@ export function usePresence(conversationId: string | undefined) {
 			window.removeEventListener("blur", report);
 			document.removeEventListener("visibilitychange", report);
 		};
-	}, [conversationId]);
+	}, [chatId]);
 
 	useEffect(() => () => reportPresence(null), []);
 }
 
-function closeNotificationsAbout(conversationId: string) {
-	shownByThisTab.get(conversationNotificationTag(conversationId))?.close();
+function closeNotificationsAbout(chatId: string) {
+	shownByThisTab.get(chatNotificationTag(chatId))?.close();
 }
 
 /** When the place's mute ends, or null when it is not muted for a while. */

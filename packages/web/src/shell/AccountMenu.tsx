@@ -26,13 +26,13 @@ import { initialOf } from "@/ui/letter-tile.tsx";
  * opens next time.
  */
 export function AccountMenu({
-	user,
+	signedIn,
 	current,
 	workspaces,
 	settingsBack,
 	onSignOut,
 }: {
-	user: { name: string; email: string; image?: string | null };
+	signedIn: { name: string; email: string; image?: string | null };
 	current: Workspace;
 	/** Every workspace you belong to, `current` among them. */
 	workspaces: readonly Workspace[];
@@ -43,18 +43,20 @@ export function AccountMenu({
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
-				aria-label={`Account: ${user.name}`}
+				aria-label={`Account: ${signedIn.name}`}
 				className="focus-ring flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1.5 text-left transition-colors hover:bg-row-hover data-popup-open:bg-row-selected"
 			>
-				<PersonAvatar person={user} size={24} />
-				<span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">{user.name}</span>
+				<PersonAvatar person={signedIn} size={24} />
+				<span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">
+					{signedIn.name}
+				</span>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent side="top" align="start" className="w-58">
 				<div className="flex items-center gap-2.5 p-2">
-					<PersonAvatar person={user} size={32} />
+					<PersonAvatar person={signedIn} size={32} />
 					<span className="flex min-w-0 flex-1 flex-col leading-snug">
-						<span className="truncate font-medium text-sm text-foreground">{user.name}</span>
-						<span className="truncate text-xs text-subtle-foreground">{user.email}</span>
+						<span className="truncate font-medium text-sm text-foreground">{signedIn.name}</span>
+						<span className="truncate text-xs text-subtle-foreground">{signedIn.email}</span>
 					</span>
 				</div>
 				<DropdownMenuSeparator />
@@ -67,7 +69,7 @@ export function AccountMenu({
 							render={
 								<Link
 									to="/$workspace/settings/$section"
-									params={{ workspace: current.slug, section: "members" }}
+									params={{ workspace: current.slug, section: "people" }}
 									state={settingsBack}
 								/>
 							}
@@ -97,7 +99,7 @@ export function AccountMenu({
 								</DropdownMenuItem>
 							),
 						)}
-						<DropdownMenuItem render={<Link to="/onboarding" />}>
+						<DropdownMenuItem render={<Link to="/workspace-setup" />}>
 							<Plus />
 							New workspace
 						</DropdownMenuItem>
@@ -108,7 +110,7 @@ export function AccountMenu({
 					render={
 						<Link
 							to="/$workspace/settings/$section"
-							params={{ workspace: current.slug, section: "profile" }}
+							params={{ workspace: current.slug, section: "account" }}
 							state={settingsBack}
 						/>
 					}

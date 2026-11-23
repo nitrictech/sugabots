@@ -3,13 +3,13 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/ht
 import {
 	acceptedInvitationSchema,
 	invitationPreviewSchema,
+	membershipSchema,
 	newWorkspaceInvitationSchema,
 	newWorkspaceSchema,
-	ownershipTransferSchema,
+	ownershipHandOverSchema,
+	roleChangeSchema,
 	workspaceDetailsSchema,
 	workspaceInvitationSchema,
-	workspaceMemberSchema,
-	workspaceMemberUpdateSchema,
 	workspaceSchema,
 	workspaceTimeZoneChangeSchema,
 	workspaceTimeZoneSchema,
@@ -51,23 +51,23 @@ export class WorkspacesApi extends HttpApiGroup.make("workspaces")
 			params: workspace,
 			error: [Conflict, ...refused],
 		}),
-		HttpApiEndpoint.get("members", "/workspaces/:workspace/members", {
+		HttpApiEndpoint.get("memberships", "/workspaces/:workspace/memberships", {
 			params: workspace,
-			success: Schema.Array(workspaceMemberSchema),
+			success: Schema.Array(membershipSchema),
 			error: refused,
 		}),
-		HttpApiEndpoint.patch("updateMember", "/workspaces/:workspace/members/:memberId", {
-			params: { ...workspace, memberId: uuidSchema },
-			payload: workspaceMemberUpdateSchema,
+		HttpApiEndpoint.patch("changeRole", "/workspaces/:workspace/memberships/:membershipId", {
+			params: { ...workspace, membershipId: uuidSchema },
+			payload: roleChangeSchema,
 			error: [BadRequest, ...refused],
 		}),
-		HttpApiEndpoint.delete("removeMember", "/workspaces/:workspace/members/:memberId", {
-			params: { ...workspace, memberId: uuidSchema },
+		HttpApiEndpoint.delete("removeMembership", "/workspaces/:workspace/memberships/:membershipId", {
+			params: { ...workspace, membershipId: uuidSchema },
 			error: [BadRequest, Conflict, ...refused],
 		}),
-		HttpApiEndpoint.put("transferOwnership", "/workspaces/:workspace/owner", {
+		HttpApiEndpoint.put("handOverOwnership", "/workspaces/:workspace/owner", {
 			params: workspace,
-			payload: ownershipTransferSchema,
+			payload: ownershipHandOverSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.post("leave", "/workspaces/:workspace/leave", {

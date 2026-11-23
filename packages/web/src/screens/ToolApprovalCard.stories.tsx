@@ -3,24 +3,24 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { expect, screen } from "storybook/test";
 import preview from "#storybook/preview";
-import type { ConnectionLook } from "@/lib/connections.ts";
+import type { MarkedConnector } from "@/lib/connectors.ts";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 
 const PHONE = { viewport: { value: "galaxys9", isRotated: false } };
 
-const calendar: ConnectionLook = { name: "Google Calendar" };
-const linear: ConnectionLook = { name: "Linear", presetId: "linear" };
+const calendar: MarkedConnector = { name: "Google Calendar" };
+const linear: MarkedConnector = { name: "Linear", markId: "linear" };
 
 const tripPlanner = {
 	name: "Trip Planner",
 	color: "sky" as const,
-	face: "dot" as const,
+	eyes: "dot" as const,
 	shape: "circle" as const,
 };
 const growthDesk = {
 	name: "Growth Desk",
 	color: "green" as const,
-	face: "pill" as const,
+	eyes: "pill" as const,
 	shape: "circle" as const,
 };
 
@@ -41,7 +41,7 @@ function asking(over: Partial<ToolCallPart> = {}): ToolCallPart {
 		output: null,
 		status: "awaiting_approval",
 		error: null,
-		mutating: true,
+		writeOrDelete: true,
 		atOffset: 0,
 		startedAt: "2026-11-10T09:00:00.000Z",
 		finishedAt: null,
@@ -80,9 +80,9 @@ const meta = preview.meta({
 	args: {
 		call: asking(),
 		bot: tripPlanner,
-		conversationId: "0199a3a0-0000-7000-8000-0000000000b2",
+		chatId: "0199a3a0-0000-7000-8000-0000000000b2",
 		canApprove: true,
-		look: calendar,
+		connector: calendar,
 	},
 	decorators: [
 		function WithQueries(Story) {
@@ -141,21 +141,21 @@ export const Answered = meta.story({
 	},
 });
 
-/** BigLinearIssueFolded is a long write folded in the card, so it never takes over the conversation. */
+/** BigLinearIssueFolded is a long write folded in the card, so it never takes over the chat. */
 export const BigLinearIssueFolded = meta.story({
-	args: { call: bigLinearIssue, bot: growthDesk, look: linear },
+	args: { call: bigLinearIssue, bot: growthDesk, connector: linear },
 });
 
 /** BigLinearIssueUnfolded scrolls inside the card, stopping at its ends rather than scrolling the chat. */
 export const BigLinearIssueUnfolded = meta.story({
-	args: { call: bigLinearIssue, bot: growthDesk, look: linear },
+	args: { call: bigLinearIssue, bot: growthDesk, connector: linear },
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "See more" }));
 	},
 });
 
-/** ConnectionSinceRemoved is a call to a connection the bot no longer has: the handle is written out. */
-export const ConnectionSinceRemoved = meta.story({ args: { look: undefined } });
+/** ConnectorSinceRemoved is a call to a connector the bot no longer has: the handle is written out. */
+export const ConnectorSinceRemoved = meta.story({ args: { connector: undefined } });
 
 /** OnAPhone shows the start of the request and one Review button, which opens it full screen. */
 export const OnAPhone = meta.story({
@@ -171,7 +171,7 @@ export const OnAPhoneInLight = meta.story({ globals: { ...PHONE, theme: "light" 
 /** ReviewOnAPhone is the whole request full screen, with Close at its top right and Deny and Allow pinned under it. */
 export const ReviewOnAPhone = meta.story({
 	globals: PHONE,
-	args: { call: bigLinearIssue, bot: growthDesk, look: linear },
+	args: { call: bigLinearIssue, bot: growthDesk, connector: linear },
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog", { name: "Create issue" });
@@ -195,18 +195,18 @@ export const ReviewOnAPhoneAsAViewer = meta.story({
 export const ANetworkRequest = meta.story({
 	args: {
 		call: asking({
-			tool: "request_network_access",
+			tool: "request_host",
 			input: {
 				host: "api.stripe.com",
 			},
 			approval: {
 				status: "pending",
-				deciders: "computer-managers",
+				approvers: "computer-managers",
 				decidedByName: null,
 				decidedAt: null,
 			},
 		}),
-		look: undefined,
+		connector: undefined,
 	},
 	play: async ({ canvas }) => {
 		await expect(

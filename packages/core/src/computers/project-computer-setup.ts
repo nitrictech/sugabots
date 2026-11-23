@@ -1,7 +1,7 @@
 export * as ProjectComputerSetup from "./project-computer-setup.ts";
 
 import type { ComputerDisk, ProjectComputer, ProjectComputerDisk } from "@sugabots/contracts";
-import { computerProviderPreset } from "@sugabots/contracts";
+import { computerBuiltInProvider } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, eq } from "drizzle-orm";
 import { Context, Data, Effect, Layer } from "effect";
@@ -12,7 +12,7 @@ import { Visibility } from "../authorization/visibility.ts";
 import { query, serviceOperations } from "../database/database.ts";
 import { project as projectTable } from "../database/schema.ts";
 import type { UserFacing } from "../user-message.ts";
-import { ComputerProviderRepository } from "./computer-provider-repository.ts";
+import { ComputerProviderStore } from "./computer-provider-store.ts";
 import type { Computers } from "./computers.ts";
 import { ProjectComputers } from "./project-computers.ts";
 
@@ -63,7 +63,7 @@ export const make = Effect.gen(function* () {
 	const authorization = yield* Authorization.Service;
 	const visibility = yield* Visibility.Service;
 	const projectComputers = yield* ProjectComputers.Service;
-	const providers = yield* ComputerProviderRepository.Service;
+	const providers = yield* ComputerProviderStore.Service;
 
 	const shown = (project: ProjectComputers.Project) =>
 		Effect.gen(function* () {
@@ -80,7 +80,7 @@ export const make = Effect.gen(function* () {
 					kind: "present",
 					state: status.state,
 					image: status.image ?? null,
-					providerName: row ? computerProviderPreset(row.preset).name : "Removed provider",
+					providerName: row ? computerBuiltInProvider(row.builtIn).name : "Removed provider",
 					createdAt: status.createdAt.toISOString(),
 					lastUsedAt: status.lastUsedAt.toISOString(),
 					turnsUsing: status.turnsUsing,
@@ -158,7 +158,7 @@ export const layer = layerNoDeps.pipe(
 		Authorization.layer,
 		Visibility.layer,
 		ProjectComputers.layer,
-		ComputerProviderRepository.layer,
+		ComputerProviderStore.layer,
 	]),
 );
 

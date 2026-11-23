@@ -9,12 +9,12 @@ import {
 
 /**
  * `service` with its methods returning promises, each run against the test
- * database as the person `userId`.
+ * database as the person `personId`.
  */
-export const onPostgresAs = (userId: string) =>
+export const onPostgresAs = (personId: string) =>
 	promising<CurrentActor.Service | TestInfrastructure>((effect) =>
 		runOnPostgres(
-			effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId))),
+			effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(personId))),
 		),
 	);
 
@@ -33,7 +33,7 @@ export async function servedOnPostgresAs<
 >(
 	service: Context.Key<Identifier, Shape>,
 	layer: Layer.Layer<Identifier, never, TestInfrastructure>,
-): Promise<(userId: string) => Promised<Shape>> {
+): Promise<(personId: string) => Promised<Shape>> {
 	const served = await runOnPostgres(Effect.provide(service, layer));
-	return (userId) => onPostgresAs(userId)(served);
+	return (personId) => onPostgresAs(personId)(served);
 }

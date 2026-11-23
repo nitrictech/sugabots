@@ -7,6 +7,7 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./http": "./src/http/index.ts",
+		"./operations": "./src/operations/index.ts",
 		"./*": "./src/*.ts"
 	},
 	"scripts": {

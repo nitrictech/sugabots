@@ -4,7 +4,7 @@ import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administra
 import { userText } from "@sugabots/errors";
 import { Effect, Schema } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -19,13 +19,13 @@ export const systemBotRoutes = HttpApiBuilder.group(ServerApi, "systemBots", (ha
 			.handle("list", ({ params }) =>
 				bots
 					.systemBots({ workspace: params.workspace })
-					.pipe(asSessionUser, asHttpError(systemBotErrors)),
+					.pipe(asSignedInPerson, asHttpError(systemBotErrors)),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const key = Schema.decodeUnknownOption(systemBotKeySchema)(params.key);
 					if (key._tag === "None") {
-						return yield* new NotFound({ message: userText`No such built-in bot` });
+						return yield* new NotFound({ message: userText`No such system bot` });
 					}
 					return yield* bots
 						.setSystemBotModel({
@@ -33,7 +33,7 @@ export const systemBotRoutes = HttpApiBuilder.group(ServerApi, "systemBots", (ha
 							key: key.value,
 							model: payload.model,
 						})
-						.pipe(asSessionUser, asHttpError(systemBotErrors));
+						.pipe(asSignedInPerson, asHttpError(systemBotErrors));
 				}),
 			);
 	}),

@@ -1,10 +1,10 @@
 import { BadRequest, Conflict, NotFound, Unauthorized } from "@sugabots/contracts/http";
-import { Automations } from "@sugabots/core/conversations/automations/automations";
+import { Automations } from "@sugabots/core/chats/automations/automations";
 import { userText } from "@sugabots/errors";
 import { Effect, Schema } from "effect";
 import type { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -44,49 +44,49 @@ export const automationRoutes = HttpApiBuilder.group(ServerApi, "automations", (
 		return (
 			handlers
 				.handle("list", ({ params }) =>
-					automations.list(params).pipe(asSessionUser, asHttpError(automationErrors)),
+					automations.list(params).pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				.handle("create", ({ params, payload }) =>
-					automations.create(params, payload).pipe(asSessionUser, asHttpError(automationErrors)),
+					automations.create(params, payload).pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				.handle("update", ({ params, payload }) =>
-					automations.update(params, payload).pipe(asSessionUser, asHttpError(automationErrors)),
+					automations.update(params, payload).pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				.handle("remove", ({ params }) =>
-					automations.remove(params).pipe(asSessionUser, asHttpError(automationErrors)),
+					automations.remove(params).pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				.handle("run", ({ params, payload }) =>
 					automations
 						.run({ ...params, requestId: payload.requestId })
-						.pipe(asSessionUser, asHttpError(automationErrors)),
+						.pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				.handle("addTrigger", ({ params, payload }) =>
 					automations
 						.addTrigger(params, payload)
-						.pipe(asSessionUser, asHttpError(automationErrors)),
+						.pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				.handle("updateTrigger", ({ params, payload }) =>
 					automations
 						.updateTrigger(params, payload)
-						.pipe(asSessionUser, asHttpError(automationErrors)),
+						.pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				.handle("removeTrigger", ({ params }) =>
-					automations.removeTrigger(params).pipe(asSessionUser, asHttpError(automationErrors)),
+					automations.removeTrigger(params).pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				.handle("getSecret", ({ params }) =>
-					automations.getSecret(params).pipe(asSessionUser, asHttpError(automationErrors)),
+					automations.getSecret(params).pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				.handle("rotateSecret", ({ params, payload }) =>
 					automations.rotateSecret(params, payload.secret).pipe(
 						Effect.map((secret) => ({ secret })),
-						asSessionUser,
+						asSignedInPerson,
 						asHttpError(automationErrors),
 					),
 				)
 				.handle("projectRuns", ({ params, query }) =>
 					automations
 						.listProjectRuns(params, query)
-						.pipe(asSessionUser, asHttpError(automationErrors)),
+						.pipe(asSignedInPerson, asHttpError(automationErrors)),
 				)
 				// Raw, so a body that is not JSON is refused with the reason rather
 				// than the generic unsupported-content-type answer.

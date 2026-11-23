@@ -41,7 +41,7 @@ describe("moving between pages on a phone", () => {
 
 		await router.navigate({
 			to: "/$workspace/settings/$section",
-			params: { workspace: "suga", section: "profile" },
+			params: { workspace: "suga", section: "account" },
 		});
 
 		expect(started).toHaveBeenCalledWith(expect.objectContaining({ types: ["forward"] }));
@@ -55,10 +55,10 @@ describe("moving between pages on a phone", () => {
 
 		await router.navigate({
 			to: "/$workspace/settings/$section",
-			params: { workspace: "suga", section: "profile" },
+			params: { workspace: "suga", section: "account" },
 		});
 
-		expect(router.state.location.pathname).toBe("/suga/settings/profile");
+		expect(router.state.location.pathname).toBe("/suga/settings/account");
 		expect(started).not.toHaveBeenCalled();
 	});
 });

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/ui/button.tsx";
 
 /**
- * The centred card the pages outside the shell sit on: log in, accept an
+ * The centred card the pages outside the shell sit on: sign in, accept an
  * invitation, set a workspace up. There is no sidebar to be had on any of them
  * — you are not in a workspace yet — so they get their own frame.
  */

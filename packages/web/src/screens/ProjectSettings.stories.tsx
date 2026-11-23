@@ -2,10 +2,16 @@ import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyProjects, storyUser, storyWorkspace } from "../story-app.tsx";
+import {
+	appHandlers,
+	StoryApp,
+	storyPerson,
+	storyProjects,
+	storyWorkspace,
+} from "../story-app.tsx";
 
 /*
- * A project's settings, a page of its own beside its threads, with its people
+ * A project's settings, a page of its own beside its chats, with its people
  * and its bots each a page under it. On a phone each opens full screen, with
  * the way back to the project, or from its people or bots back to its settings.
  */
@@ -16,15 +22,15 @@ const revenuePage = (page: "people" | "bots") => `${revenueSettings}/${page}`;
 const PHONE = { viewport: { value: "iphone12", isRotated: false } };
 
 const people = [
-	{ userId: storyUser.id, name: storyUser.name, email: storyUser.email, image: null },
+	{ personId: storyPerson.id, name: storyPerson.name, email: storyPerson.email, image: null },
 	{
-		userId: "0199a3a0-0000-7000-8000-000000000012",
+		personId: "0199a3a0-0000-7000-8000-000000000012",
 		name: "Jay Young",
 		email: "jay@nitric.io",
 		image: null,
 	},
 	{
-		userId: "0199a3a0-0000-7000-8000-000000000013",
+		personId: "0199a3a0-0000-7000-8000-000000000013",
 		name: "Mara Kent",
 		email: "mara@nitric.io",
 		image: null,
@@ -38,12 +44,12 @@ const people = [
 /** The Revenue project's people, which the example workspace has none of by default. */
 const revenueHandlers = [
 	// The project's people are the workspace's too, with the roles the project's rows show.
-	http.get(`${API}/workspaces/:workspace/members`, () =>
+	http.get(`${API}/workspaces/:workspace/memberships`, () =>
 		HttpResponse.json(
 			people.map((person, index) => ({
 				id: `0199a3a0-0000-7000-8000-0000000007${index}0`,
-				role: index === 0 ? "admin" : index === 1 ? "admin" : "member",
-				user: { id: person.userId, name: person.name, email: person.email, image: null },
+				role: index === 0 ? "admin" : index === 1 ? "admin" : "editor",
+				person: { id: person.personId, name: person.name, email: person.email, image: null },
 				joinedAt: "2026-09-02T00:00:00.000Z",
 			})),
 		),
@@ -67,7 +73,7 @@ const meta = preview.meta({
 	},
 });
 
-/** A project's settings, picked out among its pages beside its threads: its name and colour, its people and bots, and deleting it. */
+/** A project's settings, picked out among its pages beside its chats: its name and colour, its people and bots, and deleting it. */
 export const General = meta.story({
 	render: () => <StoryApp path={revenueSettings} />,
 	play: async ({ canvas }) => {
@@ -87,7 +93,7 @@ export const General = meta.story({
 
 /**
  * Who can see into the project. Administrators are in every project, so only
- * Mara, a member, can be taken out, and you cannot leave.
+ * Mara, an editor, can be taken out, and you cannot leave.
  */
 export const People = meta.story({
 	render: () => <StoryApp path={revenuePage("people")} />,
@@ -117,22 +123,22 @@ export const Bots = meta.story({
 	},
 });
 
-/** A member reads the project's people, without the controls only an administrator has, and can leave it. */
-export const AsAMember = meta.story({
+/** An editor reads the project's people, without the controls only an administrator has, and can leave it. */
+export const AsAnEditor = meta.story({
 	beforeEach({ msw }) {
-		// A project carries what its viewer may do there; a member may not rename, delete or manage it.
-		const asMember = projectsWithPeople.map((project) => ({
+		// A project carries what its viewer may do there; an editor may not rename, delete or manage it.
+		const asEditor = projectsWithPeople.map((project) => ({
 			...project,
 			permissions: {
 				...project.permissions,
 				rename: false,
-				manageMembers: false,
+				managePeople: false,
 				manageBots: false,
 				delete: false,
 				leave: true,
 			},
 		}));
-		msw.use(...revenueHandlers, ...appHandlers({ role: "member", projects: asMember }));
+		msw.use(...revenueHandlers, ...appHandlers({ role: "editor", projects: asEditor }));
 	},
 	render: () => <StoryApp path={revenuePage("people")} />,
 	play: async ({ canvas }) => {
@@ -143,9 +149,9 @@ export const AsAMember = meta.story({
 	},
 });
 
-/** A member's General for the same project: nothing to rename and no Delete project. */
-export const GeneralAsAMember = meta.story({
-	beforeEach: AsAMember.input.beforeEach,
+/** An editor's General for the same project: nothing to rename and no Delete project. */
+export const GeneralAsAnEditor = meta.story({
+	beforeEach: AsAnEditor.input.beforeEach,
 	render: () => <StoryApp path={revenueSettings} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();

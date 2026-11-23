@@ -1,6 +1,6 @@
 /*
  * How a bot-made HTML page is framed, wherever it is shown from: written into
- * a frame in the web app, or served from the installation's content origin.
+ * a frame in the web app, or served from the server's content origin.
  * Both must apply the same policy, report their height the same way and take
  * the same theme, so the pieces live here, beside each other.
  */

@@ -1,13 +1,13 @@
 import { DisplayName } from "@sugabots/errors";
 import { Effect } from "effect";
-import type { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
+import type { ModelProviderStore } from "../model-providers/model-provider-store.ts";
 import { Models } from "./models.ts";
 
-/** `endpoint` as the provider offering the model, under test names. */
+/** `access` as the provider offering the model, under test names. */
 export const resolvedModel = (
-	endpoint: ModelProviderRepository.ProviderEndpoint,
-): ModelProviderRepository.ResolvedModel => ({
-	endpoint,
+	access: ModelProviderStore.ProviderAccess,
+): ModelProviderStore.ResolvedModel => ({
+	access,
 	providerName: DisplayName.fromRecord("Test provider"),
 	modelName: DisplayName.fromRecord("test-model"),
 });
@@ -22,14 +22,14 @@ export const unusedModel = (): Models.Interface =>
 		Effect.fail(new Models.ModelNotOffered({ model: DisplayName.fromRecord("unused model") })),
 	);
 
-/** A response with this text that ended as `finished` says: by default after one model call, with no tool calls waiting. */
+/** A response with this text that ended as `finished` says: by default after one model request, with no tool calls waiting. */
 export const streamed = (
 	text: AsyncIterable<string>,
 	finished: Partial<Models.Finished> = {},
 ): Models.Streamed => ({
 	text,
 	finished: Effect.succeed({
-		modelCalls: 1,
+		modelRequests: 1,
 		approvalRequests: [],
 		responseMessages: [],
 		...finished,

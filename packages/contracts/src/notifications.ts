@@ -5,10 +5,10 @@ import { uuidSchema } from "./uuid.ts";
 
 /**
  * How much a person is notified about, as Slack offers it:
- * `all`: every message somebody else finishes in a conversation they reach,
+ * `all`: every message somebody else finishes in a chat they reach,
  * and approvals they may decide.
  * `mentions`: messages that mention them, a bot's answers to them, messages in
- * conversations they take part in, and approvals they may decide.
+ * chats they take part in, and approvals they may decide.
  * `nothing`: no notifications.
  */
 const notificationLevelSchema = Schema.Literals(["all", "mentions", "nothing"]);
@@ -93,21 +93,21 @@ export const notificationPreferencesSchema = Schema.Struct({
 export type NotificationPreferences = typeof notificationPreferencesSchema.Type;
 
 /**
- * Which conversation a browser tab shows while it has focus, which the server
+ * Which chat a browser tab shows while it has focus, which the server
  * passes to the person's other tabs, so none of them notifies them of what
  * they are looking at. `clientId` tells one tab from another; a null
- * conversation means the tab shows none, or lost focus.
+ * chat means the tab shows none, or lost focus.
  */
 export const presenceSchema = Schema.Struct({
 	clientId: uuidSchema,
-	conversationId: Schema.NullOr(uuidSchema),
+	chatId: Schema.NullOr(uuidSchema),
 	/** Counts up with each report from the tab, so one that arrives late cannot undo a newer one. */
 	sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
 export type Presence = typeof presenceSchema.Type;
 
-/** How long a tab is taken to show a conversation after it last said so, which it says again well within. */
+/** How long a tab is taken to show a chat after it last said so, which it says again well within. */
 export const PRESENCE_LIFETIME_MS = 90_000;
 
 /** A notification as the browser shows it, sent to the person's open tabs. */
@@ -115,19 +115,19 @@ export const notificationContentSchema = Schema.Struct({
 	title: Schema.String,
 	body: Schema.String,
 	/**
-	 * Notifications with one tag replace each other, so a busy conversation
+	 * Notifications with one tag replace each other, so a busy chat
 	 * shows as one notification rather than a stack.
 	 */
 	tag: Schema.String,
 	/** The path in the web app the notification opens. */
 	path: Schema.String,
-	/** The conversation it is about, which a tab showing it holds back; null for one about none. */
-	conversationId: Schema.NullOr(uuidSchema),
+	/** The chat it is about, which a tab showing it holds back; null for one about none. */
+	chatId: Schema.NullOr(uuidSchema),
 });
 
 export type NotificationContent = typeof notificationContentSchema.Type;
 
-/** The tag a conversation's notifications share, so each replaces the last. */
-export function conversationNotificationTag(conversationId: string): string {
-	return `conversation:${conversationId}`;
+/** The tag a chat's notifications share, so each replaces the last. */
+export function chatNotificationTag(chatId: string): string {
+	return `chat:${chatId}`;
 }

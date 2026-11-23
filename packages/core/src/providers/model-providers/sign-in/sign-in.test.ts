@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { user, workspace, workspaceMember } from "../../../database/schema.ts";
+import { membership, person, workspace } from "../../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -11,8 +11,8 @@ import {
 import { servedOnPostgresAs } from "../../../workspaces/testing.ts";
 import { Egress, type EgressHttpClients } from "../../network/egress.ts";
 import { providerIn, providersIn } from "../model-provider-reads.ts";
-import { ModelProviderRepository } from "../model-provider-repository.ts";
 import { ModelProviderSetup } from "../model-provider-setup.ts";
+import { ModelProviderStore } from "../model-provider-store.ts";
 import { withSignInAccess } from "./sign-in.ts";
 
 /**
@@ -20,9 +20,9 @@ import { withSignInAccess } from "./sign-in.ts";
  * against real SQL and stand-ins for each sign-in service and model API.
  */
 describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
-	let store: Promised<ModelProviderRepository.Interface>;
+	let store: Promised<ModelProviderStore.Interface>;
 	let workspaceId: string;
-	let userId: string;
+	let personId: string;
 	let providerId: string;
 	let service: { clients: EgressHttpClients };
 
@@ -42,27 +42,27 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					]),
 				),
 			)
-		)(userId);
+		)(personId);
 
 	const view = () => runOnPostgres(providerIn(workspaceId, providerId));
 
-	/** The endpoint ready to send, as a turn would get it. */
-	const withAccess = (endpoint: ModelProviderRepository.ProviderEndpoint) =>
+	/** The provider access ready to send, as a turn would get it. */
+	const withAccess = (access: ModelProviderStore.ProviderAccess) =>
 		runOnPostgres(
 			Effect.gen(function* () {
-				const repository = yield* ModelProviderRepository.Service;
-				return yield* withSignInAccess(repository, service.clients, workspaceId, endpoint);
-			}).pipe(Effect.provide(ModelProviderRepository.layer)),
+				const repository = yield* ModelProviderStore.Service;
+				return yield* withSignInAccess(repository, service.clients, workspaceId, access);
+			}).pipe(Effect.provide(ModelProviderStore.layer)),
 		);
 
-	const storedEndpoint = async () => {
-		const endpoint = await store.endpoint(workspaceId, providerId);
-		if (!endpoint) throw new Error("fixture");
-		return endpoint;
+	const storedAccess = async () => {
+		const access = await store.access(workspaceId, providerId);
+		if (!access) throw new Error("fixture");
+		return access;
 	};
 
 	beforeAll(async () => {
-		store = await servedOnPostgres(ModelProviderRepository.Service, ModelProviderRepository.layer);
+		store = await servedOnPostgres(ModelProviderStore.Service, ModelProviderStore.layer);
 	});
 
 	afterAll(async () => {
@@ -77,19 +77,19 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 				.values({ name: `Test ${stamp}`, slug: `test-${stamp}` })
 				.returning(),
 		);
-		const [person] = await onDatabase((db) =>
+		const [somebody] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
 				.returning(),
 		);
-		if (!made || !person) throw new Error("could not create the test workspace");
+		if (!made || !somebody) throw new Error("could not create the test workspace");
 		workspaceId = made.id;
-		userId = person.id;
+		personId = somebody.id;
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values({ workspaceId, userId, role: "admin" }),
+			db.insert(membership).values({ workspaceId, personId, role: "admin" }),
 		);
-		await store.seedPresets(workspaceId);
+		await store.seedBuiltInProviders(workspaceId);
 	});
 
 	describe("with ChatGPT", () => {
@@ -99,7 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			openai = fakeOpenAI();
 			service = openai;
 			const seeded = (await runOnPostgres(providersIn(workspaceId))).find(
-				({ preset }) => preset === "chatgpt",
+				({ builtIn }) => builtIn === "chatgpt",
 			);
 			if (!seeded) throw new Error("ChatGPT is not seeded");
 			providerId = seeded.id;
@@ -147,7 +147,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			const signIn = await setup();
 			const started = await signIn.startSignIn({ workspace: workspaceId, providerId });
 			const other = await store.create(workspaceId, {
-				createdById: userId,
+				createdById: personId,
 				provider: {
 					name: "Gateway",
 					baseUrl: "https://models.example/v1",
@@ -174,11 +174,11 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					expiresAt: Date.now() + 60_000,
 					accountId: "account-1",
 				},
-				signedInById: userId,
+				signedInById: personId,
 			});
-			const endpoint = await storedEndpoint();
+			const access = await storedAccess();
 
-			const ready = await Promise.all([1, 2, 3].map(() => withAccess(endpoint)));
+			const ready = await Promise.all([1, 2, 3].map(() => withAccess(access)));
 
 			expect(openai.refreshesSpent).toEqual(["refresh-0"]);
 			const renewed = openai.issued[0];
@@ -194,10 +194,10 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					expiresAt: Date.now() + 60 * 60_000,
 					accountId: "account-1",
 				},
-				signedInById: userId,
+				signedInById: personId,
 			});
 
-			const ready = await withAccess(await storedEndpoint());
+			const ready = await withAccess(await storedAccess());
 
 			expect(ready.apiKey).toBe("fresh-token");
 			expect(ready.headers["ChatGPT-Account-Id"]).toBe("account-1");
@@ -212,8 +212,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			xai = fakeXai();
 			service = xai;
 			const added = await store.create(workspaceId, {
-				createdById: userId,
-				provider: { preset: "supergrok" },
+				createdById: personId,
+				provider: { builtIn: "supergrok" },
 			});
 			providerId = added.id;
 		});
@@ -276,16 +276,16 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					expiresAt: Date.now() + 60_000,
 					accountId: null,
 				},
-				signedInById: userId,
+				signedInById: personId,
 			});
 
-			const ready = await withAccess(await storedEndpoint());
-			const again = await withAccess(await storedEndpoint());
+			const ready = await withAccess(await storedAccess());
+			const again = await withAccess(await storedAccess());
 
 			expect(ready.apiKey).toBe("xai-access-1");
 			expect(again.apiKey).toBe("xai-access-1");
 			expect(xai.refreshesSpent).toEqual(["xai-refresh-0"]);
-			expect((await storedEndpoint()).oauthTokens?.refresh).toBe("xai-refresh-0");
+			expect((await storedAccess()).oauthTokens?.refresh).toBe("xai-refresh-0");
 		});
 	});
 });

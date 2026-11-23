@@ -10,11 +10,11 @@
 </p>
 
 Sugabots is a self-hosted workspace where people and bots work together.
-Create bots, bring them into projects with your team, and run conversations that can use
-built-in tools and MCP connections.
+Create bots, bring them into projects with your team, and run chats that can use
+built-in tools and MCP connectors.
 
 <p align="center">
-  <img alt="A Sugabots project where two people and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/project-thread-mac.webp" width="800">
+  <img alt="A Sugabots project where two people and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/project-chat-mac.webp" width="800">
 </p>
 
 Everything stays in your own database. Bots use the model providers you choose,
@@ -49,13 +49,13 @@ a server of your own or a hosting platform.
 ### Projects
 
 A project is a long-running piece of work shared by a group of people and their bots. Everyone in it
-sees the same threads, results and approvals, so nobody has to forward an answer
+sees the same chats, results and approvals, so nobody has to forward an answer
 or explain what a bot already did.
 
 ### Bots that work together
 
 When a bot needs help, it asks another bot. The exchange shows up as
-a conversation under its message, so you can see exactly who said what.
+a chat under its message, so you can see exactly who said what.
 
 ### A different model for every bot
 

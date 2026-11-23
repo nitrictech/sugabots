@@ -15,7 +15,7 @@ const createComputer = async () => {
 			apiKey: Redacted.make("test-key"),
 			image: "example/image:latest",
 			size: COMPUTER_OPENSANDBOX_DEFAULT_SIZE,
-			networkMode: "allowlist",
+			networkMode: "allowed-hosts-only",
 		},
 		await Effect.runPromise(Ids.make),
 	);

@@ -24,13 +24,13 @@ const bots = [builder, reviewer].filter((bot) => bot !== undefined);
 const GB = 1024 ** 3;
 const bytes = (gigabytes: number) => Math.round(gigabytes * GB);
 
-/** A 20 GB disk with `usedGB` of it used: two bots' homes, the threads' folders, /tmp, and the system. */
+/** A 20 GB disk with `usedGB` of it used: two bots' homes, the chats' folders, /tmp, and the system. */
 const diskWith = (usedGB: number): ComputerDisk => ({
 	usedBytes: bytes(usedGB),
 	totalBytes: bytes(20),
 	measuredAt: "2026-10-02T05:38:00.000Z",
 	folders: [
-		{ kind: "conversations", bytes: bytes(usedGB * 0.45) },
+		{ kind: "chats", bytes: bytes(usedGB * 0.45) },
 		{ kind: "home", botId: builder?.id ?? "", bytes: bytes(usedGB * 0.25) },
 		{ kind: "temporary", bytes: bytes(usedGB * 0.1) },
 		{ kind: "home", botId: reviewer?.id ?? "", bytes: bytes(usedGB * 0.05) },
@@ -81,7 +81,7 @@ function Preview({ children }: { children: ReactNode }) {
 const answers = (shown: ProjectComputer) => http.get(computerUrl, () => HttpResponse.json(shown));
 
 const network: ProjectComputerNetwork = {
-	mode: "allowlist",
+	mode: "allowed-hosts-only",
 	blocking: true,
 	workspaceHosts: [
 		{ host: "github.com", blockedBy: null },
@@ -147,7 +147,7 @@ export const Running = meta.story({
 });
 
 /**
- * Its disk, with what each bot's home, the threads' folders and /tmp take of
+ * Its disk, with what each bot's home, the chats' folders and /tmp take of
  * it, largest first, and the rest the system's.
  */
 export const Disk = meta.story({
@@ -155,7 +155,7 @@ export const Disk = meta.story({
 		const disk = await canvas.findByRole("region", { name: "Disk" });
 		await expect(within(disk).getByText("6.2 GB of 20 GB used")).toBeVisible();
 		await expect(within(disk).getByRole("meter", { name: "Disk used" })).toHaveValue(31);
-		await expect(within(disk).getByText("Conversation folders")).toBeVisible();
+		await expect(within(disk).getByText("Chat folders")).toBeVisible();
 		await expect(within(disk).getByText(builder?.name ?? "")).toBeVisible();
 		await expect(within(disk).getByText("Everything else")).toBeVisible();
 		await expect(within(disk).queryByText(/Nearly full|Almost full/)).toBeNull();
@@ -194,14 +194,14 @@ export const DiskNotMeasured = meta.story({
 	},
 });
 
-/** Paused, with an upgrade waiting because the provider now makes computers from another image. */
-export const PausedWithUpgrade = meta.story({
+/** Asleep, with an upgrade waiting because the provider now makes computers from another image. */
+export const AsleepWithUpgrade = meta.story({
 	beforeEach({ msw }) {
-		msw.use(answers(present({ state: "paused", upgradeAvailable: true })));
+		msw.use(answers(present({ state: "asleep", upgradeAvailable: true })));
 	},
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("Upgrade available")).toBeVisible();
-		await expect(canvas.getByText(/Paused while nobody uses it/)).toBeVisible();
+		await expect(canvas.getByText(/Asleep while nobody uses it/)).toBeVisible();
 	},
 });
 
@@ -236,7 +236,7 @@ export const NoneYet = meta.story({
 });
 
 /** Someone in the project who may not change its computer sees how it stands, without the actions. */
-export const AsAMember = meta.story({
+export const AsAnEditor = meta.story({
 	args: {
 		owner: {
 			project: {

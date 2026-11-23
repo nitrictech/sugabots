@@ -8,18 +8,8 @@ import {
 	useSearch,
 } from "@tanstack/react-router";
 import { useBotWithHandle } from "@/lib/bots.ts";
-import {
-	placeBot,
-	prefetchConversation,
-	useAnyConversationPlace,
-	useBotThreadPlace,
-} from "@/lib/chats.ts";
-import {
-	botAutomationsLink,
-	botConnectionsLink,
-	botSettingsLink,
-	conversationLink,
-} from "@/lib/links.ts";
+import { placeBot, prefetchChat, useAnyChatLocation, useBotChatPlace } from "@/lib/chats.ts";
+import { botAutomationsLink, botConnectorsLink, botSettingsLink, chatLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { FilesPage } from "@/screens/Files.tsx";
 import { BotsDirectory } from "@/shell/BotsDirectory.tsx";
@@ -28,22 +18,18 @@ import { OwnerNotFound } from "@/shell/OwnerNotFound.tsx";
 import { Panes } from "@/shell/Shell.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import {
-	ConversationPage,
-	ConversationScreen,
+	ChatPage,
+	ChatScreen,
 	preloadChatScreenForWideLayout,
-	RoutedConversation,
+	RoutedChat,
 	type SearchChange,
-} from "./conversation.tsx";
+} from "./chat.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { useBotRouteOwner } from "./owner.ts";
-import {
-	type ConversationSearch,
-	validateConversationSearch,
-	validateFileSearch,
-} from "./search.ts";
+import { type ChatSearch, validateChatSearch, validateFileSearch } from "./search.ts";
 import { shellRoute } from "./workspace.tsx";
 
-const NewThreadPage = lazyNamed(() => import("@/screens/NewThreadPage.tsx"), "NewThreadPage");
+const NewChatPage = lazyNamed(() => import("@/screens/NewChatPage.tsx"), "NewChatPage");
 
 /** Every bot the person reaches, pinning them to the sidebar, and making another. */
 export const botsRoute = createRoute({
@@ -71,9 +57,7 @@ function BotRoute() {
 	const onAutomations = Boolean(
 		matchRoute({ to: "/$workspace/bots/$bot/automations", fuzzy: true }),
 	);
-	const onConnections = Boolean(
-		matchRoute({ to: "/$workspace/bots/$bot/connections", fuzzy: true }),
-	);
+	const onConnectors = Boolean(matchRoute({ to: "/$workspace/bots/$bot/connectors", fuzzy: true }));
 	const onSettings = Boolean(
 		matchRoute({ to: "/$workspace/bots/$bot/settings" }) ||
 			matchRoute({ to: "/$workspace/bots/$bot/computer" }),
@@ -81,11 +65,11 @@ function BotRoute() {
 	if (isPending) return <Panes>{null}</Panes>;
 	if (!bot) return <OwnerNotFound kind="bot" error={error} />;
 	// Someone else's private bot, which an administrator sees listed: it exists, and its settings,
-	// connections and automations are theirs to manage, though its threads and what its
+	// connectors and automations are theirs to manage, though its chats and what its
 	// automations posted are not.
 	const managing =
 		(bot.permissions.resources.manageAutomations && onAutomations) ||
-		(bot.permissions.resources.manageConnections && onConnections) ||
+		(bot.permissions.resources.manageConnectors && onConnectors) ||
 		(bot.permissions.resources.openSettings && onSettings);
 	if (!bot.permissions.talk && !managing) {
 		return (
@@ -99,9 +83,9 @@ function BotRoute() {
 									Open its settings
 								</Link>
 							)}
-							{bot.permissions.resources.manageConnections && (
-								<Link {...botConnectionsLink(bot)} className="text-link underline">
-									Open its connections
+							{bot.permissions.resources.manageConnectors && (
+								<Link {...botConnectorsLink(bot)} className="text-link underline">
+									Open its connectors
 								</Link>
 							)}
 							{bot.permissions.resources.manageAutomations && (
@@ -112,7 +96,7 @@ function BotRoute() {
 						</>
 					}
 				>
-					This is someone else's private bot, so its threads are theirs alone.
+					This is someone else's private bot, so its chats are theirs alone.
 				</EmptyState>
 			</Panes>
 		);
@@ -125,10 +109,10 @@ function BotRoute() {
 }
 
 /**
- * A bot opened without a thread chosen: on a phone, its sidebar as a page, to
- * pick from, as a project's is; on a wider screen, starting a thread with it
- * from its first message, whether or not it has threads, which are in its
- * sidebar. A project's index opens its newest thread instead.
+ * A bot opened without a chat chosen: on a phone, its sidebar as a page, to
+ * pick from, as a project's is; on a wider screen, starting a chat with it
+ * from its first message, whether or not it has chats, which are in its
+ * sidebar. A project's index opens its newest chat instead.
  */
 export const botIndexRoute = createRoute({
 	getParentRoute: () => botRoute,
@@ -137,44 +121,44 @@ export const botIndexRoute = createRoute({
 		const { bot } = useBotWithHandle(botIndexRoute.useParams().bot);
 		const wide = useMediaQuery(SIDE_BY_SIDE);
 		if (!bot) return null;
-		return wide ? <BotNewThread bot={bot} /> : <MobileOwner owner={{ bot }} />;
+		return wide ? <BotNewChat bot={bot} /> : <MobileOwner owner={{ bot }} />;
 	},
 });
 
-/** Starting a thread with the bot, from its first message. */
-export const botNewThreadRoute = createRoute({
+/** Starting a chat with the bot, from its first message. */
+export const botNewChatRoute = createRoute({
 	getParentRoute: () => botRoute,
 	path: "/new",
 	component: () => {
-		const { bot } = useBotWithHandle(botNewThreadRoute.useParams().bot);
-		return bot ? <BotNewThread bot={bot} /> : null;
+		const { bot } = useBotWithHandle(botNewChatRoute.useParams().bot);
+		return bot ? <BotNewChat bot={bot} /> : null;
 	},
 });
 
-/** Starting a thread with `bot` from its first message. */
-function BotNewThread({ bot }: { bot: Bot }) {
-	return <NewThreadPage key={bot.id} owner={{ bot }} />;
+/** Starting a chat with `bot` from its first message. */
+function BotNewChat({ bot }: { bot: Bot }) {
+	return <NewChatPage key={bot.id} owner={{ bot }} />;
 }
 
-/** One of the bot's threads, or one of its automations' feeds. */
-export const threadRoute = createRoute({
+/** One of the bot's chats, or one of its automations' feeds. */
+export const chatRoute = createRoute({
 	getParentRoute: () => botRoute,
-	path: "/threads/$conversation",
-	validateSearch: (search: Record<string, unknown>) => validateConversationSearch(search),
+	path: "/chats/$chat",
+	validateSearch: (search: Record<string, unknown>) => validateChatSearch(search),
 	preloadStaleTime: 0,
 	loader: ({ context, params }) => {
-		prefetchConversation(context.queries, params.conversation);
-		return ConversationPage.preload();
+		prefetchChat(context.queries, params.chat);
+		return ChatPage.preload();
 	},
 	component: () => {
-		const { bot: handle, conversation } = threadRoute.useParams();
-		const navigate = threadRoute.useNavigate();
-		const search = threadRoute.useSearch();
+		const { bot: handle, chat } = chatRoute.useParams();
+		const navigate = chatRoute.useNavigate();
+		const search = chatRoute.useSearch();
 		const { bot } = useBotWithHandle(handle);
 		return bot ? (
-			<BotConversation
+			<BotChatScreen
 				bot={bot}
-				conversationId={conversation}
+				chatId={chat}
 				search={search}
 				navigate={(change) => void navigate(change)}
 			/>
@@ -182,30 +166,30 @@ export const threadRoute = createRoute({
 	},
 });
 
-/** One of the bot `bot`'s threads or automations' feeds at its own address; see `RoutedConversation`. */
-export function BotConversation({
+/** One of the bot `bot`'s chats or automations' feeds at its own address; see `RoutedChat`. */
+export function BotChatScreen({
 	bot,
-	conversationId,
+	chatId,
 	search,
 	navigate,
 }: {
 	bot: Bot;
-	conversationId: string;
-	search: ConversationSearch;
+	chatId: string;
+	search: ChatSearch;
 	navigate: (change: SearchChange) => void;
 }) {
 	return (
-		<ConversationScreen place={useBotThreadPlace(bot, conversationId)}>
-			{(found, user) => (
-				<RoutedConversation
+		<ChatScreen place={useBotChatPlace(bot, chatId)}>
+			{(found, signedIn) => (
+				<RoutedChat
 					found={found}
-					conversationId={conversationId}
-					user={user}
+					chatId={chatId}
+					signedIn={signedIn}
 					search={search}
 					navigate={navigate}
 				/>
 			)}
-		</ConversationScreen>
+		</ChatScreen>
 	);
 }
 
@@ -230,29 +214,23 @@ export const botFileRoute = createRoute({
 	},
 });
 
-/** A thread by its id alone, as a notification names it, which goes on to its bot's address. */
-export const threadByIdRoute = createRoute({
+/** A chat by its id alone, as a notification names it, which goes on to its bot's address. */
+export const chatByIdRoute = createRoute({
 	getParentRoute: () => shellRoute,
-	path: "/threads/$conversation",
+	path: "/chats/$chat",
 	component: () => {
-		const { conversation } = threadByIdRoute.useParams();
+		const { chat } = chatByIdRoute.useParams();
 		const search = useSearch({ strict: false });
-		const { found, isPending, error } = useAnyConversationPlace(conversation);
+		const { found, isPending, error } = useAnyChatLocation(chat);
 		if (isPending) return <Panes>{null}</Panes>;
 		const bot = found && placeBot(found);
 		if (!bot) {
 			return (
 				<Panes>
-					<EmptyState title={error ? "Could not load this thread" : "Thread not found"} />
+					<EmptyState title={error ? "Could not load this chat" : "Chat not found"} />
 				</Panes>
 			);
 		}
-		return (
-			<Navigate
-				{...conversationLink({ bot, conversationId: conversation })}
-				search={search as ConversationSearch}
-				replace
-			/>
-		);
+		return <Navigate {...chatLink({ bot, chatId: chat })} search={search as ChatSearch} replace />;
 	},
 });

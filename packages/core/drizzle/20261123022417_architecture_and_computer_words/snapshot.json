@@ -1,0 +1,121 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "b73765a8-ac1e-4c0d-9183-c98a1bff35dc",
+  "prevIds": [
+    "5da026cb-09c4-44b4-8857-1c7d3fa38528"
+  ],
+  "footprints": [
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "tool_call",
+        "mutating"
+      ],
+      "writes": [
+        "s|col|public.tool_call.mutating",
+        "n|col|public.tool_call.mutating",
+        "s|col|public.tool_call.write_or_delete",
+        "n|col|public.tool_call.write_or_delete"
+      ],
+      "reads": [
+        "n|tbl|public.tool_call",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "turn",
+        "mutation_started"
+      ],
+      "writes": [
+        "s|col|public.turn.mutation_started",
+        "n|col|public.turn.mutation_started",
+        "s|col|public.turn.write_or_delete_started",
+        "n|col|public.turn.write_or_delete_started"
+      ],
+      "reads": [
+        "n|tbl|public.turn",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "event",
+        "channel"
+      ],
+      "writes": [
+        "s|col|public.event.channel",
+        "n|col|public.event.channel",
+        "s|col|public.event.stream",
+        "n|col|public.event.stream"
+      ],
+      "reads": [
+        "n|tbl|public.event",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "rename_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "event",
+        "event_channel_seq_idx"
+      ],
+      "writes": [
+        "s|idx|public.event_channel_seq_idx",
+        "n|idx|public.event_channel_seq_idx",
+        "n|rel|public.event_channel_seq_idx",
+        "s|idx|public.event_stream_seq_idx",
+        "n|idx|public.event_stream_seq_idx",
+        "n|rel|public.event_stream_seq_idx"
+      ],
+      "reads": [
+        "e|tbl|public.event",
+        "n|sch|public",
+        "e|col|public.event.stream",
+        "e|col|public.event.seq"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"tool_call\",\"mutating\"]",
+      "set": {
+        "name": "write_or_delete"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"turn\",\"mutation_started\"]",
+      "set": {
+        "name": "write_or_delete_started"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"event\",\"channel\"]",
+      "set": {
+        "name": "stream"
+      }
+    },
+    {
+      "op": "rename",
+      "key": "indexes\u0000[\"public\",\"event_channel_seq_idx\"]",
+      "set": {
+        "name": "event_stream_seq_idx"
+      }
+    }
+  ]
+}

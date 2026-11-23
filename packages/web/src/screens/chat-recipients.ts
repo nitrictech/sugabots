@@ -1,7 +1,7 @@
 import {
 	type BotParticipant,
-	type ConversationDetails,
-	type ConversationKind,
+	type ChatDetails,
+	type ChatKind,
 	decideFloor,
 	type Floor,
 	type Message,
@@ -12,7 +12,7 @@ import {
 	type Participant,
 } from "@sugabots/contracts";
 import type { Dispatch, SetStateAction } from "react";
-import { useTakenOffRecipients } from "@/lib/conversation-draft.ts";
+import { useTakenOffRecipients } from "@/lib/chat-draft.ts";
 import { botsNamed } from "./mentions.tsx";
 
 /** The bots the message being written goes to, and the ways to take them off; see `useChatRecipients`. */
@@ -33,13 +33,12 @@ export interface ChatRecipients {
  * The bots the message being written goes to, where the person chooses them:
  * those the draft names, the bot replied to, and the bots the person's last
  * message went to, which stay addressed until they take them off: talking to
- * a bot is a conversation, not a mention every time. Taking one off lasts
+ * a bot is a chat, not a mention every time. Taking one off lasts
  * until they send again. Where the person does not choose, there are none.
  */
 export function useChatRecipients({
-	userId,
-	projectId,
-	conversationId,
+	personId,
+	chatId,
 	choosesBots,
 	projectBots: allProjectBots,
 	shownMessages,
@@ -47,12 +46,11 @@ export function useChatRecipients({
 	setDraft,
 	replyingTo,
 }: {
-	userId: string;
-	projectId: string | null;
-	conversationId: string;
+	personId: string;
+	chatId: string;
 	/** Whether the person chooses which bots answer here; see `choosesBotsIn`. */
 	choosesBots: boolean;
-	/** The project's bots, when the conversation has loaded. */
+	/** The project's bots, when the chat has loaded. */
 	projectBots: readonly BotParticipant[] | undefined;
 	shownMessages: readonly Message[];
 	draft: string;
@@ -62,10 +60,10 @@ export function useChatRecipients({
 	const projectBots = choosesBots ? (allProjectBots ?? []) : [];
 	const lastOwnMessage = choosesBots
 		? shownMessages.findLast(
-				(message) => message.author.kind === "person" && message.author.id === userId,
+				(message) => message.author.kind === "person" && message.author.id === personId,
 			)
 		: undefined;
-	const [takenOff, setTakenOff] = useTakenOffRecipients(userId, projectId, conversationId);
+	const [takenOff, setTakenOff] = useTakenOffRecipients(personId, chatId);
 	const takenOffIds = takenOff.after === lastOwnMessage?.id ? takenOff.botIds : [];
 	const named = botsNamed(draft, projectBots);
 	const repliedToBot = botRepliedTo(replyingTo, projectBots);
@@ -96,29 +94,29 @@ export function useChatRecipients({
 
 /**
  * Whether the person chooses which bots answer a message in `details`: in a
- * project's thread with more than its lead bot, as the floor gives each bot a
+ * project's chat with more than its lead bot, as the floor gives each bot a
  * message names, or replies to, its turn. With the lead alone, as in a bot's own
- * threads, the lead answers whichever it is, so there is nothing to choose;
+ * chats, the lead answers whichever it is, so there is nothing to choose;
  * and in an automation's feed only the lead ever answers.
  */
 export function choosesBotsIn(
-	details: Pick<ConversationDetails, "conversation" | "projectBots"> | undefined,
+	details: Pick<ChatDetails, "chat" | "projectBots"> | undefined,
 ): boolean {
-	return details?.conversation.kind === "project_thread" && details.projectBots.length > 1;
+	return details?.chat.kind === "project_chat" && details.projectBots.length > 1;
 }
 
 /**
  * Who answers the message being written, by the floor's rule (`decideFloor`),
  * as the server decides it once the message is sent:
- * - `bots`: in a thread, the project's bots the message mentions, else the one
+ * - `bots`: in a chat, the project's bots the message mentions, else the one
  *   it replies to; each must reply.
  * - `lead`: the project's lead bot, which must reply.
- * - `leadMayReply`: in a thread, the draft mentions only people, so the lead reads
+ * - `leadMayReply`: in a chat, the draft mentions only people, so the lead reads
  *   it and either replies or reacts 👀.
  * - `leadWontReply`: in an automation's feed, the draft mentions only people.
- * - `nobody`: no bot answers. In a thread, because the draft mentions only
+ * - `nobody`: no bot answers. In a chat, because the draft mentions only
  *   people and the lead has no model to reply with; and in any other
- *   conversation.
+ *   chat.
  */
 export type DraftFloor =
 	| { kind: "bots"; bots: BotParticipant[] }
@@ -138,11 +136,11 @@ export interface DraftAudience {
 
 /**
  * Whom `draft` mentions among `mentionable`, and who answers it in a
- * conversation of `conversationKind`.
+ * chat of `chatKind`.
  */
 export function draftAudience({
 	draft,
-	conversationKind,
+	chatKind,
 	mentionable,
 	projectBots,
 	lead,
@@ -151,7 +149,7 @@ export function draftAudience({
 	replyingTo,
 }: {
 	draft: string;
-	conversationKind: ConversationKind;
+	chatKind: ChatKind;
 	mentionable: readonly Participant[];
 	/** The project's bots: the only bots a mention or a reply gives a turn. */
 	projectBots: readonly BotParticipant[];
@@ -164,7 +162,7 @@ export function draftAudience({
 	replyingTo: MessageReplyTo | undefined;
 }): DraftAudience {
 	const handles = mentionedHandles(draft);
-	const mentions = mentionable.filter((member) => handles.includes(member.handle));
+	const mentions = mentionable.filter((participant) => handles.includes(participant.handle));
 	const peopleOnly = mentionsOnlyPeople(handles, {
 		botHandles: new Set(projectBots.map((bot) => bot.handle)),
 		peopleHandles: new Set(
@@ -176,7 +174,7 @@ export function draftAudience({
 	);
 	const repliedTo = botRepliedTo(replyingTo, projectBots);
 	const floor = decideFloor({
-		conversationKind,
+		chatKind,
 		lead: lead ? { id: lead.id, hasModel: leadHasModel } : null,
 		mentionedBotIds: mentionedBots.map((bot) => bot.id),
 		repliedToProjectBotId: repliedTo?.id,
@@ -186,7 +184,7 @@ export function draftAudience({
 		mentions,
 		peopleOnly,
 		floor: draftFloorOf(floor, {
-			conversationKind,
+			chatKind,
 			lead,
 			peopleOnly,
 			bots: [...mentionedBots, ...(repliedTo ? [repliedTo] : [])],
@@ -205,12 +203,12 @@ export function requiredRepliers(floor: DraftFloor): BotParticipant[] {
 function draftFloorOf(
 	floor: Floor,
 	{
-		conversationKind,
+		chatKind,
 		lead,
 		peopleOnly,
 		bots,
 	}: {
-		conversationKind: ConversationKind;
+		chatKind: ChatKind;
 		lead: BotParticipant | undefined;
 		/** Whether the draft mentions only people. */
 		peopleOnly: boolean;
@@ -219,14 +217,14 @@ function draftFloorOf(
 	},
 ): DraftFloor {
 	if (floor.kind === "nobody") {
-		return conversationKind === "automation_feed" && peopleOnly && lead
+		return chatKind === "automation_feed" && peopleOnly && lead
 			? { kind: "leadWontReply", lead }
 			: { kind: "nobody" };
 	}
 	const reason = floor.bots[0]?.reason;
 	if (lead && reason === "optional") return { kind: "leadMayReply", lead };
 	// In an automation's feed only the lead answers, whether the draft mentions it or not.
-	if (lead && (reason === "default" || conversationKind === "automation_feed")) {
+	if (lead && (reason === "default" || chatKind === "automation_feed")) {
 		return { kind: "lead", lead };
 	}
 	return {
@@ -255,7 +253,7 @@ function botRepliedTo(
 ): BotParticipant | undefined {
 	const author = replyTo?.author;
 	if (author?.kind !== "bot") return undefined;
-	return projectBots.find((member) => member.id === author.id);
+	return projectBots.find((bot) => bot.id === author.id);
 }
 
 /** `draft` with its mentions of `handle` taken out, each with the space after it. */

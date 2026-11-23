@@ -258,7 +258,7 @@ export const make = Effect.gen(function* () {
 	const root = yield* makeWithDefaults({ relations });
 	return Database.of({
 		execute: (run) => run(root),
-		// A failure to begin or commit is a defect: no repository can do anything about it.
+		// A failure to begin or commit is a defect: no store can do anything about it.
 		transaction: transactional(
 			<A, E, R>(use: Effect.Effect<A, E, R>) =>
 				client.withTransaction(use).pipe(Effect.catchIf(isSqlError, Effect.die)) as Effect.Effect<
@@ -275,7 +275,7 @@ export const layerNoDeps = Layer.effect(Database, make);
 /** The database at `DATABASE_URL`, with its pool, which other modules also use directly. */
 export const layer = layerNoDeps.pipe(Layer.provideMerge(clientLayer));
 
-/** A query against the pool, or the open transaction. A repository's whole vocabulary. */
+/** A query against the pool, or the open transaction. A store's whole vocabulary. */
 export const query = <A>(
 	run: (executor: Executor) => Effect.Effect<A, QueryFailure>,
 ): Effect.Effect<A, never, Database> =>

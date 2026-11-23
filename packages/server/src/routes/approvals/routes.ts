@@ -1,8 +1,8 @@
 import { Conflict, Forbidden, NotFound } from "@sugabots/contracts/http";
-import { Turns } from "@sugabots/core/conversations/turns/turns";
+import { Turns } from "@sugabots/core/chats/turns/turns";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -15,7 +15,7 @@ export const approvalRoutes = HttpApiBuilder.group(ServerApi, "approvals", (hand
 					toolCallId: params.toolCallId,
 					decision: payload.decision,
 				})
-				.pipe(asSessionUser, asHttpError(approvalErrors)),
+				.pipe(asSignedInPerson, asHttpError(approvalErrors)),
 		);
 	}),
 );

@@ -3,11 +3,11 @@ import {
 	type ModelProvider,
 	type ProviderModel,
 	type Run,
-	type SessionUser,
+	type SignedInPerson,
 	streamEvent,
 } from "@sugabots/contracts";
 import { Conflict, Forbidden, InternalServerError } from "@sugabots/contracts/http";
-import { listedThread } from "@sugabots/contracts/testing";
+import { listedChat } from "@sugabots/contracts/testing";
 import { UserText, userText } from "@sugabots/errors";
 import { failureForStatus } from "@sugabots/sdk";
 import { createMemoryHistory } from "@tanstack/react-router";
@@ -20,6 +20,7 @@ import { createAppRouter } from "@/router.tsx";
 import {
 	apiAnswers,
 	bots,
+	chatWith,
 	compaction,
 	controlledEventStream,
 	juno,
@@ -35,7 +36,6 @@ import {
 	sam,
 	systemBots,
 	TestApp,
-	threadWith,
 	triager,
 	workspace,
 	writeDraft,
@@ -68,7 +68,7 @@ async function openWorkspaceMenu() {
 describe("the shell", () => {
 	it("ignores a panel name it does not know rather than failing the route", async () => {
 		// `bot` and `history` were panels until the design made a bot a page
-		// of its own and the threads list the history. A link from then lands in
+		// of its own and the chats list the history. A link from then lands in
 		// the app rather than in an error.
 		mount(`${linearPage}?panel=bot`);
 
@@ -83,7 +83,7 @@ describe("the workspace choice", () => {
 		name: "Nitric",
 		slug: "nitric",
 		timeZone: "UTC",
-		setupCompletedAt: "2026-09-01T00:00:00.000Z",
+		setUpAt: "2026-09-01T00:00:00.000Z",
 	};
 
 	it("keeps a workspace choice in memory when storage is unavailable", async () => {
@@ -155,7 +155,7 @@ describe("the workspace choice", () => {
 		const { router } = mount(linearPage);
 
 		const name = await screen.findByLabelText("Workspace name");
-		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/workspace-setup"));
 		expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
 		fireEvent.change(name, { target: { value: "Nitric" } });
@@ -166,9 +166,7 @@ describe("the workspace choice", () => {
 	});
 
 	it("takes somebody who may finish an unfinished workspace's setup back into it", async () => {
-		client.api.workspaces.list.mockReturnValue(
-			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
-		);
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([{ ...workspace, setUpAt: null }]));
 		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
@@ -176,20 +174,18 @@ describe("the workspace choice", () => {
 		const { router } = mount("/");
 
 		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
-		expect(router.state.location.pathname).toBe("/onboarding");
+		expect(router.state.location.pathname).toBe("/workspace-setup");
 		expect(router.state.location.search).toEqual({ workspace: workspace.slug });
 	});
 
 	it("finishes an unfinished workspace's setup into its chat, not back into setup", async () => {
-		client.api.workspaces.list.mockReturnValue(
-			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
-		);
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([{ ...workspace, setUpAt: null }]));
 		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		const made = firstBotMade("Chief");
-		client.api.onboarding.complete.mockImplementation(() => {
+		client.api.workspaceSetup.complete.mockImplementation(() => {
 			client.api.workspaces.list.mockReturnValue(
-				Effect.succeed([{ ...workspace, setupCompletedAt: "2026-10-09T00:00:00.000Z" }]),
+				Effect.succeed([{ ...workspace, setUpAt: "2026-10-09T00:00:00.000Z" }]),
 			);
 			return Effect.void;
 		});
@@ -205,9 +201,7 @@ describe("the workspace choice", () => {
 	});
 
 	it("says so, rather than opening an unfinished workspace, when it cannot tell who may finish it", async () => {
-		client.api.workspaces.list.mockReturnValue(
-			Effect.succeed([{ ...workspace, setupCompletedAt: null }]),
-		);
+		client.api.workspaces.list.mockReturnValue(Effect.succeed([{ ...workspace, setUpAt: null }]));
 		client.api.workspaceAccess.mockReturnValueOnce(
 			Effect.fail(new Forbidden({ message: userText`Unavailable` })),
 		);
@@ -221,7 +215,7 @@ describe("the workspace choice", () => {
 		expect(screen.queryByRole("navigation", { name: "Sidebar" })).toBeNull();
 
 		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
-		expect(router.state.location.pathname).toBe("/onboarding");
+		expect(router.state.location.pathname).toBe("/workspace-setup");
 	});
 
 	it.each([
@@ -242,9 +236,9 @@ describe("the workspace choice", () => {
 	])(
 		"opens an unfinished workspace as it is $opened, for somebody invited part way",
 		async ({ address, landsAt, unfinished, alongside }) => {
-			apiAnswers({ role: "member" });
+			apiAnswers({ role: "editor" });
 			client.api.workspaces.list.mockReturnValue(
-				Effect.succeed([...alongside, { ...unfinished, setupCompletedAt: null }]),
+				Effect.succeed([...alongside, { ...unfinished, setUpAt: null }]),
 			);
 			chooseWorkspace(unfinished.id);
 			const { router } = mount(address);
@@ -256,7 +250,7 @@ describe("the workspace choice", () => {
 	);
 
 	it("cancels an unfinished workspace's setup into another workspace, keeping it for an admin, who may not delete it", async () => {
-		const unfinished = { ...other, setupCompletedAt: null };
+		const unfinished = { ...other, setUpAt: null };
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, unfinished]));
 		const { router } = mount(`/${unfinished.slug}`);
 
@@ -267,7 +261,7 @@ describe("the workspace choice", () => {
 	});
 
 	it("opens a workspace that is set up from the root, rather than the one being set up", async () => {
-		const unfinished = { ...other, setupCompletedAt: null };
+		const unfinished = { ...other, setUpAt: null };
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, unfinished]));
 		chooseWorkspace(unfinished.id);
 		const { router } = mount("/");
@@ -281,7 +275,7 @@ describe("the workspace choice", () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([{ ...personalAssistant, model: null }]));
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([]));
 		client.api.workspaces.create.mockReturnValue(Effect.never);
-		const { router } = mount("/onboarding");
+		const { router } = mount("/workspace-setup");
 		fireEvent.change(await screen.findByLabelText("Workspace name"), {
 			target: { value: "Nitric" },
 		});
@@ -299,7 +293,7 @@ describe("the workspace choice", () => {
 
 	it("picks setting up a new workspace back up after a reload", async () => {
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
-		mount("/onboarding?workspace=nitric");
+		mount("/workspace-setup?workspace=nitric");
 
 		expect(await screen.findByRole("button", { name: "Cancel" })).toBeDefined();
 		await waitFor(() => expect(localStorage.getItem("sugabots-workspace")).toBe(other.id));
@@ -311,26 +305,26 @@ describe("the workspace choice", () => {
 		// Setup reached by its address, from a bookmark or Back, for a workspace set up since.
 		apiAnswers({ role: "owner" });
 		client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, other]));
-		const { router } = mount("/onboarding?workspace=nitric");
+		const { router } = mount("/workspace-setup?workspace=nitric");
 
 		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
-		await waitFor(() => expect(router.state.location.pathname).not.toBe("/onboarding"));
+		await waitFor(() => expect(router.state.location.pathname).not.toBe("/workspace-setup"));
 		expect(client.api.workspaces.delete).not.toHaveBeenCalled();
 	});
 
 	it("asks before leaving a workspace made but not set up", async () => {
 		client.api.workspaces.list.mockReturnValue(
-			Effect.succeed([workspace, { ...other, setupCompletedAt: null }]),
+			Effect.succeed([workspace, { ...other, setUpAt: null }]),
 		);
-		const { router } = mount("/onboarding?workspace=nitric");
+		const { router } = mount("/workspace-setup?workspace=nitric");
 		await screen.findByRole("button", { name: "Cancel" });
 
 		void router.navigate({ to: linearPage });
 		const dialog = await screen.findByRole("dialog", { name: "Leave setup?" });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Leave setup?" })).toBeNull());
-		expect(router.state.location.pathname).toBe("/onboarding");
+		expect(router.state.location.pathname).toBe("/workspace-setup");
 
 		void router.navigate({ to: linearPage });
 		fireEvent.click(
@@ -355,7 +349,7 @@ describe("the workspace choice", () => {
 
 	it("deletes the workspace it made when its owner cancels, and goes back to where it came from", async () => {
 		apiAnswers({ role: "owner" });
-		const made = { ...other, setupCompletedAt: null };
+		const made = { ...other, setUpAt: null };
 		client.api.workspaces.create.mockImplementation(() => {
 			client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace, made]));
 			return Effect.succeed(made);
@@ -377,15 +371,15 @@ describe("the workspace choice", () => {
 		apiAnswers({ role: "owner" });
 		client.api.bots.list.mockReturnValue(Effect.succeed([{ ...personalAssistant, model: null }]));
 		client.api.workspaces.list.mockReturnValue(
-			Effect.succeed([workspace, { ...other, setupCompletedAt: null }]),
+			Effect.succeed([workspace, { ...other, setUpAt: null }]),
 		);
 		client.api.workspaces.delete.mockReturnValue(Effect.void);
-		const { router } = mount("/onboarding?workspace=nitric");
+		const { router } = mount("/workspace-setup?workspace=nitric");
 
 		await screen.findByRole("heading", { name: "Connect a provider" });
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-		await waitFor(() => expect(router.state.location.pathname).not.toBe("/onboarding"));
+		await waitFor(() => expect(router.state.location.pathname).not.toBe("/workspace-setup"));
 		expect(client.api.workspaces.delete).toHaveBeenCalledWith({ params: { workspace: other.id } });
 	});
 
@@ -434,7 +428,7 @@ describe("the workspace choice", () => {
 	async function startNewWorkspace(router: ReturnType<typeof mount>["router"]) {
 		await openWorkspaceMenu();
 		fireEvent.click(await screen.findByRole("menuitem", { name: "New workspace" }));
-		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/workspace-setup"));
 		await screen.findByRole("heading", { name: "Name your workspace" });
 		return screen.getByLabelText("Workspace name");
 	}
@@ -493,7 +487,7 @@ describe("the sidebar", () => {
 
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
 		const projects = within(sidebar).getByRole("group", { name: "Projects" });
-		// One row each, as a bot has: their threads are in the project's own sidebar.
+		// One row each, as a bot has: their chats are in the project's own sidebar.
 		const sales = await within(projects).findByRole("link", { name: "Sales" });
 		const team = within(projects).getByRole("link", { name: "Suga-Team" });
 		expect(team.compareDocumentPosition(sales) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -509,7 +503,7 @@ describe("the sidebar", () => {
 
 	it("says what waits in the Personal Assistant's row, as a bot's row does", async () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([linear, personalAssistant]));
-		client.api.chats.projectMarkers.mockReturnValue(
+		client.api.chats.attentionMarks.mockReturnValue(
 			Effect.succeed({
 				projects: {
 					[personalAssistant.defaultProjectId]: {
@@ -531,7 +525,7 @@ describe("the sidebar", () => {
 		).toBeDefined();
 	});
 
-	it("gives an open bot a sidebar of its own, listing its threads", async () => {
+	it("gives an open bot a sidebar of its own, listing its chats", async () => {
 		onWideScreen();
 		mount(linearPage);
 
@@ -539,9 +533,9 @@ describe("the sidebar", () => {
 		expect(
 			await within(sidebar).findByRole("navigation", { name: `${linear.name}'s pages` }),
 		).toBeDefined();
-		const work = await within(sidebar).findByRole("region", { name: "Threads" });
+		const work = await within(sidebar).findByRole("region", { name: "Chats" });
 		expect(
-			await within(work).findByRole("link", { name: new RegExp(threadWith(linear).title) }),
+			await within(work).findByRole("link", { name: new RegExp(chatWith(linear).title) }),
 		).toBeDefined();
 		expect(within(sidebar).queryByRole("group", { name: "Projects" })).toBeNull();
 	});
@@ -601,9 +595,9 @@ describe("the sidebar", () => {
 			(await within(rail).findByRole("link", { name: "Sales" })).getAttribute("aria-current"),
 		).toBe("page");
 		expect(await screen.findByRole("navigation", { name: "Sales's pages" })).toBeDefined();
-		await router.navigate({ to: "/$workspace/inbox", params: { workspace: "suga" } });
+		await router.navigate({ to: "/$workspace/approvals", params: { workspace: "suga" } });
 
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/inbox"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/approvals"));
 		const sidebar = await screen.findByRole("navigation", { name: "Sidebar" });
 		expect(await within(sidebar).findByRole("link", { name: "Sales" })).toBeDefined();
 		expect(screen.queryByRole("navigation", { name: "Projects and bots" })).toBeNull();
@@ -624,7 +618,7 @@ describe("the sidebar", () => {
 		fireEvent.click(await within(sidebar).findByRole("button", { name: /^Account:/ }));
 		expect(
 			(await screen.findByRole("menuitem", { name: "Preferences" })).getAttribute("href"),
-		).toBe("/suga/settings/profile");
+		).toBe("/suga/settings/account");
 	});
 });
 
@@ -640,7 +634,7 @@ describe("someone else's private bot an administrator sees listed", () => {
 		},
 	};
 
-	it("shows that it exists, with its settings, but none of its threads", async () => {
+	it("shows that it exists, with its settings, but none of its chats", async () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([linear, theirs, personalAssistant]));
 		mount(`/suga/bots/${theirs.handle}`);
 
@@ -648,7 +642,7 @@ describe("someone else's private bot an administrator sees listed", () => {
 		expect(screen.getByRole("link", { name: "Open its settings" }).getAttribute("href")).toBe(
 			`/suga/bots/${theirs.handle}/settings`,
 		);
-		expect(client.api.chats.threads).not.toHaveBeenCalledWith({
+		expect(client.api.chats.projectChats).not.toHaveBeenCalledWith({
 			params: { projectId: theirs.defaultProjectId },
 		});
 	});
@@ -694,7 +688,7 @@ describe("a public project you're not in", () => {
 				params: { projectId: projects[1]?.id },
 			}),
 		);
-		expect(client.api.chats.threads).not.toHaveBeenCalledWith({
+		expect(client.api.chats.projectChats).not.toHaveBeenCalledWith({
 			params: { projectId: projects[1]?.id },
 		});
 	});
@@ -721,37 +715,34 @@ describe("a public project you're not in", () => {
 	});
 });
 
-describe("a project's threads", () => {
+describe("a project's chats", () => {
 	const sales = projects[1] as (typeof projects)[number];
-	const threadIn = (id: string, title: string) =>
-		listedThread({
-			kind: "project_thread",
+	const chatIn = (id: string, title: string) =>
+		listedChat({
+			kind: "project_chat",
 			id,
 			workspaceId: workspace.id,
 			projectId: sales.id,
 			botId: null,
 			title,
-			archivedAt: null,
-			doneAt: null,
+			resolvedAt: null,
 			createdAt: "2026-09-18T06:00:00.000Z",
 			updatedAt: "2026-09-18T06:00:00.000Z",
 		});
 
-	it("opens the project at its newest thread", async () => {
+	it("opens the project at its newest chat", async () => {
 		onWideScreen();
-		const newest = threadIn("0199a3a0-0000-7000-8000-0000000000f1", "Launch");
-		client.api.chats.threads.mockReturnValue(
+		const newest = chatIn("0199a3a0-0000-7000-8000-0000000000f1", "Launch");
+		client.api.chats.projectChats.mockReturnValue(
 			Effect.succeed({
-				threads: [newest, threadIn("0199a3a0-0000-7000-8000-0000000000f2", "Pricing")],
+				chats: [newest, chatIn("0199a3a0-0000-7000-8000-0000000000f2", "Pricing")],
 				automations: [],
 			}),
 		);
 		const { router } = mount(`/suga/projects/${sales.slug}`);
 
 		await waitFor(() =>
-			expect(router.state.location.pathname).toBe(
-				`/suga/projects/${sales.slug}/${newest.conversation.id}`,
-			),
+			expect(router.state.location.pathname).toBe(`/suga/projects/${sales.slug}/${newest.chat.id}`),
 		);
 	});
 
@@ -759,9 +750,9 @@ describe("a project's threads", () => {
 		onWideScreen();
 		const updates = controlledEventStream();
 		client.events.workspace.mockReturnValue(updates.stream);
-		client.api.chats.threads.mockReturnValue(
+		client.api.chats.projectChats.mockReturnValue(
 			Effect.succeed({
-				threads: [threadIn("0199a3a0-0000-7000-8000-0000000000f1", "Launch")],
+				chats: [chatIn("0199a3a0-0000-7000-8000-0000000000f1", "Launch")],
 				automations: [],
 			}),
 		);
@@ -774,8 +765,8 @@ describe("a project's threads", () => {
 			automationId: "0199a3a0-0000-7000-8000-0000000003e1",
 			workspaceId: workspace.id,
 			botId: "0199a3a0-0000-7000-8000-0000000000b1",
-			conversationId: "0199a3a0-0000-7000-8000-0000000003e6",
-			rootConversationId: "0199a3a0-0000-7000-8000-0000000003e7",
+			chatId: "0199a3a0-0000-7000-8000-0000000003e6",
+			rootChatId: "0199a3a0-0000-7000-8000-0000000003e7",
 			automationName: "Morning pipeline review",
 			instructions: "Review the pipeline.",
 			trigger: { kind: "routine", scheduledAt: at, acceptedAt: at },
@@ -790,23 +781,23 @@ describe("a project's threads", () => {
 			Effect.succeed({ items: [run], nextCursor: null }),
 		);
 		updates.emit(
-			streamEvent("conversation.item_changed", {
-				rootConversationId: run.rootConversationId,
-				conversationId: run.conversationId,
+			streamEvent("chat.item_changed", {
+				rootChatId: run.rootChatId,
+				chatId: run.chatId,
 			}),
 		);
 
 		expect(await screen.findByText(run.automationName)).toBeDefined();
 	});
 
-	it("starts the first thread of a project with none from its first message, as a bot's page does", async () => {
+	it("starts the first chat of a project with none from its first message, as a bot's page does", async () => {
 		onWideScreen();
-		const started = threadIn("0199a3a0-0000-7000-8000-0000000000f3", "Plan the kickoff");
-		client.api.chats.startProjectThread.mockImplementation(
+		const started = chatIn("0199a3a0-0000-7000-8000-0000000000f3", "Plan the kickoff");
+		client.api.chats.startProjectChat.mockImplementation(
 			({ payload }: { payload: { id: string; message: string } }) =>
 				Effect.succeed({
-					conversation: started.conversation,
-					message: { id: payload.id, conversationId: started.conversation.id },
+					chat: started.chat,
+					message: { id: payload.id, chatId: started.chat.id },
 				}),
 		);
 		const { router } = mount(`/suga/projects/${sales.slug}`);
@@ -815,48 +806,48 @@ describe("a project's threads", () => {
 		const composer = await screen.findByLabelText(`Message ${sales.name}`);
 		composer.textContent = "Plan the kickoff";
 		fireEvent.input(composer);
-		fireEvent.click(screen.getByRole("button", { name: "Start thread" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start chat" }));
 
 		await waitFor(() =>
-			expect(client.api.chats.startProjectThread).toHaveBeenCalledWith({
+			expect(client.api.chats.startProjectChat).toHaveBeenCalledWith({
 				params: { projectId: sales.id },
 				payload: { id: expect.any(String), message: "Plan the kickoff" },
 			}),
 		);
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe(
-				`/suga/projects/${sales.slug}/${started.conversation.id}`,
+				`/suga/projects/${sales.slug}/${started.chat.id}`,
 			),
 		);
 	});
 
-	it("starts a thread again with the same message when its first answer was lost, so it starts once", async () => {
+	it("starts a chat again with the same message when its first answer was lost, so it starts once", async () => {
 		onWideScreen();
-		const started = threadIn("0199a3a0-0000-7000-8000-0000000000f3", "Plan the kickoff");
-		client.api.chats.startProjectThread
+		const started = chatIn("0199a3a0-0000-7000-8000-0000000000f3", "Plan the kickoff");
+		client.api.chats.startProjectChat
 			.mockReturnValueOnce(Effect.fail(new InternalServerError({ message: userText`Lost` })))
 			.mockImplementation(({ payload }: { payload: { id: string; message: string } }) =>
 				Effect.succeed({
-					conversation: started.conversation,
-					message: { id: payload.id, conversationId: started.conversation.id },
+					chat: started.chat,
+					message: { id: payload.id, chatId: started.chat.id },
 				}),
 			);
 		mount(`/suga/projects/${sales.slug}`);
 		const composer = await screen.findByLabelText(`Message ${sales.name}`);
 		composer.textContent = "Plan the kickoff";
 		fireEvent.input(composer);
-		fireEvent.click(screen.getByRole("button", { name: "Start thread" }));
-		await waitFor(() => expect(client.api.chats.startProjectThread).toHaveBeenCalledTimes(1));
+		fireEvent.click(screen.getByRole("button", { name: "Start chat" }));
+		await waitFor(() => expect(client.api.chats.startProjectChat).toHaveBeenCalledTimes(1));
 		await waitFor(() =>
-			expect(screen.getByRole("button", { name: "Start thread" }).hasAttribute("disabled")).toBe(
+			expect(screen.getByRole("button", { name: "Start chat" }).hasAttribute("disabled")).toBe(
 				false,
 			),
 		);
 
-		fireEvent.click(screen.getByRole("button", { name: "Start thread" }));
+		fireEvent.click(screen.getByRole("button", { name: "Start chat" }));
 
-		await waitFor(() => expect(client.api.chats.startProjectThread).toHaveBeenCalledTimes(2));
-		const [first, second] = client.api.chats.startProjectThread.mock.calls.map(
+		await waitFor(() => expect(client.api.chats.startProjectChat).toHaveBeenCalledTimes(2));
+		const [first, second] = client.api.chats.startProjectChat.mock.calls.map(
 			([request]) => (request as { payload: { id: string } }).payload.id,
 		);
 		expect(second).toBe(first);
@@ -883,21 +874,21 @@ describe("a project's settings on a phone", () => {
 });
 
 describe("a bot on a phone", () => {
-	it("opens to its threads and its pages, with + to start a thread", async () => {
+	it("opens to its chats and its pages, with + to start a chat", async () => {
 		const { router } = mount(linearPage);
 
 		const page = await screen.findByRole("region", { name: linear.name });
 		expect(
-			await within(page).findByRole("link", { name: new RegExp(threadWith(linear).title) }),
+			await within(page).findByRole("link", { name: new RegExp(chatWith(linear).title) }),
 		).toBeDefined();
 		expect(within(page).getByRole("link", { name: "Files" })).toBeDefined();
-		fireEvent.click(within(page).getByRole("link", { name: `New thread with ${linear.name}` }));
+		fireEvent.click(within(page).getByRole("link", { name: `New chat with ${linear.name}` }));
 
 		await waitFor(() => expect(router.state.location.pathname).toBe(`${linearPage}/new`));
 		expect(await screen.findByLabelText(`Message ${linear.name}`)).toBeDefined();
 	});
 
-	it("goes back from a new thread opened first to the bot's threads, not to itself", async () => {
+	it("goes back from a new chat opened first to the bot's chats, not to itself", async () => {
 		const { router } = mount(`${linearPage}/new`);
 
 		const back = await screen.findByRole("link", { name: `Back to ${linear.name}` });
@@ -917,8 +908,8 @@ describe("a bot on a phone", () => {
 		expect(screen.queryByRole("link", { name: "Choose a model" })).toBeNull();
 	});
 
-	it("tells a member who cannot switch a model on who can, for their Personal Assistant", async () => {
-		apiAnswers({ role: "member" });
+	it("tells an editor who cannot switch a model on who can, for their Personal Assistant", async () => {
+		apiAnswers({ role: "editor" });
 		client.api.bots.list.mockReturnValue(Effect.succeed([{ ...personalAssistant, model: null }]));
 		mount(`/suga/bots/${personalAssistant.handle}/new`);
 
@@ -929,34 +920,34 @@ describe("a bot on a phone", () => {
 	});
 });
 
-describe("starting a thread with a bot", () => {
-	it("stays on the bot opened while the thread started, rather than going to the thread", async () => {
+describe("starting a chat with a bot", () => {
+	it("stays on the bot opened while the chat started, rather than going to the chat", async () => {
 		onWideScreen();
 		const starting = pendingAnswer();
-		client.api.chats.startProjectThread.mockReturnValue(starting.effect);
+		client.api.chats.startProjectChat.mockReturnValue(starting.effect);
 		const { router } = mount(linearPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
 		writeDraft(composer, "Plan the kickoff");
-		fireEvent.click(screen.getByRole("button", { name: "Start thread" }));
-		await waitFor(() => expect(client.api.chats.startProjectThread).toHaveBeenCalled());
+		fireEvent.click(screen.getByRole("button", { name: "Start chat" }));
+		await waitFor(() => expect(client.api.chats.startProjectChat).toHaveBeenCalled());
 
 		const triagerPage = `/suga/bots/${triager.handle}`;
 		await router.navigate({ to: triagerPage });
-		const started = listedThread(threadWith(linear));
-		const threadsAsked = client.api.chats.threads.mock.calls.length;
+		const started = listedChat(chatWith(linear));
+		const chatsAsked = client.api.chats.projectChats.mock.calls.length;
 		starting.answer(
 			Effect.succeed({
-				conversation: started.conversation,
+				chat: started.chat,
 				message: {
 					id: "0199a3a0-0000-7000-8000-0000000000fb",
-					conversationId: started.conversation.id,
+					chatId: started.chat.id,
 				},
 			}),
 		);
 
-		// The thread list is asked for again once the thread has started, wherever the person is.
+		// The chat list is asked for again once the chat has started, wherever the person is.
 		await waitFor(() =>
-			expect(client.api.chats.threads.mock.calls.length).toBeGreaterThan(threadsAsked),
+			expect(client.api.chats.projectChats.mock.calls.length).toBeGreaterThan(chatsAsked),
 		);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(router.state.location.pathname).toBe(triagerPage);
@@ -967,7 +958,7 @@ describe("the settings navigation", () => {
 	/*
 	 * Your own sections, then the workspace's; a bot's and a project's settings
 	 * are its own pages. The sections an administrator alone may open are left
-	 * out for a member, so their list simply ends rather than showing gaps.
+	 * out for an editor, so their list simply ends rather than showing gaps.
 	 */
 
 	it("lists your settings first, then the workspace's sections, and no bots or projects", async () => {
@@ -991,7 +982,7 @@ describe("the settings navigation", () => {
 
 		fireEvent.click(within(you).getByRole("link", { name: "General" }));
 
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/profile"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/account"));
 	});
 
 	it("shows the workspace's time zone under General", async () => {
@@ -1007,29 +998,29 @@ describe("the settings navigation", () => {
 
 	it("leaves the roster uncounted while you are the only person in it", async () => {
 		onWideScreen();
-		client.api.workspaces.members.mockReturnValue(
+		client.api.workspaces.memberships.mockReturnValue(
 			Effect.succeed([
 				{
 					id: "0199a3a0-0000-7000-8000-0000000000d1",
 					role: "admin",
-					user: sam,
+					person: sam,
 					joinedAt: "2026-09-09T00:00:00.000Z",
 				},
 			]),
 		);
 		mount("/suga/settings");
 
-		// General counts the members too, so once it does the roster has answered.
+		// General counts the people too, so once it does the roster has answered.
 		await screen.findByText("Workspace with 1 person and 2 projects");
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
 
-		// The one member is you. "1" tells nobody anything they did not know.
+		// The one person is you. "1" tells nobody anything they did not know.
 		expect(within(rail).getByRole("link", { name: "People" })).toBeDefined();
 	});
 
-	it("withholds the administrative sections from a member", async () => {
+	it("withholds the administrative sections from an editor", async () => {
 		onWideScreen();
-		apiAnswers({ role: "member" });
+		apiAnswers({ role: "editor" });
 		mount("/suga/settings");
 
 		const rail = await screen.findByRole("navigation", { name: "Settings" });
@@ -1042,8 +1033,8 @@ describe("the settings navigation", () => {
 		expect(within(rail).queryByRole("link", { name: "Computers" })).toBeNull();
 	});
 
-	it("tells a member who reaches the Models page by address that it is not theirs", async () => {
-		apiAnswers({ role: "member" });
+	it("tells an editor who reaches the Models page by address that it is not theirs", async () => {
+		apiAnswers({ role: "editor" });
 		mount("/suga/settings/providers/system");
 
 		expect(
@@ -1083,30 +1074,30 @@ describe("routes", () => {
 		expect(assistant.getAttribute("aria-current")).toBe("page");
 	});
 
-	it("sends somebody signed out to the login page, remembering where they were going", async () => {
-		const destination = `${linearPage}?item=0199a3a0-0000-7000-8000-0000000000aa`;
-		const { router } = mount(destination, { user: null });
+	it("sends somebody signed out to the sign-in page, remembering where they were going", async () => {
+		const destination = `${linearPage}?nestedChat=0199a3a0-0000-7000-8000-0000000000aa`;
+		const { router } = mount(destination, { person: null });
 
 		expect(await screen.findByRole("heading", { name: "Welcome to Sugabots" })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Continue with email" }));
-		expect(await screen.findByRole("button", { name: "Log in" })).toBeDefined();
+		expect(await screen.findByRole("button", { name: "Sign in" })).toBeDefined();
 		await waitFor(() => {
-			expect(router.state.location.pathname).toBe("/login");
+			expect(router.state.location.pathname).toBe("/sign-in");
 		});
 		expect(router.state.location.search).toEqual({ returnTo: destination });
 	});
 
-	it("returns a signed-in visit to the login page to where it was going, search and all", async () => {
+	it("returns a signed-in visit to the sign-in page to where it was going, search and all", async () => {
 		onWideScreen();
 		const destination = `/suga/bots/${linear.handle}/settings?tab=automations`;
-		const { router } = mount(`/login?returnTo=${encodeURIComponent(destination)}`);
+		const { router } = mount(`/sign-in?returnTo=${encodeURIComponent(destination)}`);
 
 		expect(await screen.findByRole("link", { name: /^Automations/ })).toBeDefined();
 		expect(router.state.location.href).toBe(destination);
 	});
 
-	it("will not return from the login page to another site", async () => {
-		const { router } = mount(`/login?returnTo=${encodeURIComponent("//evil.example/steal")}`);
+	it("will not return from the sign-in page to another site", async () => {
+		const { router } = mount(`/sign-in?returnTo=${encodeURIComponent("//evil.example/steal")}`);
 
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga"));
 	});
@@ -1115,11 +1106,11 @@ describe("routes", () => {
 		client.api.projects.list.mockReturnValue(Effect.succeed([]));
 		client.api.bots.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		const made = firstBotMade("Chief");
-		client.api.onboarding.complete.mockReturnValue(Effect.void);
-		const { router } = mount(`/onboarding?workspace=${workspace.slug}`);
+		client.api.workspaceSetup.complete.mockReturnValue(Effect.void);
+		const { router } = mount(`/workspace-setup?workspace=${workspace.slug}`);
 
 		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
-		await waitFor(() => expect(router.state.location.pathname).toBe("/onboarding"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/workspace-setup"));
 		const create = screen.getByRole("button", { name: "Create bot" });
 		expect(create.hasAttribute("disabled")).toBe(true);
 		fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Chief" } });
@@ -1135,7 +1126,7 @@ describe("routes", () => {
 					model: personalAssistant.model,
 					color: "purple",
 					shape: "circle",
-					face: "pill",
+					eyes: "pill",
 					visibility: "public",
 				},
 			}),
@@ -1148,7 +1139,7 @@ describe("routes", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Start talking" }));
 
 		await waitFor(() =>
-			expect(client.api.onboarding.complete).toHaveBeenCalledWith({
+			expect(client.api.workspaceSetup.complete).toHaveBeenCalledWith({
 				payload: { workspaceId: workspace.id, botId: made.id },
 			}),
 		);
@@ -1162,7 +1153,7 @@ describe("routes", () => {
 		client.api.bots.list.mockReturnValue(Effect.succeed([personalAssistant]));
 		firstBotMade("Chief");
 		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
-		mount(`/onboarding?workspace=${workspace.slug}`);
+		mount(`/workspace-setup?workspace=${workspace.slug}`);
 
 		fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Chief" } });
 		fireEvent.click(screen.getByRole("button", { name: "Create bot" }));
@@ -1178,7 +1169,7 @@ describe("routes", () => {
 		await waitFor(() => {
 			for (const email of ["jay@nitric.io", "mara@nitric.io"]) {
 				expect(client.api.workspaces.invite).toHaveBeenCalledWith(
-					expect.objectContaining({ payload: expect.objectContaining({ email, role: "member" }) }),
+					expect.objectContaining({ payload: expect.objectContaining({ email, role: "editor" }) }),
 				);
 			}
 		});
@@ -1190,7 +1181,7 @@ describe("routes", () => {
 		client.api.bots.list.mockReturnValue(
 			Effect.succeed([{ ...personalAssistant, model: "switched-off" }]),
 		);
-		mount(`/onboarding?workspace=${workspace.slug}`);
+		mount(`/workspace-setup?workspace=${workspace.slug}`);
 
 		expect(await screen.findByRole("heading", { name: "Connect a provider" })).toBeDefined();
 		expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
@@ -1205,7 +1196,7 @@ describe("routes", () => {
 		const openrouter = {
 			...(modelProviders[0] as ModelProvider),
 			id: "0199a3a0-0000-7000-8000-0000000000c9",
-			preset: "openrouter" as const,
+			builtIn: "openrouter" as const,
 			name: "OpenRouter",
 			models: ["meta/llama", "mistral/large"].map((modelId, index) => ({
 				...(modelProviders[0]?.models[0] as ProviderModel),
@@ -1223,7 +1214,7 @@ describe("routes", () => {
 				return openrouter;
 			}),
 		);
-		client.api.modelProviders.fetchModels.mockReturnValue(
+		client.api.modelProviders.discoverModels.mockReturnValue(
 			Effect.succeed({ added: 2, updated: 0, unchanged: 0 }),
 		);
 		client.api.modelProviders.updateModel.mockReturnValue(
@@ -1232,7 +1223,7 @@ describe("routes", () => {
 		client.api.bots.ensureAssistant.mockReturnValue(
 			Effect.succeed({ ...personalAssistant, model: "mistral/large" }),
 		);
-		mount(`/onboarding?workspace=${workspace.slug}`);
+		mount(`/workspace-setup?workspace=${workspace.slug}`);
 
 		fireEvent.click(await screen.findByRole("button", { name: "Choose a provider" }));
 		const picker = await screen.findByRole("dialog", { name: "Add provider" });
@@ -1244,7 +1235,7 @@ describe("routes", () => {
 		expect(await screen.findByRole("heading", { name: "Choose a model" })).toBeDefined();
 		expect(client.api.modelProviders.create).toHaveBeenCalledWith({
 			params: { workspace: workspace.id },
-			payload: { preset: "openrouter", apiKey: "sk-or-test" },
+			payload: { builtIn: "openrouter", apiKey: "sk-or-test" },
 		});
 		const next = screen.getByRole("button", { name: "Continue" });
 		expect(next.hasAttribute("disabled")).toBe(true);
@@ -1266,12 +1257,12 @@ describe("routes", () => {
 		expect(await screen.findByRole("heading", { name: "Make your first bot" })).toBeDefined();
 	});
 
-	it("asks somebody with an invitation to log in first, keeping the invitation", async () => {
-		const { router } = mount("/invite/an-invitation", { user: null });
+	it("asks somebody with an invitation to sign in first, keeping the invitation", async () => {
+		const { router } = mount("/invitations/an-invitation", { person: null });
 
 		expect(await screen.findByText(/invited to a workspace/)).toBeDefined();
 		await waitFor(() => {
-			expect(router.state.location.search).toEqual({ invite: "an-invitation" });
+			expect(router.state.location.search).toEqual({ invitation: "an-invitation" });
 		});
 	});
 
@@ -1290,8 +1281,8 @@ describe("routes", () => {
 	}
 
 	it("points an invitee's verification link back at the invitation", async () => {
-		client.auth.signUp.mockResolvedValue({ token: null, user: sam });
-		mount("/invite/an-invitation", { user: null });
+		client.auth.signUp.mockResolvedValue({ token: null, person: sam });
+		mount("/invitations/an-invitation", { person: null });
 
 		await createAccount("Sam", "sam@example.com");
 
@@ -1300,7 +1291,7 @@ describe("routes", () => {
 			name: "Sam",
 			email: "sam@example.com",
 			password: "correct-horse",
-			callbackURL: `${window.location.origin}/invite/an-invitation`,
+			callbackURL: `${window.location.origin}/invitations/an-invitation`,
 		});
 	});
 
@@ -1308,16 +1299,18 @@ describe("routes", () => {
 		client.auth.signUp.mockRejectedValue(
 			failureForStatus(
 				403,
-				UserText.unchecked("Signups are invite only. Ask a member to invite you."),
+				UserText.unchecked(
+					"Sign-up is by invitation only. Ask someone in a workspace to invite you.",
+				),
 				"SIGN_UP_CLOSED",
 			),
 		);
-		mount("/", { user: null });
+		mount("/", { person: null });
 		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 
 		await createAccount("Eve", "eve@example.com");
 
-		expect(await screen.findByText(/invite only/)).toBeDefined();
+		expect(await screen.findByText(/invitation only/)).toBeDefined();
 		expect(screen.queryByText("Check your email")).toBeNull();
 	});
 
@@ -1325,7 +1318,7 @@ describe("routes", () => {
 		client.auth.signIn.mockRejectedValue(
 			failureForStatus(403, UserText.unchecked("Email not verified"), "EMAIL_NOT_VERIFIED"),
 		);
-		mount("/", { user: null });
+		mount("/", { person: null });
 		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 
 		fireEvent.change(await screen.findByLabelText("Email"), {
@@ -1334,15 +1327,15 @@ describe("routes", () => {
 		fireEvent.change(screen.getByLabelText("Password"), {
 			target: { value: "correct-horse" },
 		});
-		fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+		fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
 		expect(await screen.findByText("Check your email")).toBeDefined();
 	});
 
 	it("signs a new account in at once when no verification is needed", async () => {
-		client.auth.signUp.mockResolvedValue({ token: "a-session", user: sam });
+		client.auth.signUp.mockResolvedValue({ token: "a-session", person: sam });
 		const refresh = vi.fn().mockResolvedValue(undefined);
-		mount("/invite/an-invitation", { user: null, refresh });
+		mount("/invitations/an-invitation", { person: null, refresh });
 
 		await createAccount("Sam", "sam@example.com");
 
@@ -1363,7 +1356,7 @@ describe("routes", () => {
 			),
 		);
 
-		mount("/invite/an-invitation");
+		mount("/invitations/an-invitation");
 
 		expect((await screen.findByRole("alert")).textContent).toContain(
 			"Verify your email address before accepting",
@@ -1376,16 +1369,16 @@ describe("routes", () => {
 				status: "pending",
 				workspaceName: "Nitric",
 				inviterName: "Sam",
-				role: "member",
+				role: "editor",
 			}),
 		);
 		const refresh = vi
 			.fn<() => Promise<void>>()
 			.mockRejectedValueOnce(new Error("Offline"))
 			.mockResolvedValueOnce(undefined);
-		const { router } = mount("/invite/an-invitation", { refresh });
+		const { router } = mount("/invitations/an-invitation", { refresh });
 
-		fireEvent.click(await screen.findByRole("button", { name: "Accept invite" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Accept invitation" }));
 
 		expect(await screen.findByText("Invitation accepted")).toBeDefined();
 		expect((await screen.findByRole("alert")).textContent).toContain(
@@ -1405,14 +1398,14 @@ describe("routes", () => {
 			name: "Nitric",
 			slug: "nitric",
 			timeZone: "UTC",
-			setupCompletedAt: "2026-09-01T00:00:00.000Z",
+			setUpAt: "2026-09-01T00:00:00.000Z",
 		};
 		client.api.workspaces.invitation.mockReturnValue(
 			Effect.succeed({
 				status: "pending",
 				workspaceName: "Nitric",
 				inviterName: "Sam",
-				role: "member",
+				role: "editor",
 			}),
 		);
 		client.api.workspaces.acceptInvitation.mockImplementation(() => {
@@ -1422,13 +1415,13 @@ describe("routes", () => {
 		// As main.tsx starts a session: with the workspaces /me answered with.
 		const queries = createQueryClient();
 		queries.setQueryData(workspacesQuery.queryKey, [workspace]);
-		const { router } = mount("/invite/an-invitation", {
+		const { router } = mount("/invitations/an-invitation", {
 			queries,
 			refresh: vi.fn().mockResolvedValue(undefined),
 		});
 
 		await screen.findByText("You have been invited to Nitric.");
-		fireEvent.click(screen.getByRole("button", { name: "Accept invite" }));
+		fireEvent.click(screen.getByRole("button", { name: "Accept invitation" }));
 
 		await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/nitric(\/|$)/));
 	});
@@ -1438,17 +1431,17 @@ describe("routes", () => {
 			Effect.succeed({ status: "accepted", workspaceId: workspace.id }),
 		);
 		const refresh = vi.fn().mockResolvedValue(undefined);
-		const { router } = mount("/invite/an-invitation", { refresh });
+		const { router } = mount("/invitations/an-invitation", { refresh });
 
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga"));
 		expect(client.api.workspaces.acceptInvitation).not.toHaveBeenCalled();
 		expect(refresh).toHaveBeenCalledOnce();
 	});
 
-	it("awaits login completion and reports its failure", async () => {
+	it("awaits signing in and reports its failure", async () => {
 		client.auth.signIn.mockResolvedValue(undefined);
 		const refresh = vi.fn().mockRejectedValue(new Error("Offline"));
-		mount("/login", { user: null, refresh });
+		mount("/sign-in", { person: null, refresh });
 		fireEvent.click(await screen.findByRole("button", { name: "Continue with email" }));
 		fireEvent.change(await screen.findByLabelText("Email"), {
 			target: { value: "sam@example.com" },
@@ -1457,7 +1450,7 @@ describe("routes", () => {
 			target: { value: "password" },
 		});
 
-		fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+		fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
 		expect((await screen.findByRole("alert")).textContent).toContain("Could not reach the API");
 		expect(refresh).toHaveBeenCalledOnce();
@@ -1581,14 +1574,14 @@ describe("creating a project", () => {
 });
 
 describe("creating a bot", () => {
-	it("offers a member the same New bot action as an admin", async () => {
+	it("offers an editor the same New bot action as an admin", async () => {
 		mount("/suga/bots");
 
 		expect(await screen.findByRole("button", { name: "New bot" })).toBeDefined();
 		cleanup();
 		vi.clearAllMocks();
 
-		apiAnswers({ role: "member" });
+		apiAnswers({ role: "editor" });
 		mount("/suga/bots");
 
 		expect(await screen.findByRole("button", { name: "New bot" })).toBeDefined();
@@ -1608,7 +1601,7 @@ describe("creating a bot", () => {
 		expect(screen.queryByRole("button", { name: "Delete project" })).toBeNull();
 	});
 
-	it("creates a bot in the look and colour chosen, and opens it", async () => {
+	it("creates a bot with the avatar and colour chosen, and opens it", async () => {
 		onWideScreen();
 		const made = {
 			...linear,
@@ -1634,14 +1627,14 @@ describe("creating a bot", () => {
 		await waitFor(() => {
 			expect(client.api.bots.create).toHaveBeenCalledWith({
 				params: { workspace: workspace.id },
-				// The looks on offer are drawn at random; the colour is the one chosen.
+				// The avatars on offer are drawn at random; the colour is the one chosen.
 				payload: {
 					name: made.name,
 					model: made.model,
 					visibility: "public",
 					color: "orange",
 					shape: expect.any(String),
-					face: expect.any(String),
+					eyes: expect.any(String),
 				},
 			});
 		});
@@ -1652,15 +1645,15 @@ describe("creating a bot", () => {
 		expect((await screen.findAllByText(made.name)).length).toBeGreaterThan(0);
 	});
 
-	it("on a phone, chooses the look on a page of its own, from the bot's face", async () => {
+	it("on a phone, chooses the avatar on a page of its own, from the bot's face", async () => {
 		client.api.bots.create.mockReturnValue(Effect.succeed({ ...linear, name: "Scout" }));
 		mount("/suga/bots");
 		(await screen.findByRole("button", { name: "New bot" })).click();
 
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Scout" } });
-		fireEvent.click(within(dialog).getByRole("button", { name: "Change the look" }));
-		// The look's page has Back where the page had Close, and no Create.
+		fireEvent.click(within(dialog).getByRole("button", { name: "Change the avatar" }));
+		// The avatar's page has Back where the page had Close, and no Create.
 		expect(within(dialog).queryByRole("button", { name: "Create" })).toBeNull();
 		fireEvent.click(within(dialog).getByRole("radio", { name: "orange" }));
 		fireEvent.click(within(dialog).getByRole("button", { name: "Back" }));
@@ -1781,7 +1774,7 @@ describe("workspace settings", () => {
 	const ollama = {
 		...openai,
 		id: "0199a3a0-0000-7000-8000-0000000000da",
-		preset: "ollama" as const,
+		builtIn: "ollama" as const,
 		name: "Ollama",
 		baseUrl: "http://127.0.0.1:11434/v1",
 		hasApiKey: false,
@@ -1854,7 +1847,7 @@ describe("workspace settings", () => {
 		const provider = {
 			...openai,
 			id: "0199a3a0-0000-7000-8000-0000000000cf",
-			preset: null,
+			builtIn: null,
 			name: "Local gateway",
 			baseUrl: "http://localhost:11434/v1",
 			hasApiKey: false,
@@ -1890,11 +1883,11 @@ describe("workspace settings", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe(providerPage(provider)));
 	});
 
-	it("offers the catalog, minus what is connected, and adds a preset by its key", async () => {
+	it("offers the built-in providers, minus what is connected, and adds one by its key", async () => {
 		const groq = {
 			...openai,
 			id: "0199a3a0-0000-7000-8000-0000000000d1",
-			preset: "groq" as const,
+			builtIn: "groq" as const,
 			name: "Groq",
 			baseUrl: "https://api.groq.com/openai/v1",
 			models: [],
@@ -1916,7 +1909,7 @@ describe("workspace settings", () => {
 		await waitFor(() => {
 			expect(client.api.modelProviders.create).toHaveBeenCalledWith({
 				params: { workspace: workspace.id },
-				payload: { preset: "groq", apiKey: "gsk-test" },
+				payload: { builtIn: "groq", apiKey: "gsk-test" },
 			});
 		});
 	});
@@ -1998,7 +1991,7 @@ describe("workspace settings", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/providers"));
 	});
 
-	it("replaces a key, and says where a connection test failed", async () => {
+	it("replaces a key, and says where a provider test failed", async () => {
 		client.api.modelProviders.test.mockReturnValue(
 			Effect.fail(new InternalServerError({ message: userText`Provider unavailable` })),
 		);
@@ -2007,10 +2000,10 @@ describe("workspace settings", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
 		expect(screen.getByLabelText("OpenAI API key")).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-		fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+		fireEvent.click(screen.getByRole("button", { name: "Test provider" }));
 
 		expect((await screen.findByRole("alert")).textContent).toContain("Provider unavailable");
-		expect(screen.getByRole("button", { name: "Test connection" }).hasAttribute("disabled")).toBe(
+		expect(screen.getByRole("button", { name: "Test provider" }).hasAttribute("disabled")).toBe(
 			false,
 		);
 	});
@@ -2019,7 +2012,7 @@ describe("workspace settings", () => {
 		const custom = {
 			...openai,
 			id: "0199a3a0-0000-7000-8000-0000000000cf",
-			preset: null,
+			builtIn: null,
 			name: "Local gateway",
 			baseUrl: "http://localhost:11434/v1",
 			models: [],
@@ -2040,8 +2033,7 @@ describe("workspace settings", () => {
 		expect((screen.getByLabelText("Model ID") as HTMLInputElement).value).toBe("local-model");
 	});
 
-	/** Opens the invite panel, which is behind a button rather than always open. */
-	const openInvitePanel = async () => {
+	const openInvitePeoplePanel = async () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Invite people" }));
 		return screen.findByRole("dialog", { name: "Invite people" });
 	};
@@ -2050,19 +2042,19 @@ describe("workspace settings", () => {
 		// The navigation drawer is a dialog too. While it wrapped the screens,
 		// Base UI read every dialog they opened as nested and dropped its
 		// backdrop, leaving the page behind undimmed and unblurred.
-		mount("/suga/settings/members");
-		const dialog = await openInvitePanel();
+		mount("/suga/settings/people");
+		const dialog = await openInvitePeoplePanel();
 
 		expect(dialog.ownerDocument.querySelector('[data-slot="dialog-overlay"]')).not.toBeNull();
 	});
 
-	const junoPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d2";
-	const samPage = "/suga/settings/members/0199a3a0-0000-7000-8000-0000000000d1";
+	const junoPage = "/suga/settings/people/0199a3a0-0000-7000-8000-0000000000d2";
+	const samPage = "/suga/settings/people/0199a3a0-0000-7000-8000-0000000000d1";
 
 	it("invites every address typed, with the role chosen", async () => {
 		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
-		mount("/suga/settings/members");
-		const panel = await openInvitePanel();
+		mount("/suga/settings/people");
+		const panel = await openInvitePeoplePanel();
 
 		fireEvent.change(within(panel).getByLabelText("Email addresses"), {
 			target: { value: "juno@example.com, kim@example.com" },
@@ -2097,8 +2089,8 @@ describe("workspace settings", () => {
 					? Effect.die(new Error("Offline"))
 					: Effect.succeed({ id: "an-invitation" }),
 		);
-		mount("/suga/settings/members");
-		const panel = await openInvitePanel();
+		mount("/suga/settings/people");
+		const panel = await openInvitePeoplePanel();
 		const emails = within(panel).getByLabelText("Email addresses");
 		fireEvent.change(emails, { target: { value: "juno@example.com kim@example.com" } });
 
@@ -2109,10 +2101,10 @@ describe("workspace settings", () => {
 	});
 
 	it("lists each person with their role, and opens their page", async () => {
-		const { router } = mount("/suga/settings/members");
+		const { router } = mount("/suga/settings/people");
 
 		const row = await screen.findByRole("link", { name: new RegExp(juno.name) });
-		expect(row.textContent).toContain("Member");
+		expect(row.textContent).toContain("Editor");
 		expect(screen.getByRole("link", { name: new RegExp(sam.name) }).textContent).toContain("(you)");
 		fireEvent.click(row);
 
@@ -2126,8 +2118,8 @@ describe("workspace settings", () => {
 		fireEvent.click(await screen.findByRole("radio", { name: "Viewer" }));
 
 		await waitFor(() => {
-			expect(client.api.workspaces.updateMember).toHaveBeenCalledWith({
-				params: { workspace: workspace.id, memberId: "0199a3a0-0000-7000-8000-0000000000d2" },
+			expect(client.api.workspaces.changeRole).toHaveBeenCalledWith({
+				params: { workspace: workspace.id, membershipId: "0199a3a0-0000-7000-8000-0000000000d2" },
 				payload: { role: "viewer" },
 			});
 		});
@@ -2145,7 +2137,7 @@ describe("workspace settings", () => {
 		await waitFor(() =>
 			expect(client.api.projects.addMember).toHaveBeenCalledWith({
 				params: { projectId: projects[0]?.id },
-				payload: { userId: juno.id },
+				payload: { personId: juno.id },
 			}),
 		);
 	});
@@ -2156,17 +2148,17 @@ describe("workspace settings", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Remove from workspace" }));
 
 		expect(await screen.findByRole("heading", { name: `Remove ${juno.name}?` })).toBeDefined();
-		expect(screen.getByText(/their Personal Assistant and its threads are deleted/)).toBeDefined();
-		expect(client.api.workspaces.removeMember).not.toHaveBeenCalled();
+		expect(screen.getByText(/their Personal Assistant and its chats are deleted/)).toBeDefined();
+		expect(client.api.workspaces.removeMembership).not.toHaveBeenCalled();
 
 		fireEvent.click(screen.getByRole("button", { name: "Remove" }));
 
 		await waitFor(() => {
-			expect(client.api.workspaces.removeMember).toHaveBeenCalledWith({
-				params: { workspace: workspace.id, memberId: "0199a3a0-0000-7000-8000-0000000000d2" },
+			expect(client.api.workspaces.removeMembership).toHaveBeenCalledWith({
+				params: { workspace: workspace.id, membershipId: "0199a3a0-0000-7000-8000-0000000000d2" },
 			});
 		});
-		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/members"));
+		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/settings/people"));
 	});
 
 	it("offers leaving on your own page, and no way to change your own role", async () => {
@@ -2189,7 +2181,7 @@ describe("workspace settings", () => {
 	});
 
 	it("lists an invitation that has not been accepted, and can withdraw it", async () => {
-		mount("/suga/settings/members");
+		mount("/suga/settings/people");
 
 		expect(await screen.findByText("dana@example.com")).toBeDefined();
 		fireEvent.click(
@@ -2205,7 +2197,7 @@ describe("workspace settings", () => {
 
 	it("sends an invitation again without retyping it", async () => {
 		client.api.workspaces.invite.mockReturnValue(Effect.succeed({ id: "an-invitation" }));
-		mount("/suga/settings/members");
+		mount("/suga/settings/people");
 
 		await screen.findByText("dana@example.com");
 		fireEvent.click(screen.getByRole("button", { name: "Resend" }));
@@ -2219,13 +2211,13 @@ describe("workspace settings", () => {
 		expect(await screen.findByText("Sent again")).toBeDefined();
 	});
 
-	it("shows a member who holds what, and no way to change it", async () => {
-		apiAnswers({ role: "member" });
-		mount("/suga/settings/members");
+	it("shows an editor who holds what, and no way to change it", async () => {
+		apiAnswers({ role: "editor" });
+		mount("/suga/settings/people");
 
 		expect(
 			(await screen.findByRole("link", { name: new RegExp(juno.name) })).textContent,
-		).toContain("Member");
+		).toContain("Editor");
 		expect(screen.queryByRole("button", { name: "Invite people" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Resend" })).toBeNull();
 		cleanup();
@@ -2265,7 +2257,7 @@ describe("workspace settings", () => {
 		(await screen.findByRole("button", { name: "Continue" })).click();
 
 		await waitFor(() => {
-			expect(router.state.location.pathname).toBe("/onboarding");
+			expect(router.state.location.pathname).toBe("/workspace-setup");
 			expect(client.api.workspaces.create).toHaveBeenCalledWith({
 				payload: { name: "Nitric", slug: "nitric", timeZone: "Australia/Sydney" },
 			});
@@ -2298,7 +2290,7 @@ describe("settings on a phone", () => {
 			(await within(settings).findByRole("link", { name: new RegExp(sam.name) })).getAttribute(
 				"href",
 			),
-		).toBe("/suga/settings/profile");
+		).toBe("/suga/settings/account");
 		expect(within(settings).getByRole("link", { name: "General" }).getAttribute("href")).toBe(
 			"/suga/settings/general",
 		);
@@ -2306,17 +2298,17 @@ describe("settings on a phone", () => {
 			within(settings)
 				.getByRole("link", { name: /^People/ })
 				.getAttribute("href"),
-		).toBe("/suga/settings/members");
+		).toBe("/suga/settings/people");
 	});
 
-	it("lists Notifications under your profile, and leads from it back there", async () => {
-		mount("/suga/settings/profile");
+	it("lists Notifications under your account, and leads from it back there", async () => {
+		mount("/suga/settings/account");
 
-		const profile = await screen.findByRole("main");
+		const account = await screen.findByRole("main");
 		expect(
-			(await within(profile).findByRole("link", { name: "Notifications" })).getAttribute("href"),
+			(await within(account).findByRole("link", { name: "Notifications" })).getAttribute("href"),
 		).toBe("/suga/settings/notifications");
-		expect(within(profile).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
+		expect(within(account).getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
 			"/suga/you",
 		);
 		cleanup();
@@ -2325,7 +2317,7 @@ describe("settings on a phone", () => {
 		const notifications = await screen.findByRole("main");
 		expect(
 			(await within(notifications).findByRole("link", { name: "You" })).getAttribute("href"),
-		).toBe("/suga/settings/profile");
+		).toBe("/suga/settings/account");
 	});
 
 	it("opens General by name, with the way back to Settings", async () => {
@@ -2340,10 +2332,10 @@ describe("settings on a phone", () => {
 });
 
 describe("the theme", () => {
-	// Chosen under your profile, since it is yours rather than the workspace's.
+	// Chosen under your account, since it is yours rather than the workspace's.
 	it("is dark until something is chosen", async () => {
 		onWideScreen();
-		mount("/suga/settings/profile");
+		mount("/suga/settings/account");
 
 		const theme = await screen.findByRole("group", { name: "Theme" });
 		expect((within(theme).getByRole("radio", { name: "Dark" }) as HTMLInputElement).checked).toBe(
@@ -2354,7 +2346,7 @@ describe("the theme", () => {
 
 	it("is chosen in settings, and remembered", async () => {
 		onWideScreen();
-		mount("/suga/settings/profile");
+		mount("/suga/settings/account");
 
 		fireEvent.click(await screen.findByRole("radio", { name: "Light" }));
 
@@ -2365,7 +2357,7 @@ describe("the theme", () => {
 	it("stores nothing when dark is chosen, because that is the default", async () => {
 		onWideScreen();
 		localStorage.setItem("sugabots-theme", "light");
-		mount("/suga/settings/profile");
+		mount("/suga/settings/account");
 
 		fireEvent.click(await screen.findByRole("radio", { name: "Dark" }));
 
@@ -2374,25 +2366,25 @@ describe("the theme", () => {
 	});
 });
 
-describe("your profile", () => {
+describe("your account", () => {
 	it("signs out, and re-asks who you are", async () => {
 		client.auth.signOut.mockResolvedValue(undefined);
 		const refresh = vi.fn();
-		mount("/suga/settings/profile", { refresh });
+		mount("/suga/settings/account", { refresh });
 
 		fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
 
 		await waitFor(() => expect(client.auth.signOut).toHaveBeenCalled());
 		// Dropping the token is not enough on its own: the guard reads the
 		// session, so it has to be asked again before the route can send
-		// anybody to the login page.
+		// anybody to the sign-in page.
 		await waitFor(() => expect(refresh).toHaveBeenCalled());
 	});
 
 	it("changes your name when you leave the field, and re-asks who you are", async () => {
 		client.auth.updateName.mockResolvedValue({ status: true });
 		const refresh = vi.fn();
-		mount("/suga/settings/profile", { refresh });
+		mount("/suga/settings/account", { refresh });
 
 		const name = await screen.findByRole("textbox", { name: "Name" });
 		fireEvent.change(name, { target: { value: "  Samantha " } });
@@ -2404,14 +2396,14 @@ describe("your profile", () => {
 
 	it("shows your new name once the session has it, without a navigation", async () => {
 		const router = createAppRouter({
-			history: createMemoryHistory({ initialEntries: ["/suga/settings/profile"] }),
+			history: createMemoryHistory({ initialEntries: ["/suga/settings/account"] }),
 		});
 		const queries = createQueryClient();
-		const signedInAs = (user: SessionUser) => (
+		const signedInAs = (signedIn: SignedInPerson) => (
 			<TestApp
 				router={router}
 				queries={queries}
-				session={{ user, error: undefined, refresh: vi.fn() }}
+				session={{ person: signedIn, error: undefined, refresh: vi.fn() }}
 			/>
 		);
 		const { rerender } = render(signedInAs(sam));
@@ -2427,7 +2419,7 @@ describe("your profile", () => {
 		client.auth.updateName.mockRejectedValue(
 			failureForStatus(400, UserText.unchecked(refusal), "INVALID_NAME"),
 		);
-		mount("/suga/settings/profile");
+		mount("/suga/settings/account");
 
 		const name = await screen.findByRole("textbox", { name: "Name" });
 		fireEvent.change(name, { target: { value: "Samantha" } });
@@ -2445,7 +2437,7 @@ describe("project settings", () => {
 	const botsPage = `${projectPage}/bots`;
 	const peoplePage = `${projectPage}/people`;
 	const samInProject = {
-		userId: sam.id,
+		personId: sam.id,
 		name: sam.name,
 		email: sam.email,
 		image: null,
@@ -2454,7 +2446,7 @@ describe("project settings", () => {
 	};
 	const junoInProject = {
 		...samInProject,
-		userId: juno.id,
+		personId: juno.id,
 		name: juno.name,
 		email: juno.email,
 		removable: true,
@@ -2498,7 +2490,7 @@ describe("project settings", () => {
 		await waitFor(() =>
 			expect(client.api.projects.addMember).toHaveBeenCalledWith({
 				params: { projectId: suga.id },
-				payload: { userId: sam.id },
+				payload: { personId: sam.id },
 			}),
 		);
 	});
@@ -2521,7 +2513,7 @@ describe("project settings", () => {
 
 		await waitFor(() =>
 			expect(client.api.projects.removeMember).toHaveBeenCalledWith({
-				params: { projectId: suga.id, userId: juno.id },
+				params: { projectId: suga.id, personId: juno.id },
 			}),
 		);
 	});
@@ -2538,8 +2530,8 @@ describe("project settings", () => {
 		expect(screen.queryByRole("button", { name: `Remove ${sam.name}` })).toBeNull();
 	});
 
-	it("lets a member leave a project, and nothing more", async () => {
-		apiAnswers({ role: "member" });
+	it("lets an editor leave a project, and nothing more", async () => {
+		apiAnswers({ role: "editor" });
 		client.api.projects.listMembers.mockImplementation(() =>
 			Effect.succeed([samInProject, junoInProject]),
 		);
@@ -2607,9 +2599,9 @@ describe("project settings", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe("/suga/projects"));
 	});
 
-	it("says so when a project with threads cannot be deleted", async () => {
+	it("says so when a project with chats cannot be deleted", async () => {
 		client.api.projects.remove.mockReturnValue(
-			Effect.fail(new Conflict({ message: userText`The project still has threads` })),
+			Effect.fail(new Conflict({ message: userText`The project still has chats` })),
 		);
 		mount(projectPage);
 
@@ -2631,7 +2623,7 @@ describe("the app's badge", () => {
 			output: null,
 			status: "awaiting_approval",
 			error: null,
-			mutating: true,
+			writeOrDelete: true,
 			atOffset: 0,
 			startedAt: "2026-09-18T09:00:00.000Z",
 			finishedAt: null,
@@ -2643,12 +2635,12 @@ describe("the app's badge", () => {
 			name: linear.name,
 			handle: linear.handle,
 			color: linear.color,
-			face: linear.face,
+			eyes: linear.eyes,
 			shape: "circle",
 		},
 		projectId: project.id,
-		conversationId: "0199a3a0-0000-7000-8000-0000000004b1",
-		rootConversationId: "0199a3a0-0000-7000-8000-0000000004b1",
+		chatId: "0199a3a0-0000-7000-8000-0000000004b1",
+		rootChatId: "0199a3a0-0000-7000-8000-0000000004b1",
 	};
 
 	/** The Badging API, which only Chromium browsers have. */
@@ -2691,7 +2683,6 @@ describe("the app's badge", () => {
 	function approvalsWaiting(count: number) {
 		client.api.chats.attention.mockReturnValue(
 			Effect.succeed({
-				unreadInInbox: 0,
 				waitingApprovals: count,
 				unreadForYou: 0,
 			}),
@@ -2720,7 +2711,7 @@ describe("the app's badge", () => {
 	it("leaves the icon and the title alone for unread messages that are not for you", async () => {
 		const { setAppBadge } = badging();
 		pageTitle();
-		client.api.chats.projectMarkers.mockReturnValue(
+		client.api.chats.attentionMarks.mockReturnValue(
 			Effect.succeed({
 				projects: {
 					[project.id]: { unreadMessages: 2, needsApproval: false, failedAutomations: 0 },
@@ -2747,9 +2738,7 @@ describe("the app's badge", () => {
 		clearAppBadge.mockClear();
 
 		approvalsWaiting(0);
-		updates.emit(
-			streamEvent("conversation.changed", { conversationId: waitingApproval.conversationId }),
-		);
+		updates.emit(streamEvent("chat.changed", { chatId: waitingApproval.chatId }));
 
 		await waitFor(() => expect(document.title).toBe("Sugabots | Suga Workspace"));
 		expect(clearAppBadge).toHaveBeenCalled();

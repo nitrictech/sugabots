@@ -1,6 +1,6 @@
 import { type Liveliness, livelinessLevels } from "@sugabots/avatars";
 import {
-	USER_NAME_MAX_LENGTH,
+	PERSON_NAME_MAX_LENGTH,
 	WORKSPACE_NAME_MAX_LENGTH,
 	type WorkspaceRole,
 	workspaceRoleLabel,
@@ -19,9 +19,9 @@ import { useBackToHere } from "@/lib/settings-back.tsx";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
+	useMemberships,
 	useUpdateWorkspace,
 	useWorkspace,
-	useWorkspaceMembers,
 	useWorkspacePermissions,
 	useWorkspaceRole,
 	useWorkspaceTimeZone,
@@ -49,34 +49,34 @@ import { ProviderSettings } from "./ProviderSettings.tsx";
 import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
-import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
+import { WorkspacePeopleSettings } from "./WorkspacePeopleSettings.tsx";
 
 export function WorkspaceSettings({
 	section,
 	selectedProviderId,
 	modelChoice,
-	selectedMemberId,
+	selectedMembershipId,
 }: {
 	section: WorkspaceSettingSection;
 	/** The provider open on the Models page. */
 	selectedProviderId?: string;
 	/** Which model the Models page shows the choice of instead: new bots' or the system bots'. */
 	modelChoice?: "default" | "system";
-	/** The membership open on the Members page. */
-	selectedMemberId?: string;
+	/** The membership open on the People page. */
+	selectedMembershipId?: string;
 }) {
 	const { workspace, isPending } = useWorkspace();
 	const session = useSession();
 	const may = useWorkspacePermissions();
 	const role = useWorkspaceRole();
 
-	// The shell sends somebody in no workspace to onboarding, so there is always one here.
+	// The shell sends somebody in no workspace to workspace setup, so there is always one here.
 	if (isPending || !workspace) return null;
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			{section === "providers" && may.manageProviders ? (
-				modelChoice === "system" && may.configureBuiltInBots ? (
+				modelChoice === "system" && may.chooseSystemModel ? (
 					<SystemModelSettings />
 				) : modelChoice === "default" ? (
 					<DefaultModelSettings />
@@ -94,16 +94,16 @@ export function WorkspaceSettings({
 							canDelete={may.deleteWorkspace}
 						/>
 					)}
-					{section === "profile" && <ProfileSettings />}
+					{section === "account" && <AccountSettings />}
 					{section === "notifications" && <NotificationsSettings />}
-					{section === "members" && (
-						<WorkspaceMembersSettings
+					{section === "people" && (
+						<WorkspacePeopleSettings
 							workspaceId={workspace.id}
-							canManage={may.manageMembers}
+							canManage={may.managePeople}
 							canManageAdmins={may.manageAdmins}
-							canTransferOwnership={may.transferOwnership}
-							currentUserId={session.user?.id}
-							selectedMemberId={selectedMemberId}
+							canHandOverOwnership={may.handOverOwnership}
+							currentPersonId={session.person?.id}
+							selectedMembershipId={selectedMembershipId}
 						/>
 					)}
 					{section === "search" && (
@@ -135,7 +135,9 @@ export function WorkspaceSettings({
 							<UsageSettings />
 						) : (
 							<SettingsPage title="Usage">
-								<Alert>Only workspace administrators can see what the workspace spends.</Alert>
+								<Alert>
+									Only workspace administrators can see what the workspace's models cost.
+								</Alert>
 							</SettingsPage>
 						))}
 					{section === "providers" && (
@@ -168,7 +170,7 @@ function GeneralSettings({
 	canDelete: boolean;
 }) {
 	const { workspace } = useWorkspace();
-	const { data: members } = useWorkspaceMembers(workspace?.id);
+	const { data: memberships } = useMemberships(workspace?.id);
 	const { data: projects } = useProjects();
 	const [choosingTimeZone, setChoosingTimeZone] = useState(false);
 	// Loaded with the page, so the dialog opens with its automations note already in place.
@@ -189,7 +191,10 @@ function GeneralSettings({
 	}
 
 	return (
-		<SettingsPage title="General" description={workspaceSummary(members?.length, projects?.length)}>
+		<SettingsPage
+			title="General"
+			description={workspaceSummary(memberships?.length, projects?.length)}
+		>
 			<SettingsGroup>
 				{canUpdate ? (
 					// Keeps the slug: it is in every link to the workspace, which nothing redirects from.
@@ -227,7 +232,7 @@ function GeneralSettings({
 				<>
 					<SettingsDanger
 						label="Delete workspace"
-						description={`Removes every project, bot and conversation in ${workspace.name}.`}
+						description={`Removes every project, bot and chat in ${workspace.name}.`}
 						action="Delete"
 						onClick={() => setConfirmingDelete(true)}
 					/>
@@ -235,7 +240,7 @@ function GeneralSettings({
 						open={confirmingDelete}
 						onOpenChange={setConfirmingDelete}
 						title={`Delete ${workspace.name}?`}
-						description="Its projects, bots, conversations and connections are deleted, and everyone in it loses it. This can't be undone."
+						description="Its projects, bots, chats and connectors are deleted, and everyone in it loses it. This can't be undone."
 						pending={deleteWorkspace.isPending}
 						error={deleteWorkspace.error ? failureMessage(deleteWorkspace.error) : undefined}
 						onDelete={() => confirmDelete(workspace.id)}
@@ -280,25 +285,25 @@ function LivelinessChoice() {
 	);
 }
 
-function ProfileSettings() {
+function AccountSettings() {
 	const session = useSession();
 	const signOut = useSignOut();
 	const updateName = useUpdateName();
 	const openedFromCard = !useMediaQuery(SETTINGS_BESIDE);
-	const backToProfile = useBackToHere("You");
-	const user = session.user;
-	if (!user) return null;
+	const backToAccount = useBackToHere("You");
+	const signedIn = session.person;
+	if (!signedIn) return null;
 
 	return (
 		<SettingsPage
-			hero={<PersonAvatar person={user} size={44} />}
-			title={user.name}
-			description={user.email}
+			hero={<PersonAvatar person={signedIn} size={44} />}
+			title={signedIn.name}
+			description={signedIn.email}
 		>
 			<SettingsGroup label="Account">
 				<SettingsNameRow
-					name={user.name}
-					maxLength={USER_NAME_MAX_LENGTH}
+					name={signedIn.name}
+					maxLength={PERSON_NAME_MAX_LENGTH}
 					savePending={updateName.isPending}
 					error={updateName.error ? failureMessage(updateName.error) : undefined}
 					onCommit={(name) => updateName.mutateAsync(name)}
@@ -306,7 +311,7 @@ function ProfileSettings() {
 				<SettingsControlRow label="Email">
 					{/* In the name's column and at its size, which a touch screen keeps at 16px for its field. */}
 					<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground pointer-coarse:text-base">
-						{user.email}
+						{signedIn.email}
 					</span>
 				</SettingsControlRow>
 			</SettingsGroup>
@@ -318,7 +323,7 @@ function ProfileSettings() {
 					trailing={<LivelinessChoice />}
 				/>
 			</SettingsGroup>
-			{/* Below a laptop's width your profile is opened from a card, with no list beside it that has Notifications. */}
+			{/* Below a laptop's width your account is opened from a card, with no list beside it that has Notifications. */}
 			{openedFromCard && (
 				<SettingsGroup>
 					<SettingsRow
@@ -329,7 +334,7 @@ function ProfileSettings() {
 								from="/$workspace"
 								to="./settings/$section"
 								params={{ section: "notifications" }}
-								state={backToProfile}
+								state={backToAccount}
 							/>
 						}
 					/>
@@ -346,7 +351,7 @@ function ProfileSettings() {
 	);
 }
 
-/** The link that lets somebody new sign up, where the installation signs people up by referral. */
+/** The link that lets somebody new sign up, where the server signs people up by referral. */
 function ReferralLinkSettings() {
 	const { data: link } = useReferralLink();
 	const reset = useResetReferralLink();
@@ -375,7 +380,7 @@ function ReferralLinkSettings() {
 			}
 		>
 			<div className="flex flex-col gap-1">
-				<h3 className="m-0 font-medium text-sm text-foreground">Share your invite link</h3>
+				<h3 className="m-0 font-medium text-sm text-foreground">Share your referral link</h3>
 				<p className="m-0 text-muted-foreground text-xs">
 					Anyone with it can sign up and get a workspace of their own.
 				</p>

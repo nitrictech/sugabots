@@ -10,11 +10,11 @@ import { today } from "@/lib/routine-schedule.ts";
 import {
 	apiAnswers,
 	bots,
+	chatDetails,
 	linear,
 	mount,
 	open,
 	personalAssistant,
-	threadDetails,
 	triager,
 } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
@@ -80,7 +80,7 @@ afterEach(() => {
 });
 
 /** An automation's own page, where it is set up. */
-const itemPage = (one: BotsAutomation) =>
+const nestedChatPage = (one: BotsAutomation) =>
 	`/suga/bots/${one.bot.handle}/automations/${one.automation.id}`;
 /** An automation being made, under the triager's automations. */
 const newPage = `/suga/bots/${triager.handle}/automations/new`;
@@ -100,9 +100,9 @@ function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []
 			[one.automation, ...others].filter((automation) => automation.projectId === params.projectId),
 		),
 	);
-	client.api.chats.threads.mockReturnValue(
+	client.api.chats.projectChats.mockReturnValue(
 		Effect.succeed({
-			threads: [],
+			chats: [],
 			automations: [
 				{
 					automation: {
@@ -111,7 +111,7 @@ function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []
 						state: one.automation.state,
 						pausedAfterFailures: false,
 					},
-					conversation: {
+					chat: {
 						kind: "automation_feed",
 						id: feed,
 						workspaceId: one.bot.workspaceId,
@@ -127,14 +127,14 @@ function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []
 			],
 		}),
 	);
-	const details = threadDetails(one.bot);
-	client.api.conversations.get.mockReturnValue(
+	const details = chatDetails(one.bot);
+	client.api.chats.get.mockReturnValue(
 		Effect.succeed({
 			...details,
-			conversation: {
-				...details.conversation,
+			chat: {
+				...details.chat,
 				id: feed,
-				rootConversationId: feed,
+				rootChatId: feed,
 				kind: "automation_feed",
 				title: one.automation.name,
 			},
@@ -152,7 +152,7 @@ function serveAutomation(one: BotsAutomation, others: readonly Automation[] = []
 /** Opens `one`'s own page, where it is set up. */
 async function openPanel(one: BotsAutomation, others: readonly Automation[] = []) {
 	serveAutomation(one, others);
-	const { router } = mount(itemPage(one));
+	const { router } = mount(nestedChatPage(one));
 	const panel = await showPanel();
 	await within(panel).findByRole("heading", { name: one.automation.name });
 	return { router, panel };
@@ -387,11 +387,11 @@ describe("a bot's automations", () => {
 			),
 		);
 		// Made, it opens its feed; its panel beside it has the address and the secret.
-		await waitFor(() => expect(router.state.location.pathname).toBe(itemPage(webhook)));
+		await waitFor(() => expect(router.state.location.pathname).toBe(nestedChatPage(webhook)));
 		const panel = await showPanel();
 		fireEvent.click(await within(panel).findByRole("button", { name: /^Webhook/ }));
 		expect(
-			await screen.findByText(new RegExp(`/hooks/triggers/${webhook.automation.id}$`)),
+			await screen.findByText(new RegExp(`/webhooks/triggers/${webhook.automation.id}$`)),
 		).toBeDefined();
 		const secret = await screen.findByLabelText("Signing secret");
 		await waitFor(() =>
@@ -524,7 +524,7 @@ describe("a bot's automations", () => {
 		expect(screen.queryByLabelText("Delivery ID header")).toBeNull();
 	});
 
-	it("saves a webhook filter only after confirmation, and removes conditions", async () => {
+	it("saves a webhook filter only after confirmation, and removes tests", async () => {
 		const labelled = { path: "data.labels.name", oneOf: ["10x, bug"] };
 		let webhook = withTrigger(morningBrief, {
 			kind: "webhook",
@@ -542,25 +542,25 @@ describe("a bot's automations", () => {
 		await openPanel(webhook);
 		client.api.automations.list.mockImplementation(() => Effect.succeed([webhook.automation]));
 		await openTrigger(/^Webhook/);
-		fireEvent.click(await screen.findByRole("button", { name: "Add condition" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Add test" }));
 		fireEvent.change(screen.getByLabelText("JSON path"), {
 			target: { value: " data.labels.name " },
 		});
 		fireEvent.change(screen.getByLabelText("Accepted value 1"), { target: { value: "10x, bug" } });
 		fireEvent.blur(screen.getByLabelText("Accepted value 1"));
 		expect(client.api.automations.updateTrigger).not.toHaveBeenCalled();
-		fireEvent.click(screen.getByRole("button", { name: "Save condition" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save test" }));
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenLastCalledWith({
 				params: onlyTrigger(webhook),
 				payload: { kind: "webhook", filter: [{ path: "type", oneOf: ["Issue"] }, labelled] },
 			}),
 		);
-		fireEvent.click(await screen.findByRole("button", { name: "Edit condition 1" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Edit test 1" }));
 		fireEvent.change(screen.getByLabelText("JSON path"), { target: { value: "" } });
-		expect(screen.getByRole("button", { name: "Save condition" })).toHaveProperty("disabled", true);
-		fireEvent.click(screen.getByRole("button", { name: "Cancel condition" }));
-		fireEvent.click(screen.getByRole("button", { name: "Remove condition 1" }));
+		expect(screen.getByRole("button", { name: "Save test" })).toHaveProperty("disabled", true);
+		fireEvent.click(screen.getByRole("button", { name: "Cancel test" }));
+		fireEvent.click(screen.getByRole("button", { name: "Remove test 1" }));
 		await waitFor(() =>
 			expect(client.api.automations.updateTrigger).toHaveBeenLastCalledWith({
 				params: onlyTrigger(webhook),
@@ -583,12 +583,12 @@ describe("a bot's automations", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Done" }));
 		await addTrigger("Webhook");
-		fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+		fireEvent.click(screen.getByRole("button", { name: "Add test" }));
 		expect(screen.getByRole("button", { name: "Add trigger" })).toHaveProperty("disabled", true);
 		fireEvent.change(screen.getByLabelText("JSON path"), { target: { value: "data.labels.name" } });
 		fireEvent.change(screen.getByLabelText("Accepted value 1"), { target: { value: "10x" } });
-		fireEvent.click(screen.getByRole("button", { name: "Save condition" }));
-		expect(await screen.findByRole("button", { name: "Edit condition 1" })).toBeDefined();
+		fireEvent.click(screen.getByRole("button", { name: "Save test" }));
+		expect(await screen.findByRole("button", { name: "Edit test 1" })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Add trigger" }));
 		expect(await screen.findByRole("button", { name: /^Webhook/ })).toBeDefined();
 		fireEvent.click(screen.getByRole("button", { name: "Create automation" }));
@@ -753,7 +753,7 @@ describe("a bot's automations", () => {
 				},
 			}),
 		);
-		await waitFor(() => expect(router.state.location.pathname).toBe(itemPage(secondCopy)));
+		await waitFor(() => expect(router.state.location.pathname).toBe(nestedChatPage(secondCopy)));
 	});
 
 	it("turns an automation back on from its panel", async () => {
@@ -778,13 +778,13 @@ describe("a bot's automations", () => {
 		client.api.automations.run.mockReturnValue(
 			Effect.succeed({
 				runId: "0199a3a0-0000-7000-8000-0000000000e1",
-				conversationId: "0199a3a0-0000-7000-8000-0000000000e2",
+				chatId: "0199a3a0-0000-7000-8000-0000000000e2",
 				duplicate: false,
 			}),
 		);
 		await openPanel(churnReport);
 
-		fireEvent.click(await screen.findByRole("button", { name: "Run now" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Start a run" }));
 
 		await waitFor(() =>
 			expect(client.api.automations.run).toHaveBeenCalledWith({
@@ -988,10 +988,10 @@ describe("a bot's automations", () => {
 			}),
 		);
 
-		// Its threads, its feed and how it ran are not theirs to read.
-		expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
-		expect(client.api.chats.threads).not.toHaveBeenCalled();
-		expect(client.api.conversations.get).not.toHaveBeenCalled();
+		// Its chats, its feed and how it ran are not theirs to read.
+		expect(screen.queryByRole("button", { name: "Start a run" })).toBeNull();
+		expect(client.api.chats.projectChats).not.toHaveBeenCalled();
+		expect(client.api.chats.get).not.toHaveBeenCalled();
 		expect(client.api.automations.projectRuns).not.toHaveBeenCalled();
 	});
 
@@ -1013,7 +1013,7 @@ describe("a bot's automations", () => {
 		);
 		const { panel } = await openPanel(morningBrief);
 
-		expect(within(panel).queryByRole("button", { name: "Run now" })).toBeNull();
+		expect(within(panel).queryByRole("button", { name: "Start a run" })).toBeNull();
 		expect(within(panel).queryByRole("button", { name: /^More for / })).toBeNull();
 		expect(screen.queryByRole("link", { name: "New automation" })).toBeNull();
 		expect(within(panel).getByRole("switch", { name: "Automation on" })).toHaveProperty(

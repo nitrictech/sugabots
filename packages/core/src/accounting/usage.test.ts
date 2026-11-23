@@ -3,27 +3,27 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ActionForbidden } from "../authorization/access.ts";
 import {
 	bot,
+	membership,
 	modelProvider,
 	modelRequest,
-	user,
+	person,
 	workspace,
-	workspaceMember,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, type Promised } from "../database/testing.ts";
 import { servedOnPostgresAs } from "../workspaces/testing.ts";
 import { Usage } from "./usage.ts";
 
 /**
- * A month's spend, read from the request ledger in Postgres: how requests are
+ * A month's usage, read from the request ledger in Postgres: how requests are
  * grouped, which month and day a request falls on in the workspace's time zone,
- * and which requests count as unpriced. Needs a migrated database and skips
+ * and which requests count as of unknown cost. Needs a migrated database and skips
  * without one; CI always has one.
  */
 describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
-	let usageAs: (userId: string) => Promised<Usage.Interface>;
+	let usageAs: (personId: string) => Promised<Usage.Interface>;
 	let workspaceId: string;
 	let adminId: string;
-	let memberId: string;
+	let editorId: string;
 	let growthDeskId: string;
 	let accountManagerId: string;
 	let providerId: string;
@@ -41,23 +41,23 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				.values({ name: "Usage", slug: `usage-${suffix}` })
 				.returning(),
 		);
-		const [admin, member] = await onDatabase((db) =>
+		const [admin, editor] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values([
 					{ name: "Ada", email: `ada-${suffix}@example.com` },
 					{ name: "Sam", email: `sam-${suffix}@example.com` },
 				])
 				.returning(),
 		);
-		if (!space || !admin || !member) throw new Error("fixture");
+		if (!space || !admin || !editor) throw new Error("fixture");
 		workspaceId = space.id;
 		adminId = admin.id;
-		memberId = member.id;
+		editorId = editor.id;
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values([
-				{ workspaceId, userId: adminId, role: "admin" },
-				{ workspaceId, userId: memberId, role: "member" },
+			db.insert(membership).values([
+				{ workspaceId, personId: adminId, role: "admin" },
+				{ workspaceId, personId: editorId, role: "editor" },
 			]),
 		);
 		const [growthDesk, accountManager] = await onDatabase((db) =>
@@ -69,14 +69,14 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 						name: "Growth Desk",
 						handle: `growth-desk-${suffix}`,
 						color: "green",
-						face: "pill",
+						eyes: "pill",
 					},
 					{
 						workspaceId,
 						name: "Account Manager",
 						handle: `account-manager-${suffix}`,
 						color: "sky",
-						face: "dot",
+						eyes: "dot",
 					},
 				])
 				.returning(),
@@ -89,7 +89,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				.insert(modelProvider)
 				.values({
 					workspaceId,
-					preset: "anthropic",
+					builtIn: "anthropic",
 					name: "Anthropic",
 					baseUrl: "https://api.anthropic.com",
 					apiFormat: "anthropic",
@@ -113,7 +113,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 					botId: growthDeskId,
 					step: 0,
 					providerId,
-					preset: "anthropic" as const,
+					builtIn: "anthropic" as const,
 					model: "claude-sonnet",
 					outcome: "completed" as const,
 					endedAt: request.startedAt,
@@ -144,25 +144,25 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 
 		const usage = await usageAs(adminId).month({ workspace: workspaceId, month: "2026-09" });
 
-		expect(usage).toMatchObject({ usd: 4.5, unpricedRequests: 1 });
+		expect(usage).toMatchObject({ usd: 4.5, unknownCostRequests: 1 });
 		expect(usage.bots).toEqual([
 			{
 				botId: growthDeskId,
 				name: "Growth Desk",
 				color: "green",
-				face: "pill",
+				eyes: "pill",
 				shape: "circle",
 				usd: 2.25,
-				unpricedRequests: 1,
+				unknownCostRequests: 1,
 			},
 			{
 				botId: accountManagerId,
 				name: "Account Manager",
 				color: "sky",
-				face: "dot",
+				eyes: "dot",
 				shape: "circle",
 				usd: 2,
-				unpricedRequests: 0,
+				unknownCostRequests: 0,
 			},
 		]);
 		// The bots' requests and Compaction's to the same model are one line.
@@ -171,10 +171,10 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 				model: "claude-sonnet",
 				providerName: "Anthropic",
 				usd: 4.5,
-				unpricedRequests: 1,
+				unknownCostRequests: 1,
 			}),
 		]);
-		expect(usage.systemBots).toEqual({ usd: 0.25, unpricedRequests: 0 });
+		expect(usage.systemBots).toEqual({ usd: 0.25, unknownCostRequests: 0 });
 		expect(usage.days).toHaveLength(30);
 		expect(usage.days.filter((day) => day.usd > 0)).toEqual([
 			{ date: "2026-09-03", usd: 2.25 },
@@ -191,9 +191,9 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 					name: "Personal Assistant",
 					handle: "personal-assistant",
 					color: "sky",
-					face: "pill",
+					eyes: "pill",
 					visibility: "private",
-					assistantOf: memberId,
+					assistantOf: editorId,
 				})
 				.returning(),
 		);
@@ -205,9 +205,9 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 
 		const usage = await usageAs(adminId).month({ workspace: workspaceId, month: "2026-09" });
 
-		expect(usage).toMatchObject({ usd: 2, unpricedRequests: 0 });
+		expect(usage).toMatchObject({ usd: 2, unknownCostRequests: 0 });
 		expect(usage.bots.map((bot) => bot.botId)).toEqual([growthDeskId]);
-		expect(usage.personalAssistants).toEqual({ usd: 0.5, unpricedRequests: 0 });
+		expect(usage.personalAssistants).toEqual({ usd: 0.5, unknownCostRequests: 0 });
 	});
 
 	it("puts a request in the month and on the day of the workspace's time zone", async () => {
@@ -228,7 +228,7 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 		expect(inSydney.days[0]).toEqual({ date: "2026-09-01", usd: 1 });
 	});
 
-	it("counts a request cut off long ago as unpriced, and leaves one still going out", async () => {
+	it("counts a request cut off long ago as of unknown cost, and leaves one still going out", async () => {
 		const now = Date.now();
 		const cutOff = new Date(now - 20 * 60_000);
 		await recorded(
@@ -241,12 +241,12 @@ describe.skipIf(!process.env.DATABASE_URL)("usage, against Postgres", () => {
 			month: cutOff.toISOString().slice(0, 7),
 		});
 
-		expect(usage.unpricedRequests).toBe(1);
+		expect(usage.unknownCostRequests).toBe(1);
 	});
 
-	it("refuses somebody who may not see what the workspace spends", async () => {
+	it("refuses somebody who may not see what the workspace's models cost", async () => {
 		await expect(
-			usageAs(memberId).month({ workspace: workspaceId, month: "2026-09" }),
+			usageAs(editorId).month({ workspace: workspaceId, month: "2026-09" }),
 		).rejects.toBeInstanceOf(ActionForbidden);
 	});
 });

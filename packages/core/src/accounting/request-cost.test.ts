@@ -17,8 +17,8 @@ const registry = {
 	cost: (model: string) => (model === "priced" ? { input: 3, output: 15 } : undefined),
 };
 
-const provider = (preset: ProviderIdentity["preset"]): ProviderIdentity => ({
-	preset,
+const provider = (builtIn: ProviderIdentity["builtIn"]): ProviderIdentity => ({
+	builtIn,
 	baseUrl: "https://models.example/v1",
 	apiFormat: "openai",
 });
@@ -30,7 +30,7 @@ describe("requestCost", () => {
 		expect(cost?.usd).toBeCloseTo(3 + 1.5);
 	});
 
-	it("leaves a model with no published price unpriced", () => {
+	it("leaves the cost unknown for a model with no published price", () => {
 		expect(requestCost(provider("anthropic"), "unlisted", usage(), registry)).toBeUndefined();
 		expect(requestCost(provider(null), "unlisted", usage(), registry)).toBeUndefined();
 	});

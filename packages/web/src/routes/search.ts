@@ -4,7 +4,7 @@ import type { Staged } from "@/screens/staged.ts";
 
 export const optionalString = (value: unknown) => (typeof value === "string" ? value : undefined);
 
-/** What a connections page's address carries back from an OAuth sign-in. */
+/** What a connectors page's address carries back from an OAuth sign-in. */
 interface SignInErrorSearch {
 	/** A code saying why the sign-in did not finish, shown only through `signInFailureReason`. */
 	oauth_error?: string;
@@ -24,32 +24,32 @@ export const validateFileSearch = (search: Record<string, unknown>): FileSearch 
 		? { version: search.version }
 		: {};
 
-export interface ConversationSearch {
-	/** A collaboration or automation run open beside the conversation. */
-	item?: string;
-	/** A file open large beside the conversation. */
+export interface ChatSearch {
+	/** A nested chat, a collaboration or automation run, open beside the chat. */
+	nestedChat?: string;
+	/** A file open large beside the chat. */
 	file?: string;
 	/** An earlier version of `file` to show; the current one when absent. */
 	version?: number;
-	/** The project's computer's desktop open large beside the conversation, when no file is. */
+	/** The project's computer's desktop open large beside the chat, when no file is. */
 	desktop?: true;
 	/**
-	 * The project's automations open large beside the conversation, when nothing
+	 * The project's automations open large beside the chat, when nothing
 	 * else is: all of them, one by its id, or a new one being made.
 	 */
 	automations?: string;
-	/** A message to jump to in the conversation, such as the mention a notification is about. */
+	/** A message to jump to in the chat, such as the mention a notification is about. */
 	message?: string;
-	/** An automation run or collaboration shown as the page itself, in place of the conversation. */
-	itemPage?: string;
+	/** An automation run or collaboration shown as the page itself, in place of the chat. */
+	nestedChatPage?: string;
 }
 
-export const validateConversationSearch = (search: Record<string, unknown>): ConversationSearch => {
+export const validateChatSearch = (search: Record<string, unknown>): ChatSearch => {
 	const { file } = idParam(search, "file");
 	return {
-		...idParam(search, "item"),
+		...idParam(search, "nestedChat"),
 		...idParam(search, "message"),
-		...idParam(search, "itemPage"),
+		...idParam(search, "nestedChatPage"),
 		...(file
 			? { file, ...validateFileSearch(search) }
 			: search.desktop === true
@@ -60,7 +60,7 @@ export const validateConversationSearch = (search: Record<string, unknown>): Con
 	};
 };
 
-/** How the address says which of a project's automations are open beside its conversation. */
+/** How the address says which of a project's automations are open beside its chat. */
 const ALL_AUTOMATIONS = "all";
 const NEW_AUTOMATION = "new";
 
@@ -77,8 +77,8 @@ const automationsViewFromSearch = (value: string): AutomationsView =>
 const automationsViewSearch = (view: AutomationsView): string =>
 	view.kind === "new" ? NEW_AUTOMATION : view.kind === "list" ? ALL_AUTOMATIONS : view.automationId;
 
-/** What `search` opens beside a conversation, and the search that opens `staged`. */
-export const stagedOf = (search: ConversationSearch): Staged | undefined =>
+/** What `search` opens beside a chat, and the search that opens `staged`. */
+export const stagedOf = (search: ChatSearch): Staged | undefined =>
 	search.file
 		? { kind: "file", fileId: search.file, version: search.version }
 		: search.desktop
@@ -87,7 +87,7 @@ export const stagedOf = (search: ConversationSearch): Staged | undefined =>
 				? { kind: "automations", view: automationsViewFromSearch(search.automations) }
 				: undefined;
 
-export const stagedSearchOf = (staged: Staged | undefined): ConversationSearch => ({
+export const stagedSearchOf = (staged: Staged | undefined): ChatSearch => ({
 	file: staged?.kind === "file" ? staged.fileId : undefined,
 	version: staged?.kind === "file" ? staged.version : undefined,
 	desktop: staged?.kind === "desktop" ? true : undefined,

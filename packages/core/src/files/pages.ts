@@ -4,13 +4,13 @@ import { Context, Data, DateTime, Effect, Layer, Schema } from "effect";
 import { type AuthorizationDenied, ResourceHidden } from "../authorization/access.ts";
 import type { CurrentActor } from "../authorization/current-actor.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
-import { Credentials } from "../credentials/credentials.ts";
 import { serviceOperations } from "../database/database.ts";
-import { Installation } from "../installation/installation.ts";
+import { Secrets } from "../secrets/secrets.ts";
+import { ServerSettings } from "../server-settings/server-settings.ts";
 import { Files } from "./files.ts";
 
 /**
- * Bot-made HTML pages served from the installation's content origin, an
+ * Bot-made HTML pages served from the server's content origin, an
  * origin of their own, so a page shares nothing with the app: not its
  * cookies, not its site, not its process. The content origin has no session,
  * so a page is reached by an address that carries its own permission: a
@@ -34,8 +34,8 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("FilePages");
-	const installation = yield* Installation.Service;
-	const credentials = yield* Credentials.Service;
+	const serverSettings = yield* ServerSettings.Service;
+	const secrets = yield* Secrets.Service;
 	const files = yield* Files.Service;
 	const readVersion = Files.readVersionUnchecked(yield* BlobStore.Service);
 
@@ -44,7 +44,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"address",
 				Effect.gen(function* () {
-					const { contentOrigin } = installation;
+					const { contentOrigin } = serverSettings;
 					if (!contentOrigin) return undefined;
 					const page = yield* files.summary(at);
 					if (page.kind !== "html") return undefined;
@@ -53,12 +53,12 @@ export const make = Effect.gen(function* () {
 						return yield* new ResourceHidden({ resource: "file" });
 					}
 					const now = yield* DateTime.nowAsDate;
-					const sealed: SealedPage = {
+					const sealed: PageAddress = {
 						fileId: at.fileId,
 						version: at.version,
 						expiresAt: now.getTime() + ADDRESS_LIFETIME_MS,
 					};
-					const token = credentials.encrypt(JSON.stringify(sealed), SEALED_FOR);
+					const token = secrets.encrypt(JSON.stringify(sealed), SECRET_PURPOSE);
 					return `${contentOrigin}${PAGE_PATH}/${token}`;
 				}),
 			),
@@ -69,8 +69,8 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const sealed = yield* Effect.try({
 						try: () =>
-							Schema.decodeUnknownSync(sealedPageSchema)(
-								JSON.parse(credentials.decrypt(token, SEALED_FOR)),
+							Schema.decodeUnknownSync(pageAddressSchema)(
+								JSON.parse(secrets.decrypt(token, SECRET_PURPOSE)),
 							),
 						catch: () => new PageUnavailable(),
 					});
@@ -100,16 +100,16 @@ interface Page {
 }
 
 /** What page addresses are sealed for, so no other value sealed with the same key opens as one. */
-export const SEALED_FOR = "file-page-address";
+export const SECRET_PURPOSE = "file-page-address";
 
-const sealedPageSchema = Schema.Struct({
+const pageAddressSchema = Schema.Struct({
 	fileId: Schema.String,
 	version: Schema.Int,
 	/** In milliseconds since the epoch. */
 	expiresAt: Schema.Number,
 });
 
-type SealedPage = typeof sealedPageSchema.Type;
+type PageAddress = typeof pageAddressSchema.Type;
 
 /** The address was never given out, has been tampered with, has expired, or names a page that is gone. */
 export class PageUnavailable extends Data.TaggedError("FilePageUnavailable") {}

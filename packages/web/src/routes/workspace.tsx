@@ -11,16 +11,16 @@ import { Panes, Shell } from "@/shell/Shell.tsx";
 import { Splash } from "@/shell/Splash.tsx";
 import { You } from "@/shell/You.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { preloadChatScreenForWideLayout } from "./conversation.tsx";
+import { preloadChatScreenForWideLayout } from "./chat.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
-import { requireUser, rootRoute } from "./root.tsx";
+import { requireSignedIn, rootRoute } from "./root.tsx";
 
-const NewThreadPage = lazyNamed(() => import("@/screens/NewThreadPage.tsx"), "NewThreadPage");
+const NewChatPage = lazyNamed(() => import("@/screens/NewChatPage.tsx"), "NewChatPage");
 
 export const indexRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/",
-	beforeLoad: requireUser,
+	beforeLoad: requireSignedIn,
 	loader: preloadChatScreenForWideLayout,
 	component: LandingRoute,
 });
@@ -40,12 +40,13 @@ function LandingRoute() {
 		);
 	}
 	if (isPending) return <Splash />;
-	if (!chosen) return <Navigate to="/onboarding" replace />;
-	if (chosen.setupCompletedAt === null && standing.isPending) {
+	if (!chosen) return <Navigate to="/workspace-setup" replace />;
+	if (chosen.setUpAt === null && standing.isPending) {
 		return <Splash />;
 	}
-	const setUp = workspaces.data?.find((one) => one.setupCompletedAt !== null);
-	const landing = setUp && opensIntoSetup(chosen, standing.data?.permissions) ? setUp : chosen;
+	const setUp = workspaces.data?.find((one) => one.setUpAt !== null);
+	const landing =
+		setUp && opensIntoWorkspaceSetup(chosen, standing.data?.permissions) ? setUp : chosen;
 	return <Navigate to="/$workspace" params={{ workspace: landing.slug }} replace />;
 }
 
@@ -53,7 +54,7 @@ function LandingRoute() {
 export const shellRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/$workspace",
-	beforeLoad: requireUser,
+	beforeLoad: requireSignedIn,
 	component: ShellRoute,
 });
 
@@ -78,7 +79,7 @@ function AssistantRoute() {
 	if (assistant) {
 		return (
 			<Panes>
-				<NewThreadPage key={assistant.id} owner={{ bot: assistant }} />
+				<NewChatPage key={assistant.id} owner={{ bot: assistant }} />
 			</Panes>
 		);
 	}
@@ -110,12 +111,12 @@ function ShellRoute() {
 	if (!workspace.workspace) {
 		// Somebody in no workspace at all has one to make, not a wrong address.
 		return workspaces.data?.length === 0 ? (
-			<Navigate to="/onboarding" replace />
+			<Navigate to="/workspace-setup" replace />
 		) : (
 			<EmptyState title="No such workspace here" />
 		);
 	}
-	if (workspace.workspace.setupCompletedAt === null) {
+	if (workspace.workspace.setUpAt === null) {
 		// Setup left part way is finished before the workspace is used, by whoever may finish it.
 		// Anybody invited part way through uses it as it is.
 		const standingFailure = loadFailure(standing);
@@ -129,8 +130,10 @@ function ShellRoute() {
 			);
 		}
 		if (standing.isPending) return <Splash />;
-		if (opensIntoSetup(workspace.workspace, standing.data?.permissions)) {
-			return <Navigate to="/onboarding" search={{ workspace: workspace.workspace.slug }} replace />;
+		if (opensIntoWorkspaceSetup(workspace.workspace, standing.data?.permissions)) {
+			return (
+				<Navigate to="/workspace-setup" search={{ workspace: workspace.workspace.slug }} replace />
+			);
 		}
 	}
 	return <Shell />;
@@ -141,11 +144,11 @@ function ShellRoute() {
  * still being set up, and they may finish it, which takes
  * `workspace.providers.manage`.
  */
-function opensIntoSetup(
+function opensIntoWorkspaceSetup(
 	workspace: Workspace,
 	permissions: WorkspacePermissions | undefined,
 ): boolean {
-	return workspace.setupCompletedAt === null && permissions?.manageProviders === true;
+	return workspace.setUpAt === null && permissions?.manageProviders === true;
 }
 
 /**

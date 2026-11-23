@@ -2,16 +2,16 @@ export * as Authentication from "./authentication.ts";
 
 import {
 	httpUrlSchema,
-	type SessionUser,
-	USER_NAME_MAX_LENGTH,
-	userNameSchema,
+	PERSON_NAME_MAX_LENGTH,
+	personNameSchema,
+	type SignedInPerson,
 } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { type Database, effectRunner } from "@sugabots/core/database/database";
 import { Email } from "@sugabots/core/email/email";
-import { Installation } from "@sugabots/core/installation/installation";
-import { account, session, user, verification } from "@sugabots/core/workspaces/sql";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { account, person, session, verification } from "@sugabots/core/workspaces/sql";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
@@ -22,8 +22,8 @@ import { Cookies } from "effect/unstable/http";
 import { Pool } from "pg";
 
 /**
- * How the HTTP API proves who is calling: better-auth's users, credentials,
- * sessions, email verification and password resets, under its own routes at
+ * How the HTTP API proves who is calling: better-auth's accounts (the people
+ * it calls users, kept in `person`), credentials, sessions, email verification and password resets, under its own routes at
  * `/api/auth`.
  * Everything else in the API asks `identify` who holds the request's cookie or
  * bearer token. What the caller may then do is core's to decide.
@@ -41,7 +41,7 @@ export interface Interface {
 
 /** The holder of a request's credentials. */
 interface Identified {
-	readonly user: SessionUser;
+	readonly person: SignedInPerson;
 	/**
 	 * Cookies better-auth set while checking the credentials, such as a renewed
 	 * session cache. They belong on the response, or the browser never gets them.
@@ -77,7 +77,7 @@ const RESET_PASSWORD_LINK_SECONDS = 60 * 60;
 
 /** better-auth's drizzle adapter speaks only node-postgres, so it gets a pool of its own. */
 export const make = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
+	const serverSettings = yield* ServerSettings.Service;
 	const email = yield* Email.Service;
 	const database = yield* Effect.context<Database>();
 	const secret = yield* signingSecret;
@@ -96,20 +96,23 @@ export const make = Effect.gen(function* () {
 	const auth = betterAuth({
 		appName: "Sugabots",
 		secret: Redacted.value(secret),
-		baseURL: installation.publicUrl,
+		baseURL: serverSettings.publicUrl,
 		basePath: `${API_BASE_PATH}/auth`,
-		trustedOrigins: [...installation.trustedOrigins],
+		trustedOrigins: [...serverSettings.trustedOrigins],
 
 		database: drizzleAdapter(drizzle({ client: pool }), {
 			provider: "pg",
-			schema: { user, session, account, verification },
+			schema: { person, session, account, verification },
 		}),
 
 		// Postgres mints the id of every row better-auth inserts, as it does
 		// every other table's, so better-auth leaves the column alone.
 		advanced: { database: { generateId: false } },
 
+		// better-auth calls a person a user; ours are kept in `person`, and
+		// sessions and accounts name theirs by `personId`.
 		user: {
+			modelName: "person",
 			additionalFields: {
 				// Set from the referral link the account signed up with, never by the caller.
 				referredBy: { type: "string", required: false, input: false },
@@ -121,8 +124,8 @@ export const make = Effect.gen(function* () {
 			user: {
 				create: {
 					before: async (creating, context) => {
-						const name = validUserName(creating.name);
-						const image = validUserImage(creating.image);
+						const name = validPersonName(creating.name);
+						const image = validPersonImage(creating.image);
 						const { referredBy } = await run(
 							Effect.mapError(
 								accounts.admit({
@@ -144,14 +147,16 @@ export const make = Effect.gen(function* () {
 						return {
 							data: {
 								...updating,
-								...(updating.name !== undefined && { name: validUserName(updating.name) }),
-								...(updating.image !== undefined && { image: validUserImage(updating.image) }),
+								...(updating.name !== undefined && { name: validPersonName(updating.name) }),
+								...(updating.image !== undefined && { image: validPersonImage(updating.image) }),
 							},
 						};
 					},
 				},
 			},
 		},
+
+		account: { fields: { userId: "personId" } },
 
 		emailAndPassword: {
 			enabled: true,
@@ -174,7 +179,7 @@ export const make = Effect.gen(function* () {
 			// email is not a dead end.
 			sendOnSignIn: true,
 			// The link proves the address, and the password was already given, so
-			// it lands in the app rather than back at a login form.
+			// it lands in the app rather than back at the sign-in form.
 			autoSignInAfterVerification: true,
 			sendVerificationEmail: async ({ user, url }) => {
 				await send({
@@ -187,6 +192,7 @@ export const make = Effect.gen(function* () {
 		},
 
 		session: {
+			fields: { userId: "personId" },
 			cookieCache: { enabled: true, maxAge: SESSION_COOKIE_CACHE_SECONDS },
 		},
 
@@ -211,7 +217,7 @@ export const make = Effect.gen(function* () {
 				({ headers: responseHeaders, response }): Identified | undefined =>
 					response
 						? {
-								user: {
+								person: {
 									id: response.user.id,
 									email: response.user.email,
 									name: response.user.name,
@@ -233,19 +239,19 @@ const refusalCodes = {
 } as const;
 
 /** `name` trimmed, or a refusal the caller is shown when it is blank or too long. */
-function validUserName(name: unknown): string {
+function validPersonName(name: unknown): string {
 	return Option.getOrThrowWith(
-		Schema.decodeUnknownOption(userNameSchema)(name),
+		Schema.decodeUnknownOption(personNameSchema)(name),
 		() =>
 			new APIError("BAD_REQUEST", {
 				code: "INVALID_NAME",
-				message: `Your name needs 1 to ${USER_NAME_MAX_LENGTH} characters.`,
+				message: `Your name needs 1 to ${PERSON_NAME_MAX_LENGTH} characters.`,
 			}),
 	);
 }
 
 /** `image` as an HTTP address, or a refusal the caller is shown. Null, or none, is no picture. */
-function validUserImage(image: unknown): string | null | undefined {
+function validPersonImage(image: unknown): string | null | undefined {
 	if (image === null || image === undefined) return image;
 	return Option.getOrThrowWith(
 		Schema.decodeUnknownOption(httpUrlSchema)(image),
@@ -287,7 +293,7 @@ const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 
 /** `BETTER_AUTH_SECRET`, which production refuses when it is short or a placeholder. */
 const signingSecret = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
+	const serverSettings = yield* ServerSettings.Service;
 	const secret = yield* Config.option(Config.Redacted("BETTER_AUTH_SECRET"));
 	if (Option.isNone(secret)) {
 		return yield* new InvalidConfig({
@@ -296,7 +302,7 @@ const signingSecret = Effect.gen(function* () {
 	}
 	const value = Redacted.value(secret.value).trim();
 	if (
-		installation.isProduction &&
+		serverSettings.isProduction &&
 		(value.length < MIN_PRODUCTION_SECRET_LENGTH ||
 			PRODUCTION_SECRET_PLACEHOLDERS.has(value.toLowerCase()))
 	) {

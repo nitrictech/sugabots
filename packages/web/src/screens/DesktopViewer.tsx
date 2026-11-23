@@ -27,7 +27,7 @@ import { IconTile } from "@/ui/icon-tile.tsx";
 import { LiveDot } from "@/ui/live-dot.tsx";
 
 /**
- * A bot's or a project's computer opened beside one of its threads, live:
+ * A bot's or a project's computer opened beside one of its chats, live:
  * where the browser `bot` drives is shown. Opening it starts the desktop, and
  * the computer if it was paused, so the first connection can take a few
  * seconds; it comes over a WebSocket the API relays from the computer. The
@@ -36,12 +36,12 @@ import { LiveDot } from "@/ui/live-dot.tsx";
  * up or the bot does not use one, it says so and where to change that.
  */
 export function DesktopStage({
-	conversationId,
+	chatId,
 	owner,
 	bot,
 	onClose,
 }: {
-	conversationId: string;
+	chatId: string;
 	/** Whose computer it is: a bot's, or a project's. */
 	owner: ResourceOwner;
 	/** The bot at work on it: the bot itself, or a project's lead bot. */
@@ -51,7 +51,7 @@ export function DesktopStage({
 	const access = useComputerAccess();
 	const missing = useComputerGap(owner);
 	const may = useWorkspacePermissions();
-	const backToThread = useBackToHere("Thread");
+	const backToChat = useBackToHere("Chat");
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	// For a phone's own view, which covers everything; a wider screen's `Stage` has its own.
 	const phoneKeys = usePanelKeys<HTMLElement>(onClose);
@@ -70,7 +70,7 @@ export function DesktopStage({
 									from="/$workspace"
 									to="./settings/$section"
 									params={{ section: "computers" }}
-									state={backToThread}
+									state={backToChat}
 									className={buttonStyles({ size: "sm" })}
 								>
 									Set up computers
@@ -94,11 +94,7 @@ export function DesktopStage({
 					)}
 				</EmptyState>
 			) : missing === null ? (
-				<ComputerScreen
-					conversationId={conversationId}
-					bot={bot}
-					mayUse={resourcePermissions(owner).useDesktop}
-				/>
+				<ComputerScreen chatId={chatId} bot={bot} mayUse={resourcePermissions(owner).useDesktop} />
 			) : access.isError ? (
 				<EmptyState title="Could not check for a computer">{API_DID_NOT_ANSWER}</EmptyState>
 			) : null}
@@ -150,17 +146,9 @@ export function DesktopStage({
 }
 
 /** The bot's computer, live, as large as the room allows, with who has control and the way to take it. */
-function ComputerScreen({
-	conversationId,
-	bot,
-	mayUse,
-}: {
-	conversationId: string;
-	bot: Bot;
-	mayUse: boolean;
-}) {
+function ComputerScreen({ chatId, bot, mayUse }: { chatId: string; bot: Bot; mayUse: boolean }) {
 	const [inControl, setInControl] = useState(false);
-	const botUsing = useDesktopInUse(conversationId, bot.id);
+	const botUsing = useDesktopInUse(chatId, bot.id);
 	const keyboard = useRef<HTMLTextAreaElement>(null);
 	return (
 		<div className="flex min-h-0 flex-1 flex-col items-center gap-4">
@@ -168,7 +156,7 @@ function ComputerScreen({
 			<div className="@container-size flex min-h-0 w-full flex-1 items-center justify-center">
 				<div className="w-desktop-screen">
 					<DesktopScreen
-						conversationId={conversationId}
+						chatId={chatId}
 						botId={bot.id}
 						viewOnly={!inControl}
 						offersReconnect
@@ -179,7 +167,7 @@ function ComputerScreen({
 			<div className="flex max-w-full items-center gap-2.5 rounded-full border border-border-strong bg-panel py-1.5 pr-1.5 pl-3 text-xs">
 				<BotAvatar
 					color={bot.color}
-					face={bot.face}
+					eyes={bot.eyes}
 					shape={bot.shape}
 					size={22}
 					className="shrink-0"
@@ -236,12 +224,12 @@ function ComputerScreen({
  * beside the chat.
  */
 export function LiveDesktopCard({
-	conversationId,
+	chatId,
 	botId,
 	botName,
 	onOpen,
 }: {
-	conversationId: string;
+	chatId: string;
 	botId: string;
 	botName: string;
 	onOpen: () => void;
@@ -253,12 +241,7 @@ export function LiveDesktopCard({
 		>
 			<div className="relative">
 				{/* Covered by the button that opens the desktop, which reconnects there. */}
-				<DesktopScreen
-					conversationId={conversationId}
-					botId={botId}
-					viewOnly
-					offersReconnect={false}
-				/>
+				<DesktopScreen chatId={chatId} botId={botId} viewOnly offersReconnect={false} />
 				<button
 					type="button"
 					onClick={onOpen}
@@ -293,13 +276,13 @@ const INPUT_EVENTS = ["pointerdown", "pointermove", "wheel", "keydown"] as const
  * without input from the person or a browser call from the bot.
  */
 export function DesktopScreen({
-	conversationId,
+	chatId,
 	botId,
 	viewOnly,
 	offersReconnect,
 	keyboardInput,
 }: {
-	conversationId: string;
+	chatId: string;
 	botId: string;
 	/** Shows the desktop without sending input. The API enforces it either way. */
 	viewOnly: boolean;
@@ -318,7 +301,7 @@ export function DesktopScreen({
 	const [standing, setStanding] = useState<Standing>("connecting");
 	const [attempt, setAttempt] = useState(0);
 	const lastUsedAt = useRef(Date.now());
-	const botUsing = useDesktopInUse(conversationId, botId);
+	const botUsing = useDesktopInUse(chatId, botId);
 	const botUsingNow = useRef(botUsing);
 	useEffect(() => {
 		botUsingNow.current = botUsing;
@@ -421,7 +404,7 @@ export function DesktopScreen({
 		// Loaded only when somebody watches: noVNC is large, and most people never do.
 		void import("@novnc/novnc").then(({ default: RFBClient }) => {
 			if (unmounted) return;
-			const opened = new RFBClient(element, desktopUrl(conversationId, botId));
+			const opened = new RFBClient(element, desktopUrl(chatId, botId));
 			viewer = opened;
 			connected.current = opened;
 			opened.scaleViewport = true;
@@ -458,7 +441,7 @@ export function DesktopScreen({
 			closing?.disconnect();
 			connected.current = undefined;
 		};
-	}, [conversationId, botId, attempt]);
+	}, [chatId, botId, attempt]);
 
 	return (
 		<div className="relative aspect-4/3 w-full overflow-hidden rounded-panel bg-list">
@@ -615,8 +598,8 @@ const STANDING_TEXT: Record<Exclude<Standing, "connected">, string> = {
 	idle: `Disconnected after ${IDLE_TIMEOUT_MINUTES} minutes unused, so the computer can pause.`,
 };
 
-function desktopUrl(conversationId: string, botId: string) {
-	const url = new URL(`${apiBaseUrl}/conversations/${conversationId}/bots/${botId}/desktop`);
+function desktopUrl(chatId: string, botId: string) {
+	const url = new URL(`${apiBaseUrl}/chats/${chatId}/bots/${botId}/desktop`);
 	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
 	return url.href;
 }

@@ -4,14 +4,12 @@ import { AutomationsApi } from "./groups/automations.ts";
 import { BotsApi } from "./groups/bots.ts";
 import { ChatsApi } from "./groups/chats.ts";
 import { ComputerProvidersApi } from "./groups/computer-providers.ts";
-import { ConnectionsApi } from "./groups/connections.ts";
-import { ConversationsApi } from "./groups/conversations.ts";
+import { ConnectorsApi } from "./groups/connectors.ts";
 import { EventsApi } from "./groups/events.ts";
 import { FilesApi } from "./groups/files.ts";
-import { GitHubConnectionsApi, GitHubWebhooksApi } from "./groups/github.ts";
+import { GitHubConnectorsApi, GitHubWebhooksApi } from "./groups/github.ts";
 import { ModelProvidersApi } from "./groups/model-providers.ts";
 import { NotificationsApi } from "./groups/notifications.ts";
-import { OnboardingApi } from "./groups/onboarding.ts";
 import { ProjectComputerApi } from "./groups/project-computer.ts";
 import { ProjectsApi } from "./groups/projects.ts";
 import { ReferralsApi } from "./groups/referrals.ts";
@@ -19,10 +17,11 @@ import { SearchProvidersApi } from "./groups/search-providers.ts";
 import { SystemApi } from "./groups/system.ts";
 import { SystemBotsApi } from "./groups/system-bots.ts";
 import { UsageApi } from "./groups/usage.ts";
+import { WorkspaceSetupApi } from "./groups/workspace-setup.ts";
 import { WorkspacesApi } from "./groups/workspaces.ts";
 import { ValidateRequest } from "./middleware.ts";
 
-/** The path under the installation's `publicUrl` the API answers at, better-auth's routes included. */
+/** The path under the server's `publicUrl` the API answers at, better-auth's routes included. */
 export const API_BASE_PATH = "/api";
 
 /**
@@ -37,19 +36,18 @@ export class Api extends HttpApi.make("sugabots")
 	.add(WorkspacesApi)
 	.add(BotsApi)
 	.add(ProjectsApi)
-	.add(OnboardingApi)
+	.add(WorkspaceSetupApi)
 	.add(SystemBotsApi)
 	.add(ModelProvidersApi)
 	.add(SearchProvidersApi)
 	.add(ComputerProvidersApi)
 	.add(ProjectComputerApi)
-	.add(GitHubConnectionsApi)
+	.add(GitHubConnectorsApi)
 	.add(GitHubWebhooksApi)
-	.add(ConnectionsApi)
+	.add(ConnectorsApi)
 	.add(FilesApi)
 	.add(EventsApi)
 	.add(ChatsApi)
-	.add(ConversationsApi)
 	.add(ApprovalsApi)
 	.add(AutomationsApi)
 	.add(UsageApi)

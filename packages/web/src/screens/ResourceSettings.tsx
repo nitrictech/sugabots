@@ -6,7 +6,7 @@ import { SettingsPage } from "@/ui/settings-page.tsx";
 import { ProjectComputerSettings } from "./ProjectComputerSettings.tsx";
 
 /**
- * The owner's computer, as one of its own pages beside its threads: how it
+ * The owner's computer, as one of its own pages beside its chats: how it
  * stands, its disk, and the hosts it may reach. A bot's is its default
  * project's.
  */

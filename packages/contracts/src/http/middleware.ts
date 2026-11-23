@@ -1,11 +1,11 @@
 import { Context } from "effect";
 import { HttpApiMiddleware } from "effect/unstable/httpapi";
-import type { SessionUser } from "../api.ts";
+import type { SignedInPerson } from "../api.ts";
 import { BadRequest, InternalServerError, PayloadTooLarge, Unauthorized } from "./errors.ts";
 
 /** The person whose bearer token or cookie the request carried. */
-export class CurrentUser extends Context.Service<CurrentUser, SessionUser>()(
-	"sugabots/http/CurrentUser",
+export class CurrentPerson extends Context.Service<CurrentPerson, SignedInPerson>()(
+	"sugabots/http/CurrentPerson",
 ) {}
 
 /**
@@ -14,7 +14,7 @@ export class CurrentUser extends Context.Service<CurrentUser, SessionUser>()(
  * Not required of the client: a browser's cookie travels on its own, and the
  * SDK adds a bearer token to every request rather than per endpoint.
  */
-export class Session extends HttpApiMiddleware.Service<Session, { provides: CurrentUser }>()(
+export class Session extends HttpApiMiddleware.Service<Session, { provides: CurrentPerson }>()(
 	"sugabots/http/Session",
 	{ error: Unauthorized },
 ) {}

@@ -4,14 +4,14 @@ import {
 	type TriggerKind,
 	type TriggerKindChoice,
 } from "@/lib/automation-trigger-words.ts";
-import { useConnections } from "@/lib/connections.ts";
+import { useConnectors } from "@/lib/connectors.ts";
 import {
 	ownerLink,
 	ownerName,
 	type ResourceOwner,
 	resourceProjectId,
 } from "@/lib/resource-owner.tsx";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import {
 	DialogFormBody,
 	DialogFormHeader,
@@ -24,7 +24,7 @@ import { AutomationTriggerIcon } from "./RunRow.tsx";
 
 /*
  * The kinds of trigger an automation may have: Sugabots' own, and those of the
- * integrations its project is connected to. There may be many, so the first
+ * connectors its project has. There may be many, so the first
  * step of adding one is a searchable list of only those the project can use.
  * Routines are added from their own section, so the list leaves them out.
  */
@@ -35,10 +35,10 @@ export function triggerKindChoice(kind: TriggerKind): TriggerKindChoice {
 	return found;
 }
 
-/** A kind of trigger's mark: its integration's logo, or an icon for Sugabots' own. */
+/** A kind of trigger's mark: its connector's mark, or an icon for Sugabots' own. */
 export function TriggerKindMark({ choice }: { choice: TriggerKindChoice }) {
-	if (choice.connection) {
-		return <ConnectionMark presetId={choice.connection} name={choice.label} size="tile" />;
+	if (choice.connector) {
+		return <ConnectorMark markId={choice.connector} name={choice.label} size="tile" />;
 	}
 	return (
 		<SettingsRowIcon className="size-8.5 rounded-lg">
@@ -49,8 +49,8 @@ export function TriggerKindMark({ choice }: { choice: TriggerKindChoice }) {
 
 /**
  * The first step of adding a trigger: choosing its kind, found by typing part
- * of its name, from Sugabots' own and those of the integrations `owner` is
- * connected to, with a way to connect it to more.
+ * of its name, from Sugabots' own and those of the connectors `owner` has,
+ * with a way to add more.
  */
 export function TriggerKindStep({
 	owner,
@@ -61,15 +61,15 @@ export function TriggerKindStep({
 	onChoose: (kind: TriggerKind) => void;
 	done: () => void;
 }) {
-	const connections = useConnections(resourceProjectId(owner));
-	const connected = new Set(connections.data?.map((one) => one.kind));
+	const connectors = useConnectors(resourceProjectId(owner));
+	const connected = new Set(connectors.data?.map((one) => one.kind));
 	const { query, setQuery, searching, matches } = useSearchFilter(TRIGGER_KINDS, (choice) => [
 		choice.label,
 		choice.sub,
 	]);
-	const own = matches.filter((choice) => !choice.connection && choice.kind !== "routine");
-	const integrations = matches.filter(
-		(choice) => choice.connection && connected.has(choice.connection),
+	const own = matches.filter((choice) => !choice.connector && choice.kind !== "routine");
+	const connectorTriggers = matches.filter(
+		(choice) => choice.connector && connected.has(choice.connector),
 	);
 	const row = (choice: TriggerKindChoice) => (
 		<SettingsRow
@@ -89,29 +89,26 @@ export function TriggerKindStep({
 				<DialogFormScroll height="picker">
 					{own.length > 0 && <SettingsGroup label="Built in">{own.map(row)}</SettingsGroup>}
 					<SettingsGroup
-						label={
-							"bot" in owner ? "From this bot's connections" : "From this project's connections"
-						}
+						label={"bot" in owner ? "From this bot's connectors" : "From this project's connectors"}
 					>
-						{integrations.map(row)}
-						{/* Set as the kinds above are, a name and a line under it, so the dialog keeps to their two styles. */}
+						{connectorTriggers.map(row)}
 						<SettingsRow
 							label={
-								integrations.length > 0
-									? "Connect another app"
+								connectorTriggers.length > 0
+									? "Add another connector"
 									: !searching
-										? "No connections with triggers yet"
-										: `No connection matches “${query.trim()}”`
+										? "No connectors with triggers yet"
+										: `No connector matches “${query.trim()}”`
 							}
 							sub={
-								integrations.length > 0
-									? `On ${ownerName(owner)}'s Connections page`
-									: `Connect an app on ${ownerName(owner)}'s Connections page`
+								connectorTriggers.length > 0
+									? `On ${ownerName(owner)}'s Connectors page`
+									: `Add a connector on ${ownerName(owner)}'s Connectors page`
 							}
 							trailing={
 								<ArrowUpRight aria-hidden size={15} className="shrink-0 text-subtle-foreground" />
 							}
-							render={ownerLink(owner, { page: "connections" })}
+							render={ownerLink(owner, { page: "connectors" })}
 						/>
 					</SettingsGroup>
 				</DialogFormScroll>

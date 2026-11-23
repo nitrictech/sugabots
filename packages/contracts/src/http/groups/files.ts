@@ -14,7 +14,7 @@ const version = {
 
 export class FilesApi extends HttpApiGroup.make("files")
 	.add(
-		/** The files uploaded or made in the project's threads. */
+		/** The files uploaded or made in the project's chats. */
 		HttpApiEndpoint.get("listInProject", "/projects/:projectId/files", {
 			params: { projectId: uuidSchema },
 			success: Schema.Array(fileSummarySchema),

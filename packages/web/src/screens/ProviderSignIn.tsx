@@ -1,7 +1,7 @@
 import {
 	type ModelProvider,
 	type ProviderSignInStarted,
-	providerPreset,
+	providerBuiltIn,
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
@@ -100,7 +100,7 @@ export function ProviderSignInRow({
 			<Dialog open={warning} onOpenChange={setWarning}>
 				{warning && (
 					<SingleUserWarning
-						plan={provider.preset ? providerPreset(provider.preset).name : provider.name}
+						plan={provider.builtIn ? providerBuiltIn(provider.builtIn).name : provider.name}
 						service={service}
 						onContinue={start}
 					/>
@@ -142,7 +142,7 @@ function SingleUserWarning({
 				onContinue();
 			}}
 		>
-			<DialogFormHeader title="Single-user installs only" />
+			<DialogFormHeader title="Single-person servers only" />
 			<DialogFormBody>
 				<DialogDescription className="m-0 flex gap-2.5 text-xs text-muted-foreground">
 					<TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />

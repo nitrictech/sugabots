@@ -1,4 +1,4 @@
-import { MAX_WEBHOOK_FILTER_CONDITIONS, MAX_WEBHOOK_FILTER_VALUES } from "@sugabots/contracts";
+import { MAX_WEBHOOK_FILTER_TESTS, MAX_WEBHOOK_FILTER_VALUES } from "@sugabots/contracts";
 import { type ComponentProps, useState } from "react";
 import { expect, fn, mocked, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
@@ -31,12 +31,12 @@ const meta = preview.meta({
 export const ExactValues = meta.story({
 	args: { filter: [{ path: "data.name", oneOf: ["north, south", "", " padded ", "line\nbreak"] }] },
 	play: async ({ canvas, userEvent, args }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Edit condition 1" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Edit test 1" }));
 		for (const [index, value] of ["north, south", "", " padded ", "line\nbreak"].entries())
 			await expect(canvas.getByLabelText(`Accepted value ${index + 1}`)).toHaveValue(value);
 		await userEvent.clear(canvas.getByLabelText("JSON path"));
 		await userEvent.type(canvas.getByLabelText("JSON path"), "data.title");
-		await userEvent.click(canvas.getByRole("button", { name: "Save condition" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Save test" }));
 		await expect(args.onChange).toHaveBeenCalledWith([
 			{ path: "data.title", oneOf: ["north, south", "", " padded ", "line\nbreak"] },
 		]);
@@ -53,41 +53,41 @@ export const FailedSave = meta.story({
 			.mockResolvedValue(undefined);
 	},
 	play: async ({ canvas, userEvent, args }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Add condition" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Add test" }));
 		await userEvent.type(canvas.getByLabelText("JSON path"), "action");
 		await userEvent.type(canvas.getByLabelText("Accepted value 1"), "create");
-		await userEvent.click(canvas.getByRole("button", { name: "Save condition" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Save test" }));
 		await expect(await canvas.findByRole("alert")).toBeVisible();
 		await expect(canvas.getByLabelText("JSON path")).toHaveValue("action");
 		await expect(canvas.getByLabelText("Accepted value 1")).toHaveValue("create");
-		await userEvent.click(canvas.getByRole("button", { name: "Save condition" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Save test" }));
 		await waitFor(() => expect(args.onChange).toHaveBeenCalledTimes(2));
 		await expect(await canvas.findByText('"create"')).toBeVisible();
 	},
 });
 
-/** Invalid paths cannot be saved and cancelling a condition leaves the filter unchanged. */
+/** Invalid paths cannot be saved and cancelling a test leaves the filter unchanged. */
 export const Validation = meta.story({
 	play: async ({ canvas, userEvent, args }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Add condition" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Add test" }));
 		await userEvent.type(canvas.getByLabelText("JSON path"), "data..name");
-		await expect(canvas.getByRole("button", { name: "Save condition" })).toBeDisabled();
-		await userEvent.click(canvas.getByRole("button", { name: "Cancel condition" }));
+		await expect(canvas.getByRole("button", { name: "Save test" })).toBeDisabled();
+		await userEvent.click(canvas.getByRole("button", { name: "Cancel test" }));
 		await expect(args.onChange).not.toHaveBeenCalled();
 	},
 });
 
-/** The editor respects the API's condition and value limits. */
+/** The editor respects the API's test and value limits. */
 export const Limits = meta.story({
 	args: {
-		filter: Array.from({ length: MAX_WEBHOOK_FILTER_CONDITIONS }, (_, index) => ({
+		filter: Array.from({ length: MAX_WEBHOOK_FILTER_TESTS }, (_, index) => ({
 			path: `field${index}`,
 			oneOf: Array.from({ length: MAX_WEBHOOK_FILTER_VALUES }, (_, value) => String(value)),
 		})),
 	},
 	play: async ({ canvas, userEvent }) => {
-		await expect(canvas.queryByRole("button", { name: "Add condition" })).toBeNull();
-		await userEvent.click(canvas.getByRole("button", { name: "Edit condition 1" }));
+		await expect(canvas.queryByRole("button", { name: "Add test" })).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: "Edit test 1" }));
 		await expect(canvas.queryByRole("button", { name: "Add value" })).toBeNull();
 	},
 });

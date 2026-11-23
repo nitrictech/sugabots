@@ -1,14 +1,14 @@
 import type {
 	AnsweredApproval,
-	ApprovalInbox,
 	ApprovalRequest,
 	ToolCallPart,
+	WorkspaceApprovals,
 } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyThreadFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * Every approval across the workspace, opened from the sidebar: what waits on
@@ -31,7 +31,7 @@ function call(id: string, tool: string, approval: ToolCallPart["approval"]): Too
 		output: null,
 		status: approval?.status === "pending" ? "awaiting_approval" : "completed",
 		error: null,
-		mutating: true,
+		writeOrDelete: true,
 		atOffset: 0,
 		startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
 		finishedAt: null,
@@ -48,12 +48,12 @@ function request(id: string, tool: string, approval: ToolCallPart["approval"]): 
 			name: growthDesk.name,
 			handle: growthDesk.handle,
 			color: growthDesk.color,
-			face: growthDesk.face,
+			eyes: growthDesk.eyes,
 			shape: "circle",
 		},
 		projectId: revenue.id,
-		conversationId: storyThreadFor(growthDesk).id,
-		rootConversationId: storyThreadFor(growthDesk).id,
+		chatId: storyChatFor(growthDesk).id,
+		rootChatId: storyChatFor(growthDesk).id,
 	};
 }
 
@@ -61,7 +61,7 @@ function answered(id: string, tool: string, answer: AnsweredApproval["answer"]):
 	return { ...request(id, tool, answer), answer };
 }
 
-const inbox: ApprovalInbox = {
+const approvals: WorkspaceApprovals = {
 	waiting: [
 		request("01", "stripe__send_quote", {
 			status: "pending",
@@ -89,7 +89,7 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/approvals`, () => HttpResponse.json(inbox)),
+			http.get(`${API}/workspaces/:workspace/chats/approvals`, () => HttpResponse.json(approvals)),
 			...appHandlers(),
 		);
 	},
@@ -121,9 +121,7 @@ export const Opened = meta.story({
 		});
 		await expect(page).toHaveTextContent("Acme Retail");
 		// The link waits for the projects and bots too, which can answer after the request.
-		await expect(
-			await canvas.findByRole("link", { name: "Open conversation" }),
-		).toBeInTheDocument();
+		await expect(await canvas.findByRole("link", { name: "Open chat" })).toBeInTheDocument();
 	},
 });
 
@@ -139,7 +137,7 @@ export const Clear = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			http.get(`${API}/workspaces/:workspace/chats/approvals`, () =>
-				HttpResponse.json({ ...inbox, waiting: [] }),
+				HttpResponse.json({ ...approvals, waiting: [] }),
 			),
 		);
 	},

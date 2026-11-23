@@ -1,6 +1,6 @@
 import { Result, Schema, SchemaIssue } from "effect";
 import { describe, expect, it } from "vitest";
-import { connectionUpdateSchema, newConnectionSchema } from "./connections.ts";
+import { connectorUpdateSchema, newConnectorSchema } from "./connectors.ts";
 import {
 	bulkProviderModelUpdateSchema,
 	effectiveCapabilities,
@@ -21,16 +21,16 @@ const customProvider = {
 } satisfies typeof newCustomProviderSchema.Encoded;
 
 describe("new model providers", () => {
-	it("takes a preset with only a key, or a custom endpoint described in full", () => {
+	it("takes a built-in provider with only a key, or a custom model provider described in full", () => {
 		const decode = Schema.decodeUnknownSync(newModelProviderSchema);
-		expect(decode({ preset: "groq", apiKey: "k" })).toEqual({ preset: "groq", apiKey: "k" });
-		expect(decode({ preset: "ollama" })).toEqual({ preset: "ollama" });
+		expect(decode({ builtIn: "groq", apiKey: "k" })).toEqual({ builtIn: "groq", apiKey: "k" });
+		expect(decode({ builtIn: "ollama" })).toEqual({ builtIn: "ollama" });
 		expect(decode(customProvider)).toEqual({ ...customProvider, customHeaders: [] });
-		expect(() => decode({ preset: "nonesuch" })).toThrow();
+		expect(() => decode({ builtIn: "nonesuch" })).toThrow();
 		expect(() => decode({ name: "Gateway" })).toThrow();
 	});
 
-	it("keeps a catalog provider's name for the preset after trimming and case folding", () => {
+	it("keeps a built-in provider's name after trimming and case folding", () => {
 		const decode = Schema.decodeUnknownSync(newCustomProviderSchema);
 		for (const name of ["OpenRouter", "  oPeNrOuTeR  ", " "]) {
 			expect(() => decode({ ...customProvider, name })).toThrow();
@@ -142,7 +142,7 @@ describe("partial updates", () => {
 	it.each([
 		["model", modelProviderUpdateSchema, "apiKey"],
 		["search", searchProviderUpdateSchema, "apiKey"],
-		["connection", connectionUpdateSchema, "secret"],
+		["connector", connectorUpdateSchema, "secret"],
 	] as const)("preserves absent, undefined and null semantics for %s", (_, schema, key) => {
 		const decode = Schema.decodeUnknownSync(schema);
 		expect(() => decode({})).toThrow("Nothing to change");
@@ -161,8 +161,8 @@ describe("partial updates", () => {
 		).toEqual({ active: false });
 	});
 
-	it("takes a connection's secret header trimmed, including the credential headers a provider may not set", () => {
-		const decode = Schema.decodeUnknownSync(newConnectionSchema);
+	it("takes a connector's secret header trimmed, including the credential headers a provider may not set", () => {
+		const decode = Schema.decodeUnknownSync(newConnectorSchema);
 		expect(
 			decode({ name: " Server ", url: customProvider.baseUrl, secretHeader: " X-Secret " }),
 		).toEqual({
@@ -177,16 +177,16 @@ describe("partial updates", () => {
 		expect(() =>
 			decode({ name: "Server", url: customProvider.baseUrl, secretHeader: "Host" }),
 		).toThrow();
-		expect(Schema.decodeSync(connectionUpdateSchema)({ secretHeader: null })).toEqual({
+		expect(Schema.decodeSync(connectorUpdateSchema)({ secretHeader: null })).toEqual({
 			secretHeader: null,
 		});
 	});
 
 	it("keeps search creation fields optional but not nullable", () => {
 		const decode = Schema.decodeUnknownSync(newSearchProviderSchema);
-		expect(decode({ preset: "exa", unknown: true })).toEqual({ preset: "exa" });
-		expect(decode({ preset: "exa", enabled: false })).toEqual({ preset: "exa", enabled: false });
-		expect(() => decode({ preset: "exa", apiKey: null })).toThrow();
+		expect(decode({ builtIn: "exa", unknown: true })).toEqual({ builtIn: "exa" });
+		expect(decode({ builtIn: "exa", enabled: false })).toEqual({ builtIn: "exa", enabled: false });
+		expect(() => decode({ builtIn: "exa", apiKey: null })).toThrow();
 	});
 });
 
@@ -233,11 +233,11 @@ describe("provider models", () => {
 describe("a provider's API key", () => {
 	it("is trimmed, since a key pasted with a stray space is sent as an empty bearer token", () => {
 		const decode = Schema.decodeUnknownSync(newModelProviderSchema);
-		expect(decode({ preset: "openrouter", apiKey: "  sk-or-v1-abc\n" })).toEqual({
-			preset: "openrouter",
+		expect(decode({ builtIn: "openrouter", apiKey: "  sk-or-v1-abc\n" })).toEqual({
+			builtIn: "openrouter",
 			apiKey: "sk-or-v1-abc",
 		});
-		expect(() => decode({ preset: "openrouter", apiKey: "   " })).toThrow();
+		expect(() => decode({ builtIn: "openrouter", apiKey: "   " })).toThrow();
 	});
 });
 

@@ -3,23 +3,23 @@ import {
 	type Bot,
 	type BotPermissions,
 	botParticipantOf,
-	type ConversationDetails,
+	type ChatDetails,
 	type ModelProvider,
 	type Project,
+	type ProjectChat,
 	type ProjectPermissions,
-	type ProjectThread,
 	type ResourcePermissions,
-	type SessionUser,
+	type SignedInPerson,
 	type StreamEvent,
 	type SystemBot,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
 import { NotFound } from "@sugabots/contracts/http";
 import {
-	connectionWithTools,
-	listedConnection,
-	listedThread,
-	type TestConnection,
+	connectorWithTools,
+	listedChat,
+	listedConnector,
+	type TestConnector,
 	testPerson,
 } from "@sugabots/contracts/testing";
 import { userText } from "@sugabots/errors";
@@ -55,7 +55,7 @@ import { TooltipProvider } from "@/ui/tooltip.tsx";
  * around, because the router is the real one.
  */
 
-export const sam: SessionUser = {
+export const sam: SignedInPerson = {
 	id: "0199a3a0-0000-7000-8000-000000000009",
 	email: "sam@example.com",
 	name: "Sam",
@@ -66,7 +66,7 @@ export const sam: SessionUser = {
 const samAsCreator = { id: sam.id, name: sam.name, email: sam.email, image: null };
 
 /** A second person in the workspace, so the roster has somebody who is not you. */
-export const juno: SessionUser = {
+export const juno: SignedInPerson = {
 	id: "0199a3a0-0000-7000-8000-00000000000a",
 	email: "juno@example.com",
 	name: "Juno",
@@ -80,7 +80,7 @@ export const workspace = {
 	name: "Suga Workspace",
 	slug: "suga",
 	timeZone: "UTC",
-	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+	setUpAt: "2026-09-01T00:00:00.000Z",
 };
 
 /** Everything with what a project or bot holds, as an admin gets it. */
@@ -88,7 +88,7 @@ const MANAGER_OF_RESOURCES: ResourcePermissions = {
 	readHistory: true,
 	openSettings: true,
 	deleteFiles: true,
-	manageConnections: true,
+	manageConnectors: true,
 	manageComputer: true,
 	useDesktop: true,
 	manageAutomations: true,
@@ -99,7 +99,7 @@ const MANAGER_OF_RESOURCES: ResourcePermissions = {
 const USER_OF_RESOURCES: ResourcePermissions = {
 	...MANAGER_OF_RESOURCES,
 	deleteFiles: false,
-	manageConnections: false,
+	manageConnectors: false,
 	manageComputer: false,
 	manageAutomations: false,
 };
@@ -107,7 +107,7 @@ const USER_OF_RESOURCES: ResourcePermissions = {
 /** Every project permission, as an admin gets them. */
 const ADMIN_IN_PROJECT: ProjectPermissions = {
 	rename: true,
-	manageMembers: true,
+	managePeople: true,
 	manageBots: true,
 	leave: false,
 	join: false,
@@ -115,8 +115,8 @@ const ADMIN_IN_PROJECT: ProjectPermissions = {
 	resources: MANAGER_OF_RESOURCES,
 };
 
-/** What a member gets in a project they are in. */
-const MEMBER_IN_PROJECT: ProjectPermissions = {
+/** What an editor gets in a project they are in. */
+const EDITOR_IN_PROJECT: ProjectPermissions = {
 	...ADMIN_IN_PROJECT,
 	rename: false,
 	leave: true,
@@ -126,8 +126,8 @@ const MEMBER_IN_PROJECT: ProjectPermissions = {
 
 /** What a viewer gets there: nothing they could change. */
 const VIEWER_IN_PROJECT: ProjectPermissions = {
-	...MEMBER_IN_PROJECT,
-	manageMembers: false,
+	...EDITOR_IN_PROJECT,
+	managePeople: false,
 	manageBots: false,
 	resources: { ...USER_OF_RESOURCES, runAutomations: false, useDesktop: false },
 };
@@ -192,7 +192,7 @@ export const modelProviders: ModelProvider[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000c1",
 		workspaceId: WORKSPACE,
-		preset: "openai",
+		builtIn: "openai",
 		name: "OpenAI",
 		baseUrl: "https://api.openai.com/v1",
 		apiFormat: "openai",
@@ -220,7 +220,7 @@ export const modelProviders: ModelProvider[] = [
 	{
 		id: "0199a3a0-0000-7000-8000-0000000000c2",
 		workspaceId: WORKSPACE,
-		preset: "anthropic",
+		builtIn: "anthropic",
 		name: "Anthropic",
 		baseUrl: "https://api.anthropic.com",
 		apiFormat: "anthropic",
@@ -256,7 +256,7 @@ export const bots: Bot[] = [
 		handle: "customer-research",
 		description: "Digs through calls and notes for what customers asked for.",
 		color: "purple",
-		face: "dot",
+		eyes: "dot",
 		shape: "circle",
 		model: MODELS[1] as string,
 		prompt: "",
@@ -278,7 +278,7 @@ export const bots: Bot[] = [
 		handle: "issue-triager",
 		description: "Sorts incoming issues every weekday morning.",
 		color: "green",
-		face: "arc",
+		eyes: "arc",
 		shape: "circle",
 		model: MODELS[0] as string,
 		prompt: "",
@@ -300,7 +300,7 @@ export const bots: Bot[] = [
 		handle: "linear-handler",
 		description: "Reads and writes Linear on the team's behalf.",
 		color: "sky",
-		face: "pill",
+		eyes: "pill",
 		shape: "circle",
 		model: MODELS[0] as string,
 		prompt: "Be brief.",
@@ -328,7 +328,7 @@ export const personalAssistant: Bot = {
 	handle: "personal-assistant",
 	description: "Your private assistant.",
 	color: "green",
-	face: "pill",
+	eyes: "pill",
 	shape: "circle",
 	model: MODELS[1] as string,
 	prompt: "",
@@ -358,9 +358,9 @@ export const systemBots: SystemBot[] = [
 	{
 		key: "compact",
 		name: "Compaction",
-		description: "Compacts long conversations so bots can keep reading them.",
+		description: "Compacts long chats so bots can keep reading them.",
 		color: "purple",
-		face: "square",
+		eyes: "square",
 		shape: "circle",
 		model: MODELS[0] as string,
 	},
@@ -368,36 +368,32 @@ export const systemBots: SystemBot[] = [
 
 export const compaction = systemBots[0] as SystemBot;
 
-/** The first thread with `bot`, one per bot, by the bot's id. */
-export function threadWith(bot: Bot): ProjectThread {
+/** The first chat with `bot`, one per bot, by the bot's id. */
+export function chatWith(bot: Bot): ProjectChat {
 	return {
-		kind: "project_thread",
+		kind: "project_chat",
 		id: `${bot.id.slice(0, -4)}c${bot.id.slice(-3)}`,
 		workspaceId: bot.workspaceId,
 		projectId: bot.defaultProjectId,
 		botId: bot.id,
 		title: `Working with ${bot.name}`,
-		archivedAt: null,
-		doneAt: null,
+		resolvedAt: null,
 		createdAt: "2026-09-18T08:00:00.000Z",
 		updatedAt: "2026-09-18T08:00:00.000Z",
 	};
 }
 
-/** `thread`, a thread of `bot`'s, as the conversations API returns it, with nothing said yet. */
-export function threadDetails(
-	bot: Bot,
-	thread: ProjectThread = threadWith(bot),
-): ConversationDetails {
+/** `chat`, a chat of `bot`'s, as the chats API returns it, with nothing said yet. */
+export function chatDetails(bot: Bot, chat: ProjectChat = chatWith(bot)): ChatDetails {
 	const participant = botParticipantOf(bot);
-	const { kind: _kind, archivedAt: _archivedAt, ...conversation } = thread;
+	const { kind: _kind, ...placed } = chat;
 	return {
-		conversation: {
-			...conversation,
-			rootConversationId: thread.id,
-			kind: "project_thread",
+		chat: {
+			...placed,
+			rootChatId: chat.id,
+			kind: "project_chat",
 			status: "done",
-			parentConversationId: null,
+			parentChatId: null,
 		},
 		automationRun: null,
 		participants: [participant],
@@ -413,21 +409,18 @@ export function threadDetails(
 
 /** What the mocked API answers before a test says otherwise. */
 export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): void {
-	client.events.conversation.mockImplementation(() => quietEventStream());
+	client.events.chat.mockImplementation(() => quietEventStream());
 	client.events.workspace.mockImplementation(() => quietEventStream());
-	client.api.chats.projectMarkers.mockReturnValue(Effect.succeed({ projects: {} }));
+	client.api.chats.attentionMarks.mockReturnValue(Effect.succeed({ projects: {} }));
 	client.api.chats.attention.mockReturnValue(
 		Effect.succeed({
-			unreadInInbox: 0,
 			waitingApprovals: 0,
 			unreadForYou: 0,
 		}),
 	);
 	client.api.chats.approvals.mockReturnValue(Effect.succeed({ waiting: [], answered: [] }));
-	client.api.chats.inbox.mockReturnValue(Effect.succeed({ items: [] }));
 	client.api.chats.markRead.mockReturnValue(Effect.succeed(undefined));
-	client.api.chats.markAllRead.mockReturnValue(Effect.succeed(undefined));
-	client.api.chats.markItemRead.mockReturnValue(Effect.succeed(undefined));
+	client.api.chats.markNestedChatRead.mockReturnValue(Effect.succeed(undefined));
 	client.api.events.typing.mockReturnValue(Effect.succeed(undefined));
 	client.api.notifications.reportPresence.mockReturnValue(Effect.succeed(undefined));
 	client.api.notifications.settings.mockReturnValue(
@@ -443,24 +436,24 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		}),
 	);
 	client.api.workspaces.list.mockReturnValue(Effect.succeed([workspace]));
-	client.api.workspaces.members.mockReturnValue(
+	client.api.workspaces.memberships.mockReturnValue(
 		Effect.succeed([
 			{
 				id: "0199a3a0-0000-7000-8000-0000000000d1",
 				role: "admin",
-				user: sam,
+				person: sam,
 				joinedAt: "2026-09-09T00:00:00.000Z",
 			},
 			{
 				id: "0199a3a0-0000-7000-8000-0000000000d2",
-				role: "member",
-				user: juno,
+				role: "editor",
+				person: juno,
 				joinedAt: "2026-09-10T00:00:00.000Z",
 			},
 		]),
 	);
-	client.api.workspaces.updateMember.mockReturnValue(Effect.succeed(undefined));
-	client.api.workspaces.removeMember.mockReturnValue(Effect.succeed(undefined));
+	client.api.workspaces.changeRole.mockReturnValue(Effect.succeed(undefined));
+	client.api.workspaces.removeMembership.mockReturnValue(Effect.succeed(undefined));
 	client.api.workspaces.leave.mockReturnValue(Effect.succeed(undefined));
 	client.api.workspaces.cancelInvitation.mockReturnValue(Effect.succeed(undefined));
 	client.api.workspaces.invitations.mockReturnValue(
@@ -479,8 +472,8 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	);
 	const inProject = administersWorkspace(role)
 		? ADMIN_IN_PROJECT
-		: role === "member"
-			? MEMBER_IN_PROJECT
+		: role === "editor"
+			? EDITOR_IN_PROJECT
 			: VIEWER_IN_PROJECT;
 	client.api.projects.list.mockReturnValue(
 		Effect.succeed(
@@ -510,7 +503,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	);
 	client.api.bots.ensureAssistant.mockReturnValue(Effect.succeed(personalAssistant));
 	client.api.systemBots.list.mockReturnValue(Effect.succeed(systemBots));
-	serveConnections();
+	serveConnectors();
 	client.api.automations.list.mockReturnValue(Effect.succeed([]));
 	client.api.automations.projectRuns.mockReturnValue(
 		Effect.succeed({ items: [], nextCursor: null }),
@@ -519,27 +512,27 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 		Effect.succeed({ kind: "set", secret: "whsec_0123456789abcdefghijklmnop" }),
 	);
 	const reachable = [...bots, personalAssistant];
-	// Each bot has one thread, nothing said in it yet; a project has nothing in it until a case says so.
-	client.api.chats.threads.mockImplementation(({ params }: { params: { projectId: string } }) => {
-		const bot = reachable.find((one) => one.defaultProjectId === params.projectId);
-		return Effect.succeed({
-			threads: bot ? [listedThread(threadWith(bot))] : [],
-			automations: [],
-		});
-	});
+	// Each bot has one chat, nothing said in it yet; a project has nothing in it until a case says so.
+	client.api.chats.projectChats.mockImplementation(
+		({ params }: { params: { projectId: string } }) => {
+			const bot = reachable.find((one) => one.defaultProjectId === params.projectId);
+			return Effect.succeed({
+				chats: bot ? [listedChat(chatWith(bot))] : [],
+				automations: [],
+			});
+		},
+	);
 	client.api.chats.startInterview.mockReturnValue(Effect.succeed(null));
 	client.api.chats.messages.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
 	client.api.chats.history.mockReturnValue(Effect.succeed({ items: [], nextCursor: null }));
-	client.api.conversations.get.mockImplementation(
-		({ params }: { params: { conversationId: string } }) => {
-			const bot = reachable.find((one) => threadWith(one).id === params.conversationId);
-			return bot
-				? Effect.succeed(threadDetails(bot))
-				: Effect.fail(new NotFound({ message: userText`No such conversation` }));
-		},
-	);
-	client.api.conversations.activity.mockReturnValue(
-		Effect.fail(new NotFound({ message: userText`No such conversation` })),
+	client.api.chats.get.mockImplementation(({ params }: { params: { chatId: string } }) => {
+		const bot = reachable.find((one) => chatWith(one).id === params.chatId);
+		return bot
+			? Effect.succeed(chatDetails(bot))
+			: Effect.fail(new NotFound({ message: userText`No such chat` }));
+	});
+	client.api.chats.context.mockReturnValue(
+		Effect.fail(new NotFound({ message: userText`No such chat` })),
 	);
 	client.api.workspaceAccess.mockReturnValue(
 		Effect.succeed({
@@ -549,11 +542,11 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 				createBots: role !== "viewer",
 				updateWorkspace: administersWorkspace(role),
 				manageProviders: administersWorkspace(role),
-				manageMembers: administersWorkspace(role),
-				configureBuiltInBots: administersWorkspace(role),
+				managePeople: administersWorkspace(role),
+				chooseSystemModel: administersWorkspace(role),
 				manageUsage: administersWorkspace(role),
 				manageAdmins: role === "owner",
-				transferOwnership: role === "owner",
+				handOverOwnership: role === "owner",
 				deleteWorkspace: role === "owner",
 			},
 		}),
@@ -567,7 +560,7 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 			models: MODELS.map((modelId) => ({
 				providerId: "0199a3a0-0000-7000-8000-0000000000c1",
 				providerName: "Anthropic",
-				providerPreset: "anthropic",
+				providerBuiltIn: "anthropic",
 				modelId,
 				displayName: null,
 				capabilities: ["tools"],
@@ -577,21 +570,21 @@ export function apiAnswers({ role = "admin" }: { role?: WorkspaceRole } = {}): v
 	);
 }
 
-/** Answers connection reads from `connections` in full: each project's list with counts, and one of a project's connections with its tools. */
-export function serveConnections(...connections: TestConnection[]): void {
-	client.api.connections.list.mockImplementation(({ params }: { params: { projectId: string } }) =>
+/** Answers connector reads from `connectors` in full: each project's list with counts, and one of a project's connectors with its tools. */
+export function serveConnectors(...connectors: TestConnector[]): void {
+	client.api.connectors.list.mockImplementation(({ params }: { params: { projectId: string } }) =>
 		Effect.succeed(
-			connections.filter((one) => one.projectId === params.projectId).map(listedConnection),
+			connectors.filter((one) => one.projectId === params.projectId).map(listedConnector),
 		),
 	);
-	client.api.connections.get.mockImplementation(
-		({ params }: { params: { projectId: string; connectionId: string } }) => {
-			const found = connections.find(
-				(one) => one.projectId === params.projectId && one.id === params.connectionId,
+	client.api.connectors.get.mockImplementation(
+		({ params }: { params: { projectId: string; connectorId: string } }) => {
+			const found = connectors.find(
+				(one) => one.projectId === params.projectId && one.id === params.connectorId,
 			);
 			return found
-				? Effect.succeed(connectionWithTools(found))
-				: Effect.fail(new NotFound({ message: userText`No such connection` }));
+				? Effect.succeed(connectorWithTools(found))
+				: Effect.fail(new NotFound({ message: userText`No such connector` }));
 		},
 	);
 }
@@ -684,7 +677,7 @@ export function writeDraft(box: HTMLElement, text: string): void {
 }
 
 /**
- * Renders the app at `path`, signed in as `user` (Sam by default; `null` for
+ * Renders the app at `path`, signed in as `signedIn` (Sam by default; `null` for
  * signed out). `queries` is the app's cache, a fresh one unless given, so one
  * test's projects cannot answer another's; pass one seeded beforehand to start
  * the app as `main.tsx` does with what /me answered.
@@ -692,11 +685,11 @@ export function writeDraft(box: HTMLElement, text: string): void {
 export function mount(
 	path: string,
 	{
-		user = sam,
+		person = sam,
 		refresh = vi.fn(),
 		queries = createQueryClient(),
 	}: {
-		user?: SessionUser | null;
+		person?: SignedInPerson | null;
 		refresh?: () => Promise<void>;
 		queries?: QueryClient;
 	} = {},
@@ -706,7 +699,7 @@ export function mount(
 	});
 
 	render(
-		<TestApp router={router} queries={queries} session={{ user, error: undefined, refresh }} />,
+		<TestApp router={router} queries={queries} session={{ person, error: undefined, refresh }} />,
 	);
 
 	return { router, queries };

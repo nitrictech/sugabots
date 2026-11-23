@@ -1,15 +1,15 @@
 import type { ModelProvider } from "@sugabots/contracts";
 import { ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
+import { ModelProviderStore } from "@sugabots/core/providers/model-providers/model-provider-store";
 import { DiscoveryUnreachable } from "@sugabots/core/providers/model-providers/remote";
 import { EgressRefused } from "@sugabots/core/providers/network/egress";
 import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { UserResolver } from "../../http/app.test-support.ts";
+import type { PersonResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
@@ -24,7 +24,7 @@ const PROVIDER_ID = "0199a3a0-0000-7000-8000-000000000003";
 const root = `/workspaces/${WORKSPACE_ID}/model-providers`;
 const headers = { authorization: "Bearer good-token", "content-type": "application/json" };
 
-const resolveUser: UserResolver = async (requestHeaders) =>
+const resolvePerson: PersonResolver = async (requestHeaders) =>
 	requestHeaders.get("authorization") === "Bearer good-token"
 		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
@@ -32,7 +32,7 @@ const resolveUser: UserResolver = async (requestHeaders) =>
 const groq: ModelProvider = {
 	id: PROVIDER_ID,
 	workspaceId: WORKSPACE_ID,
-	preset: "groq",
+	builtIn: "groq",
 	name: "Groq",
 	baseUrl: "https://api.groq.com/openai/v1",
 	apiFormat: "openai",
@@ -49,15 +49,15 @@ const groq: ModelProvider = {
 
 const app = (providers: Partial<ModelProviderSetup.Interface>) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolveUser), unimplemented(ModelProviderSetup.Service, providers)),
+		Layer.merge(identifiedBy(resolvePerson), unimplemented(ModelProviderSetup.Service, providers)),
 	);
 
 describe("model provider routes", () => {
-	it("adds a provider from the catalog as the person asking", async () => {
+	it("adds a built-in provider as the person asking", async () => {
 		let askedAs: string | undefined;
 		const create = vi.fn<ModelProviderSetup.Interface["create"]>(() =>
-			Effect.map(CurrentActor.Service, ({ userId }) => {
-				askedAs = userId;
+			Effect.map(CurrentActor.Service, ({ personId }) => {
+				askedAs = personId;
 				return groq;
 			}),
 		);
@@ -65,13 +65,13 @@ describe("model provider routes", () => {
 		const response = await app({ create }).request(root, {
 			method: "POST",
 			headers,
-			body: JSON.stringify({ preset: "groq", apiKey: "gsk-test" }),
+			body: JSON.stringify({ builtIn: "groq", apiKey: "gsk-test" }),
 		});
 
 		expect(response.status).toBe(201);
 		expect(create).toHaveBeenCalledWith({
 			workspace: WORKSPACE_ID,
-			provider: { preset: "groq", apiKey: "gsk-test" },
+			provider: { builtIn: "groq", apiKey: "gsk-test" },
 		});
 		expect(askedAs).toBe(USER_ID);
 	});
@@ -85,20 +85,20 @@ describe("model provider routes", () => {
 		}).request(root, {
 			method: "POST",
 			headers,
-			body: JSON.stringify({ preset: "lmstudio" }),
+			body: JSON.stringify({ builtIn: "lmstudio" }),
 		});
 
 		expect(response.status).toBe(400);
 		expect(await response.json()).toEqual({
 			_tag: "BadRequest",
 			message:
-				"That address is on a local or private network, which this installation doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.",
+				"That address is on a local or private network, which this server doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.",
 		});
 	});
 
 	it("reports a name already used in the workspace as a conflict", async () => {
 		const response = await app({
-			create: () => Effect.fail(new ModelProviderRepository.ModelProviderNameConflict()),
+			create: () => Effect.fail(new ModelProviderStore.ModelProviderNameConflict()),
 		}).request(root, {
 			method: "POST",
 			headers,
@@ -143,11 +143,11 @@ describe("model provider routes", () => {
 
 	it("keeps what a provider or the network said about a failed refresh out of the response", async () => {
 		const response = await app({
-			fetchModels: () =>
+			discoverModels: () =>
 				Effect.fail(
 					new DiscoveryUnreachable({ cause: new Error("getaddrinfo ENOTFOUND 10.0.0.7") }),
 				),
-		}).request(`${root}/${PROVIDER_ID}/fetch-models`, { method: "POST", headers });
+		}).request(`${root}/${PROVIDER_ID}/discover-models`, { method: "POST", headers });
 
 		expect(response.status).toBe(400);
 		const body = await response.json();

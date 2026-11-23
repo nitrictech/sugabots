@@ -4,7 +4,7 @@
 #   irm https://sugabots.ai/install.ps1 | iex
 #
 # Safe to run again: an existing compose.yml and .env are kept, so the keys that
-# sign people in and encrypt saved API keys never change under an installation.
+# sign people in and encrypt saved API keys never change under a server.
 #
 # Errors are thrown rather than exiting, because `exit` in a script run by
 # `iex` closes the reader's PowerShell window.

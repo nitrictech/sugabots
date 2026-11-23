@@ -1,10 +1,10 @@
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
-import type { ConnectionLook } from "@/lib/connections.ts";
+import type { MarkedConnector } from "@/lib/connectors.ts";
 import { capitalise, countOf, listNames } from "@/lib/name-list.ts";
 import {
 	BROWSER_TOOL_PREFIX,
 	BUILT_IN_HANDLE,
-	connectionLabel,
+	connectorLabel,
 	FILE_TOOL_PREFIX,
 	splitToolKey,
 	stepLabel,
@@ -20,11 +20,11 @@ import { awaitsApproval } from "./tool-activity.ts";
  * than as the tool's name and its raw output.
  *
  * What the bot says just before a call is narration ("Now let me get the
- * cycle:"). The conversation leaves it out, where it would read as a sentence
+ * cycle:"). The chat leaves it out, where it would read as a sentence
  * pointing at nothing; the tool line shows it over the calls it introduced.
  *
  * The built-in tools are matched by key, as `@/lib/tool-names.ts` does; a
- * connection's tool, or a built-in one not listed here, is named by its key and
+ * connector's tool, or a built-in one not listed here, is named by its key and
  * the first argument that reads as its subject.
  */
 
@@ -63,7 +63,7 @@ function narrationLine(text: string): string | undefined {
 	return line === "" ? undefined : line;
 }
 
-/** `fileNames` names the conversation's files by id, as the calls that read them refer to them. */
+/** `fileNames` names the chat's files by id, as the calls that read them refer to them. */
 export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, string>): ToolStep {
 	const input = asRecord(call.input);
 	const output = asRecord(call.output);
@@ -84,8 +84,8 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 				name(output.shared ?? input.name ?? baseName(input.path)),
 				"Shared a file",
 			);
-		case "read_conversation_file":
-			// A long tool result is kept as a file too, and has no name in the conversation.
+		case "read_chat_file":
+			// A long tool result is kept as a file too, and has no name in the chat.
 			return step("Read", name(fileName(input.file)), "Read a long result");
 		case "web_search":
 			return step("Searched the web for", name(input.query), "Searched the web");
@@ -94,11 +94,7 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 		case "tool_search":
 			return step("Looked for tools to", name(input.query), "Looked for tools");
 		case "search_history":
-			return step(
-				"Searched the conversation for",
-				name(input.query),
-				"Read back through the conversation",
-			);
+			return step("Searched the chat for", name(input.query), "Read back through the chat");
 		case "read_docs":
 			return step("Read the docs on", name(input.page), "Read the docs");
 		case "file_list":
@@ -117,13 +113,13 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 			return step("Set up the automation", name(input.name), "Set up an automation");
 		case "update_automation":
 			return step("Changed the automation", name(input.name), "Changed an automation");
-		case "mark_done":
-			return { action: "Marked the thread done" };
-		case "start_thread":
-			return step("Started the thread", name(input.title), "Started a thread");
+		case "mark_resolved":
+			return { action: "Marked the chat resolved" };
+		case "start_chat":
+			return step("Started the chat", name(input.title), "Started a chat");
 		case "save_instructions":
 			return { action: "Saved its instructions" };
-		case "request_network_access":
+		case "request_host":
 			return step("Asked to reach", code(input.host), "Asked to reach a host");
 		case "workspace_access":
 			return step("Checked the access of", name(input.person), "Checked a person's access");
@@ -132,7 +128,7 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) {
 		return { action, subject: code(withoutScheme(input.url)) };
 	}
-	// A file in the conversation, such as one a connection uploads, is named as the conversation names it.
+	// A file in the chat, such as one a connector uploads, is named as the chat names it.
 	const subject = fileName(input.file) ?? SUBJECT_ARGUMENTS.map((key) => input[key]).find(isWords);
 	return { action, subject: name(subject) };
 }
@@ -175,7 +171,7 @@ export function stepDetails(call: ToolCallPart): StepDetails {
 			};
 		case "write_file":
 			return { ...inputWithText("content"), output: shown(stored.output), ...cut };
-		case "read_conversation_file":
+		case "read_chat_file":
 			return {
 				input: shown(call.input),
 				output: textOf(output.lines) ?? shown(stored.output),
@@ -240,7 +236,7 @@ function textOf(value: unknown): string | undefined {
 	return isWords(value) ? value : undefined;
 }
 
-/** The arguments a connection's tool is most often about, most telling first. */
+/** The arguments a connector's tool is most often about, most telling first. */
 const SUBJECT_ARGUMENTS = ["query", "title", "name", "url", "path"] as const;
 
 function step(action: string, subject: ToolStep["subject"], otherwise: string): ToolStep {
@@ -281,12 +277,14 @@ function pageTitle(output: Record<string, unknown>): unknown {
 	return asRecord(output.page).title;
 }
 
-/** The app a call reached, by name: the connection, or the built-in tool itself ("Web search"). */
-export function appOf(call: ToolCallPart, look?: ConnectionLook): string {
+/** The tool source a call reached, by name: the connector, or the built-in tool itself ("Web search"). */
+export function toolSourceOf(call: ToolCallPart, connector?: MarkedConnector): string {
 	const { handle } = splitToolKey(call.tool);
 	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return "Browser";
 	if (call.tool.startsWith(FILE_TOOL_PREFIX)) return "Files";
-	return handle === BUILT_IN_HANDLE ? wordsFromKey(call.tool) : connectionLabel(handle, look?.name);
+	return handle === BUILT_IN_HANDLE
+		? wordsFromKey(call.tool)
+		: connectorLabel(handle, connector?.name);
 }
 
 /**
@@ -296,15 +294,17 @@ export function appOf(call: ToolCallPart, look?: ConnectionLook): string {
  */
 export function toolLineText(
 	calls: readonly ToolCallPart[],
-	looks: ReadonlyMap<string, ConnectionLook>,
+	markedConnectors: ReadonlyMap<string, MarkedConnector>,
 ): string {
-	const apps = (matching: (call: ToolCallPart) => boolean) =>
+	const toolSources = (matching: (call: ToolCallPart) => boolean) =>
 		listNames(
 			[
 				...new Set(
 					calls
 						.filter(matching)
-						.map((call) => appOf(call, looks.get(splitToolKey(call.tool).handle))),
+						.map((call) =>
+							toolSourceOf(call, markedConnectors.get(splitToolKey(call.tool).handle)),
+						),
 				),
 			],
 			{ maxNamed: Number.POSITIVE_INFINITY },
@@ -318,13 +318,13 @@ export function toolLineText(
 	const finished = (call: ToolCallPart) =>
 		(call.status === "completed" || call.status === "failed") && !denied(call);
 
-	const used = apps(finished);
+	const used = toolSources(finished);
 	const tail = calls.some(waiting)
-		? `waiting on ${apps(waiting)} approval`
+		? `waiting on ${toolSources(waiting)} approval`
 		: calls.some(running)
-			? `using ${apps(running)}`
+			? `using ${toolSources(running)}`
 			: calls.some(denied)
-				? `${apps(denied)} denied`
+				? `${toolSources(denied)} denied`
 				: undefined;
 
 	if (!tail) {

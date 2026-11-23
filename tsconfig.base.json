@@ -35,6 +35,8 @@
 							"packages/core/src/integrations/**/*.ts",
 							"packages/core/src/providers/models/**/*.ts",
 							"packages/core/src/providers/model-providers/remote.ts",
+							"packages/core/src/operations/**/*.ts",
+							"packages/contracts/src/errors/**/*.ts",
 							"packages/server/src/http/errors.ts"
 						],
 						"options": {

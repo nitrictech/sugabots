@@ -2,31 +2,38 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import { uploadAttachmentQuerySchema, uploadedAttachmentSchema } from "../../attachments.ts";
 import {
-	approvalInboxSchema,
 	attentionCountsSchema,
+	attentionMarksSchema,
 	automationFeedSchema,
 	chatHistoryPageSchema,
 	chatMessagesPageSchema,
+	chatNameSchema,
 	chatPageQuerySchema,
-	firstThreadMessageSchema,
-	inboxFeedSchema,
-	projectThreadListSchema,
-	projectThreadMarkersSchema,
-	projectThreadSchema,
-	startedThreadSchema,
-	threadNameSchema,
+	firstChatMessageSchema,
+	projectChatListSchema,
+	projectChatSchema,
+	startedChatSchema,
+	workspaceApprovalsSchema,
 } from "../../chats.ts";
-import { messageSchema, newMessageSchema } from "../../conversations.ts";
+import {
+	chatContextSchema,
+	chatDetailsSchema,
+	chatHistoryQuerySchema,
+	messageReactionsSchema,
+	messageSchema,
+	newMessageSchema,
+	reactionEmojiSchema,
+} from "../../messages.ts";
 import { workspaceIdOrSlugSchema } from "../../workspaces.ts";
 import { BadRequest, Conflict, PayloadTooLarge, refused } from "../errors.ts";
 import { Session } from "../middleware.ts";
 
 export class ChatsApi extends HttpApiGroup.make("chats")
 	.add(
-		/** A project's threads and automations: a bot's are its default project's. */
-		HttpApiEndpoint.get("threads", "/projects/:projectId/threads", {
+		/** A project's chats and automations: a bot's are its default project's. */
+		HttpApiEndpoint.get("projectChats", "/projects/:projectId/chats", {
 			params: { projectId: Schema.String },
-			success: projectThreadListSchema,
+			success: projectChatListSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.get("attention", "/workspaces/:workspace/chats/attention", {
@@ -34,28 +41,23 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			success: attentionCountsSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.get("projectMarkers", "/workspaces/:workspace/chats/project-markers", {
+		HttpApiEndpoint.get("attentionMarks", "/workspaces/:workspace/chats/attention-marks", {
 			params: { workspace: workspaceIdOrSlugSchema },
-			success: projectThreadMarkersSchema,
-			error: refused,
-		}),
-		HttpApiEndpoint.get("inbox", "/workspaces/:workspace/chats/inbox", {
-			params: { workspace: workspaceIdOrSlugSchema },
-			success: inboxFeedSchema,
+			success: attentionMarksSchema,
 			error: refused,
 		}),
 		HttpApiEndpoint.get("approvals", "/workspaces/:workspace/chats/approvals", {
 			params: { workspace: workspaceIdOrSlugSchema },
-			success: approvalInboxSchema,
+			success: workspaceApprovalsSchema,
 			error: refused,
 		}),
 		/**
-		 * Starts the thread in which a bot the caller just made interviews them to
+		 * Starts the chat in which a bot the caller just made interviews them to
 		 * write its own instructions. Null when the bot is not due one.
 		 */
 		HttpApiEndpoint.post("startInterview", "/bots/:botId/interview", {
 			params: { botId: Schema.String },
-			success: Schema.NullOr(projectThreadSchema),
+			success: Schema.NullOr(projectChatSchema),
 			error: refused,
 		}),
 		/** The automation's feed, where its runs post, opened on first use. */
@@ -69,78 +71,62 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 			},
 		),
 		/**
-		 * Starts a thread in the project, for everyone in it, with its first
-		 * message. A bot's thread is started in its default project.
+		 * Starts a chat in the project, for everyone in it, with its first
+		 * message. A bot's chat is started in its default project.
 		 */
-		HttpApiEndpoint.post("startProjectThread", "/projects/:projectId/threads", {
+		HttpApiEndpoint.post("startProjectChat", "/projects/:projectId/chats", {
 			params: { projectId: Schema.String },
-			payload: firstThreadMessageSchema,
-			success: startedThreadSchema.pipe(HttpApiSchema.status(201)),
+			payload: firstChatMessageSchema,
+			success: startedChatSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
 		}),
-		/** Renames one of the project's threads that is not archived. */
-		HttpApiEndpoint.put("renameThread", "/conversations/:conversationId/name", {
-			params: { conversationId: Schema.String },
-			payload: threadNameSchema,
+		/** Renames one of the project's chats. */
+		HttpApiEndpoint.put("renameChat", "/chats/:chatId/name", {
+			params: { chatId: Schema.String },
+			payload: chatNameSchema,
 			success: HttpApiSchema.Empty(204),
-			error: [BadRequest, Conflict, ...refused],
+			error: [BadRequest, ...refused],
 		}),
-		/** Archives one of the project's threads, which hides it from the project's list. */
-		HttpApiEndpoint.put("archiveThread", "/conversations/:conversationId/archived", {
-			params: { conversationId: Schema.String },
-			success: HttpApiSchema.Empty(204),
-			error: [Conflict, ...refused],
-		}),
-		HttpApiEndpoint.get("messages", "/conversations/:conversationId/messages", {
-			params: { conversationId: Schema.String },
+		HttpApiEndpoint.get("messages", "/chats/:chatId/messages", {
+			params: { chatId: Schema.String },
 			query: chatPageQuerySchema,
 			success: chatMessagesPageSchema,
 			error: refused,
 		}),
-		HttpApiEndpoint.get("history", "/conversations/:conversationId/history", {
-			params: { conversationId: Schema.String },
+		HttpApiEndpoint.get("history", "/chats/:chatId/history", {
+			params: { chatId: Schema.String },
 			query: chatPageQuerySchema,
 			success: chatHistoryPageSchema,
 			error: refused,
 		}),
-		/** Marks the project thread done. Any other conversation is hidden from this. */
-		HttpApiEndpoint.put("markDone", "/conversations/:conversationId/done", {
-			params: { conversationId: Schema.String },
+		/** Marks the project's chat resolved. Any other chat is hidden from this. */
+		HttpApiEndpoint.put("markResolved", "/chats/:chatId/resolved", {
+			params: { chatId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
-		/** Reopens a project thread marked done. Any other conversation is hidden from this. */
-		HttpApiEndpoint.delete("reopen", "/conversations/:conversationId/done", {
-			params: { conversationId: Schema.String },
+		/** Reopens a project's chat marked resolved. Any other chat is hidden from this. */
+		HttpApiEndpoint.delete("reopen", "/chats/:chatId/resolved", {
+			params: { chatId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
-		HttpApiEndpoint.post("markRead", "/conversations/:conversationId/read", {
-			params: { conversationId: Schema.String },
-			success: HttpApiSchema.Empty(204),
-			error: refused,
-		}),
-		/**
-		 * Reads, for the caller, every conversation they reach in the workspace
-		 * that holds something they have not read, as `markRead` reads one: the
-		 * automation runs and collaborations listed in each go with it.
-		 */
-		HttpApiEndpoint.post("markAllRead", "/workspaces/:workspace/chats/read", {
-			params: { workspace: workspaceIdOrSlugSchema },
+		HttpApiEndpoint.post("markRead", "/chats/:chatId/read", {
+			params: { chatId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
 		/**
-		 * Reads one automation run or collaboration, by its own conversation, and
-		 * nothing else in the conversation it is in.
+		 * Reads one automation run or collaboration, by its own chat, and
+		 * nothing else in the chat it is in.
 		 */
-		HttpApiEndpoint.post("markItemRead", "/items/:conversationId/read", {
-			params: { conversationId: Schema.String },
+		HttpApiEndpoint.post("markNestedChatRead", "/nested-chats/:chatId/read", {
+			params: { chatId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
-		HttpApiEndpoint.post("send", "/conversations/:conversationId/messages", {
-			params: { conversationId: Schema.String },
+		HttpApiEndpoint.post("send", "/chats/:chatId/messages", {
+			params: { chatId: Schema.String },
 			payload: newMessageSchema,
 			success: messageSchema.pipe(HttpApiSchema.status(201)),
 			error: [BadRequest, Conflict, ...refused],
@@ -149,8 +135,8 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		 * Uploads a file to attach to a message the caller then sends. The body
 		 * is the file's bytes, and `Content-Type` its media type.
 		 */
-		HttpApiEndpoint.post("uploadFile", "/conversations/:conversationId/files", {
-			params: { conversationId: Schema.String },
+		HttpApiEndpoint.post("uploadFile", "/chats/:chatId/files", {
+			params: { chatId: Schema.String },
 			query: uploadAttachmentQuerySchema,
 			payload: Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array()),
 			success: uploadedAttachmentSchema.pipe(HttpApiSchema.status(201)),
@@ -160,15 +146,41 @@ export class ChatsApi extends HttpApiGroup.make("chats")
 		 * Removes one of the caller's uploads before it is sent. Removing one
 		 * already gone, sent, or someone else's changes nothing.
 		 */
-		HttpApiEndpoint.delete("removeFile", "/conversations/:conversationId/files/:fileId", {
-			params: { conversationId: Schema.String, fileId: Schema.String },
+		HttpApiEndpoint.delete("removeFile", "/chats/:chatId/files/:fileId", {
+			params: { chatId: Schema.String, fileId: Schema.String },
 			success: HttpApiSchema.Empty(204),
 			error: refused,
 		}),
-		/** A file attached to a message in the conversation, with its own media type. */
-		HttpApiEndpoint.get("file", "/conversations/:conversationId/files/:fileId", {
-			params: { conversationId: Schema.String, fileId: Schema.String },
+		/** A file attached to a message in the chat, with its own media type. */
+		HttpApiEndpoint.get("file", "/chats/:chatId/files/:fileId", {
+			params: { chatId: Schema.String, fileId: Schema.String },
 			success: HttpApiSchema.StreamUint8Array(),
+			error: refused,
+		}),
+		// HEAD answers the same with a one-message page, for asking whether the
+		// chat is there without its history.
+		HttpApiEndpoint.get("get", "/chats/:chatId", {
+			params: { chatId: Schema.String },
+			query: chatHistoryQuerySchema,
+			success: chatDetailsSchema,
+			error: refused,
+		}),
+		// Null until a reply in the chat has been measured.
+		HttpApiEndpoint.get("context", "/chats/:chatId/context", {
+			params: { chatId: Schema.String },
+			success: Schema.NullOr(chatContextSchema),
+			error: refused,
+		}),
+		// Adding a reaction already there, or taking back one that is not, changes
+		// nothing, so a retried request is safe. Both answer with what the message has now.
+		HttpApiEndpoint.put("react", "/messages/:messageId/reactions/:emoji", {
+			params: { messageId: Schema.String, emoji: reactionEmojiSchema },
+			success: messageReactionsSchema,
+			error: [Conflict, ...refused],
+		}),
+		HttpApiEndpoint.delete("unreact", "/messages/:messageId/reactions/:emoji", {
+			params: { messageId: Schema.String, emoji: reactionEmojiSchema },
+			success: messageReactionsSchema,
 			error: refused,
 		}),
 	)

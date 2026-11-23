@@ -2,8 +2,8 @@ import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
 	accountRepositorySchema,
-	connectionRepositoriesSchema,
-	connectionRepositoryChangeSchema,
+	connectorRepositoriesSchema,
+	connectorRepositoryChangeSchema,
 	GITHUB_APP_INSTALLED_PATH,
 	GITHUB_APP_MADE_PATH,
 	GITHUB_WEBHOOK_PATH,
@@ -16,14 +16,14 @@ import { BadRequest, Conflict, NotFound, refused, Unauthorized } from "../errors
 import { Session } from "../middleware.ts";
 
 const project = { projectId: uuidSchema };
-const connected = { projectId: uuidSchema, connectionId: uuidSchema };
+const connected = { projectId: uuidSchema, connectorId: uuidSchema };
 
 /**
  * A project's GitHub app, a bot's being its default project's: making it,
  * installing it on the account the project's bots work on, and the
  * repositories there they work on.
  */
-export class GitHubConnectionsApi extends HttpApiGroup.make("gitHubConnections")
+export class GitHubConnectorsApi extends HttpApiGroup.make("gitHubConnectors")
 	.add(
 		HttpApiEndpoint.post("start", "/projects/:projectId/github", {
 			params: project,
@@ -33,7 +33,7 @@ export class GitHubConnectionsApi extends HttpApiGroup.make("gitHubConnections")
 		}),
 		HttpApiEndpoint.post(
 			"installUrl",
-			"/projects/:projectId/connections/:connectionId/github/install",
+			"/projects/:projectId/connectors/:connectorId/github/install",
 			{
 				params: connected,
 				success: gitHubAppInstallSchema,
@@ -42,7 +42,7 @@ export class GitHubConnectionsApi extends HttpApiGroup.make("gitHubConnections")
 		),
 		HttpApiEndpoint.get(
 			"reachableRepositories",
-			"/projects/:projectId/connections/:connectionId/github/reachable",
+			"/projects/:projectId/connectors/:connectorId/github/reachable",
 			{
 				params: connected,
 				success: Schema.Array(accountRepositorySchema),
@@ -51,31 +51,31 @@ export class GitHubConnectionsApi extends HttpApiGroup.make("gitHubConnections")
 		),
 		HttpApiEndpoint.get(
 			"repositories",
-			"/projects/:projectId/connections/:connectionId/repositories",
+			"/projects/:projectId/connectors/:connectorId/repositories",
 			{
 				params: connected,
-				success: connectionRepositoriesSchema,
+				success: connectorRepositoriesSchema,
 				error: [NotFound, ...refused],
 			},
 		),
 		HttpApiEndpoint.post(
 			"addRepository",
-			"/projects/:projectId/connections/:connectionId/repositories",
+			"/projects/:projectId/connectors/:connectorId/repositories",
 			{
 				params: connected,
-				payload: connectionRepositoryChangeSchema,
-				success: connectionRepositoriesSchema,
+				payload: connectorRepositoryChangeSchema,
+				success: connectorRepositoriesSchema,
 				error: [BadRequest, NotFound, ...refused],
 			},
 		),
 		// A repository's path has a slash in it, so it goes in the body.
 		HttpApiEndpoint.post(
 			"removeRepository",
-			"/projects/:projectId/connections/:connectionId/repositories/remove",
+			"/projects/:projectId/connectors/:connectorId/repositories/remove",
 			{
 				params: connected,
-				payload: connectionRepositoryChangeSchema,
-				success: connectionRepositoriesSchema,
+				payload: connectorRepositoryChangeSchema,
+				success: connectorRepositoriesSchema,
 				error: [NotFound, ...refused],
 			},
 		),
@@ -96,13 +96,13 @@ export class GitHubConnectionsApi extends HttpApiGroup.make("gitHubConnections")
 	.middleware(Session) {}
 
 /**
- * Where a GitHub connection's app delivers events. Without a session: a
+ * Where a GitHub connector's app delivers events. Without a session: a
  * delivery is admitted by its signature under the app's webhook secret, over
  * the body exactly as sent.
  */
 export class GitHubWebhooksApi extends HttpApiGroup.make("gitHubWebhooks").add(
-	HttpApiEndpoint.post("delivery", `${GITHUB_WEBHOOK_PATH}/:connectionId`, {
-		params: { connectionId: uuidSchema },
+	HttpApiEndpoint.post("delivery", `${GITHUB_WEBHOOK_PATH}/:connectorId`, {
+		params: { connectorId: uuidSchema },
 		payload: Schema.Json,
 		success: HttpApiSchema.Empty(204),
 		error: [BadRequest, Unauthorized],

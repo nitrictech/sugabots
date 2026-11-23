@@ -52,7 +52,7 @@ export function StageClose({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * Something a bot made or is doing, opened large beside its conversation or a
+ * Something a bot made or is doing, opened large beside its chat or a
  * list so it can be talked about while it is looked at. On a phone it covers
  * them.
  * With `parent`, it is a view inside another, and its Back, before the

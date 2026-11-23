@@ -1,8 +1,89 @@
+import type { WorkspaceRole } from "@sugabots/contracts";
 import { asc, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { bot, user, workspace, workspaceMember } from "../database/schema.ts";
+import type * as schema from "../database/schema.ts";
+import { bot, membership, person, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase } from "../database/testing.ts";
-import { reachesBotFor } from "./access.ts";
+import { mayDecideToolCall, type ProjectStanding, reachesBotFor } from "./access.ts";
+import { type BotFacts, mayInProject, type ProjectFacts } from "./permissions.ts";
+
+describe("who decides a call raised in an automation's run", () => {
+	const ALICE = "0199a3a0-0000-7000-8000-00000000a11c";
+	const BOB = "0199a3a0-0000-7000-8000-00000000b0b0";
+	const publicBotBy = (createdById: string): BotFacts => ({
+		visibility: "public",
+		createdById,
+		assistantOf: null,
+	});
+	/** `personId`'s standing, with `role`, in a project with `facts`. */
+	const standing = (
+		role: WorkspaceRole,
+		personId: string,
+		facts: ProjectFacts,
+	): ProjectStanding => {
+		const actor = { personId, workspaceRole: role };
+		return {
+			project: {} as schema.ProjectRow,
+			actor,
+			facts,
+			may: (permission) => mayInProject(actor, permission, facts),
+		};
+	};
+	/** Whether `personId` may decide a call in a chat of the project, raised in a run `runBot` does. */
+	const decides = (
+		role: WorkspaceRole,
+		personId: string,
+		facts: ProjectFacts,
+		runBot: BotFacts | undefined,
+	) => mayDecideToolCall(standing(role, personId, facts), undefined, runBot, "chat");
+
+	describe("in a project people made, led by Alice's public bot", () => {
+		const member: ProjectFacts = { isMember: true, defaultOf: null };
+		const lead = publicBotBy(ALICE);
+
+		it("lets the lead bot's creator, an editor in the project, decide", () => {
+			expect(decides("editor", ALICE, member, lead)).toBe(true);
+		});
+
+		it("lets an admin decide, as before", () => {
+			expect(decides("admin", BOB, member, lead)).toBe(true);
+			expect(decides("owner", BOB, member, lead)).toBe(true);
+		});
+
+		it("refuses another editor, though they decide the project's calls outside runs", () => {
+			expect(decides("editor", BOB, member, lead)).toBe(false);
+			expect(decides("editor", BOB, member, undefined)).toBe(true);
+		});
+
+		it("refuses the creator once a viewer, and when not in the project", () => {
+			expect(decides("viewer", ALICE, member, lead)).toBe(false);
+			expect(decides("editor", ALICE, { isMember: false, defaultOf: null }, lead)).toBe(false);
+		});
+	});
+
+	describe("in a bot's default project, as before", () => {
+		it("lets its creator and admins decide its own runs' calls, and no other editor", () => {
+			const bot = publicBotBy(ALICE);
+			const own: ProjectFacts = { isMember: false, defaultOf: bot };
+			expect(decides("editor", ALICE, own, bot)).toBe(true);
+			expect(decides("admin", BOB, own, bot)).toBe(true);
+			expect(decides("editor", BOB, own, bot)).toBe(false);
+			expect(decides("viewer", ALICE, own, bot)).toBe(false);
+		});
+
+		it("refuses an admin a private bot's runs, whose chats they don't reach", () => {
+			const bot: BotFacts = { visibility: "private", createdById: ALICE, assistantOf: null };
+			expect(decides("admin", BOB, { isMember: false, defaultOf: bot }, bot)).toBe(false);
+		});
+
+		it("lets only its person decide a Personal Assistant's runs' calls, a viewer included", () => {
+			const assistant: BotFacts = { visibility: "private", createdById: null, assistantOf: ALICE };
+			const own: ProjectFacts = { isMember: false, defaultOf: assistant };
+			expect(decides("viewer", ALICE, own, assistant)).toBe(true);
+			expect(decides("owner", BOB, own, assistant)).toBe(false);
+		});
+	});
+});
 
 describe.skipIf(!process.env.DATABASE_URL)("reach written as SQL", () => {
 	afterAll(async () => {
@@ -21,7 +102,7 @@ describe.skipIf(!process.env.DATABASE_URL)("reach written as SQL", () => {
 		);
 		const [ada, sam] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values([
 					{ name: "Ada", email: `ada-${stamp}@example.com` },
 					{ name: "Sam", email: `sam-${stamp}@example.com` },
@@ -30,9 +111,9 @@ describe.skipIf(!process.env.DATABASE_URL)("reach written as SQL", () => {
 		);
 		if (!space || !ada || !sam) throw new Error("could not create the fixtures");
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values([
-				{ workspaceId: space.id, userId: ada.id, role: "member" },
-				{ workspaceId: space.id, userId: sam.id, role: "member" },
+			db.insert(membership).values([
+				{ workspaceId: space.id, personId: ada.id, role: "editor" },
+				{ workspaceId: space.id, personId: sam.id, role: "editor" },
 			]),
 		);
 		await onDatabase((db) =>
@@ -42,7 +123,7 @@ describe.skipIf(!process.env.DATABASE_URL)("reach written as SQL", () => {
 					name: "Public",
 					handle: `public-${stamp}`,
 					color: "green",
-					face: "pill",
+					eyes: "pill",
 					visibility: "public",
 					createdById: sam.id,
 				},
@@ -51,7 +132,7 @@ describe.skipIf(!process.env.DATABASE_URL)("reach written as SQL", () => {
 					name: "Sam's",
 					handle: `sams-${stamp}`,
 					color: "sky",
-					face: "pill",
+					eyes: "pill",
 					visibility: "private",
 					createdById: sam.id,
 				},

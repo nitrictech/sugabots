@@ -2,7 +2,7 @@ import type { Bot } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Monitor } from "lucide-react";
-import { type PointerEvent, type ReactNode, useRef, useState } from "react";
+import { type PointerEvent, useRef, useState } from "react";
 import { useUpdateBot } from "@/lib/bots.ts";
 import { useComputerGap } from "@/lib/computer-providers.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -11,6 +11,7 @@ import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button, buttonStyles } from "@/ui/button.tsx";
 import { DialogContent, DialogTitle, SheetHandle } from "@/ui/dialog.tsx";
+import { EmptyState } from "@/ui/empty-state.tsx";
 import { DesktopScreen } from "./DesktopViewer.tsx";
 
 /**
@@ -20,13 +21,13 @@ import { DesktopScreen } from "./DesktopViewer.tsx";
  */
 export function ComputerSheet({
 	bot,
-	conversationId,
+	chatId,
 	onOpenFull,
 	onDismiss,
 }: {
 	bot: Bot;
-	/** The conversation the desktop is watched from. */
-	conversationId: string;
+	/** The chat the desktop is watched from. */
+	chatId: string;
 	/** Opens the desktop full screen, where it can be taken over. */
 	onOpenFull: () => void;
 	/** Closes the sheet, when it is pulled down. */
@@ -38,7 +39,7 @@ export function ComputerSheet({
 	const update = useUpdateBot(bot.id);
 	// Whether it uses a computer is the computer's to manage, not the rest of the bot's.
 	const mayGiveComputer = bot.permissions.resources.manageComputer;
-	const backToThread = useBackToHere("Thread");
+	const backToChat = useBackToHere("Chat");
 	const title = `${bot.name}'s computer`;
 
 	return (
@@ -56,7 +57,6 @@ export function ComputerSheet({
 			>
 				<SheetHandle />
 			</div>
-			{/* Named for a screen reader, which hears what the sheet is; the screen shows it. */}
 			<DialogTitle className="sr-only">{title}</DialogTitle>
 			{missing === null ? (
 				<div className="flex flex-col gap-3">
@@ -66,84 +66,63 @@ export function ComputerSheet({
 						aria-label={`Open ${title} full screen`}
 						className="focus-ring overflow-hidden rounded-xl border border-border-strong"
 					>
-						<DesktopScreen
-							conversationId={conversationId}
-							botId={bot.id}
-							viewOnly
-							offersReconnect={false}
-						/>
+						<DesktopScreen chatId={chatId} botId={bot.id} viewOnly offersReconnect={false} />
 					</button>
 					<Button variant="secondary" className="h-11 text-sm" onClick={onOpenFull}>
 						Open full screen
 					</Button>
 				</div>
 			) : missing === "bot" ? (
-				<NoComputer
-					text={`${bot.name} doesn't have a computer`}
-					detail={
-						mayGiveComputer
-							? "Give it one to run commands, browse and make files."
-							: bot.assistant
-								? "Sugabots sets up your Personal Assistant, its computer included."
-								: "Ask somebody who can edit it to give it one."
+				<EmptyState
+					compact
+					icon={<Monitor strokeWidth={1.75} />}
+					title={`${bot.name} doesn't have a computer`}
+					actions={
+						mayGiveComputer && (
+							<>
+								<Button
+									className="h-11 w-full text-sm"
+									disabled={update.isPending}
+									onClick={() => update.mutate({ usesComputer: true })}
+								>
+									Turn on computer
+								</Button>
+								{update.error && <Alert>{failureMessage(update.error)}</Alert>}
+							</>
+						)
 					}
 				>
-					{mayGiveComputer && (
-						<>
-							<Button
-								className="h-11 w-full text-sm"
-								disabled={update.isPending}
-								onClick={() => update.mutate({ usesComputer: true })}
-							>
-								Turn on computer
-							</Button>
-							{update.error && <Alert>{failureMessage(update.error)}</Alert>}
-						</>
-					)}
-				</NoComputer>
+					{mayGiveComputer
+						? "Give it one to run commands, browse and make files."
+						: bot.assistant
+							? "Sugabots sets up your Personal Assistant, its computer included."
+							: "Ask somebody who can edit it to give it one."}
+				</EmptyState>
 			) : missing === "workspace" ? (
-				<NoComputer
-					text="Computers aren't set up yet"
-					detail={
-						may.manageProviders
-							? "They're set up once, for the whole workspace."
-							: "Ask a workspace admin to set them up."
+				<EmptyState
+					compact
+					icon={<Monitor strokeWidth={1.75} />}
+					title="Computers aren't set up yet"
+					actions={
+						may.manageProviders && (
+							<Link
+								from="/$workspace"
+								to="./settings/$section"
+								params={{ section: "computers" }}
+								state={backToChat}
+								className={buttonStyles({ className: "h-11 w-full text-sm" })}
+							>
+								Set up computers
+							</Link>
+						)
 					}
 				>
-					{may.manageProviders && (
-						<Link
-							from="/$workspace"
-							to="./settings/$section"
-							params={{ section: "computers" }}
-							state={backToThread}
-							className={buttonStyles({ className: "h-11 w-full text-sm" })}
-						>
-							Set up computers
-						</Link>
-					)}
-				</NoComputer>
+					{may.manageProviders
+						? "They're set up once, for the whole workspace."
+						: "Ask a workspace admin to set them up."}
+				</EmptyState>
 			) : null}
 		</DialogContent>
-	);
-}
-
-/** Why there is no computer to show, and what to do about it as `children`. */
-function NoComputer({
-	text,
-	detail,
-	children,
-}: {
-	text: string;
-	detail: string;
-	children?: ReactNode;
-}) {
-	return (
-		<div className="flex flex-col items-center gap-2 pt-2 text-center">
-			<Monitor aria-hidden size={28} strokeWidth={1.5} className="text-subtle-foreground" />
-			<p className="m-0 font-medium text-sm text-foreground">{text}</p>
-			<p className="m-0 text-sm text-muted-foreground leading-normal">{detail}</p>
-			{children && <div className="mt-3 flex w-full flex-col gap-2">{children}</div>}
-		</div>
 	);
 }
 

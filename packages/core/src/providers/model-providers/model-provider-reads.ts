@@ -1,28 +1,28 @@
 import type { ModelProvider, NamedPerson, WorkspaceModelsResponse } from "@sugabots/contracts";
 import {
-	presetSignsIn,
+	builtInSignsIn,
 	providerIsConnected,
 	providerLacksCredential,
-	seededPresets,
+	seededBuiltIns,
 } from "@sugabots/contracts";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
-import { namedPersonColumns } from "../../conversations/repository/participants.ts";
+import { namedPersonColumns } from "../../chats/store/participants.ts";
 import { type Executor, query } from "../../database/database.ts";
 import {
 	type ModelProviderRow,
+	membership,
 	modelProvider,
 	type ProviderModelRow,
+	person,
 	providerModel,
-	user,
-	workspaceMember,
 } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
-import { defaultModelOf, offeredIn } from "./model-provider-repository.ts";
+import { defaultModelOf, offeredIn } from "./model-provider-store.ts";
 
 /**
  * Every model provider in the workspace, each with its models: the defaults
- * first, in the catalog's order, then the rest oldest first.
+ * first, in the built-in providers' order, then the rest oldest first.
  */
 export const providersIn = (workspaceId: string) =>
 	Effect.gen(function* () {
@@ -97,7 +97,7 @@ export const offeredModels = (workspaceId: string) =>
 				models: rows.map(({ model, provider }) => ({
 					providerId: provider.id,
 					providerName: provider.name,
-					providerPreset: provider.preset,
+					providerBuiltIn: provider.builtIn,
 					modelId: model.modelId,
 					displayName: model.displayName,
 					capabilities: model.capabilities.filter(
@@ -111,8 +111,8 @@ export const offeredModels = (workspaceId: string) =>
 
 function inListOrder<Row extends { provider: ModelProviderRow }>(rows: Row[]): Row[] {
 	const rank = ({ provider: row }: Row) => {
-		const seeded = row.preset ? seededPresets.indexOf(row.preset) : -1;
-		return seeded === -1 ? seededPresets.length : seeded;
+		const seeded = row.builtIn ? seededBuiltIns.indexOf(row.builtIn) : -1;
+		return seeded === -1 ? seededBuiltIns.length : seeded;
 	};
 	return rows.toSorted((a, b) => rank(a) - rank(b));
 }
@@ -123,13 +123,13 @@ function withConnectedBy(db: Executor) {
 		.select({ provider: modelProvider, connectedBy: namedPersonColumns })
 		.from(modelProvider)
 		.leftJoin(
-			workspaceMember,
+			membership,
 			and(
-				eq(workspaceMember.workspaceId, modelProvider.workspaceId),
-				eq(workspaceMember.userId, modelProvider.connectedById),
+				eq(membership.workspaceId, modelProvider.workspaceId),
+				eq(membership.personId, modelProvider.connectedById),
 			),
 		)
-		.leftJoin(user, eq(user.id, workspaceMember.userId));
+		.leftJoin(person, eq(person.id, membership.personId));
 }
 
 function toProvider(
@@ -140,7 +140,7 @@ function toProvider(
 	const hasApiKey = row.apiKeyEncrypted !== null;
 	const signedIn = row.oauthTokensEncrypted !== null;
 	const connected = providerIsConnected({
-		preset: row.preset,
+		builtIn: row.builtIn,
 		hasApiKey,
 		signedIn,
 		active: row.active,
@@ -148,16 +148,16 @@ function toProvider(
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
-		preset: row.preset,
+		builtIn: row.builtIn,
 		name: row.name,
 		baseUrl: row.baseUrl,
 		apiFormat: row.apiFormat,
 		active: row.active,
 		status:
-			presetSignsIn(row.preset) && row.oauthTokensEncrypted === null
+			builtInSignsIn(row.builtIn) && row.oauthTokensEncrypted === null
 				? "signed_out"
 				: configurationStatus({
-						missingKey: providerLacksCredential({ preset: row.preset, hasApiKey, signedIn }),
+						missingKey: providerLacksCredential({ builtIn: row.builtIn, hasApiKey, signedIn }),
 						lastTestedAt: row.lastTestedAt,
 						lastTestError: row.lastTestError,
 					}),

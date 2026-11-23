@@ -1,7 +1,7 @@
 import { type EventStream, type StreamEvent, streamEvent } from "@sugabots/contracts";
-import { CurrentUser, NotFound } from "@sugabots/contracts/http";
+import { CurrentPerson, NotFound } from "@sugabots/contracts/http";
 import type { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { toPerson } from "@sugabots/core/conversations/repository/participants";
+import { toPerson } from "@sugabots/core/chats/store/participants";
 import { Audience } from "@sugabots/core/database/events/audience";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { userText } from "@sugabots/errors";
@@ -18,7 +18,7 @@ import {
 } from "effect";
 import { type HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { StreamAccess } from "./access.ts";
 
@@ -38,7 +38,7 @@ const PING = Duration.seconds(15);
 
 /**
  * The server hangs up after this and the client reconnects with
- * `Last-Event-ID`, missing nothing. Bounds connections leaked by clients that
+ * `Last-Event-ID`, missing nothing. Bounds connectors leaked by clients that
  * went away without the socket noticing.
  */
 const MAX_AGE = Duration.minutes(30);
@@ -70,7 +70,7 @@ export const StreamTiming = Context.Reference<Timing>("@sugabots/server/StreamTi
 	defaultValue: () => ({ ping: PING, maxAge: MAX_AGE, recheck: RECHECK }),
 });
 
-/** The workspace, conversation and personal streams, with authorization resolved before streaming. */
+/** The workspace, chat and personal streams, with authorization resolved before streaming. */
 export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) =>
 	Effect.gen(function* () {
 		const bus = yield* EventBus.Service;
@@ -102,29 +102,29 @@ export const eventRoutes = HttpApiBuilder.group(ServerApi, "events", (handlers) 
 					),
 					mayHear: (audience) => access.hears(audience),
 				});
-			}).pipe(asSessionUser);
+			}).pipe(asSignedInPerson);
 
 		return handlers
 			.handle("workspace", ({ params, request }) =>
 				openStream(request, () => access.workspace(params.workspace)),
 			)
-			.handle("conversation", ({ params, request }) =>
-				openStream(request, () => access.conversation(params.conversationId)),
+			.handle("chat", ({ params, request }) =>
+				openStream(request, () => access.chat(params.chatId)),
 			)
 			.handle("me", ({ request }) => openStream(request, access.me))
 			.handle("typing", ({ params }) =>
 				Effect.gen(function* () {
-					const stream = yield* access.conversation(params.conversationId);
+					const stream = yield* access.chat(params.chatId);
 					if (!stream) {
-						return yield* new NotFound({ message: userText`No such conversation` });
+						return yield* new NotFound({ message: userText`No such chat` });
 					}
-					const user = yield* CurrentUser;
+					const signedIn = yield* CurrentPerson;
 					const typing = streamEvent("person.typing", {
-						conversationId: params.conversationId,
-						person: toPerson(user),
+						chatId: params.chatId,
+						person: toPerson(signedIn),
 					});
 					yield* Effect.promise(() => bus.publish(stream, typing));
-				}).pipe(asSessionUser),
+				}).pipe(asSignedInPerson),
 			);
 	}),
 );
@@ -141,7 +141,7 @@ function frame(seq: number | undefined, event: StreamEvent): string {
  * Streams what the caller's authorisation resolved to.
  *
  * A stream the caller may not have is answered with 404 before this, rather
- * than 403: a stream for a conversation you cannot see should not confirm the conversation
+ * than 403: a stream for a chat you cannot see should not confirm the chat
  * exists.
  */
 const streamEvents = Effect.fnUntraced(function* ({
@@ -269,7 +269,7 @@ const streamEvents = Effect.fnUntraced(function* ({
 /**
  * `Last-Event-ID` is whatever the client sent, including nothing at all. Only a
  * positive integer is a resume point; anything else starts a fresh stream,
- * which is the same thing a first connection gets.
+ * which is the same thing a first connector gets.
  */
 function resumeFrom(header: string | undefined): number | undefined {
 	if (!header) {

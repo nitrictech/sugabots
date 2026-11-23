@@ -6,15 +6,15 @@ import {
 import { and, asc, count, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { peopleReachingProject } from "../../authorization/access.ts";
-import { personColumns, toPerson } from "../../conversations/repository/participants.ts";
+import { personColumns, toPerson } from "../../chats/store/participants.ts";
 import { query } from "../../database/database.ts";
 import {
 	bot,
+	membership,
+	person,
 	project,
 	projectBot,
 	projectMember,
-	user,
-	workspaceMember,
 } from "../../database/schema.ts";
 
 /** The people in the project, by name. Administrators, who are in every one, can't be taken out. */
@@ -22,29 +22,29 @@ export const projectMembers = (projectId: string) =>
 	query((db) =>
 		db
 			.select({
-				userId: user.id,
-				name: user.name,
-				email: user.email,
-				image: user.image,
-				removable: sql<boolean>`${not(inArray(workspaceMember.role, [...ADMINISTERING_WORKSPACE_ROLES]))}`,
+				personId: person.id,
+				name: person.name,
+				email: person.email,
+				image: person.image,
+				removable: sql<boolean>`${not(inArray(membership.role, [...ADMINISTERING_WORKSPACE_ROLES]))}`,
 			})
 			.from(projectMember)
-			.innerJoin(user, eq(user.id, projectMember.userId))
+			.innerJoin(person, eq(person.id, projectMember.personId))
 			.innerJoin(
-				workspaceMember,
+				membership,
 				and(
-					eq(workspaceMember.workspaceId, projectMember.workspaceId),
-					eq(workspaceMember.userId, projectMember.userId),
+					eq(membership.workspaceId, projectMember.workspaceId),
+					eq(membership.personId, projectMember.personId),
 				),
 			)
 			.where(eq(projectMember.projectId, projectId))
-			.orderBy(asc(user.name)),
+			.orderBy(asc(person.name)),
 	).pipe(Effect.map((rows): ProjectMember[] => rows));
 
 /** The people who reach the project (see `peopleReachingProject`), by name. */
 export const peopleReachingProjectNamed = (projectId: string) =>
 	query((db) =>
-		db.query.user.findMany({
+		db.query.person.findMany({
 			...personColumns,
 			where: {
 				RAW: (person) => sql`${person.id} in (${peopleReachingProject(sql`${projectId}`)})`,
@@ -64,10 +64,10 @@ export const projectHeadcounts = (projectIds: readonly string[]) =>
 				.select({ projectId: projectMember.projectId, count: count() })
 				.from(projectMember)
 				.innerJoin(
-					workspaceMember,
+					membership,
 					and(
-						eq(workspaceMember.workspaceId, projectMember.workspaceId),
-						eq(workspaceMember.userId, projectMember.userId),
+						eq(membership.workspaceId, projectMember.workspaceId),
+						eq(membership.personId, projectMember.personId),
 					),
 				)
 				.where(inArray(projectMember.projectId, [...projectIds]))
@@ -90,7 +90,7 @@ export const projectHeadcounts = (projectIds: readonly string[]) =>
 	});
 
 /**
- * The id of the bot's default project, where its own threads are. Every bot
+ * The id of the bot's default project, where its own chats are. Every bot
  * but a system bot has one from the moment it is made.
  */
 export const defaultProjectOf = (botId: string) =>

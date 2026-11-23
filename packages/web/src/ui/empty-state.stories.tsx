@@ -51,3 +51,21 @@ export const WithActions = meta.story({
 		await expect(canvas.getByText("Or ask an admin to look into it.")).toBeVisible();
 	},
 });
+
+/** Compact, in a phone's sheet: no padding of its own, and its actions as wide as the sheet. */
+export const Compact = meta.story({
+	args: {
+		compact: true,
+		title: "Computers aren't set up yet",
+		children: "They're set up once, for the whole workspace.",
+		actions: <Button className="h-11 w-full text-sm">Set up computers</Button>,
+	},
+	render: (args) => (
+		<div className="w-90 rounded-dialog bg-background p-4">
+			<EmptyState {...args} />
+		</div>
+	),
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("button", { name: "Set up computers" })).toBeVisible();
+	},
+});

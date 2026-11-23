@@ -10,7 +10,7 @@ import { Effect } from "effect";
 import { client } from "@/api.ts";
 
 /*
- * Files: a project's, a bot's being its default project's, each opened by version. They refetch on every visit, and whenever a conversation the
+ * Files: a project's, a bot's being its default project's, each opened by version. They refetch on every visit, and whenever a chat the
  * app is following reports a write (see `refreshFilesAfter`).
  */
 
@@ -35,7 +35,7 @@ export const fileKey = (fileId: string, version?: number) => [
 	version ?? "current",
 ];
 
-/** The files from the threads of the project `projectId`, which for a bot is its default project. */
+/** The files from the chats of the project `projectId`, which for a bot is its default project. */
 export function useFiles(projectId: string) {
 	return useQuery({
 		queryKey: filesKey(projectId),

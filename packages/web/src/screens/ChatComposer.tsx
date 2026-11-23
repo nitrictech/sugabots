@@ -35,6 +35,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { AttachmentTray, LeftOutNote } from "./ComposerAttachments.tsx";
 import { MentionEditor, type MentionEditorHandle } from "./MentionEditor.tsx";
@@ -195,11 +196,11 @@ export function ChatComposer({
 	};
 	/**
 	 * The files attached to the message, and what attaches, removes and
-	 * retries them. Without them nothing can be attached, as before a thread
-	 * starts, since a file uploads to its conversation.
+	 * retries them. Without them nothing can be attached, as before a chat
+	 * starts, since a file uploads to its chat.
 	 */
 	attachments?: Pick<ComposerAttachments, "items" | "leftOut" | "attach" | "remove" | "retry">;
-	/** A strip over everything else in the box, of what the person should know before sending, such as a connection bots can't use. */
+	/** A strip over everything else in the box, of what the person should know before sending, such as a connector bots can't use. */
 	notice?: ReactNode;
 	/** Send is off, as while a bot the message must go to has no model; `notice` says why. */
 	held?: boolean;
@@ -610,17 +611,14 @@ function AttachButton({
 					afterClose.current = undefined;
 				}}
 			>
-				<DropdownMenuTrigger
-					render={
-						<button
-							type="button"
-							aria-label="Add"
-							className="focus-ring order-1 grid size-7.5 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-hover hover:text-foreground data-popup-open:bg-hover data-popup-open:text-foreground max-md:size-9"
-						>
-							<Plus aria-hidden size={18} strokeWidth={2} className="max-md:size-5" />
-						</button>
-					}
-				/>
+				<IconButton
+					label="Add"
+					side="top"
+					render={<DropdownMenuTrigger />}
+					className="order-1 size-7.5 data-popup-open:bg-hover data-popup-open:text-foreground max-md:size-9 [&_svg]:size-4.5 max-md:[&_svg]:size-5"
+				>
+					<Plus aria-hidden strokeWidth={2} />
+				</IconButton>
 				<DropdownMenuContent side="top" align="start" className="min-w-56">
 					<DropdownMenuItem
 						disabled={unavailable}

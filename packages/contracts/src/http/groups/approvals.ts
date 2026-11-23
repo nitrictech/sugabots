@@ -9,7 +9,7 @@ export class ApprovalsApi extends HttpApiGroup.make("approvals")
 		// Who may decide depends on the bot that asked and on the tool call: an
 		// automation's action asks more than an ordinary approval. The decision
 		// is recorded before this answers, and the call's status changes on the
-		// conversation's event stream.
+		// chat's event stream.
 		HttpApiEndpoint.post("decide", "/tool-calls/:toolCallId/approval", {
 			params: { toolCallId: Schema.String },
 			payload: toolApprovalDecisionSchema,

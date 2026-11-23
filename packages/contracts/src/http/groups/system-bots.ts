@@ -14,7 +14,7 @@ import { Session } from "../middleware.ts";
  * which is configured in its own settings instead.
  *
  * Reading is open to the whole workspace: what is exposed is names and model
- * ids, which a member already sees on every bot they can see.
+ * ids, which anyone in the workspace already sees on every bot they can see.
  */
 export class SystemBotsApi extends HttpApiGroup.make("systemBots")
 	.add(

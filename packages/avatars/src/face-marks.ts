@@ -1,4 +1,4 @@
-import type { BotFace } from "@sugabots/contracts";
+import type { BotEyes } from "@sugabots/contracts";
 
 /** The side of the square a face is drawn in, in SVG user units. */
 export const FACE_VIEWBOX_SIZE = 40;
@@ -56,7 +56,7 @@ export type FaceMark =
  * the pair; these are those fractions on a 40-unit face. An arc is the top
  * half of a ring, drawn along its centre line.
  */
-const marksByFace: Record<BotFace, readonly FaceMark[]> = {
+const marksByEyes: Record<BotEyes, readonly FaceMark[]> = {
 	// 0.125 × 0.25 bars, 0.17 apart.
 	pill: [
 		{ shape: "rect", x: 11.6, y: 15, width: 5, height: 10, rx: 2.8 },
@@ -88,6 +88,6 @@ const marksByFace: Record<BotFace, readonly FaceMark[]> = {
 };
 
 /** The marks that make up a face, on a disc filling the viewbox. */
-export function faceMarks(face: BotFace): readonly FaceMark[] {
-	return marksByFace[face];
+export function faceMarks(eyes: BotEyes): readonly FaceMark[] {
+	return marksByEyes[eyes];
 }

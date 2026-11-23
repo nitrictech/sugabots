@@ -1,6 +1,6 @@
 /**
  * The one client every part of the workspace asks a model through: turns,
- * compaction, model trials and provider settings.
+ * compaction, model tests and provider settings.
  * It resolves the workspace's provider for a model, signs in where the
  * provider needs it, and either streams the response or collects a whole
  * answer.
@@ -40,7 +40,7 @@ import { streamLedger } from "../../accounting/stream-ledger.ts";
 import type { Database } from "../../database/database.ts";
 import type { ProviderOptions } from "../model-providers/dialects/dialect.ts";
 import { dialectFor, type ModelRegistry, modelsDev } from "../model-providers/dialects/index.ts";
-import { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
+import { ModelProviderStore } from "../model-providers/model-provider-store.ts";
 import { withSignInAccess } from "../model-providers/sign-in/sign-in.ts";
 import { Egress, type EgressHttpClients } from "../network/egress.ts";
 import {
@@ -77,7 +77,7 @@ export interface PromptMessage {
 	content: string;
 	/**
 	 * Whether later requests repeat the prompt up to and including this
-	 * message, as a turn's history is repeated by the conversation's next turn. A
+	 * message, as a turn's history is repeated by the chat's next turn. A
 	 * provider that caches only the prefixes a request marks is told to cache
 	 * it; one that caches by itself needs no telling.
 	 */
@@ -86,15 +86,15 @@ export interface PromptMessage {
 
 /** A response streamed as it arrives, with tools the model may call along the way. */
 export interface StreamRequest extends Prompt {
-	/** What the request is for, which the ledger records as whose spend it is. */
-	activity: ModelRequests.Activity;
+	/** What the request is for, which the ledger records as whose usage it counts as. */
+	purpose: ModelRequests.RequestPurpose;
 	/** Server-owned SDK messages appended when resuming a suspended tool call. */
 	continuationMessages?: readonly ModelMessage[];
 	/** What the model may call. The SDK executes them as it streams. */
 	tools?: ToolSet;
 	toolApproval?: ToolApprovalConfiguration<ToolSet, unknown>;
 	/**
-	 * How many model calls the response may take, counting one per round of
+	 * How many model requests the response may take, counting one per round of
 	 * tool calls. The last is told to answer rather than call more tools.
 	 */
 	maxSteps: number;
@@ -102,8 +102,8 @@ export interface StreamRequest extends Prompt {
 
 /** A whole answer, given up on if it runs past either limit. */
 interface AnswerRequest extends Prompt {
-	/** What the request is for, which the ledger records as whose spend it is and the logs name it by. */
-	activity: ModelRequests.Activity;
+	/** What the request is for, which the ledger records as whose usage it counts as and the logs name it by. */
+	purpose: ModelRequests.RequestPurpose;
 	maxCharacters: number;
 	timeout: Duration.Input;
 }
@@ -125,10 +125,10 @@ export interface Streamed {
  * request used and cost is in the `model_request` ledger, not here.
  */
 export interface Finished {
-	/** How many model calls the response took, one per round of tool calls. */
-	modelCalls: number;
+	/** How many model requests the response took, one per round of tool calls. */
+	modelRequests: number;
 	/**
-	 * The prompt's size at the response's first model call: its history, system
+	 * The prompt's size at the response's first model request: its history, system
 	 * text and tools. What its tool calls return is left out.
 	 */
 	contextTokens?: number;
@@ -151,7 +151,7 @@ export interface Interface {
 	 * running inside it.
 	 */
 	stream(request: StreamRequest): Effect.Effect<Streamed, RequestFailure, Database | Scope.Scope>;
-	/** Asks for one whole answer, in a single model call. */
+	/** Asks for one whole answer, in a single model request. */
 	answer(
 		request: AnswerRequest,
 	): Effect.Effect<Answer, RequestFailure | AnswerTimedOut | UnusableAnswer, Database>;
@@ -162,7 +162,7 @@ export interface Interface {
  * with its cause chain, every error the provider reported in the stream, and
  * whether `signal` had aborted. For an HTTP failure that includes the
  * provider's address, status, headers and body. The request body is left out,
- * since it holds the conversation.
+ * since it holds the chat.
  */
 function logModelFailure(
 	failure: unknown,
@@ -248,7 +248,7 @@ async function* failingWith<T>(
 }
 
 interface Options {
-	modelProviders: Pick<ModelProviderRepository.Interface, "resolve" | "renewOAuthTokens">;
+	modelProviders: Pick<ModelProviderStore.Interface, "resolve" | "renewOAuthTokens">;
 	httpClients: EgressHttpClients;
 	/** Where every request the model makes is recorded. */
 	requests: ModelRequests.Interface;
@@ -268,23 +268,23 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 				provider: resolved.providerName,
 				model: resolved.modelName,
 			};
-			if (!resolved.endpoint) return yield* new ProviderCredentialsMissing(context);
-			const connection = yield* withSignInAccess(
+			if (!resolved.access) return yield* new ProviderCredentialsMissing(context);
+			const access = yield* withSignInAccess(
 				modelProviders,
 				httpClients,
 				input.workspaceId,
-				resolved.endpoint,
+				resolved.access,
 			).pipe(Effect.mapError((cause) => new ProviderOAuthRefreshFailed({ ...context, cause })));
 			const ledger = yield* streamLedger({
 				requests,
 				registry,
 				workspaceId: input.workspaceId,
-				activity: input.activity,
+				purpose: input.purpose,
 				model: input.model,
-				connection,
+				access,
 			});
-			const dialect = dialectFor(connection);
-			const baseUrl = connection.baseUrl.replace(/\/$/, "");
+			const dialect = dialectFor(access);
+			const baseUrl = access.baseUrl.replace(/\/$/, "");
 			const requestRoot = dialect.requestRoot?.(baseUrl) ?? baseUrl;
 			const systemOptions = dialect.systemOptions?.(input.system);
 			// Anthropic allows a request four marks. This spends three: the system
@@ -309,7 +309,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 			const result = streamText({
 				model: wrapLanguageModel({
 					model: dialect.languageModel(
-						{ ...connection, baseUrl: requestRoot },
+						{ ...access, baseUrl: requestRoot },
 						input.model,
 						httpClients.for({ baseUrl: requestRoot }),
 					),
@@ -392,7 +392,7 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 						]);
 						if (providerFailure !== undefined) throw providerFailure;
 						return {
-							modelCalls: steps.length,
+							modelRequests: steps.length,
 							contextTokens: steps[0]?.usage.inputTokens,
 							approvalRequests: [...approvalRequests],
 							responseMessages,
@@ -405,11 +405,11 @@ export function make({ modelProviders, httpClients, requests, registry }: Option
 	);
 }
 
-/** How many times one model call is sent again after the provider asks us to wait. */
+/** How many times one model request is sent again after the provider asks us to wait. */
 const RATE_LIMIT_RETRIES = 3;
 
 /**
- * Sends a model call again when the provider answers 429 and says to wait no
+ * Sends a model request again when the provider answers 429 and says to wait no
  * longer than `MAX_RATE_LIMIT_WAIT`, after waiting that long. Only the call's
  * opening request is sent again, which the provider refused before streaming
  * anything, so nothing the model said or a tool did is repeated. Aborting the
@@ -472,7 +472,7 @@ export function fromStream(stream: Interface["stream"]): Interface {
 								(soFar) => soFar.length <= request.maxCharacters,
 								() =>
 									new UnusableAnswer({
-										reason: `The ${request.activity.purpose} answer ran past ${request.maxCharacters} characters`,
+										reason: `The ${request.purpose.name} answer ran past ${request.maxCharacters} characters`,
 									}),
 							),
 							Effect.asVoid,
@@ -484,7 +484,7 @@ export function fromStream(stream: Interface["stream"]): Interface {
 			).pipe(
 				Effect.timeoutOrElse({
 					duration: request.timeout,
-					orElse: () => Effect.fail(new AnswerTimedOut({ purpose: request.activity.purpose })),
+					orElse: () => Effect.fail(new AnswerTimedOut({ purpose: request.purpose.name })),
 				}),
 			),
 	};
@@ -583,12 +583,12 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const layer = Layer.effect(
 	Service,
 	Effect.gen(function* () {
-		const modelProviders = yield* ModelProviderRepository.Service;
+		const modelProviders = yield* ModelProviderStore.Service;
 		const egress = yield* Egress.Service;
 		const requests = yield* ModelRequests.make;
 		return make({ modelProviders, httpClients: egress.providers, requests, registry: modelsDev });
 	}),
-).pipe(Layer.provide(ModelProviderRepository.layer));
+).pipe(Layer.provide(ModelProviderStore.layer));
 
 /**
  * Reads the model's text one delta at a time and runs `onDelta` for each.
@@ -654,7 +654,7 @@ export class AnswerTimedOut
 /**
  * Three attempts, a moment apart.
  *
- * Short, because each attempt is a model call somebody is waiting on, and
+ * Short, because each attempt is a model request somebody is waiting on, and
  * because a prompt the model cannot follow will not start working on the tenth
  * try — that is a prompt to fix, not a failure to absorb. The small gap is
  * jittered so a wave of requests hitting the same bad patch does not re-ask in

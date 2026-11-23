@@ -1,14 +1,14 @@
 import type {
 	AnsweredApproval,
-	ApprovalInbox,
 	ApprovalRequest,
 	ToolCallPart,
+	WorkspaceApprovals,
 } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyThreadFor, storyWorkspace } from "@/story-app.tsx";
+import { appHandlers, StoryApp, storyChatFor, storyWorkspace } from "@/story-app.tsx";
 
 /*
  * One approval request in full, beside the Approvals list: what it would do,
@@ -34,7 +34,7 @@ function request(
 			output: null,
 			status,
 			error: null,
-			mutating: true,
+			writeOrDelete: true,
 			atOffset: 0,
 			startedAt: ASKED_AT,
 			finishedAt: null,
@@ -46,12 +46,12 @@ function request(
 			name: growthDesk.name,
 			handle: growthDesk.handle,
 			color: growthDesk.color,
-			face: growthDesk.face,
+			eyes: growthDesk.eyes,
 			shape: "circle",
 		},
 		projectId: revenue.id,
-		conversationId: storyThreadFor(growthDesk).id,
-		rootConversationId: storyThreadFor(growthDesk).id,
+		chatId: storyChatFor(growthDesk).id,
+		rootChatId: storyChatFor(growthDesk).id,
 	};
 }
 
@@ -65,7 +65,7 @@ const answerable = request("01", "awaiting_approval", pending);
 const stopped = request("02", "failed", pending);
 const answered: AnsweredApproval = { ...request("03", "failed", denied), answer: denied };
 
-const inbox: ApprovalInbox = { waiting: [answerable, stopped], answered: [answered] };
+const approvals: WorkspaceApprovals = { waiting: [answerable, stopped], answered: [answered] };
 
 const meta = preview.meta({
 	title: "Views/ApprovalPage",
@@ -73,7 +73,7 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/approvals`, () => HttpResponse.json(inbox)),
+			http.get(`${API}/workspaces/:workspace/chats/approvals`, () => HttpResponse.json(approvals)),
 			...appHandlers(),
 		);
 	},
@@ -110,7 +110,7 @@ export const NoLongerWaiting = meta.story({
 	},
 });
 
-/** Missing is a request the inbox no longer holds, such as one answered long ago. */
+/** Missing is a request the approvals no longer list, such as one answered long ago. */
 export const Missing = meta.story({
 	render: at("0199a3a0-0000-7000-8000-000000000899"),
 	play: async ({ canvas }) => {

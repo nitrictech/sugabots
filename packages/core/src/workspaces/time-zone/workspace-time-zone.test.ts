@@ -1,9 +1,9 @@
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { Automations } from "../../conversations/automations/automations.ts";
-import { anAutomationOwner } from "../../conversations/automations/testing.ts";
-import { conversationsForTests } from "../../conversations/testing.ts";
+import { Automations } from "../../chats/automations/automations.ts";
+import { anAutomationOwner } from "../../chats/automations/testing.ts";
+import { chatServicesForTests } from "../../chats/testing.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { workspace } from "../../database/schema.ts";
@@ -15,7 +15,7 @@ import { WorkspaceTimeZone } from "./workspace-time-zone.ts";
 describe.skipIf(!process.env.DATABASE_URL)(
 	"a workspace's time zone, against Postgres",
 	async () => {
-		const conversations = await conversationsForTests(
+		const services = await chatServicesForTests(
 			EventBus.inProcess({ store: EventStore.inMemory() }),
 		);
 		let workspaceId: string;
@@ -34,16 +34,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 
 		beforeEach(async () => {
-			let userId: string;
-			({ workspaceId, userId, ownProjectId } = await anAutomationOwner());
+			let personId: string;
+			({ workspaceId, personId, ownProjectId } = await anAutomationOwner());
 			await onDatabase((db) =>
 				db
 					.update(workspace)
 					.set({ timeZone: "Australia/Sydney" })
 					.where(eq(workspace.id, workspaceId)),
 			);
-			timeZones = onPostgresAs(userId)(Context.get(conversations, WorkspaceTimeZone.Service));
-			automations = onPostgresAs(userId)(Context.get(conversations, Automations.Service));
+			timeZones = onPostgresAs(personId)(Context.get(services, WorkspaceTimeZone.Service));
+			automations = onPostgresAs(personId)(Context.get(services, Automations.Service));
 		});
 
 		it("moves the routines in the workspace's zone, and leaves the ones set for another", async () => {

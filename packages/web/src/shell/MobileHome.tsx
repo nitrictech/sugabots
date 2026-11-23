@@ -3,7 +3,7 @@ import { cn } from "cn";
 import { Bot, Hash, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAssistant, useBots } from "@/lib/bots.ts";
-import { useProjectMarkers } from "@/lib/chats.ts";
+import { useAttentionMarks } from "@/lib/chats.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { botLink, botsLink, projectLink, projectsLink } from "@/lib/links.ts";
 import { ownerPages } from "@/lib/owner-pages.ts";
@@ -50,13 +50,13 @@ function MobilePage({
 
 /**
  * Home on a phone: the Personal Assistant, the projects the person is in and
- * the bots they pinned, each opening its threads.
+ * the bots they pinned, each opening its chats.
  */
 export function MobileHome() {
 	const { data: projects } = useProjects();
 	const { bots } = useBots();
 	const assistant = useAssistant();
-	const { markerOf } = useProjectMarkers();
+	const { attentionMarkOf } = useAttentionMarks();
 	const pinned = sidebarBots(bots ?? []);
 	return (
 		<MobilePage title="Home">
@@ -64,7 +64,7 @@ export function MobileHome() {
 				<Link {...botLink(assistant)} className={HOME_ROW}>
 					<BotAvatar
 						color={assistant.color}
-						face={assistant.face}
+						eyes={assistant.eyes}
 						shape={assistant.shape}
 						size={22}
 					/>
@@ -90,7 +90,7 @@ export function MobileHome() {
 					{pinned.map((bot) => (
 						<SidebarBot
 							key={bot.id}
-							standing={{ bot, ...markerOf(bot.defaultProjectId) }}
+							standing={{ bot, ...attentionMarkOf(bot.defaultProjectId) }}
 							selected={false}
 						/>
 					))}
@@ -107,7 +107,7 @@ export function MobileHome() {
 /**
  * A bot or a project on a phone, its sidebar as a page: its work, as the
  * sidebar beside it lists it on a wider screen, then its own pages, and + to
- * start a thread.
+ * start a chat.
  */
 export function MobileOwner({ owner }: { owner: ResourceOwner }) {
 	const work = useOwnerWork(owner);
@@ -118,14 +118,14 @@ export function MobileOwner({ owner }: { owner: ResourceOwner }) {
 			title={name}
 			action={
 				<IconButton
-					label={"bot" in owner ? `New thread with ${name}` : `New thread in ${name}`}
-					render={ownerLink(owner, { page: "newThread" })}
+					label={"bot" in owner ? `New chat with ${name}` : `New chat in ${name}`}
+					render={ownerLink(owner, { page: "newChat" })}
 				>
 					<Plus strokeWidth={2.2} />
 				</IconButton>
 			}
 		>
-			<OwnerWork owner={owner} work={work} selectedConversationId={undefined} />
+			<OwnerWork owner={owner} work={work} selectedChatId={undefined} />
 			<HomeSection label="Pages">
 				{ownerPages(owner, { computersOn }).map(({ to, label, icon: Icon }) => (
 					<OwnerLink

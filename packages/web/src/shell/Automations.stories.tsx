@@ -1,4 +1,4 @@
-import type { Automation, AutomationUpdate, ProjectThreadList, Run } from "@sugabots/contracts";
+import type { Automation, AutomationUpdate, ProjectChatList, Run } from "@sugabots/contracts";
 import { testPerson } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, waitFor, within } from "storybook/test";
@@ -9,8 +9,8 @@ import {
 	chatPath,
 	StoryApp,
 	storyChatDetails,
-	storyThreadFor,
-	storyUser,
+	storyChatFor,
+	storyPerson,
 	storyWorkspace,
 } from "@/story-app.tsx";
 
@@ -35,7 +35,7 @@ const bot = {
 	name: growthDesk.name,
 	handle: growthDesk.handle,
 	color: growthDesk.color,
-	face: growthDesk.face,
+	eyes: growthDesk.eyes,
 	shape: growthDesk.shape,
 };
 
@@ -45,8 +45,8 @@ function posted(id: string, author: "bot" | "you", text: string, at: string, res
 		kind: "message",
 		message: {
 			id: `0199a3a0-0000-7000-8000-0000000006${id}`,
-			conversationId: outbound.feed,
-			author: author === "bot" ? bot : testPerson({ id: storyUser.id, name: storyUser.name }),
+			chatId: outbound.feed,
+			author: author === "bot" ? bot : testPerson({ id: storyPerson.id, name: storyPerson.name }),
 			kind: "text",
 			status: "complete",
 			parts: [{ type: "text", text }],
@@ -55,7 +55,7 @@ function posted(id: string, author: "bot" | "you", text: string, at: string, res
 			...(resultOf && {
 				automationResultOf: {
 					runId: resultOf,
-					conversationId: resultOf,
+					chatId: resultOf,
 					automationId: outbound.id,
 					automationName: "Overnight outbound",
 				},
@@ -111,11 +111,11 @@ const renewalsAutomation = automation(
 
 const outboundFailure: Run = {
 	id: outbound.run,
-	rootConversationId: outbound.feed,
+	rootChatId: outbound.feed,
 	automationId: outbound.id,
 	workspaceId: storyWorkspace.id,
 	botId: growthDesk.id,
-	conversationId: outbound.run,
+	chatId: outbound.run,
 	automationName: "Overnight outbound",
 	instructions: outboundAutomation.instructions,
 	trigger: {
@@ -131,8 +131,8 @@ const outboundFailure: Run = {
 	posted: false,
 };
 
-const chatList: ProjectThreadList = {
-	threads: [],
+const chatList: ProjectChatList = {
+	chats: [],
 	automations: [
 		{
 			automation: {
@@ -141,7 +141,7 @@ const chatList: ProjectThreadList = {
 				state: "enabled",
 				pausedAfterFailures: false,
 			},
-			conversation: {
+			chat: {
 				kind: "automation_feed",
 				id: outbound.feed,
 				workspaceId: storyWorkspace.id,
@@ -171,7 +171,7 @@ const chatList: ProjectThreadList = {
 				state: "paused",
 				pausedAfterFailures: false,
 			},
-			conversation: null,
+			chat: null,
 			mentionsYou: false,
 			status: { failing: false, latestRun: null },
 		},
@@ -181,10 +181,10 @@ const chatList: ProjectThreadList = {
 function automationHandlers() {
 	const feed = {
 		...storyChatDetails(growthDesk),
-		conversation: {
-			...storyChatDetails(growthDesk).conversation,
+		chat: {
+			...storyChatDetails(growthDesk).chat,
 			id: outbound.feed,
-			rootConversationId: outbound.feed,
+			rootChatId: outbound.feed,
 			kind: "automation_feed" as const,
 			title: "Overnight outbound",
 		},
@@ -198,11 +198,11 @@ function automationHandlers() {
 	};
 	return [
 		// Both automations are Growth Desk's, so its default project lists them and every other none.
-		http.get(`${API}/projects/:projectId/threads`, ({ params }) =>
+		http.get(`${API}/projects/:projectId/chats`, ({ params }) =>
 			HttpResponse.json(
 				params.projectId === growthDesk.defaultProjectId
 					? chatList
-					: { threads: [], automations: [] },
+					: { chats: [], automations: [] },
 			),
 		),
 		http.get(`${API}/projects/:projectId/automations`, ({ params }) =>
@@ -212,14 +212,14 @@ function automationHandlers() {
 				),
 			),
 		),
-		http.get(`${API}/conversations/${outbound.feed}`, () => HttpResponse.json(feed)),
-		http.get(`${API}/conversations/${outbound.feed}/messages`, () =>
+		http.get(`${API}/chats/${outbound.feed}`, () => HttpResponse.json(feed)),
+		http.get(`${API}/chats/${outbound.feed}/messages`, () =>
 			HttpResponse.json({
 				items: [
 					{
 						kind: "run",
 						id: outbound.quiet,
-						conversationId: outbound.quiet,
+						chatId: outbound.quiet,
 						automationName: "Overnight outbound",
 						triggerKind: "routine",
 						state: "completed",
@@ -244,7 +244,7 @@ function automationHandlers() {
 					{
 						kind: "run",
 						id: outbound.run,
-						conversationId: outbound.run,
+						chatId: outbound.run,
 						automationName: "Overnight outbound",
 						triggerKind: "routine",
 						state: "failed",
@@ -276,7 +276,7 @@ const meta = preview.meta({
 
 /**
  * An automation's own page, under "Growth Desk / Automations": its switch and
- * Run now at the top, then its instructions, written straight into, and its
+ * Start a run at the top, then its instructions, written straight into, and its
  * triggers. The bot's sidebar marks its Automations, one of whose last runs failed.
  */
 export const Default = meta.story({
@@ -286,7 +286,7 @@ export const Default = meta.story({
 			await within(page).findByRole("heading", { name: "Overnight outbound" }),
 		).toBeVisible();
 		await expect(within(page).getByRole("link", { name: "Automations" })).toBeVisible();
-		await expect(within(page).getByRole("button", { name: "Run now" })).toBeVisible();
+		await expect(within(page).getByRole("button", { name: "Start a run" })).toBeVisible();
 		await expect(within(page).getByRole("switch", { name: "Automation on" })).toBeChecked();
 		await expect(within(page).getByRole("textbox", { name: "Instructions" })).toHaveValue(
 			outboundAutomation.instructions,
@@ -376,17 +376,17 @@ export const BotWithNone = meta.story({
 });
 
 /** Somebody who may not manage the bot's automations is sent to someone who may, as a bot makes them only for them. */
-export const BotWithNoneAsAMember = meta.story({
+export const BotWithNoneAsAnEditor = meta.story({
 	beforeEach({ msw }) {
 		// A bot's automations are its default project's, so whether they may be managed is the bot's.
-		const asMember = storyBots.map((bot) => ({
+		const asEditor = storyBots.map((bot) => ({
 			...bot,
 			permissions: {
 				...bot.permissions,
 				resources: { ...bot.permissions.resources, manageAutomations: false },
 			},
 		}));
-		msw.use(...appHandlers({ role: "member", bots: asMember }));
+		msw.use(...appHandlers({ role: "editor", bots: asEditor }));
 	},
 	render: () => <StoryApp path={botWithNonePath} />,
 	play: async ({ canvas }) => {
@@ -398,11 +398,11 @@ export const BotWithNoneAsAMember = meta.story({
 });
 
 /**
- * Beside a thread with the bot, as its computer opens: its automations, then one
+ * Beside a chat with the bot, as its computer opens: its automations, then one
  * of them in their place, its runs and all, and the Back before its name to the
- * list, with that thread in view throughout.
+ * list, with that chat in view throughout.
  */
-export const BesideTheBotThread = meta.story({
+export const BesideTheBotChat = meta.story({
 	render: () => <StoryApp path={`${chatPath(growthDesk)}?automations=all`} />,
 	play: async ({ canvas, userEvent }) => {
 		const automations = await canvas.findByRole("region", {
@@ -411,7 +411,7 @@ export const BesideTheBotThread = meta.story({
 		await userEvent.click(
 			await within(automations).findByRole("button", { name: /^Overnight outbound/ }),
 		);
-		// Its runs, in its automation feed beside the bot's thread.
+		// Its runs, in its automation feed beside the bot's chat.
 		await waitFor(() =>
 			expect(
 				canvas
@@ -426,7 +426,7 @@ export const BesideTheBotThread = meta.story({
 			await canvas.findByRole("region", { name: `${growthDesk.name}'s automations` }),
 		).toBeVisible();
 		await expect(
-			canvas.getByRole("heading", { name: storyThreadFor(growthDesk).title, level: 1 }),
+			canvas.getByRole("heading", { name: storyChatFor(growthDesk).title, level: 1 }),
 		).toBeVisible();
 	},
 });

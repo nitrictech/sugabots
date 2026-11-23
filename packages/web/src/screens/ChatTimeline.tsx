@@ -1,24 +1,23 @@
 import type {
 	BotParticipant,
-	ChatHistoryEntry,
+	ChatDetails,
 	ChatMessageItem,
-	ConversationDetails,
 	Message,
 	Participant,
-	SessionUser,
+	SignedInPerson,
 } from "@sugabots/contracts";
 import { Pause } from "lucide-react";
 import { Fragment } from "react";
 import { useAuthorLinks } from "@/lib/author-links.ts";
-import { conversationFileUrl } from "@/lib/conversation-files.ts";
+import { chatFileUrl } from "@/lib/chat-files.ts";
 import { formatListTime } from "@/lib/list-time.ts";
 import { useReactions } from "@/lib/reactions.ts";
 import { workStateOf } from "@/lib/work-state.ts";
 import { NextRunDivider, RunDivider, RunMessage } from "./AutomationRun.tsx";
-import { BotStartedThreadLine, threadsStartedBy } from "./BotStartedThreadLine.tsx";
-import { ConversationMessages, DaySeparator } from "./ConversationMessages.tsx";
+import { BotStartedChatLine, chatsStartedBy } from "./BotStartedChatLine.tsx";
+import { ChatMessages, DaySeparator } from "./ChatMessages.tsx";
 import { chatGroupsOf, latestRunId, messagesIn } from "./chat-items.ts";
-import { findAnsweringFace } from "./conversation-layout.ts";
+import { findAnsweringFace } from "./chat-layout.ts";
 import { queuedBehindReply } from "./queued-messages.ts";
 import { RunRow } from "./RunRow.tsx";
 
@@ -31,30 +30,27 @@ export function ChatTimeline({
 	items,
 	details,
 	host,
-	conversationId,
-	user,
+	chatId,
+	signedIn,
 	mentionable,
-	entries,
 	sending,
 	viewerWriting,
 	pointedOut,
 	previews,
-	onOpenItem,
+	onOpenNestedChat,
 	onOpenFile,
 	onOpenDesktop,
 	onReply,
 	onJumpToMessage,
 }: {
 	items: readonly ChatMessageItem[];
-	details: ConversationDetails;
-	/** The bot whose thread it is, as the conversation lists it; none in a project's thread. */
+	details: ChatDetails;
+	/** The bot whose chat it is, as the chat lists it; none in a project's chat. */
 	host: BotParticipant | undefined;
-	conversationId: string;
-	user: SessionUser;
+	chatId: string;
+	signedIn: SignedInPerson;
 	/** Everyone here and the project's bots and people. */
 	mentionable: Participant[];
-	/** The runs and collaborations opened beside the chat. */
-	entries: readonly ChatHistoryEntry[];
 	/** The viewer's messages still on their way to the API. */
 	sending: ReadonlySet<string>;
 	/** Whether the viewer has a draft, so a bot's face waiting to answer stays still. */
@@ -63,16 +59,16 @@ export function ChatTimeline({
 	pointedOut: string | undefined;
 	/** Whether replies show what they made; off while something is open large beside the chat. */
 	previews: boolean;
-	onOpenItem: (itemConversationId: string) => void;
+	onOpenNestedChat: (nestedChatId: string) => void;
 	onOpenFile: (fileId: string) => void;
 	onOpenDesktop: () => void;
 	onReply: (message: Message) => void;
 	onJumpToMessage: (messageId: string) => void;
 }) {
-	const authorLinkOf = useAuthorLinks("Thread");
-	const reactions = useReactions(user);
-	const reacting = { userId: user.id, onToggle: reactions.toggle, onAdd: reactions.add };
-	const automationFeed = details.conversation.kind === "automation_feed";
+	const authorLinkOf = useAuthorLinks("Chat");
+	const reactions = useReactions(signedIn);
+	const reacting = { personId: signedIn.id, onToggle: reactions.toggle, onAdd: reactions.add };
+	const automationFeed = details.chat.kind === "automation_feed";
 	const groups = chatGroupsOf(items, automationFeed);
 	const shownMessages = messagesIn(items);
 	// Found across all the messages, not in each part they're shown in, or each part would bring a face of its own alive.
@@ -85,34 +81,34 @@ export function ChatTimeline({
 					{group.separated &&
 						(automationFeed ? <RunDivider at={group.at} /> : <DaySeparator at={group.at} />)}
 					{group.kind === "messages" ? (
-						<ConversationMessages
+						<ChatMessages
 							messages={group.messages}
 							participants={mentionable}
 							peopleReachingProject={details.peopleReachingProject}
-							conversationKind={details.conversation.kind}
-							projectId={details.conversation.projectId}
+							chatKind={details.chat.kind}
+							projectId={details.chat.projectId}
 							dividers={false}
-							onOpenItem={onOpenItem}
+							onOpenNestedChat={onOpenNestedChat}
 							onOpenFile={onOpenFile}
 							onOpenDesktop={onOpenDesktop}
-							fileUrlOf={(fileId) => conversationFileUrl(conversationId, fileId)}
+							fileUrlOf={(fileId) => chatFileUrl(chatId, fileId)}
 							previews={previews}
 							approvalCapabilities={details.capabilities}
 							queued={queued}
 							sending={sending}
 							answeringFace={answeringFace}
 							viewerWriting={viewerWriting}
-							viewerId={user.id}
+							viewerId={signedIn.id}
 							namedBotId={host?.id}
-							nameColorsFor={conversationId}
+							nameColorsFor={chatId}
 							highlightedMessageId={pointedOut}
 							authorLinkOf={authorLinkOf}
 							onReply={onReply}
 							sideLinesOf={(message) => {
 								const { author } = message;
 								if (author.kind !== "bot") return null;
-								return threadsStartedBy(message).map((started) => (
-									<BotStartedThreadLine
+								return chatsStartedBy(message).map((started) => (
+									<BotStartedChatLine
 										key={started.id}
 										started={started}
 										startedBy={author}
@@ -130,12 +126,12 @@ export function ChatTimeline({
 							item={group.item}
 							bot={host}
 							automation={details.automation}
-							conversationId={conversationId}
+							chatId={chatId}
 							latest={details.automation.failed && group.item.id === latestRunId(items)}
 							mentionable={mentionable}
 						/>
 					) : (
-						<RunLine item={group.item} entries={entries} onOpenItem={onOpenItem} />
+						<RunLine item={group.item} onOpenNestedChat={onOpenNestedChat} />
 					)}
 				</Fragment>
 			))}
@@ -147,23 +143,18 @@ export function ChatTimeline({
 /** An automation run, as a row among the messages. */
 function RunLine({
 	item,
-	entries,
-	onOpenItem,
+	onOpenNestedChat,
 }: {
 	item: Extract<ChatMessageItem, { kind: "run" }>;
-	/** The runs and collaborations opened beside the chat, where how a run stands is read. */
-	entries: readonly ChatHistoryEntry[];
-	onOpenItem: (itemConversationId: string) => void;
+	onOpenNestedChat: (nestedChatId: string) => void;
 }) {
 	return (
 		<RunRow
 			automationName={item.automationName}
 			triggerKind={item.triggerKind}
-			state={workStateOf(
-				entries.find((entry) => entry.conversationId === item.conversationId)?.status,
-			)}
+			state={workStateOf(item.state)}
 			at={item.createdAt}
-			onOpen={() => onOpenItem(item.conversationId)}
+			onOpen={() => onOpenNestedChat(item.chatId)}
 		/>
 	);
 }

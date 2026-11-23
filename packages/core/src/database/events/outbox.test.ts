@@ -33,7 +33,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 		bus.publishCommitted.mockClear();
 		// Per test, so a shared Postgres and whatever a previous run left in it
 		// cannot affect the result.
-		stream = `conversation:${crypto.randomUUID()}`;
+		stream = `chat:${crypto.randomUUID()}`;
 	});
 
 	/** A durable event carrying a marker, so a delivery can be told from another. */
@@ -149,7 +149,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the event outbox", () => {
 	});
 
 	it("stores what a transaction publishes in several batches together, so crossed streams cannot deadlock", async () => {
-		const other: EventStream = `conversation:${crypto.randomUUID()}`;
+		const other: EventStream = `chat:${crypto.randomUUID()}`;
 		const on = (to: EventStream, n: number): PendingEvent => ({ ...marked(n), stream: to });
 		let firstPublished = () => {};
 		const firstHasPublished = new Promise<void>((resolve) => {

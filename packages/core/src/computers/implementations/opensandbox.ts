@@ -35,15 +35,15 @@ const BOT_USER = { name: "bot", id: 1000, home: "/home/bot" } as const;
 const STOPPED_STATES: ReadonlySet<string> = new Set(["Terminated", "Failed"]);
 
 export const fromOpenSandbox = (
-	connection: Computers.OpenSandboxConnection,
+	access: Computers.OpenSandboxAccess,
 	ids: Ids.Interface,
 ): Computers.Provider => {
-	const url = new URL(connection.baseUrl);
+	const url = new URL(access.baseUrl);
 	const connectionConfig = () =>
 		new ConnectionConfig({
 			domain: url.host,
 			protocol: url.protocol === "https:" ? "https" : "http",
-			apiKey: Redacted.value(connection.apiKey),
+			apiKey: Redacted.value(access.apiKey),
 			requestTimeoutSeconds: REQUEST_TIMEOUT_SECONDS,
 		});
 	const manager = () => SandboxManager.create({ connectionConfig: connectionConfig() });
@@ -54,7 +54,7 @@ export const fromOpenSandbox = (
 	const replacePolicy = async (sandboxId: string, policy: NetworkPolicy) => {
 		const lifecycle = createLifecycleClient({
 			baseUrl: connectionConfig().getBaseUrl(),
-			apiKey: Redacted.value(connection.apiKey),
+			apiKey: Redacted.value(access.apiKey),
 		});
 		const { error, response } = await lifecycle.PUT("/sandboxes/{sandboxId}/networkpolicy", {
 			params: { path: { sandboxId } },
@@ -77,7 +77,7 @@ export const fromOpenSandbox = (
 			? new Computers.Unavailable({
 					provider: "opensandbox",
 					cause,
-					reason: userText`OpenSandbox couldn't create a computer using image ${DisplayName.fromRecord(connection.image)}. Check the OpenSandbox server logs for the cause.`,
+					reason: userText`OpenSandbox couldn't create a computer using image ${DisplayName.fromRecord(access.image)}. Check the OpenSandbox server logs for the cause.`,
 				})
 			: unavailable(cause);
 	/** The server's 404 for a sandbox id means it no longer has that sandbox. */
@@ -89,8 +89,8 @@ export const fromOpenSandbox = (
 	return {
 		// Docker keeps memory across a pause, but Kubernetes keeps only the
 		// root filesystem, and the server doesn't say which it runs on.
-		capabilities: { pauseKeeps: "disk", credentials: "host-and-path", blocksHosts: true },
-		networkMode: connection.networkMode,
+		capabilities: { sleepKeeps: "disk", credentials: "host-and-path", blocksHosts: true },
+		networkMode: access.networkMode,
 		check: Effect.tryPromise({
 			try: () => manager().listSandboxInfos({ pageSize: 1 }),
 			catch: unavailable,
@@ -100,10 +100,10 @@ export const fromOpenSandbox = (
 				try: () =>
 					OpenSandbox.create({
 						connectionConfig: connectionConfig(),
-						image: connection.image,
+						image: access.image,
 						resource: {
-							cpu: String(connection.size.cpuCount),
-							memory: `${connection.size.memoryGiB}Gi`,
+							cpu: String(access.size.cpuCount),
+							memory: `${access.size.memoryGiB}Gi`,
 						},
 						// Kept until Sugabots destroys it: a computer outlives any one turn.
 						timeoutSeconds: null,
@@ -166,14 +166,14 @@ export const fromOpenSandbox = (
 						state:
 							state === "Running" || state === "Pending" || state === "Resuming"
 								? "running"
-								: "paused",
+								: "asleep",
 						// On its own volume, which outlives the sandbox.
 						workKeptApart: true,
 					};
 				},
 				catch: missingOr(id),
 			}),
-		pause: (id) =>
+		sleep: (id) =>
 			Effect.tryPromise({
 				try: () => manager().pauseSandbox(id),
 				catch: missingOr(id),
@@ -240,7 +240,7 @@ export const fromOpenSandbox = (
 						const endpoint = await sandbox.getEndpoint(port);
 						const url = endpoint.endpoint.includes("://")
 							? endpoint.endpoint
-							: `${connection.baseUrl.startsWith("https:") ? "https" : "http"}://${endpoint.endpoint}`;
+							: `${access.baseUrl.startsWith("https:") ? "https" : "http"}://${endpoint.endpoint}`;
 						return { url: url.replace(/\/$/, ""), headers: { ...endpoint.headers } };
 					},
 					catch: unavailable,
@@ -354,18 +354,18 @@ async function writeAsRoot(sandbox: OpenSandbox, path: string, content: string) 
 }
 
 function policyOf(reach: Computers.Reach): NetworkPolicy {
-	return reach.kind === "allowlist"
+	return reach.kind === "allowed-hosts-only"
 		? { defaultAction: "deny", egress: rulesFor("allow", reach.hosts) }
 		: { defaultAction: "allow", egress: rulesFor("deny", reach.blockedHosts) };
 }
 
 /**
  * A policy that lets through whatever `a` or `b` does: an open one denies
- * only what every open policy denies and no allowlist allows.
+ * only what every open policy denies and no other policy allows.
  */
 function eitherOf(a: NetworkPolicy, b: NetworkPolicy): NetworkPolicy {
-	const allowlisted = [a, b].filter((policy) => !isOpen(policy));
-	const allowed = new Set(allowlisted.flatMap(targetsOf));
+	const closed = [a, b].filter((policy) => !isOpen(policy));
+	const allowed = new Set(closed.flatMap(targetsOf));
 	const open = [a, b].filter(isOpen);
 	if (open.length === 0) return { defaultAction: "deny", egress: rulesFor("allow", [...allowed]) };
 	const deniedByAll = open
@@ -385,7 +385,7 @@ function isOpen(policy: NetworkPolicy) {
 	return policy.defaultAction === "allow";
 }
 
-/** What the policy's rules name: the hosts an allowlist allows, or an open policy denies. */
+/** What the policy's rules name: the hosts a closed policy allows, or an open policy denies. */
 function targetsOf(policy: NetworkPolicy) {
 	return (policy.egress ?? []).map((rule) => rule.target);
 }

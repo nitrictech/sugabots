@@ -14,7 +14,7 @@ import { Button } from "@/ui/button.tsx";
  */
 export function ForgotPassword({
 	initialEmail = "",
-	subtitle = "Enter the email you log in with and we'll send you a link to choose a new password.",
+	subtitle = "Enter the email you sign in with and we'll send you a link to choose a new password.",
 	onBack,
 }: {
 	initialEmail?: string;
@@ -47,7 +47,7 @@ export function ForgotPassword({
 				subtitle={`If ${sentTo} has an account, a link to reset its password is on its way. It works for an hour.`}
 			>
 				<Button variant="secondary" size="lg" onClick={onBack} className="w-full">
-					Back to log in
+					Back to sign in
 				</Button>
 			</AuthLayout>
 		);
@@ -132,7 +132,7 @@ export function ResetPassword({
 		<AuthLayout
 			onBack={onBack}
 			title="Choose a new password"
-			subtitle="This signs you out on every device. Then log in with the new password."
+			subtitle="This signs you out on every device. Then sign in with the new password."
 		>
 			<form onSubmit={submit} className="flex flex-col gap-3.5">
 				<div className="overflow-hidden rounded-panel bg-list">

@@ -96,7 +96,7 @@ async function take(stream: AsyncIterable<{ type: string }>, count: number) {
 
 describe("requests", () => {
 	it("asks for the right route with the bearer token", async () => {
-		const { fetch, calls } = scripted(frame({ event: "conversation.created", id: 1 }));
+		const { fetch, calls } = scripted(frame({ event: "chat.created", id: 1 }));
 		const stream = events(fetch).workspace("w1");
 
 		await take(stream, 1);
@@ -108,7 +108,7 @@ describe("requests", () => {
 	});
 
 	it("includes browser cookies when no bearer store is supplied", async () => {
-		const { fetch, calls } = scripted(frame({ event: "conversation.created", id: 1 }));
+		const { fetch, calls } = scripted(frame({ event: "chat.created", id: 1 }));
 		const stream = createEventsApi({ baseUrl: BASE, fetch }).workspace("w1");
 
 		await take(stream, 1);
@@ -119,9 +119,9 @@ describe("requests", () => {
 
 	it("escapes an id rather than pasting it into the path", async () => {
 		const { fetch, calls } = scripted(frame({ event: "message.created", id: 1 }));
-		await take(events(fetch).conversation("a/../b"), 1);
+		await take(events(fetch).chat("a/../b"), 1);
 
-		expect(calls[0]?.url).toBe(`${BASE}/conversations/a%2F..%2Fb/events`);
+		expect(calls[0]?.url).toBe(`${BASE}/chats/a%2F..%2Fb/events`);
 	});
 });
 
@@ -133,7 +133,7 @@ describe("parsing", () => {
 				frame({ event: "message.completed", id: 2 }),
 		);
 
-		const seen = await take(events(fetch).conversation("c1"), 3);
+		const seen = await take(events(fetch).chat("c1"), 3);
 
 		expect(seen.map((event) => event.type)).toEqual([
 			"message.created",
@@ -145,16 +145,16 @@ describe("parsing", () => {
 	it("keeps a payload field it has no schema for", async () => {
 		const { fetch } = scripted(
 			frame({
-				event: "conversation.created",
+				event: "chat.created",
 				id: 1,
-				data: { v: 1, type: "conversation.created", conversationId: "c1" },
+				data: { v: 1, type: "chat.created", chatId: "c1" },
 			}),
 		);
 
 		expect((await take(events(fetch).workspace("w1"), 1))[0]).toEqual({
 			v: 1,
-			type: "conversation.created",
-			conversationId: "c1",
+			type: "chat.created",
+			chatId: "c1",
 		});
 	});
 
@@ -165,7 +165,7 @@ describe("parsing", () => {
 				frame({ event: "message.created", id: 1 }),
 		);
 
-		expect((await take(events(fetch).conversation("c1"), 1)).map((e) => e.type)).toEqual([
+		expect((await take(events(fetch).chat("c1"), 1)).map((e) => e.type)).toEqual([
 			"message.created",
 		]);
 	});
@@ -181,7 +181,7 @@ describe("parsing", () => {
 			})),
 		);
 		const toolCallCompleted = streamEvent("tool_call.completed", {
-			conversationId: "c1",
+			chatId: "c1",
 			messageId: "m1",
 			toolCall: {
 				type: "tool_call",
@@ -195,7 +195,7 @@ describe("parsing", () => {
 				},
 				status: "completed",
 				error: null,
-				mutating: false,
+				writeOrDelete: false,
 				atOffset: 0,
 				startedAt: "2026-10-06T02:50:51.000Z",
 				finishedAt: "2026-10-06T02:50:51.027Z",
@@ -206,7 +206,7 @@ describe("parsing", () => {
 				frame({ event: "message.delta", id: 2 }),
 		);
 
-		expect((await take(events(fetch).conversation("c1"), 2)).map((e) => e.type)).toEqual([
+		expect((await take(events(fetch).chat("c1"), 2)).map((e) => e.type)).toEqual([
 			"tool_call.completed",
 			"message.delta",
 		]);
@@ -215,7 +215,7 @@ describe("parsing", () => {
 	it("bounds an unfinished frame", async () => {
 		const { fetch } = scripted(`data: ${"x".repeat(1024 * 1024)}\n`);
 
-		await expect(take(events(fetch).conversation("c1"), 1)).rejects.toMatchObject({
+		await expect(take(events(fetch).chat("c1"), 1)).rejects.toMatchObject({
 			_tag: "InternalServerError",
 		});
 	});
@@ -223,7 +223,7 @@ describe("parsing", () => {
 	it("ignores the server's keep-alive comments", async () => {
 		const { fetch } = scripted(`: ping\n\n: ping\n\n${frame({ event: "turn.started", id: 1 })}`);
 
-		expect(await take(events(fetch).conversation("c1"), 1)).toHaveLength(1);
+		expect(await take(events(fetch).chat("c1"), 1)).toHaveLength(1);
 	});
 });
 
@@ -259,7 +259,7 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 8 }),
 		);
 
-		const seen = await take(events(fetch).conversation("c1"), 2);
+		const seen = await take(events(fetch).chat("c1"), 2);
 
 		expect(seen.map((event) => event.type)).toEqual(["message.created", "message.completed"]);
 		expect(calls[0]?.headers.get("last-event-id")).toBeNull();
@@ -275,7 +275,7 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 8 }),
 		);
 
-		await take(events(fetch).conversation("c1"), 3);
+		await take(events(fetch).chat("c1"), 3);
 
 		expect(calls[1]?.headers.get("last-event-id")).toBe("7");
 	});
@@ -287,7 +287,7 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 8 }),
 		);
 
-		await take(events(fetch).conversation("c1"), 3);
+		await take(events(fetch).chat("c1"), 3);
 
 		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
 	});
@@ -298,7 +298,7 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 9 }),
 		);
 
-		const seen = await take(events(fetch).conversation("c1"), 2);
+		const seen = await take(events(fetch).chat("c1"), 2);
 
 		expect(seen.map((event) => event.type)).toEqual(["reset", "message.completed"]);
 		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
@@ -309,7 +309,7 @@ describe("resume", () => {
 		// this stream is feeding — so `reset` is delivered like any other event.
 		const { fetch } = scripted(frame({ event: "reset", data: { v: 1, type: "reset" } }));
 
-		expect((await take(events(fetch).conversation("c1"), 1))[0]?.type).toBe("reset");
+		expect((await take(events(fetch).chat("c1"), 1))[0]?.type).toBe("reset");
 	});
 });
 
@@ -317,14 +317,14 @@ describe("failure", () => {
 	it("ends permanently when the server returns 204", async () => {
 		const { fetch, calls } = scripted(204, frame({ event: "message.created", id: 1 }));
 
-		expect(await take(events(fetch).conversation("c1"), 1)).toEqual([]);
+		expect(await take(events(fetch).chat("c1"), 1)).toEqual([]);
 		expect(calls).toHaveLength(1);
 	});
 
 	it("rejects a successful response that is not an event stream", async () => {
 		const fetch = vi.fn(async () => Response.json({ status: "ok" })) as typeof globalThis.fetch;
 
-		await expect(take(events(fetch).conversation("c1"), 1)).rejects.toMatchObject({
+		await expect(take(events(fetch).chat("c1"), 1)).rejects.toMatchObject({
 			_tag: "InternalServerError",
 		});
 	});
@@ -332,7 +332,7 @@ describe("failure", () => {
 	it("retries a server error", async () => {
 		const { fetch, calls } = scripted(503, frame({ event: "message.created", id: 1 }));
 
-		await take(events(fetch).conversation("c1"), 1);
+		await take(events(fetch).chat("c1"), 1);
 
 		expect(calls).toHaveLength(2);
 	});
@@ -340,9 +340,7 @@ describe("failure", () => {
 	it("gives up when the token is refused, rather than retrying forever", async () => {
 		const { fetch, calls } = scripted(401);
 
-		const failure = await take(events(fetch).conversation("c1"), 1).catch(
-			(error: unknown) => error,
-		);
+		const failure = await take(events(fetch).chat("c1"), 1).catch((error: unknown) => error);
 		expect(isApiFailure(failure)).toBe(true);
 		expect(calls).toHaveLength(1);
 	});
@@ -350,7 +348,7 @@ describe("failure", () => {
 	it("gives up on a resource that is not there", async () => {
 		const { fetch } = scripted(404);
 
-		await expect(take(events(fetch).conversation("gone"), 1)).rejects.toMatchObject({
+		await expect(take(events(fetch).chat("gone"), 1)).rejects.toMatchObject({
 			_tag: "NotFound",
 		});
 	});
@@ -361,7 +359,7 @@ describe("failure", () => {
 		// updates until it was reloaded.
 		const { fetch, calls } = scripted(429, 408, frame({ event: "message.created", id: 1 }));
 
-		expect(await take(events(fetch).conversation("c1"), 1)).toHaveLength(1);
+		expect(await take(events(fetch).chat("c1"), 1)).toHaveLength(1);
 		expect(calls).toHaveLength(3);
 	});
 });
@@ -369,7 +367,7 @@ describe("failure", () => {
 describe("closing", () => {
 	it("ends the iteration without throwing", async () => {
 		const { fetch } = scripted(frame({ event: "message.created", id: 1 }));
-		const stream = events(fetch).conversation("c1");
+		const stream = events(fetch).chat("c1");
 
 		const seen: unknown[] = [];
 		for await (const event of stream) {
@@ -384,7 +382,7 @@ describe("closing", () => {
 		const abort = new AbortController();
 		const { fetch, calls } = scripted(frame({ event: "message.created", id: 1 }));
 
-		for await (const _event of events(fetch).conversation("c1", { signal: abort.signal })) {
+		for await (const _event of events(fetch).chat("c1", { signal: abort.signal })) {
 			abort.abort();
 		}
 

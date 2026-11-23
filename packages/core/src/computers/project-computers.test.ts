@@ -4,14 +4,14 @@ import { COMPUTER_OPENSANDBOX_DEFAULT_SIZE } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { DateTime, type Duration, Effect, Fiber, Layer, Redacted } from "effect";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { computer, computerLease, user, workspace, workspaceMember } from "../database/schema.ts";
+import { computer, computerLease, membership, person, workspace } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
 import { seedProject } from "../workspaces/projects/seed.test-support.ts";
-import { ComputerCredentials } from "./computer-credentials.ts";
-import { ComputerProviderRepository } from "./computer-provider-repository.ts";
+import { ComputerProviderStore } from "./computer-provider-store.ts";
+import { ComputerSignIn } from "./computer-sign-in.ts";
 import { Computers } from "./computers.ts";
 import { ProjectComputers } from "./project-computers.ts";
 import { recordingIds, removeWorkVolumes } from "./testing.ts";
@@ -29,20 +29,20 @@ const IMAGE = "debian:bookworm-slim";
 const HOLDER: ProjectComputers.Holder = { kind: "turn", id: "turn-under-test" };
 
 describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox", () => {
-	const connection: Computers.OpenSandboxConnection = {
+	const access: Computers.OpenSandboxAccess = {
 		provider: "opensandbox",
 		baseUrl: env.OPENSANDBOX_URL ?? "",
 		apiKey: Redacted.make(env.OPENSANDBOX_API_KEY ?? ""),
 		image: IMAGE,
 		size: COMPUTER_OPENSANDBOX_DEFAULT_SIZE,
-		networkMode: "allowlist",
+		networkMode: "allowed-hosts-only",
 	};
 	let projectComputers: ProjectComputers.Interface;
 	// What the project's computer is signed in with, and how often it was asked.
-	let signedIn: ComputerCredentials.SignedIn = ComputerCredentials.NOT_SIGNED_IN;
+	let signedIn: ComputerSignIn.SignedIn = ComputerSignIn.NOT_SIGNED_IN;
 	let signIns = 0;
 	let registryAnswers = true;
-	let providers: ComputerProviderRepository.Interface;
+	let providers: ComputerProviderStore.Interface;
 	let direct: Computers.Provider;
 	let theProject: ProjectComputers.Project;
 	let ownerId: string;
@@ -50,10 +50,10 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 
 	beforeAll(async () => {
 		[projectComputers, providers] = await runOnPostgres(
-			Effect.all([ProjectComputers.Service, ComputerProviderRepository.Service]).pipe(
-				Effect.provide(Layer.merge(ProjectComputers.layer, ComputerProviderRepository.layer)),
+			Effect.all([ProjectComputers.Service, ComputerProviderStore.Service]).pipe(
+				Effect.provide(Layer.merge(ProjectComputers.layer, ComputerProviderStore.layer)),
 				Effect.provide([
-					Layer.succeed(ComputerCredentials.Service, {
+					Layer.succeed(ComputerSignIn.Service, {
 						forProject: () =>
 							Effect.sync(() => {
 								signIns += 1;
@@ -76,7 +76,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			),
 		);
 		direct = await Effect.runPromise(
-			Effect.map(Computers.Service, (computers) => computers.forConnection(connection)).pipe(
+			Effect.map(Computers.Service, (computers) => computers.forAccess(access)).pipe(
 				Effect.provide(Computers.layer.pipe(Layer.provide(Ids.layer))),
 			),
 		);
@@ -87,8 +87,8 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 	afterEach(async () => {
 		const server = SandboxManager.create({
 			connectionConfig: new ConnectionConfig({
-				domain: connection.baseUrl,
-				apiKey: Redacted.value(connection.apiKey),
+				domain: access.baseUrl,
+				apiKey: Redacted.value(access.apiKey),
 			}),
 		});
 		const { items } = await server.listSandboxInfos({
@@ -114,20 +114,20 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 		);
 		const [owner] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({ name: "Sam", email: `computer-${suffix}@example.com` })
 				.returning(),
 		);
 		if (!space || !owner) throw new Error("fixture");
 		ownerId = owner.id;
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values({ workspaceId: space.id, userId: owner.id }),
+			db.insert(membership).values({ workspaceId: space.id, personId: owner.id }),
 		);
 		const made = await onDatabase((db) =>
 			seedProject(db, { workspaceId: space.id, name: "Launch", slug: "launch" }),
 		);
 		theProject = { workspaceId: space.id, projectId: made.id };
-		signedIn = ComputerCredentials.NOT_SIGNED_IN;
+		signedIn = ComputerSignIn.NOT_SIGNED_IN;
 		await addProvider();
 	});
 
@@ -137,9 +137,9 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			providers.create(theProject.workspaceId, {
 				createdById: ownerId,
 				provider: {
-					settings: { preset: "opensandbox", serverUrl: connection.baseUrl, image: IMAGE },
+					settings: { builtIn: "opensandbox", serverUrl: access.baseUrl, image: IMAGE },
 					enabled: true,
-					apiKey: Redacted.value(connection.apiKey),
+					apiKey: Redacted.value(access.apiKey),
 				},
 			}),
 		);
@@ -165,12 +165,12 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 	const writeWork = (computer: Computers.Computer) =>
 		exec(
 			computer,
-			"mkdir -p threads/t1/app/node_modules && echo kept > threads/t1/app/notes.md && echo ignored > threads/t1/app/node_modules/big.js && echo node_modules > threads/t1/app/.gitignore",
+			"mkdir -p chats/t1/app/node_modules && echo kept > chats/t1/app/notes.md && echo ignored > chats/t1/app/node_modules/big.js && echo node_modules > chats/t1/app/.gitignore",
 		);
 	const readWork = async (computer: Computers.Computer) => {
 		const listed = await exec(
 			computer,
-			"cat threads/t1/app/notes.md threads/t1/app/node_modules/big.js 2>&1",
+			"cat chats/t1/app/notes.md chats/t1/app/node_modules/big.js 2>&1",
 		);
 		return listed.stdout.text;
 	};
@@ -233,10 +233,10 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 	);
 
 	it(
-		"says a paused computer came back without its programs",
+		"says a sleeping computer came back without its programs",
 		async () => {
 			const first = await open();
-			await Effect.runPromise(direct.pause(first.computer.id));
+			await Effect.runPromise(direct.sleep(first.computer.id));
 
 			expect((await open()).arrival).toBe("rebooted");
 		},
@@ -330,43 +330,43 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 				.set({ lastUsedAt: new Date(Date.now() - 60 * 60 * 1000) })
 				.where(eq(computer.projectId, theProject.projectId)),
 		);
-	const pausedAt = async () =>
+	const sleptAt = async () =>
 		(
 			await onDatabase((db) =>
 				db
-					.select({ pausedAt: computer.pausedAt })
+					.select({ sleptAt: computer.sleptAt })
 					.from(computer)
 					.where(eq(computer.projectId, theProject.projectId)),
 			)
-		)[0]?.pausedAt;
+		)[0]?.sleptAt;
 
 	it(
-		"never pauses a computer a turn holds",
+		"never puts to sleep a computer a turn holds",
 		async () => {
 			await open();
 			await idleForAnHour();
 
-			await runOnPostgres(projectComputers.pauseIdle);
+			await runOnPostgres(projectComputers.sleepIdle);
 
-			expect(await pausedAt()).toBeNull();
+			expect(await sleptAt()).toBeNull();
 		},
 		SLOW,
 	);
 
 	it(
-		"pauses a computer once its turns have let go and it has sat idle, and resumes it on next use",
+		"puts a computer to sleep once its turns have let go and it has sat idle, and resumes it on next use",
 		async () => {
 			const first = await open();
 			await runOnPostgres(projectComputers.release(HOLDER));
 			await idleForAnHour();
 
-			await runOnPostgres(projectComputers.pauseIdle);
+			await runOnPostgres(projectComputers.sleepIdle);
 
-			expect(await pausedAt()).toBeInstanceOf(Date);
+			expect(await sleptAt()).toBeInstanceOf(Date);
 			const reopened = await open();
 			expect(reopened.computer.id).toBe(first.computer.id);
 			expect(reopened.arrival).toBe("rebooted");
-			expect(await pausedAt()).toBeNull();
+			expect(await sleptAt()).toBeNull();
 		},
 		SLOW,
 	);
@@ -374,16 +374,16 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 	const measuredDisk = () => runOnPostgres(projectComputers.diskOf(theProject));
 
 	it(
-		"measures a running computer's disk, and what each bot's home, the conversations' folders and /tmp take of it",
+		"measures a running computer's disk, and what each bot's home, the chats' folders and /tmp take of it",
 		async () => {
 			const botId = crypto.randomUUID();
 			const { computer: opened } = await open();
 			await exec(
 				opened,
 				[
-					`mkdir -p bots/${botId} threads/t1`,
+					`mkdir -p bots/${botId} chats/t1`,
 					`head -c 3000000 /dev/zero > bots/${botId}/cache`,
-					"head -c 2000000 /dev/zero > threads/t1/clone",
+					"head -c 2000000 /dev/zero > chats/t1/clone",
 					"head -c 1000000 /dev/zero > /tmp/download",
 				].join(" && "),
 			);
@@ -396,7 +396,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			const sized = (kind: string) => disk?.folders?.find((folder) => folder.kind === kind);
 			expect(sized("home")).toMatchObject({ botId, bytes: expect.any(Number) });
 			expect(sized("home")?.bytes).toBeGreaterThanOrEqual(3_000_000);
-			expect(sized("conversations")?.bytes).toBeGreaterThanOrEqual(2_000_000);
+			expect(sized("chats")?.bytes).toBeGreaterThanOrEqual(2_000_000);
 			expect(sized("temporary")?.bytes).toBeGreaterThanOrEqual(1_000_000);
 		},
 		SLOW,
@@ -433,14 +433,14 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 	);
 
 	it(
-		"leaves a paused computer paused, with its last measurement",
+		"leaves a sleeping computer asleep, with its last measurement",
 		async () => {
 			await open();
 			await runOnPostgres(projectComputers.measureDisks);
 			const before = await measuredDisk();
 			await runOnPostgres(projectComputers.release(HOLDER));
 			await idleForAnHour();
-			await runOnPostgres(projectComputers.pauseIdle);
+			await runOnPostgres(projectComputers.sleepIdle);
 			await onDatabase((db) =>
 				db
 					.update(computer)
@@ -450,7 +450,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 
 			await runOnPostgres(projectComputers.measureDisks);
 
-			expect(await pausedAt()).toBeInstanceOf(Date);
+			expect(await sleptAt()).toBeInstanceOf(Date);
 			expect((await measuredDisk())?.usedBytes).toBe(before?.usedBytes);
 		},
 		SLOW,
@@ -465,9 +465,9 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			);
 			await idleForAnHour();
 
-			await runOnPostgres(projectComputers.pauseIdle);
+			await runOnPostgres(projectComputers.sleepIdle);
 
-			expect(await pausedAt()).toBeInstanceOf(Date);
+			expect(await sleptAt()).toBeInstanceOf(Date);
 		},
 		SLOW,
 	);
@@ -476,7 +476,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 	const changeImage = async (image: string) =>
 		runOnPostgres(
 			providers.update(theProject.workspaceId, (await enabledProvider()).id, {
-				settings: { preset: "opensandbox", serverUrl: connection.baseUrl, image },
+				settings: { builtIn: "opensandbox", serverUrl: access.baseUrl, image },
 			}),
 		);
 	const recorded = async () =>
@@ -513,7 +513,7 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			const after = await recorded();
 			expect(after?.image).toMatch(/^python@sha256:/);
 			expect(after?.providerComputerId).not.toBe(first.computer.id);
-			expect(await pausedAt()).toBeInstanceOf(Date);
+			expect(await sleptAt()).toBeInstanceOf(Date);
 			expect(await missing(first.computer.id)).toBe(true);
 			const reopened = await open();
 			expect(reopened.arrival).toBe("rebooted");
@@ -581,8 +581,8 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			await runOnPostgres(
 				providers.update(theProject.workspaceId, provider.id, {
 					settings: {
-						preset: "opensandbox",
-						serverUrl: connection.baseUrl,
+						builtIn: "opensandbox",
+						serverUrl: access.baseUrl,
 						image: "python:3.13-slim",
 					},
 				}),
@@ -627,8 +627,8 @@ describe.skipIf(!configured)("bots' computers, against Postgres and OpenSandbox"
 			await runOnPostgres(
 				providers.update(theProject.workspaceId, provider.id, {
 					settings: {
-						preset: "opensandbox",
-						serverUrl: connection.baseUrl,
+						builtIn: "opensandbox",
+						serverUrl: access.baseUrl,
 						image: "python:3.13-slim",
 					},
 				}),

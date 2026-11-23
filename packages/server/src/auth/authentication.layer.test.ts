@@ -1,7 +1,7 @@
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { noDatabase } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
-import { Installation } from "@sugabots/core/installation/installation";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
@@ -27,7 +27,7 @@ async function startup(env: Record<string, string>) {
 				Authentication.layer.pipe(
 					Layer.provide([
 						noDatabase,
-						Installation.layer,
+						ServerSettings.layer,
 						Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
 						unimplemented(Accounts.Service, { requireEmailVerification: false }),
 					]),

@@ -38,7 +38,7 @@ const importFirst = (moduleUrl: URL) => `await import(${JSON.stringify(moduleUrl
 
 describe("loading the server in a fresh process", () => {
 	it(
-		"imports the entry point without starting it, and its Main is a layer",
+		"imports the server's main module without starting it, and its Main is a layer",
 		() =>
 			expectCleanExit(`
 				const { Main } = await import(${JSON.stringify(new URL("index.ts", import.meta.url).href)});
@@ -50,13 +50,13 @@ describe("loading the server in a fresh process", () => {
 
 	it(
 		"imports the floor control first",
-		() => expectCleanExit(importFirst(new URL("conversations/floor/floor-control.ts", coreSource))),
+		() => expectCleanExit(importFirst(new URL("chats/floor/floor-control.ts", coreSource))),
 		CHILD_TIMEOUT_MS,
 	);
 
 	it(
 		"imports the turn steps first",
-		() => expectCleanExit(importFirst(new URL("conversations/turns/turn.steps.ts", coreSource))),
+		() => expectCleanExit(importFirst(new URL("chats/turns/turn.steps.ts", coreSource))),
 		CHILD_TIMEOUT_MS,
 	);
 });

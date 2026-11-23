@@ -24,7 +24,7 @@
 # next starts. Without one, a desktop keeps the colour it has, or starts in
 # Sugabots' own.
 #
-# `--folder` is the folder of the conversation the desktop is for, where the dock's
+# `--folder` is the folder of the chat the desktop is for, where the dock's
 # Files opens, beside the bot's home and the workspace. `start` takes the
 # folder it runs in.
 #
@@ -134,18 +134,18 @@ draw_look() {
 	xfconf-query -c xfce4-desktop -p "$backdrop/image-style" -n -t int -s 5
 }
 
-# The folder of the conversation display N's desktop is for, as `desktop`,
+# The folder of the chat display N's desktop is for, as `desktop`,
 # `session` or `start` recorded it; none for a desktop started without one.
 display_folder() {
 	cat "$state/$1.folder" 2>/dev/null || true
 }
 
-# Where display N's browser saves what people download: in the conversation's
+# Where display N's browser saves what people download: in the chat's
 # folder, beside the bots' work, or the bot's home without one.
 display_downloads() {
-	local conversation
-	conversation="$(display_folder "$1")"
-	echo "${conversation:-$HOME}/Downloads"
+	local chat
+	chat="$(display_folder "$1")"
+	echo "${chat:-$HOME}/Downloads"
 }
 
 # Sugabots' own accent, for a desktop no bot's colour was given.
@@ -164,7 +164,7 @@ desktop_options() {
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--accent) accent="${2:?accent colour}" ;;
-		--folder) folder="${2:?conversation folder}" ;;
+		--folder) folder="${2:?chat folder}" ;;
 		*)
 			echo "unknown option: $1" >&2
 			exit 2
@@ -374,26 +374,26 @@ session() {
 	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) browser=$((8930 + n)) started=$started $(passwords "$n")"
 }
 
-# Thunar on display N, at its conversation's folder, with the places beside it: This
-# Conversation, Downloads, This Bot, Workspace, and its own File System. They are
+# Thunar on display N, at its chat's folder, with the places beside it: This
+# Chat, Downloads, This Bot, Workspace, and its own File System. They are
 # bookmarks, which GTK reads from the home, and the bot's home is shared by
-# its desktops in every conversation, so Thunar runs with a home of its own for the
+# its desktops in every chat, so Thunar runs with a home of its own for the
 # display. Its Home entry, that home, is hidden; it can't hide its File
 # System instead of a bookmark to `/`, as it hides entries by their folder.
 # A shell Thunar opens goes back to the bot's home.
 open_files() {
-	local n="$1" bot_home="$HOME" conversation downloads
+	local n="$1" bot_home="$HOME" chat downloads
 	local files_home="$state/$n.files"
-	conversation="$(display_folder "$n")"
+	chat="$(display_folder "$n")"
 	downloads="$(display_downloads "$n")"
-	# A conversation's folder is made by the first thing to use it, which may not
+	# A chat's folder is made by the first thing to use it, which may not
 	# have happened yet.
-	mkdir -p "$files_home/.config/gtk-3.0" ${conversation:+"$conversation"} "$downloads"
+	mkdir -p "$files_home/.config/gtk-3.0" ${chat:+"$chat"} "$downloads"
 	# The bot's colours, and the image the dock's CSS names beside them.
 	ln -sf "$bot_home/.config/gtk-3.0/gtk.css" "$bot_home/.config/gtk-3.0/sugabots-dock-dot.svg" \
 		"$files_home/.config/gtk-3.0/"
 	{
-		[ -z "$conversation" ] || echo "file://$conversation This Conversation"
+		[ -z "$chat" ] || echo "file://$chat This Chat"
 		echo "file://$downloads Downloads"
 		echo "file://$bot_home This Bot"
 		echo "file:///workspace Workspace"
@@ -403,7 +403,7 @@ open_files() {
 		[ -f "\$HOME/.bashrc" ] && . "\$HOME/.bashrc"
 	EOF
 	xfconf-query -c thunar -p /hidden-bookmarks -n -a -t string -s "file://$files_home"
-	HOME="$files_home" exec thunar "${conversation:-/workspace}"
+	HOME="$files_home" exec thunar "${chat:-/workspace}"
 }
 
 # What the dock opens on the desktop it runs on.
@@ -432,7 +432,7 @@ open() {
 case "${1:-}" in
 start)
 	n="${2:-$(free_display)}"
-	# Bots start desktops from their conversation's folder.
+	# Bots start desktops from their chat's folder.
 	echo "$PWD" >"$state/$n.folder"
 	desktop "$n"
 	echo "DISPLAY=:$n"

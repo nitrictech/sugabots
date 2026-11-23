@@ -50,12 +50,12 @@ export function BackButton({ onClick, className }: { onClick: () => void; classN
  * here.
  *
  * - `leave(toHome)` goes back to the page this one was opened from, which
- *   could be anywhere, as Back does, so a conversation opened from Home goes back to
+ *   could be anywhere, as Back does, so a chat opened from Home goes back to
  *   Home; or `toHome` when this page was the first one opened.
  * - `leaveFor(isHome, toHome)` goes back only when the page behind is home,
  *   as `isHome` tells it, and otherwise `toHome`: for a page that is gone,
  *   whose Back would otherwise return to it, or a run or collaboration that must close onto
- *   the thread it is in rather than whatever was open before it.
+ *   the chat it is in rather than whatever was open before it.
  * - `label(home)` names where `leave` goes: plainly "Back" to the opener, or
  *   "Back to" `home`.
  */

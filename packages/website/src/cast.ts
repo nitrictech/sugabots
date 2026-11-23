@@ -1,7 +1,7 @@
 import type { ChatAuthor } from "@/components/chat";
 
 /**
- * Everyone the landing page's and the docs' demo conversations put words in
+ * Everyone the landing page's and the docs' demo chats put words in
  * the mouth of. The portraits are from Unsplash; see the README.
  */
 export const cast = {
@@ -16,42 +16,42 @@ export const cast = {
 		initials: "LD",
 		photo: "/people/lorraine-delgado.jpg",
 	},
-	tripPlanner: { kind: "bot", name: "Trip Planner", look: { color: "sky", face: "pill" } },
-	budgetKeeper: { kind: "bot", name: "Budget Keeper", look: { color: "yellow", face: "square" } },
+	tripPlanner: { kind: "bot", name: "Trip Planner", look: { color: "sky", eyes: "pill" } },
+	budgetKeeper: { kind: "bot", name: "Budget Keeper", look: { color: "yellow", eyes: "square" } },
 	inboxSorter: {
 		kind: "bot",
 		name: "Inbox Sorter",
-		look: { color: "green", face: "pill", shape: "squircle" },
+		look: { color: "green", eyes: "pill", shape: "squircle" },
 	},
 	growthDesk: {
 		kind: "bot",
 		name: "Growth Desk",
-		look: { color: "green", face: "pill", shape: "leaf" },
+		look: { color: "green", eyes: "pill", shape: "leaf" },
 	},
 	pricingAnalyst: {
 		kind: "bot",
 		name: "Pricing Analyst",
-		look: { color: "sky", face: "pill", shape: "hexagon" },
+		look: { color: "sky", eyes: "pill", shape: "hexagon" },
 	},
 	copywriter: {
 		kind: "bot",
 		name: "Copywriter",
-		look: { color: "orange", face: "pill", shape: "blob" },
+		look: { color: "orange", eyes: "pill", shape: "blob" },
 	},
 	researcher: {
 		kind: "bot",
 		name: "Researcher",
-		look: { color: "sky", face: "pill", shape: "drop" },
+		look: { color: "sky", eyes: "pill", shape: "drop" },
 	},
 	journal: {
 		kind: "bot",
 		name: "Journal",
-		look: { color: "purple", face: "pill", shape: "pebble" },
+		look: { color: "purple", eyes: "pill", shape: "pebble" },
 	},
 	ticketDesk: {
 		kind: "bot",
 		name: "Ticket Desk",
-		look: { color: "purple", face: "pill", shape: "circle" },
+		look: { color: "purple", eyes: "pill", shape: "circle" },
 	},
 } as const satisfies Record<string, ChatAuthor>;
 

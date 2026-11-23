@@ -3,20 +3,19 @@ import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { BlobDeletions } from "@sugabots/core/blob-store/deletions";
+import { Automations } from "@sugabots/core/chats/automations/automations";
+import { AutomationRuns } from "@sugabots/core/chats/automations/runs";
+import { ChatServices } from "@sugabots/core/chats/chat-services";
+import { DesktopViewer } from "@sugabots/core/chats/tools/browser/viewer";
+import { BuiltInTools } from "@sugabots/core/chats/tools/built-in";
+import { ComputerTools } from "@sugabots/core/chats/tools/computer";
+import { ConnectorTools } from "@sugabots/core/chats/tools/connectors";
+import { Turns } from "@sugabots/core/chats/turns/turns";
+import { ChatWorkflows } from "@sugabots/core/chats/workflows";
 import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
 import { ComputerProviderSetup } from "@sugabots/core/computers/computer-provider-setup";
 import { ProjectComputerSetup } from "@sugabots/core/computers/project-computer-setup";
 import { ProjectComputers } from "@sugabots/core/computers/project-computers";
-import { Automations } from "@sugabots/core/conversations/automations/automations";
-import { AutomationRuns } from "@sugabots/core/conversations/automations/runs";
-import { Conversations } from "@sugabots/core/conversations/conversations";
-import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
-import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
-import { ComputerTools } from "@sugabots/core/conversations/tools/computer";
-import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
-import { Turns } from "@sugabots/core/conversations/turns/turns";
-import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
-import { Credentials } from "@sugabots/core/credentials/credentials";
 import { layer as databaseLayer, directClientLayer } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
@@ -27,21 +26,22 @@ import { Files } from "@sugabots/core/files/files";
 import { FilePages } from "@sugabots/core/files/pages";
 import { UnsentUploads } from "@sugabots/core/files/unsent-uploads";
 import { Ids } from "@sugabots/core/ids/ids";
-import { Installation } from "@sugabots/core/installation/installation";
 import { Notifications } from "@sugabots/core/notifications/notifications";
-import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
-import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
-import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
-import { GitHubSignIn } from "@sugabots/core/providers/connections/github/github-sign-in";
+import { ConnectorSetup } from "@sugabots/core/providers/connectors/connector-setup";
+import { GitHubApps } from "@sugabots/core/providers/connectors/github/github-app";
+import { GitHubConnectors } from "@sugabots/core/providers/connectors/github/github-connectors";
+import { GitHubSignIn } from "@sugabots/core/providers/connectors/github/github-sign-in";
+import { BuiltInProviderSeeding } from "@sugabots/core/providers/model-providers/built-in-provider-seeding";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
-import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-seeding";
 import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
+import { Secrets } from "@sugabots/core/secrets/secrets";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { ProjectAdministration } from "@sugabots/core/workspaces/projects/project-administration";
+import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
@@ -55,21 +55,21 @@ import { Workflows } from "./workflows.ts";
 
 /**
  * What the process owns once and every service above builds on: the pools,
- * ids, blob storage, the cipher, the installation's settings and egress
+ * ids, blob storage, the cipher, the server's settings and egress
  * policy, the durable events and the bus that fans them out, and the workflow
  * engine with its lanes. A service's `layer` never provides these, so there is one of each
  * however many services use them.
  */
 const Infrastructure = Layer.mergeAll(
 	BlobStore.layer,
-	Credentials.layer,
+	Secrets.layer,
 	Egress.layer,
 	EventOutbox.layer,
-	ConversationWorkflows.lanes,
+	ChatWorkflows.lanes,
 ).pipe(
 	Layer.provideMerge(
 		Layer.mergeAll(
-			Installation.layer,
+			ServerSettings.layer,
 			EventBus.layer.pipe(Layer.provide(directClientLayer)),
 			Workflows.engine,
 		),
@@ -85,17 +85,17 @@ const OutsideSystems = Layer.mergeAll(
 	BuiltInTools.layer,
 	ComputerTools.layer,
 	DesktopViewer.layer,
-	ConnectionTools.layer,
+	ConnectorTools.layer,
 );
 
 /**
- * Accounts, members, projects, bots, their files and the providers they
+ * Accounts, memberships, projects, bots, their files and the providers they
  * use, trying a model, and notifying people.
  */
 const WorkspacesAndProviders = Layer.mergeAll(
 	Membership.layer,
 	Notifications.layer,
-	Onboarding.layer,
+	WorkspaceSetup.layer,
 	ProjectAdministration.layer,
 	BotAdministration.layer,
 	ModelProviderSetup.layer,
@@ -104,34 +104,34 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	ComputerNetwork.layer,
 	ProjectComputerSetup.layer,
 	GitHubApps.layer,
-	GitHubConnections.layer,
-	ConnectionSetup.layer,
+	GitHubConnectors.layer,
+	ConnectorSetup.layer,
 	Files.layer,
 	FilePages.layer,
 	Usage.layer,
 ).pipe(Layer.provideMerge(Accounts.layer));
 
 /**
- * The conversations, over how they start and signal their workflows. Their
+ * The chats, over how they start and signal their workflows. Their
  * events go through the outbox.
  */
-const ConversationServices = Conversations.layer.pipe(
+const ChatServiceLayers = ChatServices.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(Turns.signalsLayer, AutomationRuns.layer)),
 );
 
 /**
  * What runs without a request: the workflows, the automation scheduler, the
- * nightly event prune, deleting queued blobs, seeding the preset providers
+ * nightly event prune, deleting queued blobs, seeding the built-in providers
  * into every workspace, pausing idle computers, and measuring running ones'
  * disks.
  */
 const Background = Layer.mergeAll(
-	ConversationWorkflows.layer,
+	ChatWorkflows.layer,
 	Automations.schedulerLayer,
 	EventPruning.layer,
 	BlobDeletions.layer,
 	UnsentUploads.layer,
-	PresetSeeding.layer,
+	BuiltInProviderSeeding.layer,
 	ProjectComputers.sweepLayer,
 );
 
@@ -150,7 +150,7 @@ const Http = listeningLayer.pipe(
  * the statements they all send.
  */
 export const Main = Layer.mergeAll(Http, Background).pipe(
-	Layer.provide(ConversationServices),
+	Layer.provide(ChatServiceLayers),
 	Layer.provide(WorkspacesAndProviders),
 	Layer.provide(OutsideSystems),
 	// What bots' computers are signed in to, which computers leave to the edge.

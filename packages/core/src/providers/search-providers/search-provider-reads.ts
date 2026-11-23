@@ -1,5 +1,5 @@
 import type { SearchProvider } from "@sugabots/contracts";
-import { searchProviderPreset } from "@sugabots/contracts";
+import { searchBuiltInProvider } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
@@ -13,16 +13,16 @@ export const searchProviderOf = (workspaceId: string) =>
 	).pipe(Effect.map(([row]) => row && toSearchProvider(row)));
 
 export function toSearchProvider(row: SearchProviderRow): SearchProvider {
-	const preset = searchProviderPreset(row.preset);
+	const builtIn = searchBuiltInProvider(row.builtIn);
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
-		preset: row.preset,
-		name: preset.name,
+		builtIn: row.builtIn,
+		name: builtIn.name,
 		baseUrl: row.baseUrl,
 		enabled: row.enabled,
 		status: configurationStatus({
-			missingKey: preset.requiresApiKey && row.apiKeyEncrypted === null,
+			missingKey: builtIn.requiresApiKey && row.apiKeyEncrypted === null,
 			lastTestedAt: row.lastTestedAt,
 			lastTestError: row.lastTestError,
 		}),

@@ -18,7 +18,7 @@ const ComputerSettingsPage = lazyNamed(
 
 /*
  * A bot's settings and a project's, and the computer each has: pages of its
- * own beside its threads, as its files and connections are.
+ * own beside its chats, as its files and connectors are.
  */
 
 export const botSettingsRoute = createRoute({
@@ -38,7 +38,7 @@ export const botComputerRoute = createRoute({
 	component: () => {
 		const owner = useBotRouteOwner();
 		if (!owner) return null;
-		// A Personal Assistant's computer is ours to set up; its person changes its look and connections.
+		// A Personal Assistant's computer is ours to set up; its person changes its look and connectors.
 		if (owner.bot.assistant) return <Navigate {...botSettingsLink(owner.bot)} replace />;
 		return <ComputerSettingsPage key={owner.bot.id} owner={owner} />;
 	},

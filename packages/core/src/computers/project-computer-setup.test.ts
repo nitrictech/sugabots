@@ -5,16 +5,16 @@ import {
 	bot,
 	computer,
 	computerProvider,
+	membership,
+	person,
 	project,
-	user,
 	workspace,
-	workspaceMember,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, type Promised } from "../database/testing.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { unimplemented } from "../testing.ts";
 import { servedOnPostgresAs } from "../workspaces/testing.ts";
-import { ComputerCredentials } from "./computer-credentials.ts";
+import { ComputerSignIn } from "./computer-sign-in.ts";
 import type { Computers } from "./computers.ts";
 import { ProjectComputerSetup } from "./project-computer-setup.ts";
 
@@ -23,14 +23,14 @@ import { ProjectComputerSetup } from "./project-computer-setup.ts";
  * scoping is SQL a fake can't check. Skips without a migrated database.
  */
 describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against Postgres", () => {
-	let setupAs: (userId: string) => Promised<ProjectComputerSetup.Interface>;
+	let setupAs: (personId: string) => Promised<ProjectComputerSetup.Interface>;
 
 	beforeAll(async () => {
 		setupAs = await servedOnPostgresAs(
 			ProjectComputerSetup.Service,
 			ProjectComputerSetup.layer.pipe(
 				Layer.provide([
-					unimplemented(ComputerCredentials.Service, {}),
+					unimplemented(ComputerSignIn.Service, {}),
 					unimplemented(Egress.Service, {}),
 				]),
 			),
@@ -51,7 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against 
 		);
 		const [ada, sam] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values([
 					{ name: "Ada", email: `ada-disks-${stamp}@example.com` },
 					{ name: "Sam", email: `sam-disks-${stamp}@example.com` },
@@ -61,9 +61,9 @@ describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against 
 		if (!space || !ada || !sam) throw new Error("fixture");
 		const workspaceId = space.id;
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values([
-				{ workspaceId, userId: ada.id, role: "admin" },
-				{ workspaceId, userId: sam.id, role: "member" },
+			db.insert(membership).values([
+				{ workspaceId, personId: ada.id, role: "admin" },
+				{ workspaceId, personId: sam.id, role: "editor" },
 			]),
 		);
 		const [provider] = await onDatabase((db) =>
@@ -71,7 +71,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against 
 				.insert(computerProvider)
 				.values({
 					workspaceId,
-					settings: { preset: "opensandbox", serverUrl: "http://computers.test", image: "debian" },
+					settings: { builtIn: "opensandbox", serverUrl: "http://computers.test", image: "debian" },
 					enabled: true,
 				})
 				.returning(),
@@ -91,7 +91,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects' computers' disks, against 
 						name: `Bot ${index}`,
 						handle: `bot-${index}`,
 						color: "sky" as const,
-						face: "pill" as const,
+						eyes: "pill" as const,
 					})),
 				)
 				.returning(),

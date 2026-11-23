@@ -1,6 +1,6 @@
 import type { ChatMessageItem, Message } from "@sugabots/contracts";
 import { chatItemCreatedAt } from "@/lib/chats.ts";
-import { startsNewDay } from "./conversation-layout.ts";
+import { startsNewDay } from "./chat-layout.ts";
 
 /** An automation's run, or its pausing itself, which a chat draws as a row of its own. */
 type AutomationItem = Extract<ChatMessageItem, { kind: "run" | "automation_paused" }>;
@@ -13,7 +13,7 @@ type ChatGroup = { key: string; at: string; separated: boolean } & (
 
 /**
  * A chat's items in the order they happened: the pages loaded, those sent
- * from here and not yet heard back, and those the conversation's live state
+ * from here and not yet heard back, and those the chat's live state
  * holds, each once.
  */
 export function mergeChatItems(

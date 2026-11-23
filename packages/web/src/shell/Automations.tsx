@@ -4,7 +4,7 @@ import { cn } from "cn";
 import { Plus, RefreshCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAutomations } from "@/lib/automations.ts";
-import { useProjectThreads } from "@/lib/chats.ts";
+import { useProjectChats } from "@/lib/chats.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import {
 	ownerLink,
@@ -116,7 +116,7 @@ type ShownAutomation = Omit<ListedAutomation, "status"> & {
 /**
  * A bot's or a project's automations as its Automations list shows them, or
  * undefined until they are loaded, each with how it stands for whoever may
- * read its runs. A bot's come with its threads; somebody who manages the
+ * read its runs. A bot's come with its chats; somebody who manages the
  * automations of a bot they do not reach, as an administrator does another
  * person's private bot, reads them as they are set up, as a project's are,
  * each run by its lead bot.
@@ -125,21 +125,21 @@ export function useListedAutomations(owner: ResourceOwner): {
 	automations: ShownAutomation[] | undefined;
 	isError: boolean;
 } {
-	const fromThreads = "bot" in owner && owner.bot.permissions.talk ? owner.bot : undefined;
-	const threads = useProjectThreads(fromThreads?.defaultProjectId);
+	const fromChats = "bot" in owner && owner.bot.permissions.talk ? owner.bot : undefined;
+	const chats = useProjectChats(fromChats?.defaultProjectId);
 	const definitions = useAutomations(resourceProjectId(owner));
 	const runner = useLeadBot(owner);
-	if (fromThreads) {
+	if (fromChats) {
 		const definitionById = new Map(
 			definitions.data?.map((automation) => [automation.id, automation]),
 		);
 		return {
-			automations: threads.data?.automations.map((row) => ({
+			automations: chats.data?.automations.map((row) => ({
 				...row,
-				bot: fromThreads,
+				bot: fromChats,
 				definition: definitionById.get(row.automation.id),
 			})),
-			isError: threads.isError,
+			isError: chats.isError,
 		};
 	}
 	return {
@@ -154,7 +154,7 @@ export function useListedAutomations(owner: ResourceOwner): {
 				},
 				bot: runner,
 				definition: automation,
-				conversation: null,
+				chat: null,
 				mentionsYou: false,
 				...(automation.status && { status: automation.status }),
 			})),
@@ -260,7 +260,7 @@ export function AutomationRow({
 				<>
 					<BotAvatar
 						color={row.bot.color}
-						face={row.bot.face}
+						eyes={row.bot.eyes}
 						shape={row.bot.shape}
 						size={20}
 						className={cn("shrink-0", paused && "opacity-50")}

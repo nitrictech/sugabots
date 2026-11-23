@@ -98,7 +98,7 @@ export class ModelProvidersApi extends HttpApiGroup.make("modelProviders")
 			success: modelProviderSchema,
 			error: [BadRequest, Conflict, ...refused],
 		}),
-		HttpApiEndpoint.post("fetchModels", `${root}/:providerId/fetch-models`, {
+		HttpApiEndpoint.post("discoverModels", `${root}/:providerId/discover-models`, {
 			params: provider,
 			success: providerFetchResultSchema,
 			error: refused,

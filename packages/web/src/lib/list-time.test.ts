@@ -8,7 +8,7 @@ import {
 
 const now = new Date(2026, 8, 25, 18, 30);
 
-describe("a conversation list's times", () => {
+describe("a chat list's times", () => {
 	it("shows the time for today, without a day period", () => {
 		expect(formatListTime(new Date(2026, 8, 25, 6, 12), now, "en-AU")).toBe("6:12");
 	});

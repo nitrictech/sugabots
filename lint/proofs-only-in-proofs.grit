@@ -1,0 +1,8 @@
+language js(typescript)
+
+or {
+	`defineProof($_)` as $made,
+	`$_.prove($_, $_)` as $made
+} where {
+	register_diagnostic(span=$made, message="Only `core/src/proofs/` makes proofs: each kind in one prover's file, which keeps its `defineProof` to itself. Call that file's `prove…` function instead.")
+}

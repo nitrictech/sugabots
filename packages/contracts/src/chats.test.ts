@@ -20,8 +20,8 @@ describe("chat contracts", () => {
 	});
 
 	const historyEntry = {
-		conversationId: ID,
-		parentConversationId: null,
+		chatId: ID,
+		parentChatId: null,
 		kind: "collaboration",
 		title: "Summary",
 		participants: [],
@@ -36,7 +36,7 @@ describe("chat contracts", () => {
 		expect(decodeHistory(historyEntry)).toBe("Success");
 	});
 
-	it.each(["project_thread", "system"])("keeps %s conversations out of the history", (kind) => {
+	it.each(["project_chat", "system_chat"])("keeps %s chats out of the history", (kind) => {
 		expect(decodeHistory({ ...historyEntry, kind })).toBe("Failure");
 	});
 
@@ -47,7 +47,7 @@ describe("chat contracts", () => {
 					{
 						kind: "run",
 						id: ID,
-						conversationId: "0199a3a0-0000-7000-8000-000000000002",
+						chatId: "0199a3a0-0000-7000-8000-000000000002",
 						automationName: "Overnight review",
 						triggerKind: "webhook",
 						state: "completed",

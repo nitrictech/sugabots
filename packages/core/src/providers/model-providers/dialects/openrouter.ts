@@ -37,7 +37,7 @@ export const openrouter: ProviderDialect = {
 	languageModel: (endpoint, modelId, fetch) =>
 		wrapLanguageModel({
 			model: createOpenRouter({
-				// Tells OpenRouter which app is calling, the same way on every installation.
+				// Tells OpenRouter which app is calling, the same way on every server.
 				appName: "Sugabots",
 				appUrl: projectLinks.website,
 				apiKey: endpoint.apiKey ?? "",
@@ -78,7 +78,7 @@ export const openrouter: ProviderDialect = {
 				const parameters = entry.supported_parameters;
 				const capabilities: ProviderModelCapability[] = [];
 				if (parameters.includes("tools")) capabilities.push("tools");
-				if (parameters.includes("reasoning")) capabilities.push("reasoning");
+				if (parameters.includes("reasoning")) capabilities.push("thinking");
 				if (inputs.includes("image")) capabilities.push("vision");
 				if (inputs.includes("audio")) capabilities.push("audio");
 				if (outputs.includes("image")) capabilities.push("images");

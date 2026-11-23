@@ -8,7 +8,7 @@ import {
 	type ModelRegistry,
 	modelsDev,
 } from "./dialects/index.ts";
-import type { ModelProviderRepository } from "./model-provider-repository.ts";
+import type { ModelProviderStore } from "./model-provider-store.ts";
 import { ProviderSignInFailed, withSignInAccess } from "./sign-in/sign-in.ts";
 
 /**
@@ -187,19 +187,16 @@ const logFailure = (failure: DiscoveryFailure) =>
 	Effect.logWarning("Asking a model provider for its models failed", failure.message);
 
 export function testProvider(
-	providers: Pick<
-		ModelProviderRepository.Interface,
-		"endpoint" | "recordTest" | "renewOAuthTokens"
-	>,
+	providers: Pick<ModelProviderStore.Interface, "access" | "recordTest" | "renewOAuthTokens">,
 	workspaceId: string,
 	providerId: string,
 	httpClients: EgressHttpClients,
 ): Effect.Effect<{ reachable: boolean; latencyMs: number; error?: UserText }> {
 	const attempt = Effect.gen(function* () {
 		const started = yield* Clock.currentTimeMillis;
-		const connection = yield* requireConnection(providers, workspaceId, providerId);
+		const access = yield* requireAccess(providers, workspaceId, providerId);
 
-		const outcome = yield* requestModels(providers, workspaceId, connection, httpClients).pipe(
+		const outcome = yield* requestModels(providers, workspaceId, access, httpClients).pipe(
 			Effect.tapError(logFailure),
 			Effect.result,
 		);
@@ -210,14 +207,14 @@ export function testProvider(
 		yield* providers.recordTest(
 			workspaceId,
 			providerId,
-			connection.configurationUpdatedAt,
+			access.configurationUpdatedAt,
 			error === undefined ? { activateOnSuccess: false } : { error },
 		);
 		const latencyMs = (yield* Clock.currentTimeMillis) - started;
 		return { reachable: error === undefined, latencyMs, error };
 	});
 
-	// A missing connection is the one failure with nothing to record against.
+	// Missing provider access is the one failure with nothing to record against.
 	return attempt.pipe(
 		Effect.catchTag("DiscoveryCredentialsMissing", (failure) =>
 			Effect.succeed({ reachable: false, latencyMs: 0, error: failure.userMessage }),
@@ -227,8 +224,8 @@ export function testProvider(
 
 export function fetchProviderModels(
 	providers: Pick<
-		ModelProviderRepository.Interface,
-		"endpoint" | "recordTest" | "syncDiscovered" | "renewOAuthTokens"
+		ModelProviderStore.Interface,
+		"access" | "recordTest" | "syncDiscovered" | "renewOAuthTokens"
 	>,
 	workspaceId: string,
 	providerId: string,
@@ -239,15 +236,15 @@ export function fetchProviderModels(
 	}: { registry?: ModelRegistry; activateOnSuccess?: boolean } = {},
 ): Effect.Effect<{ added: number; updated: number; unchanged: number }, DiscoveryFailure> {
 	return Effect.gen(function* () {
-		const connection = yield* requireConnection(providers, workspaceId, providerId);
-		const outcome = yield* requestModels(providers, workspaceId, connection, httpClients).pipe(
+		const access = yield* requireAccess(providers, workspaceId, providerId);
+		const outcome = yield* requestModels(providers, workspaceId, access, httpClients).pipe(
 			Effect.tapError(logFailure),
-			Effect.map((models) => models.map((model) => registry.complete(model, connection))),
+			Effect.map((models) => models.map((model) => registry.complete(model, access))),
 			Effect.result,
 		);
 
 		if (outcome._tag === "Failure") {
-			yield* providers.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
+			yield* providers.recordTest(workspaceId, providerId, access.configurationUpdatedAt, {
 				error: outcome.failure.userMessage,
 			});
 			return yield* outcome.failure;
@@ -258,29 +255,29 @@ export function fetchProviderModels(
 			providerId,
 			outcome.success,
 		);
-		yield* providers.recordTest(workspaceId, providerId, connection.configurationUpdatedAt, {
+		yield* providers.recordTest(workspaceId, providerId, access.configurationUpdatedAt, {
 			activateOnSuccess,
 		});
 		return { added, updated, unchanged: outcome.success.length - added - updated };
 	});
 }
 
-function requireConnection(
-	providers: Pick<ModelProviderRepository.Interface, "endpoint">,
+function requireAccess(
+	providers: Pick<ModelProviderStore.Interface, "access">,
 	workspaceId: string,
 	providerId: string,
-): Effect.Effect<ModelProviderRepository.ProviderEndpoint, DiscoveryCredentialsMissing> {
+): Effect.Effect<ModelProviderStore.ProviderAccess, DiscoveryCredentialsMissing> {
 	return Effect.filterOrFail(
-		providers.endpoint(workspaceId, providerId),
-		(connection) => connection != null,
+		providers.access(workspaceId, providerId),
+		(access) => access != null,
 		() => new DiscoveryCredentialsMissing(),
 	);
 }
 
 function requestModels(
-	providers: Pick<ModelProviderRepository.Interface, "renewOAuthTokens">,
+	providers: Pick<ModelProviderStore.Interface, "renewOAuthTokens">,
 	workspaceId: string,
-	stored: ModelProviderRepository.ProviderEndpoint,
+	stored: ModelProviderStore.ProviderAccess,
 	httpClients: EgressHttpClients,
 ): Effect.Effect<DiscoveredModel[], DiscoveryFailure> {
 	const dialect = dialectFor(stored);
@@ -288,13 +285,13 @@ function requestModels(
 	const root = dialect.discoveryRoot?.(baseUrl) ?? baseUrl;
 	const http = httpClients.for({ baseUrl: root });
 	return Effect.gen(function* () {
-		const connection = yield* withSignInAccess(providers, httpClients, workspaceId, stored).pipe(
+		const access = yield* withSignInAccess(providers, httpClients, workspaceId, stored).pipe(
 			Effect.mapError((cause) => new DiscoverySignInLapsed({ cause })),
 		);
 		const response = yield* Effect.tryPromise({
 			try: () =>
 				http(dialect.listingUrl(root), {
-					headers: { ...connection.headers, ...dialect.authorization(connection.apiKey) },
+					headers: { ...access.headers, ...dialect.authorization(access.apiKey) },
 					signal: AbortSignal.timeout(15_000),
 				}),
 			catch: unreachable,

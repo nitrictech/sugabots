@@ -53,7 +53,7 @@ export class NotFound extends Schema.TaggedError<NotFound>()(
 ) {}
 
 /**
- * How an endpoint whose use case authorizes refuses: `NotFound` for what the
+ * How an endpoint whose operation authorizes refuses: `NotFound` for what the
  * caller cannot reach, `Forbidden` for what they reach but may not do.
  */
 export const refused = [NotFound, Forbidden] as const;

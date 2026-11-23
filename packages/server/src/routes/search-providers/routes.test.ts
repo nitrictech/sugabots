@@ -2,13 +2,13 @@ import type { SearchProvider } from "@sugabots/contracts";
 import { ActionForbidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { EgressRefused } from "@sugabots/core/providers/network/egress";
-import { SearchProviderRepository } from "@sugabots/core/providers/search-providers/search-provider-repository";
 import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
+import { SearchProviderStore } from "@sugabots/core/providers/search-providers/search-provider-store";
 import { UrlNotAllowed } from "@sugabots/core/providers/tested-configuration";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { UserResolver } from "../../http/app.test-support.ts";
+import type { PersonResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
@@ -22,7 +22,7 @@ const USER_ID = "0199a3a0-0000-7000-8000-000000000002";
 const root = `/workspaces/${WORKSPACE_ID}/search-provider`;
 const headers = { authorization: "Bearer good-token", "content-type": "application/json" };
 
-const resolveUser: UserResolver = async (requestHeaders) =>
+const resolvePerson: PersonResolver = async (requestHeaders) =>
 	requestHeaders.get("authorization") === "Bearer good-token"
 		? { id: USER_ID, name: "Sam", email: "sam@example.com", image: null }
 		: null;
@@ -30,7 +30,7 @@ const resolveUser: UserResolver = async (requestHeaders) =>
 const brave: SearchProvider = {
 	id: "0199a3a0-0000-7000-8000-000000000003",
 	workspaceId: WORKSPACE_ID,
-	preset: "brave",
+	builtIn: "brave",
 	name: "Brave Search",
 	baseUrl: "https://api.search.brave.com/res/v1",
 	enabled: false,
@@ -42,7 +42,7 @@ const brave: SearchProvider = {
 
 const app = (search: Partial<SearchProviderSetup.Interface>) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolveUser), unimplemented(SearchProviderSetup.Service, search)),
+		Layer.merge(identifiedBy(resolvePerson), unimplemented(SearchProviderSetup.Service, search)),
 	);
 
 describe("a workspace's search provider", () => {
@@ -53,11 +53,11 @@ describe("a workspace's search provider", () => {
 		expect(await response.json()).toEqual({ provider: null });
 	});
 
-	it("sets a provider from the catalog as the person asking", async () => {
+	it("sets a built-in provider as the person asking", async () => {
 		let askedAs: string | undefined;
 		const replace = vi.fn<SearchProviderSetup.Interface["replace"]>(() =>
-			Effect.map(CurrentActor.Service, ({ userId }) => {
-				askedAs = userId;
+			Effect.map(CurrentActor.Service, ({ personId }) => {
+				askedAs = personId;
 				return brave;
 			}),
 		);
@@ -65,13 +65,13 @@ describe("a workspace's search provider", () => {
 		const response = await app({ replace }).request(root, {
 			method: "PUT",
 			headers,
-			body: JSON.stringify({ preset: "brave", apiKey: "brave-key" }),
+			body: JSON.stringify({ builtIn: "brave", apiKey: "brave-key" }),
 		});
 
 		expect(response.status).toBe(201);
 		expect(replace).toHaveBeenCalledWith({
 			workspace: WORKSPACE_ID,
-			provider: { preset: "brave", apiKey: "brave-key" },
+			provider: { builtIn: "brave", apiKey: "brave-key" },
 		});
 		expect(askedAs).toBe(USER_ID);
 	});
@@ -82,14 +82,14 @@ describe("a workspace's search provider", () => {
 				Effect.fail(
 					new UrlNotAllowed({ refusal: new EgressRefused({ reason: "privateNetwork" }) }),
 				),
-		}).request(root, { method: "PUT", headers, body: JSON.stringify({ preset: "searxng" }) });
+		}).request(root, { method: "PUT", headers, body: JSON.stringify({ builtIn: "searxng" }) });
 
 		expect(response.status).toBe(400);
 	});
 
 	it("reports switching search on without a key as a bad request", async () => {
 		const response = await app({
-			update: () => Effect.fail(new SearchProviderRepository.SearchProviderApiKeyRequired()),
+			update: () => Effect.fail(new SearchProviderStore.SearchProviderApiKeyRequired()),
 		}).request(root, { method: "PATCH", headers, body: JSON.stringify({ enabled: true }) });
 
 		expect(response.status).toBe(400);

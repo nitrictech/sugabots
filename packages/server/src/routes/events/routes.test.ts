@@ -5,7 +5,7 @@ import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { Effect, Layer, Logger } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { UserResolver } from "../../http/app.test-support.ts";
+import type { PersonResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy, type TestApp } from "../../http/app.test-support.ts";
 import { openStreamAccess } from "./access.test-support.ts";
 import { StreamAccess } from "./access.ts";
@@ -17,21 +17,21 @@ import { StreamTiming, type Timing } from "./routes.ts";
  */
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-00000000000a";
-const CONVERSATION = "0199a3a0-0000-7000-8000-00000000000b";
+const CHAT = "0199a3a0-0000-7000-8000-00000000000b";
 
 function rawEvent(type: EventType, data: Record<string, unknown> = {}): StreamEvent {
 	return { ...data, v: EVENT_VERSION, type };
 }
 
-const user = {
+const signedIn = {
 	id: "0199a3a0-0000-7000-8000-0000000000ff",
 	email: "sam@example.com",
 	name: "Sam",
 	image: null,
 };
 
-const resolveUser: UserResolver = async (headers) =>
-	headers.get("authorization") === "Bearer good-token" ? user : null;
+const resolvePerson: PersonResolver = async (headers) =>
+	headers.get("authorization") === "Bearer good-token" ? signedIn : null;
 
 function server(access: StreamAccess.Interface = openStreamAccess, timing?: Partial<Timing>) {
 	const bus = EventBus.inProcess({ store: EventStore.inMemory() });
@@ -49,7 +49,7 @@ function streaming(
 ) {
 	return createTestApp(
 		Layer.mergeAll(
-			identifiedBy(resolveUser),
+			identifiedBy(resolvePerson),
 			Layer.succeed(EventBus.Service, bus),
 			Layer.succeed(StreamAccess.Service, access),
 			Layer.succeed(StreamTiming, { ...StreamTiming.defaultValue(), ...timing }),
@@ -133,15 +133,15 @@ function parseFrame(raw: string): Frame {
 
 describe("authorisation", () => {
 	it("answers 404, not 403, for a resource the caller cannot see", async () => {
-		// Telling the caller a conversation exists but is not theirs is itself a leak.
+		// Telling the caller a chat exists but is not theirs is itself a leak.
 		const { app } = server({
 			workspace: () => Effect.undefined,
-			conversation: () => Effect.undefined,
+			chat: () => Effect.undefined,
 			hears: () => Effect.succeed(false),
 			me: () => Effect.succeed("person:me"),
 		});
 
-		const response = await app.request(`/conversations/${CONVERSATION}/events`, {
+		const response = await app.request(`/chats/${CHAT}/events`, {
 			headers: { authorization: "Bearer good-token" },
 		});
 
@@ -153,13 +153,13 @@ describe("authorisation", () => {
 		// answer rather than build a stream from the path itself.
 		const { app, bus } = server({
 			workspace: () => Effect.undefined,
-			conversation: () => Effect.succeed("conversation:root"),
+			chat: () => Effect.succeed("chat:root"),
 			hears: () => Effect.succeed(true),
 			me: () => Effect.succeed("person:me"),
 		});
 
-		const stream = await open(app, `/conversations/${CONVERSATION}/events`);
-		await bus.publish("conversation:root", rawEvent("message.created", { id: "m1" }));
+		const stream = await open(app, `/chats/${CHAT}/events`);
+		await bus.publish("chat:root", rawEvent("message.created", { id: "m1" }));
 
 		expect((await stream.take(1))[0]?.event).toBe("message.created");
 		stream.close();
@@ -198,24 +198,21 @@ describe("the stream", () => {
 		const { app, bus } = server();
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
 
-		await bus.publish(
-			`workspace:${WORKSPACE}`,
-			streamEvent("conversation.created", { conversationId: "c1" }),
-		);
+		await bus.publish(`workspace:${WORKSPACE}`, streamEvent("chat.created", { chatId: "c1" }));
 
 		expect((await stream.take(1))[0]).toEqual({
-			event: "conversation.created",
+			event: "chat.created",
 			id: "1",
-			data: { v: 1, type: "conversation.created", conversationId: "c1" },
+			data: { v: 1, type: "chat.created", chatId: "c1" },
 		});
 		stream.close();
 	});
 
 	it("sends deltas without an id, so they cannot become a resume point", async () => {
 		const { app, bus } = server();
-		const stream = await open(app, `/conversations/${CONVERSATION}/events`);
+		const stream = await open(app, `/chats/${CHAT}/events`);
 
-		await bus.publish(`conversation:${CONVERSATION}`, rawEvent("message.delta", { text: "hel" }));
+		await bus.publish(`chat:${CHAT}`, rawEvent("message.delta", { text: "hel" }));
 
 		const [delta] = await stream.take(1);
 		expect(delta?.event).toBe("message.delta");
@@ -243,10 +240,7 @@ describe("the stream", () => {
 			headers: { authorization: "Bearer good-token" },
 		});
 		const reader = response.body?.getReader();
-		await bus.publish(
-			`workspace:${WORKSPACE}`,
-			streamEvent("conversation.created", { conversationId: "c1" }),
-		);
+		await bus.publish(`workspace:${WORKSPACE}`, streamEvent("chat.created", { chatId: "c1" }));
 		await reader?.read();
 		expect(open).toBe(1);
 
@@ -263,29 +257,29 @@ describe("the stream", () => {
 		stream.close();
 	});
 
-	it("hangs up eventually, so a client that went away cannot hold a connection", async () => {
+	it("hangs up eventually, so a client that went away cannot hold a connector", async () => {
 		const { app } = server(openStreamAccess, { maxAge: "10 millis" });
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
 
 		await expect(stream.take(1)).rejects.toThrow("stream ended");
 	});
 
-	it.each(["revoked", "changed"])("ends when conversation access is %s", async (change) => {
-		let streamName: "conversation:root" | "conversation:other" | undefined = "conversation:root";
+	it.each(["revoked", "changed"])("ends when chat access is %s", async (change) => {
+		let streamName: "chat:root" | "chat:other" | undefined = "chat:root";
 		const { app, bus } = server(
 			{
 				workspace: () => Effect.undefined,
-				conversation: () => Effect.succeed(streamName),
+				chat: () => Effect.succeed(streamName),
 				hears: () => Effect.succeed(true),
 				me: () => Effect.succeed("person:me"),
 			},
 			{ recheck: 0 },
 		);
-		const stream = await open(app, `/conversations/${CONVERSATION}/events`);
-		await bus.publish("conversation:root", rawEvent("message.created"));
+		const stream = await open(app, `/chats/${CHAT}/events`);
+		await bus.publish("chat:root", rawEvent("message.created"));
 		await stream.take(1);
-		streamName = change === "revoked" ? undefined : "conversation:other";
-		await bus.publish("conversation:root", rawEvent("message.created"));
+		streamName = change === "revoked" ? undefined : "chat:other";
+		await bus.publish("chat:root", rawEvent("message.created"));
 		await expect(stream.take(1)).rejects.toThrow("stream ended");
 	});
 
@@ -293,17 +287,17 @@ describe("the stream", () => {
 		let asked = 0;
 		const { app, bus } = server({
 			workspace: () => Effect.undefined,
-			conversation: () =>
+			chat: () =>
 				Effect.sync(() => {
 					asked += 1;
-					return "conversation:root" as const;
+					return "chat:root" as const;
 				}),
 			hears: () => Effect.succeed(true),
 			me: () => Effect.succeed("person:me"),
 		});
-		const stream = await open(app, `/conversations/${CONVERSATION}/events`);
+		const stream = await open(app, `/chats/${CHAT}/events`);
 		for (let i = 0; i < 3; i++) {
-			await bus.publish("conversation:root", rawEvent("message.delta"));
+			await bus.publish("chat:root", rawEvent("message.delta"));
 		}
 		await stream.take(3);
 		// Once to open the stream, once for the first event.
@@ -325,10 +319,10 @@ describe("the stream", () => {
 			},
 			{ logs: Logger.layer([Logger.make(({ message }) => logged.push(message))]) },
 		);
-		const stream = await open(app, `/conversations/${CONVERSATION}/events`);
+		const stream = await open(app, `/chats/${CHAT}/events`);
 		expect((await stream.take(1))[0]?.id).toBe("1");
 		await expect(stream.take(1)).rejects.toThrow("stream ended");
-		expect(logged).toContainEqual([`Streaming conversation:${CONVERSATION} failed`, failure]);
+		expect(logged).toContainEqual([`Streaming chat:${CHAT} failed`, failure]);
 	});
 
 	it("bounds read-ahead and releases a producer blocked by a slow client", async () => {
@@ -349,7 +343,7 @@ describe("the stream", () => {
 				}
 			},
 		});
-		const response = await app.request(`/conversations/${CONVERSATION}/events`, {
+		const response = await app.request(`/chats/${CHAT}/events`, {
 			headers: { authorization: "Bearer good-token" },
 		});
 		try {
@@ -364,12 +358,12 @@ describe("the stream", () => {
 	it("flushes a reset and ends when a slow subscriber overflows the bus", async () => {
 		const bus = EventBus.inProcess({ store: EventStore.inMemory(), maxBuffered: 2 });
 		const app = streaming(bus);
-		const response = await app.request(`/conversations/${CONVERSATION}/events`, {
+		const response = await app.request(`/chats/${CHAT}/events`, {
 			headers: { authorization: "Bearer good-token" },
 		});
 		try {
 			for (let index = 0; index < 200; index += 1) {
-				await bus.publish(`conversation:${CONVERSATION}`, rawEvent("message.created"));
+				await bus.publish(`chat:${CHAT}`, rawEvent("message.created"));
 			}
 			const text = await response.text();
 			const frames = text.trim().split("\n\n").map(parseFrame);
@@ -383,27 +377,24 @@ describe("the stream", () => {
 
 	it("ends an idle response when the bus closes", async () => {
 		const { app, bus } = server();
-		const stream = await open(app, `/conversations/${CONVERSATION}/events`);
+		const stream = await open(app, `/chats/${CHAT}/events`);
 		await bus.close();
 		await expect(stream.take(1)).rejects.toThrow("stream ended");
 	});
 });
 
-describe("events meant for the people who reach one conversation", () => {
+describe("events meant for the people who reach one chat", () => {
 	const REACHED = "0199a3a0-0000-7000-8000-0000000000c1";
 	const UNREACHED = "0199a3a0-0000-7000-8000-0000000000c2";
 	const reachingOne: StreamAccess.Interface = {
 		...openStreamAccess,
-		hears: (audience) => Effect.succeed(audience.conversationId === REACHED),
+		hears: (audience) => Effect.succeed(audience.chatId === REACHED),
 	};
 	const streamName = `workspace:${WORKSPACE}` as const;
-	const about = (conversationId: string) =>
-		Audience.forConversation(
-			conversationId,
-			streamEvent("conversation.changed", { conversationId }),
-		);
+	const about = (chatId: string) =>
+		Audience.forChat(chatId, streamEvent("chat.changed", { chatId }));
 
-	it("skips what a listener who does not reach the conversation may not hear, and sends the rest without its audience", async () => {
+	it("skips what a listener who does not reach the chat may not hear, and sends the rest without its audience", async () => {
 		const { app, bus } = server(reachingOne);
 		const stream = await open(app, `/workspaces/${WORKSPACE}/events`);
 
@@ -412,9 +403,9 @@ describe("events meant for the people who reach one conversation", () => {
 
 		expect(await stream.take(1)).toEqual([
 			{
-				event: "conversation.changed",
+				event: "chat.changed",
 				id: "2",
-				data: { v: 1, type: "conversation.changed", conversationId: REACHED },
+				data: { v: 1, type: "chat.changed", chatId: REACHED },
 			},
 		]);
 		stream.close();
@@ -422,7 +413,7 @@ describe("events meant for the people who reach one conversation", () => {
 
 	it("skips them on a replay too", async () => {
 		const { app, bus } = server(reachingOne);
-		await bus.publish(streamName, rawEvent("conversation.created", { conversationId: "first" }));
+		await bus.publish(streamName, rawEvent("chat.created", { chatId: "first" }));
 		await bus.publish(streamName, about(UNREACHED));
 		await bus.publish(streamName, about(REACHED));
 
@@ -430,7 +421,7 @@ describe("events meant for the people who reach one conversation", () => {
 
 		expect((await resumed.take(1))[0]).toMatchObject({
 			id: "3",
-			data: { conversationId: REACHED },
+			data: { chatId: REACHED },
 		});
 		resumed.close();
 	});
@@ -439,8 +430,8 @@ describe("events meant for the people who reach one conversation", () => {
 describe("resuming", () => {
 	it("replays events published after the client's Last-Event-ID", async () => {
 		const { app, bus } = server();
-		const streamName = `conversation:${CONVERSATION}`;
-		const path = `/conversations/${CONVERSATION}/events`;
+		const streamName = `chat:${CHAT}`;
+		const path = `/chats/${CHAT}/events`;
 
 		const initial = await open(app, path);
 		await bus.publish(streamName, rawEvent("message.created", { id: "m1" }));
@@ -461,9 +452,9 @@ describe("resuming", () => {
 
 	it("tells a client whose resume point is gone to start again", async () => {
 		const { app, bus } = server();
-		await bus.publish(`conversation:${CONVERSATION}`, rawEvent("message.created"));
+		await bus.publish(`chat:${CHAT}`, rawEvent("message.created"));
 
-		const stream = await open(app, `/conversations/${CONVERSATION}/events`, {
+		const stream = await open(app, `/chats/${CHAT}/events`, {
 			lastEventId: "9999",
 		});
 
@@ -473,11 +464,11 @@ describe("resuming", () => {
 
 	it("ignores a Last-Event-ID that is not a sequence number", async () => {
 		const { app, bus } = server();
-		const stream = await open(app, `/conversations/${CONVERSATION}/events`, {
+		const stream = await open(app, `/chats/${CHAT}/events`, {
 			lastEventId: "nonsense",
 		});
 
-		await bus.publish(`conversation:${CONVERSATION}`, rawEvent("message.created", { id: "m1" }));
+		await bus.publish(`chat:${CHAT}`, rawEvent("message.created", { id: "m1" }));
 
 		expect((await stream.take(1))[0]?.event).toBe("message.created");
 		stream.close();
@@ -486,14 +477,14 @@ describe("resuming", () => {
 
 describe("typing", () => {
 	const typing = (app: TestApp) =>
-		app.request(`/conversations/${CONVERSATION}/typing`, {
+		app.request(`/chats/${CHAT}/typing`, {
 			method: "POST",
 			headers: { authorization: "Bearer good-token" },
 		});
 
-	it("tells the conversation's watchers who is typing, without an id to resume from", async () => {
+	it("tells the chat's watchers who is typing, without an id to resume from", async () => {
 		const { app } = server();
-		const stream = await open(app, `/conversations/${CONVERSATION}/events`);
+		const stream = await open(app, `/chats/${CHAT}/events`);
 
 		expect((await typing(app)).status).toBe(204);
 
@@ -502,15 +493,15 @@ describe("typing", () => {
 			data: {
 				v: 1,
 				type: "person.typing",
-				conversationId: CONVERSATION,
-				person: testPerson({ id: user.id, name: "Sam" }),
+				chatId: CHAT,
+				person: testPerson({ id: signedIn.id, name: "Sam" }),
 			},
 		});
 		stream.close();
 	});
 
-	it("answers 404 for a conversation the caller cannot see, and tells nobody", async () => {
-		const { app, bus } = server({ ...openStreamAccess, conversation: () => Effect.undefined });
+	it("answers 404 for a chat the caller cannot see, and tells nobody", async () => {
+		const { app, bus } = server({ ...openStreamAccess, chat: () => Effect.undefined });
 		const publish = vi.spyOn(bus, "publish");
 
 		expect((await typing(app)).status).toBe(404);

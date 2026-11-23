@@ -3,22 +3,22 @@ import { ConfigProvider, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 import { Accounts } from "../../accounts/accounts.ts";
 import { CurrentActor } from "../../authorization/current-actor.ts";
-import { ComputerProviderRepository } from "../../computers/computer-provider-repository.ts";
+import { ComputerProviderStore } from "../../computers/computer-provider-store.ts";
 import { Computers } from "../../computers/computers.ts";
 import { noComputers, recordingFirstComputer } from "../../computers/testing.ts";
 import { query } from "../../database/database.ts";
 import {
 	bot,
 	computer,
+	invitation,
+	membership,
 	modelProvider,
+	person,
 	project,
 	projectMember,
 	providerModel,
 	searchProvider,
-	user,
 	workspaceDefaultModel,
-	workspaceInvite,
-	workspaceMember,
 	workspace as workspaceTable,
 } from "../../database/schema.ts";
 import {
@@ -30,7 +30,7 @@ import {
 	waitUntilWaitingOnLocks,
 } from "../../database/testing.ts";
 import { Email } from "../../email/email.ts";
-import { Installation } from "../../installation/installation.ts";
+import { ServerSettings } from "../../server-settings/server-settings.ts";
 import { unimplemented } from "../../testing.ts";
 import { seedProject } from "../projects/seed.test-support.ts";
 import { Membership } from "./membership.ts";
@@ -54,7 +54,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				Layer.provide([
 					testInfrastructure,
 					noComputers,
-					Installation.layer,
+					ServerSettings.layer,
 					unimplemented(Accounts.Service, { requireEmailVerification }),
 					Layer.succeed(
 						Email.Service,
@@ -80,15 +80,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		);
 		runtimes.push(runtime);
 		return {
-			/** The operation's value when `userId` asks for it, or the tag it failed with. */
+			/** The operation's value when `personId` asks for it, or the tag it failed with. */
 			run: <A, E extends { _tag: string }>(
-				userId: string,
+				personId: string,
 				operation: (membership: Membership.Interface) => Effect.Effect<A, E, CurrentActor.Service>,
 			) =>
 				runtime
 					.runPromiseExit(
 						Effect.flatMap(Membership.Service, operation).pipe(
-							CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId)),
+							CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(personId)),
 						),
 					)
 					.then((exit) => {
@@ -100,8 +100,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		};
 	}
 
-	const membership = membershipWith(false);
-	const run = membership.run;
+	const { run } = membershipWith(false);
 
 	afterAll(async () => {
 		await Promise.all(runtimes.map((runtime) => runtime.dispose()));
@@ -110,10 +109,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	const unique = () => crypto.randomUUID().slice(0, 8);
 
-	async function person(name: string, options?: { verified?: boolean }) {
+	async function newPerson(name: string, options?: { verified?: boolean }) {
 		const [row] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({
 					name,
 					email: `${name.toLowerCase()}-${unique()}@example.com`,
@@ -127,7 +126,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	/** A workspace Ada owns. */
 	async function workspaceOfAda() {
-		const ada = await person("Ada");
+		const ada = await newPerson("Ada");
 		const created = await run(ada.id, (m) =>
 			m.create({ details: { name: "Nitric", slug: `nitric-${unique()}` } }),
 		);
@@ -139,7 +138,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		workspaceId: string,
 		inviterId: string,
 		invitee: { id: string; email: string },
-		role: "admin" | "member" | "viewer" = "member",
+		role: "admin" | "editor" | "viewer" = "editor",
 	) {
 		const invitation = await run(inviterId, (m) =>
 			m.invite({
@@ -149,27 +148,27 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
 		await run(invitee.id, (m) => m.accept({ invitationId: invitation.id }));
-		const members = await run(inviterId, (m) => m.members({ workspace: workspaceId }));
-		if ("failed" in members) throw new Error(members.failed);
-		const member = members.find((one) => one.user.id === invitee.id);
-		if (!member) throw new Error("The invitee did not join");
-		return member;
+		const memberships = await run(inviterId, (m) => m.memberships({ workspace: workspaceId }));
+		if ("failed" in memberships) throw new Error(memberships.failed);
+		const joined = memberships.find((one) => one.person.id === invitee.id);
+		if (!joined) throw new Error("The invitee did not join");
+		return joined;
 	}
 
 	it("makes the creator its owner, and provisions the workspace and their Personal Assistant", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 
-		expect(await run(ada.id, (m) => m.members({ workspace: workspace.id }))).toEqual([
-			expect.objectContaining({ role: "owner", user: expect.objectContaining({ id: ada.id }) }),
+		expect(await run(ada.id, (m) => m.memberships({ workspace: workspace.id }))).toEqual([
+			expect.objectContaining({ role: "owner", person: expect.objectContaining({ id: ada.id }) }),
 		]);
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ preset: searchProvider.preset, enabled: searchProvider.enabled })
+					.select({ builtIn: searchProvider.builtIn, enabled: searchProvider.enabled })
 					.from(searchProvider)
 					.where(eq(searchProvider.workspaceId, workspace.id)),
 			),
-		).toEqual([{ preset: "exa", enabled: true }]);
+		).toEqual([{ builtIn: "exa", enabled: true }]);
 		expect(
 			await onDatabase((db) =>
 				db
@@ -190,7 +189,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	});
 
 	it("keeps the time zone a workspace is created in, and is in UTC when given none", async () => {
-		const ada = await person("Ada");
+		const ada = await newPerson("Ada");
 
 		const inSydney = await run(ada.id, (m) =>
 			m.create({
@@ -207,7 +206,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	});
 
 	it("refuses a time zone Postgres does not have, and creates nothing", async () => {
-		const ada = await person("Ada");
+		const ada = await newPerson("Ada");
 
 		expect(
 			await run(ada.id, (m) =>
@@ -246,12 +245,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("emails an invitation whose id is a random UUID, and lets the invitee in", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 
 		const invitation = await run(ada.id, (m) =>
 			m.invite({
 				workspace: workspace.id,
-				invitation: { email: bob.email, role: "member" },
+				invitation: { email: bob.email, role: "editor" },
 			}),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
@@ -261,17 +260,17 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			to: [{ email: bob.email }],
 			replyTo: { email: ada.email, name: "Ada" },
 		});
-		expect(sent.at(-1)?.text).toContain(`${WEB_APP_URL}/invite/${invitation.id}`);
+		expect(sent.at(-1)?.text).toContain(`${WEB_APP_URL}/invitations/${invitation.id}`);
 		expect(await run(bob.id, (m) => m.invitation({ invitationId: invitation.id }))).toEqual({
 			status: "pending",
 			workspaceName: "Nitric",
 			inviterName: "Ada",
-			role: "member",
+			role: "editor",
 		});
 		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			workspaceId: workspace.id,
 		});
-		expect(await run(bob.id, (m) => m.members({ workspace: workspace.id }))).toHaveLength(2);
+		expect(await run(bob.id, (m) => m.memberships({ workspace: workspace.id }))).toHaveLength(2);
 		expect(
 			await onDatabase((db) =>
 				db
@@ -284,9 +283,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("leads an invitee back in from a link already accepted, until they leave", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 		const invitation = await run(ada.id, (m) =>
-			m.invite({ workspace: workspace.id, invitation: { email: bob.email, role: "member" } }),
+			m.invite({ workspace: workspace.id, invitation: { email: bob.email, role: "editor" } }),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
 		await run(bob.id, (m) => m.accept({ invitationId: invitation.id }));
@@ -298,7 +297,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
 			workspaceId: workspace.id,
 		});
-		expect(await run(bob.id, (m) => m.members({ workspace: workspace.id }))).toHaveLength(2);
+		expect(await run(bob.id, (m) => m.memberships({ workspace: workspace.id }))).toHaveLength(2);
 
 		await run(bob.id, (m) => m.leave({ workspace: workspace.id }));
 
@@ -312,7 +311,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("starts somebody joining on another model the workspace offers while it does not offer its default", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 		const [provider] = await onDatabase((db) =>
 			db
 				.insert(modelProvider)
@@ -345,7 +344,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				.values({ workspaceId: workspace.id, modelId: "switched-off" }),
 		);
 		const invitation = await run(ada.id, (m) =>
-			m.invite({ workspace: workspace.id, invitation: { email: bob.email, role: "member" } }),
+			m.invite({ workspace: workspace.id, invitation: { email: bob.email, role: "editor" } }),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
 
@@ -362,12 +361,12 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("refuses an invitation to anybody but the address it was sent to", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const eve = await person("Eve");
+		const bob = await newPerson("Bob");
+		const eve = await newPerson("Eve");
 		const invitation = await run(ada.id, (m) =>
 			m.invite({
 				workspace: workspace.id,
-				invitation: { email: bob.email, role: "member" },
+				invitation: { email: bob.email, role: "editor" },
 			}),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
@@ -380,13 +379,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
-	it("requires a proven address to accept only where the installation requires one", async () => {
+	it("requires a proven address to accept only where the server requires one", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob", { verified: false });
+		const bob = await newPerson("Bob", { verified: false });
 		const invitation = await run(ada.id, (m) =>
 			m.invite({
 				workspace: workspace.id,
-				invitation: { email: bob.email, role: "member" },
+				invitation: { email: bob.email, role: "editor" },
 			}),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
@@ -401,13 +400,13 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 	});
 
-	it("refuses a second invitation to the same address unless it is a resend, and one to a member", async () => {
+	it("refuses a second invitation to the same address unless it is a resend, and one to somebody already in the workspace", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 		const first = await run(ada.id, (m) =>
 			m.invite({
 				workspace: workspace.id,
-				invitation: { email: bob.email, role: "member" },
+				invitation: { email: bob.email, role: "editor" },
 			}),
 		);
 		if ("failed" in first) throw new Error(first.failed);
@@ -416,7 +415,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			await run(ada.id, (m) =>
 				m.invite({
 					workspace: workspace.id,
-					invitation: { email: bob.email, role: "member" },
+					invitation: { email: bob.email, role: "editor" },
 				}),
 			),
 		).toEqual({
@@ -434,21 +433,21 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			await run(ada.id, (m) =>
 				m.invite({
 					workspace: workspace.id,
-					invitation: { email: ada.email, role: "member" },
+					invitation: { email: ada.email, role: "editor" },
 				}),
 			),
 		).toEqual({
-			failed: "AlreadyMember",
+			failed: "AlreadyInWorkspace",
 		});
 	});
 
 	it("stops a cancelled invitation's link working", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 		const invitation = await run(ada.id, (m) =>
 			m.invite({
 				workspace: workspace.id,
-				invitation: { email: bob.email, role: "member" },
+				invitation: { email: bob.email, role: "editor" },
 			}),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
@@ -463,9 +462,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("answers an invitation to another workspace as it answers one that does not exist", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const eve = await person("Eve");
+		const eve = await newPerson("Eve");
 		const invitation = await run(ada.id, (m) =>
-			m.invite({ workspace: workspace.id, invitation: { email: eve.email, role: "member" } }),
+			m.invite({ workspace: workspace.id, invitation: { email: eve.email, role: "editor" } }),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
 		const refusalOf = (invitationId: string) =>
@@ -479,14 +478,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(ada.id, (m) => m.invitations({ workspace: workspace.id }))).toHaveLength(1);
 	});
 
-	it("refuses to cancel an invitation for a member who may not manage members", async () => {
+	it("refuses to cancel an invitation for somebody who may not manage people", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 		await join(workspace.id, ada.id, bob);
 		const invitation = await run(ada.id, (m) =>
 			m.invite({
 				workspace: workspace.id,
-				invitation: { email: "someone@example.com", role: "member" },
+				invitation: { email: "someone@example.com", role: "editor" },
 			}),
 		);
 		if ("failed" in invitation) throw new Error(invitation.failed);
@@ -499,42 +498,44 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("promotes and demotes, and lets a viewer read the roster and administer nobody", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const kim = await person("Kim");
-		const bobMember = await join(workspace.id, ada.id, bob);
+		const bob = await newPerson("Bob");
+		const kim = await newPerson("Kim");
+		const bobMembership = await join(workspace.id, ada.id, bob);
 		await join(workspace.id, ada.id, kim, "viewer");
 
 		await run(ada.id, (m) =>
 			m.changeRole({
 				workspace: workspace.id,
-				memberId: bobMember.id,
+				membershipId: bobMembership.id,
 				role: "admin",
 			}),
 		);
-		expect(await run(ada.id, (m) => m.members({ workspace: workspace.id }))).toContainEqual(
-			expect.objectContaining({ id: bobMember.id, role: "admin" }),
+		expect(await run(ada.id, (m) => m.memberships({ workspace: workspace.id }))).toContainEqual(
+			expect.objectContaining({ id: bobMembership.id, role: "admin" }),
 		);
 		await run(ada.id, (m) =>
 			m.changeRole({
 				workspace: workspace.id,
-				memberId: bobMember.id,
-				role: "member",
+				membershipId: bobMembership.id,
+				role: "editor",
 			}),
 		);
 
-		expect(await run(kim.id, (m) => m.members({ workspace: workspace.id }))).toHaveLength(3);
+		expect(await run(kim.id, (m) => m.memberships({ workspace: workspace.id }))).toHaveLength(3);
 		expect(
 			await run(kim.id, (m) =>
 				m.invite({
 					workspace: workspace.id,
-					invitation: { email: "nope@example.com", role: "member" },
+					invitation: { email: "nope@example.com", role: "editor" },
 				}),
 			),
 		).toEqual({
 			failed: "ActionForbidden",
 		});
 		expect(
-			await run(kim.id, (m) => m.remove({ workspace: workspace.id, memberId: bobMember.id })),
+			await run(kim.id, (m) =>
+				m.remove({ workspace: workspace.id, membershipId: bobMembership.id }),
+			),
 		).toEqual({
 			failed: "ActionForbidden",
 		});
@@ -542,7 +543,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			await run(kim.id, (m) =>
 				m.changeRole({
 					workspace: workspace.id,
-					memberId: bobMember.id,
+					membershipId: bobMembership.id,
 					role: "admin",
 				}),
 			),
@@ -553,8 +554,8 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("puts an administrator in every project people made, whether invited or promoted", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const kim = await person("Kim");
+		const bob = await newPerson("Bob");
+		const kim = await newPerson("Kim");
 		const shared = await onDatabase((db) =>
 			seedProject(db, {
 				workspaceId: workspace.id,
@@ -566,47 +567,49 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const inShared = () =>
 			onDatabase((db) =>
 				db
-					.select({ userId: projectMember.userId })
+					.select({ personId: projectMember.personId })
 					.from(projectMember)
 					.where(eq(projectMember.projectId, shared.id)),
-			).then((rows) => rows.map((row) => row.userId).toSorted());
+			).then((rows) => rows.map((row) => row.personId).toSorted());
 
-		const bobMember = await join(workspace.id, ada.id, bob);
+		const bobMembership = await join(workspace.id, ada.id, bob);
 		await join(workspace.id, ada.id, kim, "admin");
 		expect(await inShared()).toEqual([ada.id, kim.id].toSorted());
 
 		await run(ada.id, (m) =>
 			m.changeRole({
 				workspace: workspace.id,
-				memberId: bobMember.id,
+				membershipId: bobMembership.id,
 				role: "admin",
 			}),
 		);
 		expect(await inShared()).toEqual([ada.id, bob.id, kim.id].toSorted());
 	});
 
-	/** The membership `userId` holds in the workspace, as they see it on the roster. */
-	async function membershipOf(workspaceId: string, userId: string) {
-		const members = await run(userId, (m) => m.members({ workspace: workspaceId }));
-		if ("failed" in members) throw new Error(members.failed);
-		const own = members.find((one) => one.user.id === userId);
+	/** The membership `personId` holds in the workspace, as they see it on the roster. */
+	async function membershipOf(workspaceId: string, personId: string) {
+		const memberships = await run(personId, (m) => m.memberships({ workspace: workspaceId }));
+		if ("failed" in memberships) throw new Error(memberships.failed);
+		const own = memberships.find((one) => one.person.id === personId);
 		if (!own) throw new Error("They are not in the workspace");
 		return own;
 	}
 
 	it("keeps the owner, whom nobody demotes or removes and who cannot leave", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 		await join(workspace.id, ada.id, bob, "admin");
-		const adaMember = await membershipOf(workspace.id, ada.id);
+		const adaMembership = await membershipOf(workspace.id, ada.id);
 
 		for (const actor of [ada.id, bob.id]) {
 			expect(
-				await run(actor, (m) => m.remove({ workspace: workspace.id, memberId: adaMember.id })),
+				await run(actor, (m) =>
+					m.remove({ workspace: workspace.id, membershipId: adaMembership.id }),
+				),
 			).toEqual({ failed: "OwnerStays" });
 			expect(
 				await run(actor, (m) =>
-					m.changeRole({ workspace: workspace.id, memberId: adaMember.id, role: "member" }),
+					m.changeRole({ workspace: workspace.id, membershipId: adaMembership.id, role: "editor" }),
 				),
 			).toEqual({ failed: "OwnerStays" });
 		}
@@ -618,25 +621,27 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("leaves making, unmaking and removing administrators to the owner", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const kim = await person("Kim");
-		const lee = await person("Lee");
+		const bob = await newPerson("Bob");
+		const kim = await newPerson("Kim");
+		const lee = await newPerson("Lee");
 		await join(workspace.id, ada.id, bob, "admin");
-		const kimMember = await join(workspace.id, ada.id, kim, "admin");
-		const leeMember = await join(workspace.id, ada.id, lee);
+		const kimMembership = await join(workspace.id, ada.id, kim, "admin");
+		const leeMembership = await join(workspace.id, ada.id, lee);
 
 		expect(
 			await run(bob.id, (m) =>
-				m.changeRole({ workspace: workspace.id, memberId: leeMember.id, role: "admin" }),
+				m.changeRole({ workspace: workspace.id, membershipId: leeMembership.id, role: "admin" }),
 			),
 		).toEqual({ failed: "ActionForbidden" });
 		expect(
 			await run(bob.id, (m) =>
-				m.changeRole({ workspace: workspace.id, memberId: kimMember.id, role: "member" }),
+				m.changeRole({ workspace: workspace.id, membershipId: kimMembership.id, role: "editor" }),
 			),
 		).toEqual({ failed: "ActionForbidden" });
 		expect(
-			await run(bob.id, (m) => m.remove({ workspace: workspace.id, memberId: kimMember.id })),
+			await run(bob.id, (m) =>
+				m.remove({ workspace: workspace.id, membershipId: kimMembership.id }),
+			),
 		).toEqual({ failed: "ActionForbidden" });
 		expect(
 			await run(bob.id, (m) =>
@@ -649,22 +654,22 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 		// Everybody who is not an administrator is still an administrator's to manage.
 		await run(bob.id, (m) =>
-			m.changeRole({ workspace: workspace.id, memberId: leeMember.id, role: "viewer" }),
+			m.changeRole({ workspace: workspace.id, membershipId: leeMembership.id, role: "viewer" }),
 		);
 		expect(await membershipOf(workspace.id, lee.id)).toMatchObject({ role: "viewer" });
 
 		await run(ada.id, (m) =>
-			m.changeRole({ workspace: workspace.id, memberId: kimMember.id, role: "member" }),
+			m.changeRole({ workspace: workspace.id, membershipId: kimMembership.id, role: "editor" }),
 		);
-		expect(await membershipOf(workspace.id, kim.id)).toMatchObject({ role: "member" });
+		expect(await membershipOf(workspace.id, kim.id)).toMatchObject({ role: "editor" });
 		// An administrator may leave: the owner is still there to administer.
 		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toBeUndefined();
 	});
 
 	it("transfers ownership, putting the new owner in every project people made and making the old one an admin", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const bobMember = await join(workspace.id, ada.id, bob, "viewer");
+		const bob = await newPerson("Bob");
+		const bobMembership = await join(workspace.id, ada.id, bob, "viewer");
 		const shared = await onDatabase((db) =>
 			seedProject(db, {
 				workspaceId: workspace.id,
@@ -676,7 +681,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 		expect(
 			await run(ada.id, (m) =>
-				m.transferOwnership({ workspace: workspace.id, memberId: bobMember.id }),
+				m.handOverOwnership({ workspace: workspace.id, membershipId: bobMembership.id }),
 			),
 		).toBeUndefined();
 
@@ -685,16 +690,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(
 			await onDatabase((db) =>
 				db
-					.select({ userId: projectMember.userId })
+					.select({ personId: projectMember.personId })
 					.from(projectMember)
 					.where(eq(projectMember.projectId, shared.id)),
-			).then((rows) => rows.map((row) => row.userId).toSorted()),
+			).then((rows) => rows.map((row) => row.personId).toSorted()),
 		).toEqual([ada.id, bob.id].toSorted());
 		// Ada holds nothing of the owner's now, and Bob can leave nothing behind.
-		const adaMember = await membershipOf(workspace.id, ada.id);
+		const adaMembership = await membershipOf(workspace.id, ada.id);
 		expect(
 			await run(ada.id, (m) =>
-				m.transferOwnership({ workspace: workspace.id, memberId: adaMember.id }),
+				m.handOverOwnership({ workspace: workspace.id, membershipId: adaMembership.id }),
 			),
 		).toEqual({ failed: "ActionForbidden" });
 		expect(await run(bob.id, (m) => m.leave({ workspace: workspace.id }))).toEqual({
@@ -718,19 +723,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 			query((db) =>
 				Effect.gen(function* () {
 					yield* db
-						.update(workspaceMember)
+						.update(membership)
 						.set({ role: "admin" })
-						.where(
-							and(eq(workspaceMember.workspaceId, workspaceId), eq(workspaceMember.role, "owner")),
-						);
+						.where(and(eq(membership.workspaceId, workspaceId), eq(membership.role, "owner")));
 					yield* db
-						.update(workspaceMember)
+						.update(membership)
 						.set({ role: "owner" })
 						.where(
-							and(
-								eq(workspaceMember.workspaceId, workspaceId),
-								eq(workspaceMember.userId, newOwnerId),
-							),
+							and(eq(membership.workspaceId, workspaceId), eq(membership.personId, newOwnerId)),
 						);
 				}),
 			),
@@ -739,27 +739,27 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("refuses a second transfer of ownership from an owner whose first has handed it on", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const kim = await person("Kim");
+		const bob = await newPerson("Bob");
+		const kim = await newPerson("Kim");
 		await join(workspace.id, ada.id, bob);
-		const kimMember = await join(workspace.id, ada.id, kim);
+		const kimMembership = await join(workspace.id, ada.id, kim);
 		const firstTransfer = holdTransferTo(workspace.id, bob.id);
 		await firstTransfer.held;
 
 		const secondTransfer = run(ada.id, (m) =>
-			m.transferOwnership({ workspace: workspace.id, memberId: kimMember.id }),
+			m.handOverOwnership({ workspace: workspace.id, membershipId: kimMembership.id }),
 		);
 		await waitUntilWaitingOnLocks(1);
 		await firstTransfer.release();
 
 		expect(await secondTransfer).toEqual({ failed: "ActionForbidden" });
 		expect(await membershipOf(workspace.id, bob.id)).toMatchObject({ role: "owner" });
-		expect(await membershipOf(workspace.id, kim.id)).toMatchObject({ role: "member" });
+		expect(await membershipOf(workspace.id, kim.id)).toMatchObject({ role: "editor" });
 	});
 
 	it("keeps a workspace whose owner hands it on while their deletion of it waits", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 		await join(workspace.id, ada.id, bob);
 		const transfer = holdTransferTo(workspace.id, bob.id);
 		await transfer.held;
@@ -772,9 +772,9 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(bob.id, (m) => m.workspaces)).toMatchObject([{ id: workspace.id }]);
 	});
 
-	it("lets only the owner delete a workspace, which takes it from every member", async () => {
+	it("lets only the owner delete a workspace, which takes it from everyone in it", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 		await join(workspace.id, ada.id, bob, "admin");
 
 		expect(await run(bob.id, (m) => m.delete({ workspace: workspace.id }))).toEqual({
@@ -784,7 +784,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 		expect(await run(ada.id, (m) => m.workspaces)).toEqual([]);
 		expect(await run(bob.id, (m) => m.workspaces)).toEqual([]);
-		expect(await run(ada.id, (m) => m.members({ workspace: workspace.id }))).toEqual({
+		expect(await run(ada.id, (m) => m.memberships({ workspace: workspace.id }))).toEqual({
 			failed: "ResourceHidden",
 		});
 	});
@@ -792,16 +792,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 	it("keeps a workspace while its computers' provider can't be reached to destroy them", async () => {
 		const { ada, workspace } = await workspaceOfAda();
 		const provider = await runOnPostgres(
-			Effect.flatMap(ComputerProviderRepository.Service, (providers) =>
+			Effect.flatMap(ComputerProviderStore.Service, (providers) =>
 				providers.create(workspace.id, {
 					createdById: ada.id,
 					provider: {
-						settings: { preset: "opensandbox", serverUrl: UNREACHABLE_URL, image: "debian" },
+						settings: { builtIn: "opensandbox", serverUrl: UNREACHABLE_URL, image: "debian" },
 						enabled: true,
 						apiKey: "key",
 					},
 				}),
-			).pipe(Effect.provide(ComputerProviderRepository.layer)),
+			).pipe(Effect.provide(ComputerProviderStore.layer)),
 		);
 		const launch = await onDatabase((db) =>
 			seedProject(db, { workspaceId: workspace.id, name: "Launch", slug: "launch" }),
@@ -828,21 +828,21 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(ada.id, (m) => m.workspaces)).toMatchObject([{ id: workspace.id }]);
 	});
 
-	it("keeps a member whose Personal Assistant's first computer is recorded as they are removed", async () => {
+	it("keeps a person in the workspace whose Personal Assistant's first computer is recorded as they are removed", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const bobMember = await join(workspace.id, ada.id, bob);
+		const bob = await newPerson("Bob");
+		const bobMembership = await join(workspace.id, ada.id, bob);
 		const provider = await runOnPostgres(
-			Effect.flatMap(ComputerProviderRepository.Service, (providers) =>
+			Effect.flatMap(ComputerProviderStore.Service, (providers) =>
 				providers.create(workspace.id, {
 					createdById: ada.id,
 					provider: {
-						settings: { preset: "opensandbox", serverUrl: UNREACHABLE_URL, image: "debian" },
+						settings: { builtIn: "opensandbox", serverUrl: UNREACHABLE_URL, image: "debian" },
 						enabled: true,
 						apiKey: "key",
 					},
 				}),
-			).pipe(Effect.provide(ComputerProviderRepository.layer)),
+			).pipe(Effect.provide(ComputerProviderStore.layer)),
 		);
 		const [assistantProject] = await onDatabase((db) =>
 			db
@@ -859,7 +859,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		});
 
 		const removing = run(ada.id, (m) =>
-			m.remove({ workspace: workspace.id, memberId: bobMember.id }),
+			m.remove({ workspace: workspace.id, membershipId: bobMembership.id }),
 		);
 		await waitUntilWaitingOnLocks(1);
 		await recording.release();
@@ -877,32 +877,29 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("lets a workspace have only one owner", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const bobMember = await join(workspace.id, ada.id, bob);
+		const bob = await newPerson("Bob");
+		const bobMembership = await join(workspace.id, ada.id, bob);
 
 		await expect(
 			onDatabase((db) =>
-				db
-					.update(workspaceMember)
-					.set({ role: "owner" })
-					.where(eq(workspaceMember.id, bobMember.id)),
+				db.update(membership).set({ role: "owner" }).where(eq(membership.id, bobMembership.id)),
 			),
 		).rejects.toThrow();
 	});
 
 	it("hides a workspace from somebody outside it", async () => {
 		const { workspace } = await workspaceOfAda();
-		const eve = await person("Eve");
+		const eve = await newPerson("Eve");
 
-		expect(await run(eve.id, (m) => m.members({ workspace: workspace.id }))).toEqual({
+		expect(await run(eve.id, (m) => m.memberships({ workspace: workspace.id }))).toEqual({
 			failed: "ResourceHidden",
 		});
 	});
 
-	it("takes a removed member out of their projects, does not put them back when they rejoin, and gives them one Personal Assistant", async () => {
+	it("takes a removed person out of their projects, does not put them back when they rejoin, and gives them one Personal Assistant", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const bobMember = await join(workspace.id, ada.id, bob);
+		const bob = await newPerson("Bob");
+		const bobMembership = await join(workspace.id, ada.id, bob);
 		const shared = await onDatabase((db) =>
 			seedProject(db, {
 				workspaceId: workspace.id,
@@ -914,10 +911,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		await onDatabase((db) =>
 			db
 				.insert(projectMember)
-				.values({ workspaceId: workspace.id, projectId: shared.id, userId: bob.id }),
+				.values({ workspaceId: workspace.id, projectId: shared.id, personId: bob.id }),
 		);
 
-		await run(ada.id, (m) => m.remove({ workspace: workspace.id, memberId: bobMember.id }));
+		await run(ada.id, (m) => m.remove({ workspace: workspace.id, membershipId: bobMembership.id }));
 		await join(workspace.id, ada.id, bob);
 
 		expect(
@@ -925,7 +922,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 				db
 					.select()
 					.from(projectMember)
-					.where(and(eq(projectMember.projectId, shared.id), eq(projectMember.userId, bob.id))),
+					.where(and(eq(projectMember.projectId, shared.id), eq(projectMember.personId, bob.id))),
 			),
 		).toEqual([]);
 		expect(
@@ -938,10 +935,10 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		).toHaveLength(1);
 	});
 
-	it("lets the workspace's projects be made while a member's removal waits", async () => {
+	it("lets the workspace's projects be made while a membership's removal waits", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const bobMember = await join(workspace.id, ada.id, bob);
+		const bob = await newPerson("Bob");
+		const bobMembership = await join(workspace.id, ada.id, bob);
 		const [lead] = await onDatabase((db) =>
 			db
 				.insert(bot)
@@ -950,7 +947,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 					name: "Lead",
 					handle: "lead",
 					color: "sky",
-					face: "pill",
+					eyes: "pill",
 				})
 				.returning(),
 		);
@@ -960,15 +957,15 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		const hold = holdTransaction(
 			query((db) =>
 				db
-					.select({ id: workspaceMember.id })
-					.from(workspaceMember)
-					.where(eq(workspaceMember.id, bobMember.id))
+					.select({ id: membership.id })
+					.from(membership)
+					.where(eq(membership.id, bobMembership.id))
 					.for("update"),
 			),
 		);
 		await hold.held;
 		const removed = run(ada.id, (m) =>
-			m.remove({ workspace: workspace.id, memberId: bobMember.id }),
+			m.remove({ workspace: workspace.id, membershipId: bobMembership.id }),
 		);
 		await waitUntilWaitingOnLocks(1);
 
@@ -994,14 +991,14 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		await removed;
 		expect(
 			await onDatabase((db) =>
-				db.select().from(workspaceMember).where(eq(workspaceMember.id, bobMember.id)),
+				db.select().from(membership).where(eq(membership.id, bobMembership.id)),
 			),
 		).toEqual([]);
 	});
 
 	it("lets somebody who created a project leave, and keeps the project", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
+		const bob = await newPerson("Bob");
 		await join(workspace.id, ada.id, bob);
 		const shared = await onDatabase((db) =>
 			seedProject(db, {
@@ -1021,50 +1018,47 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 
 	it("matches an invitation to an address whatever its case", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const invitation = await run(ada.id, (m) =>
+		const bob = await newPerson("Bob");
+		const sent = await run(ada.id, (m) =>
 			m.invite({
 				workspace: workspace.id,
-				invitation: { email: bob.email.toUpperCase(), role: "member" },
+				invitation: { email: bob.email.toUpperCase(), role: "editor" },
 			}),
 		);
-		if ("failed" in invitation) throw new Error(invitation.failed);
+		if ("failed" in sent) throw new Error(sent.failed);
 
 		expect(
 			await onDatabase((db) =>
-				db
-					.select({ email: workspaceInvite.email })
-					.from(workspaceInvite)
-					.where(eq(workspaceInvite.id, invitation.id)),
+				db.select({ email: invitation.email }).from(invitation).where(eq(invitation.id, sent.id)),
 			),
 		).toEqual([{ email: bob.email }]);
-		expect(await run(bob.id, (m) => m.accept({ invitationId: invitation.id }))).toEqual({
+		expect(await run(bob.id, (m) => m.accept({ invitationId: sent.id }))).toEqual({
 			workspaceId: workspace.id,
 		});
 	});
 
-	it("says what a member may do in the workspace, and hides it from anybody else", async () => {
+	it("says what a person may do in the workspace, and hides it from anybody else", async () => {
 		const { ada, workspace } = await workspaceOfAda();
-		const bob = await person("Bob");
-		const eve = await person("Eve");
+		const bob = await newPerson("Bob");
+		const eve = await newPerson("Eve");
 		await join(workspace.id, ada.id, bob, "viewer");
 
 		expect(await run(ada.id, (m) => m.access({ workspace: workspace.slug }))).toMatchObject({
 			role: "owner",
 			permissions: {
-				manageMembers: true,
+				managePeople: true,
 				createProjects: true,
 				manageAdmins: true,
-				transferOwnership: true,
+				handOverOwnership: true,
 			},
 		});
 		expect(await run(bob.id, (m) => m.access({ workspace: workspace.id }))).toMatchObject({
 			role: "viewer",
 			permissions: {
-				manageMembers: false,
+				managePeople: false,
 				createProjects: false,
 				manageAdmins: false,
-				transferOwnership: false,
+				handOverOwnership: false,
 			},
 		});
 		expect(await run(eve.id, (m) => m.access({ workspace: workspace.id }))).toEqual({

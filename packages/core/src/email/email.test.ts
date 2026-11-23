@@ -1,7 +1,7 @@
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
 import { HttpClient, type HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { describe, expect, it } from "vitest";
-import { Installation } from "../installation/installation.ts";
+import { ServerSettings } from "../server-settings/server-settings.ts";
 import { Email } from "./email.ts";
 
 const message: Email.Message = {
@@ -30,7 +30,7 @@ async function sendWith(env: Record<string, string>, status = 204, sent = messag
 		Effect.flatMap(Email.Service, (email) => email.send(sent)).pipe(
 			Effect.provide(
 				Email.layerNoDeps.pipe(
-					Layer.provide([Layer.succeed(HttpClient.HttpClient, http), Installation.layer]),
+					Layer.provide([Layer.succeed(HttpClient.HttpClient, http), ServerSettings.layer]),
 					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 				),
 			),
@@ -162,7 +162,7 @@ describe("Email.transactionalSender", () => {
 	function senderFor(env: Record<string, string>) {
 		return Effect.runPromiseExit(
 			Email.transactionalSender.pipe(
-				Effect.provide(Installation.layer),
+				Effect.provide(ServerSettings.layer),
 				Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 			),
 		);

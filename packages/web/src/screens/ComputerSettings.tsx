@@ -1,16 +1,16 @@
 import {
+	type BuiltInComputerProviderId,
+	builtInComputerProviders,
 	COMPUTER_NETWORK_MODE_DEFAULT,
 	type ComputerNetworkMode,
 	type ComputerProvider,
-	type ComputerProviderPresetId,
 	type ComputerProviderSettings,
 	type ComputerProviderTestResult,
 	type ComputerProviderUpdate,
+	computerBuiltInProvider,
 	computerCpuCountSchema,
 	computerDiskShare,
 	computerMemoryGiBSchema,
-	computerProviderCatalog,
-	computerProviderPreset,
 } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
@@ -27,6 +27,7 @@ import {
 import { failureMessage } from "@/lib/failure.ts";
 import { botSettingsLink } from "@/lib/links.ts";
 import { useProjects } from "@/lib/projects.ts";
+import { useProviderSettingsAction } from "@/lib/provider-settings-action.ts";
 import { ownerLink, ownerName, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -51,12 +52,12 @@ import { TextEntryRow } from "./text-entry-row.tsx";
  * project's, which provider makes those computers, that provider's account,
  * what the computers may reach, the bots using one, and how full each
  * computer's disk is. A workspace may keep a provider configured for each
- * preset; the switch enables the chosen one, which disables any other.
+ * built-in provider; the switch enables the chosen one, which disables any other.
  */
 
 const networkModes: readonly { value: ComputerNetworkMode; label: string }[] = [
 	{ value: "open", label: "Open" },
-	{ value: "allowlist", label: "Allowlist" },
+	{ value: "allowed-hosts-only", label: "Allowed hosts only" },
 ];
 
 export function ComputerSettings() {
@@ -69,12 +70,12 @@ export function ComputerSettings() {
 function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] }) {
 	const actions = useComputerProviderActions();
 	const enabled = providers.find((provider) => provider.enabled);
-	const [chosen, setChosen] = useState<ComputerProviderPresetId>(
-		enabled?.preset ?? providers[0]?.preset ?? "opensandbox",
+	const [chosen, setChosen] = useState<BuiltInComputerProviderId>(
+		enabled?.builtIn ?? providers[0]?.builtIn ?? "opensandbox",
 	);
-	const [error, setError] = useState<string>();
-	const configured = providers.find((provider) => provider.preset === chosen);
-	const preset = computerProviderPreset(chosen);
+	const { error, setError, act } = useProviderSettingsAction();
+	const configured = providers.find((provider) => provider.builtIn === chosen);
+	const builtIn = computerBuiltInProvider(chosen);
 	const pending =
 		actions.create.isPending ||
 		actions.update.isPending ||
@@ -82,22 +83,13 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 		actions.remove.isPending;
 	const ready = configured?.hasApiKey === true;
 
-	async function act(work: () => Promise<unknown>) {
-		setError(undefined);
-		try {
-			await work();
-		} catch (cause) {
-			setError(failureMessage(cause));
-		}
-	}
-
 	/** Changes the chosen provider's settings, setting it up first when it has none. */
 	function configure(changes: ComputerProviderUpdate) {
 		return act(() =>
 			configured
 				? actions.update.mutateAsync({ providerId: configured.id, changes })
 				: actions.create.mutateAsync({
-						settings: changes.settings ?? { preset: chosen },
+						settings: changes.settings ?? { builtIn: chosen },
 						enabled: changes.enabled,
 						apiKey: changes.apiKey ?? undefined,
 					}),
@@ -112,7 +104,7 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 		);
 	}
 
-	const settings: ComputerProviderSettings = configured?.settings ?? { preset: chosen };
+	const settings: ComputerProviderSettings = configured?.settings ?? { builtIn: chosen };
 
 	return (
 		<>
@@ -121,8 +113,8 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 			</Note>
 			<SettingsGroup
 				note={
-					ready && enabled && enabled.preset !== chosen
-						? `Turning this on moves computers from ${enabled.name} to ${preset.name}. Each project and bot gets a new one, without the old one's files.`
+					ready && enabled && enabled.builtIn !== chosen
+						? `Turning this on moves computers from ${enabled.name} to ${builtIn.name}. Each project and bot gets a new one, without the old one's files.`
 						: undefined
 				}
 			>
@@ -131,11 +123,11 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 					sub={
 						ready
 							? "Each project and each bot gets its own private computer"
-							: `${preset.name} needs an API key first. Add it below.`
+							: `${builtIn.name} needs an API key first. Add it below.`
 					}
 					trailing={
 						<Toggle
-							checked={enabled?.preset === chosen}
+							checked={enabled?.builtIn === chosen}
 							disabled={!ready || pending}
 							label="Bots can use a computer"
 							onChange={(next) => void switchTo(next)}
@@ -145,9 +137,9 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 			</SettingsGroup>
 			<SettingsRadioList
 				legend="Provider"
-				options={computerProviderCatalog.map((candidate) => ({
+				options={builtInComputerProviders.map((candidate) => ({
 					...candidate,
-					badge: candidate.id === enabled?.preset ? "In use" : undefined,
+					badge: candidate.id === enabled?.builtIn ? "In use" : undefined,
 				}))}
 				chosen={chosen}
 				disabled={pending}
@@ -179,8 +171,8 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 					<SettingsRow
 						label={
 							<span className="font-medium">
-								{(settings.networkMode ?? COMPUTER_NETWORK_MODE_DEFAULT) === "allowlist"
-									? "Allowlist"
+								{(settings.networkMode ?? COMPUTER_NETWORK_MODE_DEFAULT) === "allowed-hosts-only"
+									? "Allowed hosts only"
 									: "Open"}
 							</span>
 						}
@@ -225,7 +217,7 @@ function BotsUsingAComputer() {
 			{using.map((bot) => (
 				<SettingsRow
 					key={bot.id}
-					icon={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={24} />}
+					icon={<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={24} />}
 					label={bot.name}
 					chevron
 					render={<Link {...botSettingsLink(bot)} />}
@@ -291,7 +283,7 @@ function ProviderSettings({
 	onTest,
 	onRemove,
 }: {
-	chosen: ComputerProviderPresetId;
+	chosen: BuiltInComputerProviderId;
 	provider: ComputerProvider | undefined;
 	pending: boolean;
 	testResult: ComputerProviderTestResult | undefined;
@@ -301,20 +293,20 @@ function ProviderSettings({
 	onTest: () => void;
 	onRemove: () => Promise<unknown>;
 }) {
-	const preset = computerProviderPreset(chosen);
-	const settings: ComputerProviderSettings = provider?.settings ?? { preset: chosen };
+	const builtIn = computerBuiltInProvider(chosen);
+	const settings: ComputerProviderSettings = provider?.settings ?? { builtIn: chosen };
 	const [removingKey, setRemovingKey] = useState(false);
 	const [removing, setRemoving] = useState(false);
 	const [removeError, setRemoveError] = useState<string>();
 	const hasKey = provider?.hasApiKey === true;
 
 	return (
-		<SettingsGroup label={preset.name} note={testStanding(provider, testResult) ?? hint(chosen)}>
-			{settings.preset === "opensandbox" && (
+		<SettingsGroup label={builtIn.name} note={testStanding(provider, testResult) ?? hint(chosen)}>
+			{settings.builtIn === "opensandbox" && (
 				<TextEntryRow
 					label="Server URL"
-					saved={settings.serverUrl ?? preset.baseUrl}
-					placeholder={preset.baseUrl ?? ""}
+					saved={settings.serverUrl ?? builtIn.baseUrl}
+					placeholder={builtIn.baseUrl ?? ""}
 					disabled={pending}
 					onSave={(serverUrl) => onConfigure({ settings: { ...settings, serverUrl } })}
 				/>
@@ -328,22 +320,22 @@ function ProviderSettings({
 				onSave={(apiKey) => onConfigure({ apiKey })}
 				onRemove={hasKey ? () => setRemovingKey(true) : undefined}
 			/>
-			{settings.preset === "opensandbox" && (
+			{settings.builtIn === "opensandbox" && (
 				<TextEntryRow
-					label={preset.imageLabel}
+					label={builtIn.imageLabel}
 					saved={settings.image}
-					placeholder={preset.defaultImage}
+					placeholder={builtIn.defaultImage}
 					disabled={pending}
 					clearable
 					onSave={(image) => onConfigure({ settings: { ...settings, image: image || undefined } })}
 				/>
 			)}
-			{settings.preset === "e2b" && (
+			{settings.builtIn === "e2b" && (
 				<>
 					<TextEntryRow
-						label={preset.imageLabel}
+						label={builtIn.imageLabel}
 						saved={settings.template}
-						placeholder={preset.defaultImage}
+						placeholder={builtIn.defaultImage}
 						disabled={pending}
 						clearable
 						onSave={(template) =>
@@ -375,7 +367,7 @@ function ProviderSettings({
 			<TextEntryRow
 				label="vCPUs"
 				saved={settings.cpuCount?.toString()}
-				placeholder={String(preset.defaultSize.cpuCount)}
+				placeholder={String(builtIn.defaultSize.cpuCount)}
 				disabled={pending}
 				clearable
 				onSave={(typed) => {
@@ -390,7 +382,7 @@ function ProviderSettings({
 			<TextEntryRow
 				label="Memory"
 				saved={settings.memoryGiB === undefined ? undefined : `${settings.memoryGiB} GiB`}
-				placeholder={`${preset.defaultSize.memoryGiB} GiB`}
+				placeholder={`${builtIn.defaultSize.memoryGiB} GiB`}
 				disabled={pending}
 				clearable
 				onSave={(typed) => {
@@ -405,14 +397,14 @@ function ProviderSettings({
 			{chosen === "e2b" && provider && hasKey && <TemplateRow providerId={provider.id} />}
 			{provider && hasKey && (
 				<SettingsRow
-					label="Test connection"
+					label="Test provider"
 					sub="Checks the provider answers and accepts the key."
 					onClick={pending ? undefined : onTest}
 				/>
 			)}
 			{provider && (
 				<SettingsRow
-					label={`Remove ${preset.name}`}
+					label={`Remove ${builtIn.name}`}
 					sub="Removes its computers and settings."
 					onClick={pending ? undefined : () => setRemoving(true)}
 				/>
@@ -420,7 +412,7 @@ function ProviderSettings({
 			<DeleteDialog
 				open={removingKey}
 				onOpenChange={setRemovingKey}
-				title={`Remove the ${preset.name} key?`}
+				title={`Remove the ${builtIn.name} key?`}
 				description="Projects and bots stop getting computers from this provider until another key is added."
 				confirmLabel="Remove"
 				pending={pending}
@@ -435,7 +427,7 @@ function ProviderSettings({
 					setRemoving(open);
 					setRemoveError(undefined);
 				}}
-				title={`Remove ${preset.name}?`}
+				title={`Remove ${builtIn.name}?`}
 				description={
 					removeError ??
 					"Every computer at this provider is destroyed, with its files, including work that wasn't pushed."
@@ -499,16 +491,16 @@ function TemplateRow({ providerId }: { providerId: string }) {
 
 /** What the provider's computers reach. E2B can't refuse hosts by name, so open, it blocks nothing. */
 function networkSummary(settings: ComputerProviderSettings): string {
-	if ((settings.networkMode ?? COMPUTER_NETWORK_MODE_DEFAULT) === "allowlist") {
+	if ((settings.networkMode ?? COMPUTER_NETWORK_MODE_DEFAULT) === "allowed-hosts-only") {
 		return "Only the hosts allowed";
 	}
-	return settings.preset === "e2b"
+	return settings.builtIn === "e2b"
 		? "Any host. E2B can't block hosts"
 		: "Any host but the blocked ones";
 }
 
-function hint(preset: ComputerProviderPresetId): string {
-	return preset === "opensandbox"
+function hint(builtIn: BuiltInComputerProviderId): string {
+	return builtIn === "opensandbox"
 		? "The server's own API key, from its configuration. Leave the image empty to use the default. A new size takes effect when a computer is reset; on Kubernetes, one too big for any node never starts."
 		: "Leave the URLs empty for E2B Cloud. For E2B Embed, give both. A new size takes effect once the template is prepared again and a computer is reset.";
 }

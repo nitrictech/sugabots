@@ -13,7 +13,7 @@ import { LiveDot } from "@/ui/live-dot.tsx";
 export const CHAT_HEADER_CONTAINER = "@container/chat-header";
 
 /**
- * The way into the bot's computer desktop from the top of its thread, there
+ * The way into the bot's computer desktop from the top of its chat, there
  * at any time, so it opens to say how to get one when the workspace or the
  * bot has none. While the bot is using the desktop it says so in the bot's
  * colour, with a pulse, so people notice there's something to watch.
@@ -22,16 +22,16 @@ export const CHAT_HEADER_CONTAINER = "@container/chat-header";
  */
 export function ChatComputer({
 	bot,
-	conversationId,
+	chatId,
 	onOpen,
 }: {
 	bot: Bot;
-	/** The conversation the bot's desktop is watched from. */
-	conversationId: string;
+	/** The chat the bot's desktop is watched from. */
+	chatId: string;
 	onOpen: () => void;
 }) {
 	const hasComputer = useComputerGap({ bot }) === null;
-	const inUse = useDesktopInUse(conversationId, bot.id);
+	const inUse = useDesktopInUse(chatId, bot.id);
 	if (hasComputer && inUse) {
 		return (
 			<button

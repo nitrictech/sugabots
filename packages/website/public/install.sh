@@ -5,7 +5,7 @@
 #   curl -fsSL https://sugabots.ai/install.sh | sh
 #
 # Safe to run again: an existing compose.yml and .env are kept, so the keys that
-# sign people in and encrypt saved API keys never change under an installation.
+# sign people in and encrypt saved API keys never change under a server.
 set -eu
 
 COMPOSE_URL="https://sugabots.ai/compose.yml"

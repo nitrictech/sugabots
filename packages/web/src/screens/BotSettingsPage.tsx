@@ -6,7 +6,7 @@ import {
 	type BotUpdate,
 	type BuiltInToolKey,
 	builtInToolCatalog,
-	connectionMarkFor,
+	connectorMarkFor,
 	DESCRIPTION_MAX_LENGTH,
 	PROMPT_MAX_LENGTH,
 } from "@sugabots/contracts";
@@ -17,9 +17,9 @@ import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { useDeleteBot, useModels, useUpdateBot } from "@/lib/bots.ts";
 import { characterCount } from "@/lib/character-count.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
-import { usableToolCount, useConnections } from "@/lib/connections.ts";
+import { usableToolCount, useConnectors } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { botComputerLink, botConnectionsLink, botsLink } from "@/lib/links.ts";
+import { botComputerLink, botConnectorsLink, botsLink } from "@/lib/links.ts";
 import { formatDate } from "@/lib/list-time.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { modelLogoOf } from "@/lib/model-logo.ts";
@@ -30,14 +30,14 @@ import { useSession } from "@/lib/session.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { BotCrumb } from "@/shell/BotCrumb.tsx";
-import { type Look, LookStep, type Part } from "@/shell/NewBot.tsx";
+import { type Avatar, AvatarStep, type Part } from "@/shell/NewBot.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 import {
@@ -62,7 +62,7 @@ import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import { BotAutomations } from "./AutomationEditing.tsx";
 
 /*
- * One bot's settings, as a page of its own beside its threads, and as its
+ * One bot's settings, as a page of its own beside its chats, and as its
  * contact card: its face and colour first, then what it is,
  * what it thinks with and what it is told, all open on the page, what it can
  * reach, and what it does unprompted.
@@ -88,7 +88,7 @@ function BotSettings({ bot }: { bot: Bot }) {
 	const save: Save = update.mutateAsync;
 	const savePending = update.isPending;
 	const may = bot.permissions;
-	// A Personal Assistant's prompt, model and tools are ours: its person changes its look (name, colour, face, shape), connections and automations.
+	// A Personal Assistant's prompt, model and tools are ours: its person changes its name and avatar, connectors and automations.
 	const fixed = bot.assistant;
 	const workspaceName = useWorkspace().workspace?.name ?? "the workspace";
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -112,7 +112,7 @@ function BotSettings({ bot }: { bot: Bot }) {
 				may.update ? (
 					<EditableFace bot={bot} save={save} savePending={savePending} />
 				) : (
-					<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={44} />
+					<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={44} />
 				)
 			}
 			title={bot.name}
@@ -158,12 +158,12 @@ function BotSettings({ bot }: { bot: Bot }) {
 			{!fixed && (
 				<BuiltInTools bot={bot} workspaceName={workspaceName} canChange={may.update} save={save} />
 			)}
-			<BotConnections bot={bot} />
+			<BotConnectors bot={bot} />
 			<BotAutomations bot={bot} />
 			{may.delete && !fixed && (
 				<SettingsDanger
 					label="Delete bot"
-					description="Its threads, automations and settings go with it."
+					description="Its chats, automations and settings go with it."
 					action="Delete"
 					onClick={() => setConfirmingDelete(true)}
 				/>
@@ -172,7 +172,7 @@ function BotSettings({ bot }: { bot: Bot }) {
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
 				title={`Delete ${bot.name}?`}
-				description="Its threads, automations and settings go with it. This can't be undone."
+				description="Its chats, automations and settings go with it. This can't be undone."
 				pending={remove.isPending}
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={deleteBot}
@@ -184,7 +184,7 @@ function BotSettings({ bot }: { bot: Bot }) {
 type Save = (change: BotUpdate) => Promise<unknown>;
 
 /**
- * The bot's face, which opens its look when clicked, as the pencil on its
+ * The bot's face, which opens its avatar when clicked, as the pencil on its
  * corner says. A face nobody may change is only a picture.
  */
 function EditableFace({ bot, save, savePending }: { bot: Bot; save: Save; savePending: boolean }) {
@@ -193,11 +193,11 @@ function EditableFace({ bot, save, savePending }: { bot: Bot; save: Save; savePe
 		<>
 			<button
 				type="button"
-				aria-label="Change look"
+				aria-label="Change avatar"
 				onClick={() => setEditing(true)}
 				className="focus-ring group/face relative shrink-0 rounded-full"
 			>
-				<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={44} />
+				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={44} />
 				<span
 					aria-hidden
 					// Cut out of the face by a ring of the page's own colour.
@@ -221,7 +221,7 @@ function EditableFace({ bot, save, savePending }: { bot: Bot; save: Save; savePe
 }
 
 /**
- * The bot's look, laid out as New bot's is but quieter: the bot on a faint
+ * The bot's avatar, laid out as New bot's is but quieter: the bot on a faint
  * tint of its colour, and its shape, eyes and colour beside it. Nothing is
  * saved until Save; Cancel, Escape or a click outside leaves it as it was.
  */
@@ -236,18 +236,18 @@ function LookEditor({
 	savePending: boolean;
 	done: () => void;
 }) {
-	const [look, setLook] = useState<Look>({
+	const [avatar, setAvatar] = useState<Avatar>({
 		color: bot.color,
 		shape: bot.shape,
-		face: bot.face,
+		eyes: bot.eyes,
 	});
 	const [part, setPart] = useState<Part>("shape");
 	const [failure, setFailure] = useState<string>();
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const change: BotUpdate = {
-		...(look.color !== bot.color && { color: look.color }),
-		...(look.shape !== bot.shape && { shape: look.shape }),
-		...(look.face !== bot.face && { face: look.face }),
+		...(avatar.color !== bot.color && { color: avatar.color }),
+		...(avatar.shape !== bot.shape && { shape: avatar.shape }),
+		...(avatar.eyes !== bot.eyes && { eyes: avatar.eyes }),
 	};
 	const changed = Object.keys(change).length > 0;
 
@@ -263,27 +263,27 @@ function LookEditor({
 		}
 	}
 
-	const lookStep = (
-		<LookStep
+	const avatarStep = (
+		<AvatarStep
 			part={part}
-			look={look}
+			avatar={avatar}
 			onPartChange={setPart}
-			onChange={(parts) => setLook((was) => ({ ...was, ...parts }))}
+			onChange={(parts) => setAvatar((was) => ({ ...was, ...parts }))}
 		/>
 	);
 	// A tint of the bot's colour, fainter than New bot's, so the bot is in its own light without shouting.
 	const stage = {
-		background: `color-mix(in oklab, ${botPalettes[look.color].face} 5%, var(--list))`,
+		background: `color-mix(in oklab, ${botPalettes[avatar.color].face} 5%, var(--list))`,
 	};
 
 	if (phone) {
-		// A page of its own, as New bot's look is: Close and Save across the top, the bot, then its parts.
+		// A page of its own, as New bot's avatar is: Close and Save across the top, the bot, then its parts.
 		return (
 			<DialogContent
 				showCloseButton={false}
 				className="inset-0 flex h-visible max-h-none max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none p-0"
 			>
-				<DialogTitle className="sr-only">{bot.name}'s look</DialogTitle>
+				<DialogTitle className="sr-only">{bot.name}'s avatar</DialogTitle>
 				<form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
 					<header
 						className="grid shrink-0 grid-cols-centered items-center gap-3 px-4 pt-safe-or-3 pb-2"
@@ -292,7 +292,7 @@ function LookEditor({
 						<span className="flex justify-self-start">
 							<CloseButton label="Cancel" onClick={done} />
 						</span>
-						<span className="font-semibold text-base text-foreground">Look</span>
+						<span className="font-semibold text-base text-foreground">Avatar</span>
 						<span className="flex justify-self-end">
 							<Button
 								type="submit"
@@ -305,11 +305,11 @@ function LookEditor({
 						</span>
 					</header>
 					<div className="flex shrink-0 flex-col items-center gap-3 px-4 pt-2 pb-5" style={stage}>
-						<BotAvatar color={look.color} face={look.face} shape={look.shape} size={88} />
+						<BotAvatar color={avatar.color} eyes={avatar.eyes} shape={avatar.shape} size={88} />
 						{failure && <Alert>{failure}</Alert>}
 					</div>
 					<div className="flex min-h-0 flex-1 flex-col overflow-y-auto border-border border-t bg-panel">
-						{lookStep}
+						{avatarStep}
 					</div>
 				</form>
 			</DialogContent>
@@ -321,14 +321,14 @@ function LookEditor({
 			showCloseButton={false}
 			className="max-h-dialog gap-0 overflow-hidden p-0 sm:max-w-170"
 		>
-			<DialogTitle className="sr-only">{bot.name}'s look</DialogTitle>
+			<DialogTitle className="sr-only">{bot.name}'s avatar</DialogTitle>
 			<form
 				onSubmit={submit}
 				className="flex min-h-0 min-w-0 flex-col max-md:overflow-y-auto md:h-115 md:flex-row"
 			>
 				<div className="flex shrink-0 flex-col gap-4 p-6 transition-colors md:w-65" style={stage}>
 					<div className="grid flex-1 place-items-center py-2">
-						<BotAvatar color={look.color} face={look.face} shape={look.shape} size={88} />
+						<BotAvatar color={avatar.color} eyes={avatar.eyes} shape={avatar.shape} size={88} />
 					</div>
 					{failure && <Alert>{failure}</Alert>}
 					<div className="flex justify-end gap-2">
@@ -341,7 +341,7 @@ function LookEditor({
 					</div>
 				</div>
 				<div className="flex min-h-0 min-w-0 flex-1 flex-col border-border border-l bg-panel">
-					{lookStep}
+					{avatarStep}
 				</div>
 			</form>
 		</DialogContent>
@@ -443,7 +443,7 @@ function Instructions({
 	return (
 		<SettingsGroup
 			label="Instructions"
-			description={`How ${bot.name} should work. It follows these in every thread.`}
+			description={`How ${bot.name} should work. It follows these in every chat.`}
 			className="p-1"
 			note={
 				editable
@@ -481,7 +481,7 @@ function ModelRow({
 	const offered = data?.models ?? [];
 	const current = offered.find((candidate) => candidate.modelId === model);
 	const switchedOff = model !== null && data !== undefined && current === undefined;
-	const logo = modelLogoOf(model, current?.providerPreset ?? null);
+	const logo = modelLogoOf(model, current?.providerBuiltIn ?? null);
 	const shownName = current ? modelName(current) : (model ?? "None chosen");
 	return (
 		<SettingsControlRow label="Model">
@@ -492,7 +492,7 @@ function ModelRow({
 						aria-label={`Model: ${shownName}`}
 						className="focus-ring flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-border-strong bg-settings-row-hover px-2.5 text-left text-xs text-foreground disabled:cursor-default"
 					>
-						{logo && <ProviderLogo preset={logo} className="size-3.5" />}
+						{logo && <ProviderLogo builtIn={logo} className="size-3.5" />}
 						<span className="min-w-0 flex-1 truncate">{shownName}</span>
 						{canChoose && (
 							<ChevronDown aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
@@ -509,10 +509,10 @@ function ModelRow({
 								onValueChange={(value) => onChoose(value)}
 							>
 								{offered.map((candidate) => {
-									const mark = modelLogoOf(candidate.modelId, candidate.providerPreset);
+									const mark = modelLogoOf(candidate.modelId, candidate.providerBuiltIn);
 									return (
 										<DropdownMenuRadioItem key={candidate.modelId} value={candidate.modelId}>
-											{mark && <ProviderLogo preset={mark} className="size-3.5" />}
+											{mark && <ProviderLogo builtIn={mark} className="size-3.5" />}
 											<span className="min-w-0 flex-1 truncate">{modelName(candidate)}</span>
 											<span className="shrink-0 text-subtle-foreground text-xs">
 												{candidate.providerName}
@@ -541,39 +541,35 @@ const WEB_TOOLS: readonly BuiltInToolKey[] = builtInToolCatalog
 
 /**
  * The services `bot` is connected to, each with how many of its tools it can
- * use. What each allows is set on the bot's Connections page, which Manage
- * beside the heading leads to. A connection whose tools are all off gives the
+ * use. What each allows is set on the bot's Connectors page, which Manage
+ * beside the heading leads to. A connector whose tools are all off gives the
  * bot nothing, so it is left out.
  */
-function BotConnections({ bot }: { bot: Bot }) {
-	const connections = useConnections(bot.defaultProjectId);
-	const reachable = connections.data?.filter((connection) => usableToolCount(connection) > 0);
+function BotConnectors({ bot }: { bot: Bot }) {
+	const connectors = useConnectors(bot.defaultProjectId);
+	const reachable = connectors.data?.filter((connector) => usableToolCount(connector) > 0);
 	return (
 		<SettingsGroup
-			label="Connections"
+			label="Connectors"
 			action={
-				<SettingsGroupLink render={<Link {...botConnectionsLink(bot)} />}>Manage</SettingsGroupLink>
+				<SettingsGroupLink render={<Link {...botConnectorsLink(bot)} />}>Manage</SettingsGroupLink>
 			}
 		>
-			{connections.isError && (
-				<SettingsRowAlert>{failureMessage(connections.error)}</SettingsRowAlert>
+			{connectors.isError && (
+				<SettingsRowAlert>{failureMessage(connectors.error)}</SettingsRowAlert>
 			)}
 			{reachable?.length === 0 && (
-				<SettingsRow label={<span className="text-muted-foreground">No connections yet</span>} />
+				<SettingsRow label={<span className="text-muted-foreground">No connectors yet</span>} />
 			)}
-			{reachable?.map((connection) => {
-				const tools = usableToolCount(connection);
+			{reachable?.map((connector) => {
+				const tools = usableToolCount(connector);
 				return (
 					<SettingsRow
-						key={connection.id}
+						key={connector.id}
 						icon={
-							<ConnectionMark
-								presetId={connectionMarkFor(connection)}
-								name={connection.name}
-								size="md"
-							/>
+							<ConnectorMark markId={connectorMarkFor(connector)} name={connector.name} size="md" />
 						}
-						label={connection.name}
+						label={connector.name}
 						sub={countOf(tools, "tool", "tools")}
 					/>
 				);
@@ -583,7 +579,7 @@ function BotConnections({ bot }: { bot: Bot }) {
 }
 
 /**
- * The tools `bot` has built in, rather than through its connections:
+ * The tools `bot` has built in, rather than through its connectors:
  * its computer, the web, and the rest of the catalog, each of which can be
  * switched off for it. The computer and the web are set up for the workspace
  * first; until they are, each says so and leads to where an admin sets it up.
@@ -725,7 +721,7 @@ function VisibilityRow({
 	save: Save;
 }) {
 	const isPublic = bot.visibility === "public";
-	const viewerId = useSession().user?.id;
+	const viewerId = useSession().person?.id;
 	const mine = bot.createdBy !== null && bot.createdBy.id === viewerId;
 	return (
 		<SettingsRow

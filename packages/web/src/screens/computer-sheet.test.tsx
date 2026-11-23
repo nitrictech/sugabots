@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, linear, mount, open, personalAssistant, threadWith } from "@/test-api.tsx";
+import { apiAnswers, chatWith, linear, mount, open, personalAssistant } from "@/test-api.tsx";
 import { client } from "@/test-client.ts";
 
 vi.mock("@/api.ts", () => import("@/test-client.ts"));
@@ -16,10 +16,10 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-/** Opens the computer sheet from the ⋯ of a thread with `bot`, as a phone does. */
+/** Opens the computer sheet from the ⋯ of a chat with `bot`, as a phone does. */
 async function openComputerSheet(bot: typeof linear) {
-	mount(`/suga/bots/${bot.handle}/threads/${threadWith(bot).id}`);
-	open(await screen.findByRole("button", { name: "More for this thread" }));
+	mount(`/suga/bots/${bot.handle}/chats/${chatWith(bot).id}`);
+	open(await screen.findByRole("button", { name: "More for this chat" }));
 	fireEvent.click(await screen.findByRole("menuitem", { name: "Computer" }));
 	return screen.findByText(`${bot.name} doesn't have a computer`);
 }

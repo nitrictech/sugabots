@@ -5,31 +5,31 @@ import { type Brand, Context, Data, Effect } from "effect";
 import type { UserFacing } from "../user-message.ts";
 
 /**
- * Who is asking: the person an entry point authenticated.
+ * Who is asking: the person an entrypoint authenticated.
  *
- * Each entry point proves who is calling in its own way and provides this
+ * Each entrypoint proves who is calling in its own way and provides this
  * for the work it runs, so core asks it for the caller instead of trusting an
  * id handed in with the request. There is no default: an operation that needs
  * a caller cannot run where nobody provided one.
  */
 export interface Interface {
-	readonly userId: AuthenticatedUserId;
+	readonly personId: AuthenticatedPersonId;
 }
 
 /**
- * The id of a person an entry point authenticated. Nothing in a request
+ * The id of a person an entrypoint authenticated. Nothing in a request
  * produces one: an id arriving with it is a plain `string`, so it cannot be
  * handed to {@link provide}.
  */
-export type AuthenticatedUserId = Brand.Branded<string, "AuthenticatedUserId">;
+export type AuthenticatedPersonId = Brand.Branded<string, "AuthenticatedPersonId">;
 
-export const AuthenticatedUserId = {
+export const AuthenticatedPersonId = {
 	/**
-	 * Vouches that `userId` is who is calling. Only an entry point that proved
+	 * Vouches that `personId` is who is calling. Only an entrypoint that proved
 	 * it, such as a session check, calls this, and the development seed and
 	 * test helpers stand in for one; each use is a claim for review to check.
 	 */
-	vouchedFor: (userId: string) => userId as AuthenticatedUserId,
+	vouchedFor: (personId: string) => personId as AuthenticatedPersonId,
 };
 
 /**
@@ -40,22 +40,22 @@ export const AuthenticatedUserId = {
  */
 export class Service extends Context.Service<Service, Interface>()("@sugabots/core/CurrentActor") {}
 
-/** Runs an effect as the person `userId`. */
-export const provide = (userId: AuthenticatedUserId) =>
-	Effect.provideService(Service, Service.of({ userId }));
+/** Runs an effect as the person `personId`. */
+export const provide = (personId: AuthenticatedPersonId) =>
+	Effect.provideService(Service, Service.of({ personId }));
 
 /**
  * Runs `work`, which a bot does in a turn, as the person the turn answers,
- * `askedBy`. They signed in to post the message the turn answers, which is
+ * `askerId`. They signed in to post the message the turn answers, which is
  * the claim `vouchedFor` makes. Fails with `NobodyAsked` when the turn answers
  * no person, such as an automation's run.
  */
 export const asAsker = <A, E, R>(
-	askedBy: string | null | undefined,
+	askerId: string | null | undefined,
 	work: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E | NobodyAsked, Exclude<R, Service>> =>
-	askedBy
-		? work.pipe(provide(AuthenticatedUserId.vouchedFor(askedBy)))
+	askerId
+		? work.pipe(provide(AuthenticatedPersonId.vouchedFor(askerId)))
 		: Effect.fail(new NobodyAsked());
 
 export class NobodyAsked extends Data.TaggedError("NobodyAsked") implements UserFacing {

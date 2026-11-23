@@ -37,13 +37,10 @@ const MIB_PER_GIB = 1024;
 /** How far past its own timeout a command may run before the call gives up on E2B. */
 const EXEC_GRACE = Duration.seconds(15);
 
-export const fromE2b = (
-	connection: Computers.E2bConnection,
-	ids: Ids.Interface,
-): Computers.Provider => {
+export const fromE2b = (access: Computers.E2bAccess, ids: Ids.Interface): Computers.Provider => {
 	const options = (): ConnectionOpts => ({
-		apiKey: Redacted.value(connection.apiKey),
-		...connection.endpoints,
+		apiKey: Redacted.value(access.apiKey),
+		...access.endpoints,
 	});
 	const unavailable = (cause: unknown) =>
 		new Computers.Unavailable({
@@ -58,24 +55,24 @@ export const fromE2b = (
 
 	return {
 		capabilities: {
-			pauseKeeps: "memory",
+			sleepKeeps: "memory",
 			// E2B Cloud adds headers by host. E2B Embed, at its own endpoints,
 			// leaves resolving them to E2B's enterprise orchestrator.
-			credentials: connection.endpoints ? "none" : "host",
+			credentials: access.endpoints ? "none" : "host",
 			blocksHosts: false,
 		},
-		networkMode: connection.networkMode,
+		networkMode: access.networkMode,
 		templates: {
 			build: (image) =>
 				Effect.tryPromise({
 					try: async (): Promise<Computers.TemplateBuild> => {
 						const { templateId, buildId } = await Template.buildInBackground(
 							Template().fromImage(image).runCmd([WITHOUT_SUDO, TMP_ON_DISK], { user: "root" }),
-							connection.template,
+							access.template,
 							{
 								...options(),
-								cpuCount: connection.size.cpuCount,
-								memoryMB: connection.size.memoryGiB * MIB_PER_GIB,
+								cpuCount: access.size.cpuCount,
+								memoryMB: access.size.memoryGiB * MIB_PER_GIB,
 							},
 						);
 						return { templateId, buildId };
@@ -98,7 +95,7 @@ export const fromE2b = (
 		create: (spec) =>
 			Effect.tryPromise({
 				try: () =>
-					E2bSandbox.create(connection.template, {
+					E2bSandbox.create(access.template, {
 						...options(),
 						metadata: { ...spec.labels },
 						timeoutMs: Duration.toMillis(IDLE_BACKSTOP),
@@ -106,7 +103,7 @@ export const fromE2b = (
 						// E2B serves a sandbox's ports to anyone with its address unless
 						// told otherwise; private, they need the sandbox's traffic token.
 						// Set only here: updating the network leaves it as it is.
-						network: { ...egressOf(spec.reach), allowPublicTraffic: false },
+						network: { ...networkRulesOf(spec.reach), allowPublicTraffic: false },
 					}),
 				catch: unavailable,
 			}).pipe(
@@ -130,7 +127,7 @@ export const fromE2b = (
 			Effect.tryPromise({
 				try: async () => {
 					const info = await E2bSandbox.getInfo(id, options());
-					// Connecting resumes a paused sandbox, and moves its backstop on.
+					// Connecting resumes a sleeping sandbox, and moves its backstop on.
 					const sandbox = await E2bSandbox.connect(id, {
 						...options(),
 						timeoutMs: Duration.toMillis(IDLE_BACKSTOP),
@@ -144,11 +141,11 @@ export const fromE2b = (
 				try: async (): Promise<Computers.Info> => {
 					const info = await E2bSandbox.getInfo(id, options());
 					// Work stays on the sandbox's disk, so moving it means copying it.
-					return { state: info.state, workKeptApart: false };
+					return { state: info.state === "paused" ? "asleep" : "running", workKeptApart: false };
 				},
 				catch: missingOr(id),
 			}),
-		pause: (id) =>
+		sleep: (id) =>
 			Effect.tryPromise({
 				try: () => E2bSandbox.pause(id, options()),
 				catch: missingOr(id),
@@ -201,9 +198,9 @@ export const fromE2b = (
 						: {};
 					// E2B Embed has no wildcard domain for sandboxes' hosts, so its
 					// proxy routes on headers instead.
-					return connection.endpoints
+					return access.endpoints
 						? {
-								url: connection.endpoints.sandboxUrl.replace(/\/$/, ""),
+								url: access.endpoints.sandboxUrl.replace(/\/$/, ""),
 								headers: {
 									...traffic,
 									"E2b-Sandbox-Id": sandbox.sandboxId,
@@ -218,7 +215,7 @@ export const fromE2b = (
 						// One update replaces both the hosts and the rules, so they are
 						// always set together.
 						await sandbox.updateNetwork({
-							...egressOf(network.reach),
+							...networkRulesOf(network.reach),
 							rules: credentialRules(network.credentials),
 						});
 						await sandbox.files.write(
@@ -281,13 +278,14 @@ function credentialRules(credentials: readonly Computers.Credential[]) {
 }
 
 /**
- * E2B's rules for what the sandbox may connect to. On an allowlist it refuses
+ * E2B's rules for what the sandbox may connect to. Allowed hosts only, it refuses
  * every address but the hosts', since what's allowed wins over what's denied.
  * Open, it has no rules: E2B denies addresses but never names, so it can't
  * keep blocked hosts out.
  */
-function egressOf(reach: Computers.Reach) {
-	if (reach.kind === "allowlist") return { allowOut: [...reach.hosts], denyOut: [ALL_ADDRESSES] };
+function networkRulesOf(reach: Computers.Reach) {
+	if (reach.kind === "allowed-hosts-only")
+		return { allowOut: [...reach.hosts], denyOut: [ALL_ADDRESSES] };
 	if (reach.blockedHosts.length > 0) throw new Error("E2B can't refuse hosts by name");
 	return {};
 }

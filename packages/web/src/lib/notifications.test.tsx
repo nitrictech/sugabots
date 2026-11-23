@@ -52,12 +52,12 @@ afterEach(() => {
 const release = crypto.randomUUID();
 const otherTab = crypto.randomUUID();
 
-const about = (conversationId: string, title: string): NotificationContent => ({
+const about = (chatId: string, title: string): NotificationContent => ({
 	title,
 	body: "Shipped.",
-	tag: `conversation:${conversationId}`,
+	tag: `chat:${chatId}`,
 	path: "/",
-	conversationId,
+	chatId,
 });
 
 /** The person's own event stream, carrying `events` and then ending. */
@@ -70,7 +70,7 @@ function personStream(...events: ReturnType<typeof streamEvent>[]) {
 	});
 }
 
-it("shows a notification about a conversation none of the person's tabs is looking at", async () => {
+it("shows a notification about a chat none of the person's tabs is looking at", async () => {
 	personStream(streamEvent("notification", about(release, "Scout in Release notes")));
 
 	renderHook(useNotificationsInThisBrowser);
@@ -78,15 +78,15 @@ it("shows a notification about a conversation none of the person's tabs is looki
 	await waitFor(() => expect(shown).toEqual(["Scout in Release notes"]));
 });
 
-it("holds back a notification about a conversation another of their tabs is looking at, until it looks away", async () => {
+it("holds back a notification about a chat another of their tabs is looking at, until it looks away", async () => {
 	personStream(
-		streamEvent("presence", { clientId: otherTab, conversationId: release, sequence: 2 }),
+		streamEvent("presence", { clientId: otherTab, chatId: release, sequence: 2 }),
 		streamEvent("notification", about(release, "Held back")),
 		streamEvent("notification", about(crypto.randomUUID(), "Elsewhere")),
 		// Sent before the report above, and arriving after it.
-		streamEvent("presence", { clientId: otherTab, conversationId: null, sequence: 1 }),
+		streamEvent("presence", { clientId: otherTab, chatId: null, sequence: 1 }),
 		streamEvent("notification", about(release, "Held back too")),
-		streamEvent("presence", { clientId: otherTab, conversationId: null, sequence: 3 }),
+		streamEvent("presence", { clientId: otherTab, chatId: null, sequence: 3 }),
 		streamEvent("notification", about(release, "After looking away")),
 	);
 

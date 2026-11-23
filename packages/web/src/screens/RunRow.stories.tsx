@@ -10,16 +10,23 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 });
 
+/** When each run started. */
+const STARTED_AT = "2026-09-25T06:12:00.000Z";
+
 const run = (state: WorkState, triggerKind: RunTriggerKind = "routine") => (
 	<RunRow
 		automationName="Overnight outbound"
 		triggerKind={triggerKind}
 		state={state}
+		at={STARTED_AT}
 		onOpen={fn()}
 	/>
 );
 
-/** AutomationRan is an automation's run by a routine that posted into the thread, marked with a clock. */
+/**
+ * AutomationRan is a routine's run that finished without posting into the
+ * chat, marked with a clock and the time it started.
+ */
 export const AutomationRan = meta.story({ render: () => run("done") });
 
 /** AutomationRanFromWebhook is a run its webhook started, marked with a hook in the clock's place. */

@@ -1,7 +1,7 @@
 import type {
 	Bot,
 	BotColor,
-	BotFace,
+	BotEyes,
 	BotPermissions,
 	BotShape,
 	Project,
@@ -17,7 +17,7 @@ import type {
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 const PERMISSIONS: ProjectPermissions = {
 	rename: true,
-	manageMembers: true,
+	managePeople: true,
 	manageBots: true,
 	leave: false,
 	join: false,
@@ -26,7 +26,7 @@ const PERMISSIONS: ProjectPermissions = {
 		readHistory: true,
 		openSettings: true,
 		deleteFiles: true,
-		manageConnections: true,
+		manageConnectors: true,
 		manageComputer: true,
 		useDesktop: true,
 		manageAutomations: true,
@@ -75,7 +75,7 @@ let next = 0;
 function bot(
 	name: string,
 	color: BotColor,
-	face: BotFace = "pill",
+	eyes: BotEyes = "pill",
 	shape: BotShape = "circle",
 	extra: Partial<Bot> = {},
 ): Bot {
@@ -87,7 +87,7 @@ function bot(
 		handle: name.toLowerCase().replace(/\s+/g, "-"),
 		description: null,
 		color,
-		face,
+		eyes,
 		shape,
 		model: "claude-sonnet-4-20250514",
 		prompt: "",

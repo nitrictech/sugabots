@@ -3,7 +3,7 @@ import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -13,10 +13,10 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 		const membership = yield* Membership.Service;
 		const timeZones = yield* WorkspaceTimeZone.Service;
 		return handlers
-			.handle("list", () => asSessionUser(membership.workspaces))
+			.handle("list", () => asSignedInPerson(membership.workspaces))
 			.handle("create", ({ payload }) =>
 				membership.create({ details: payload }).pipe(
-					asSessionUser,
+					asSignedInPerson,
 					asHttpError({
 						SlugTaken: Conflict,
 						SlugShapedLikeUuid: BadRequest,
@@ -28,21 +28,23 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 				membership
 					.update({ workspace: params.workspace, details: payload })
 					.pipe(
-						asSessionUser,
+						asSignedInPerson,
 						asHttpError({ ...refusals, SlugTaken: Conflict, SlugShapedLikeUuid: BadRequest }),
 					),
 			)
 			.handle("timeZone", ({ params }) =>
-				timeZones.get({ workspace: params.workspace }).pipe(asSessionUser, asHttpError(refusals)),
+				timeZones
+					.get({ workspace: params.workspace })
+					.pipe(asSignedInPerson, asHttpError(refusals)),
 			)
 			.handle("changeTimeZone", ({ params, payload }) =>
 				timeZones
 					.change({ workspace: params.workspace, timeZone: payload.timeZone })
-					.pipe(asSessionUser, asHttpError({ ...refusals, TimeZoneUnknown: BadRequest })),
+					.pipe(asSignedInPerson, asHttpError({ ...refusals, TimeZoneUnknown: BadRequest })),
 			)
 			.handle("delete", ({ params }) =>
 				membership.delete({ workspace: params.workspace }).pipe(
-					asSessionUser,
+					asSignedInPerson,
 					asHttpError({
 						...refusals,
 						ComputerUnavailable: Conflict,
@@ -50,23 +52,23 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 					}),
 				),
 			)
-			.handle("members", ({ params }) =>
+			.handle("memberships", ({ params }) =>
 				membership
-					.members({ workspace: params.workspace })
-					.pipe(asSessionUser, asHttpError(refusals)),
+					.memberships({ workspace: params.workspace })
+					.pipe(asSignedInPerson, asHttpError(refusals)),
 			)
-			.handle("updateMember", ({ params, payload }) =>
+			.handle("changeRole", ({ params, payload }) =>
 				membership
 					.changeRole({
 						workspace: params.workspace,
-						memberId: params.memberId,
+						membershipId: params.membershipId,
 						role: payload.role,
 					})
-					.pipe(asSessionUser, asHttpError({ ...refusals, OwnerStays: BadRequest })),
+					.pipe(asSignedInPerson, asHttpError({ ...refusals, OwnerStays: BadRequest })),
 			)
-			.handle("removeMember", ({ params }) =>
-				membership.remove({ workspace: params.workspace, memberId: params.memberId }).pipe(
-					asSessionUser,
+			.handle("removeMembership", ({ params }) =>
+				membership.remove({ workspace: params.workspace, membershipId: params.membershipId }).pipe(
+					asSignedInPerson,
 					asHttpError({
 						...refusals,
 						OwnerStays: BadRequest,
@@ -77,7 +79,7 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 			)
 			.handle("leave", ({ params }) =>
 				membership.leave({ workspace: params.workspace }).pipe(
-					asSessionUser,
+					asSignedInPerson,
 					asHttpError({
 						...refusals,
 						OwnerStays: BadRequest,
@@ -86,37 +88,40 @@ export const workspaceRoutes = HttpApiBuilder.group(ServerApi, "workspaces", (ha
 					}),
 				),
 			)
-			.handle("transferOwnership", ({ params, payload }) =>
+			.handle("handOverOwnership", ({ params, payload }) =>
 				membership
-					.transferOwnership({ workspace: params.workspace, memberId: payload.memberId })
-					.pipe(asSessionUser, asHttpError(refusals)),
+					.handOverOwnership({ workspace: params.workspace, membershipId: payload.membershipId })
+					.pipe(asSignedInPerson, asHttpError(refusals)),
 			)
 			.handle("invitations", ({ params }) =>
 				membership
 					.invitations({ workspace: params.workspace })
-					.pipe(asSessionUser, asHttpError(refusals)),
+					.pipe(asSignedInPerson, asHttpError(refusals)),
 			)
 			.handle("invite", ({ params, payload }) =>
 				membership
 					.invite({ workspace: params.workspace, invitation: payload })
 					.pipe(
-						asSessionUser,
-						asHttpError({ ...refusals, AlreadyMember: Conflict, AlreadyInvited: Conflict }),
+						asSignedInPerson,
+						asHttpError({ ...refusals, AlreadyInWorkspace: Conflict, AlreadyInvited: Conflict }),
 					),
 			)
 			.handle("cancelInvitation", ({ params }) =>
 				membership
 					.cancelInvitation({ invitationId: params.invitationId })
-					.pipe(asSessionUser, asHttpError(refusals)),
+					.pipe(asSignedInPerson, asHttpError(refusals)),
 			)
 			.handle("invitation", ({ params }) =>
 				membership
 					.invitation({ invitationId: params.invitationId })
-					.pipe(asSessionUser, asHttpError({ ResourceHidden: NotFound, NotTheInvitee: Forbidden })),
+					.pipe(
+						asSignedInPerson,
+						asHttpError({ ResourceHidden: NotFound, NotTheInvitee: Forbidden }),
+					),
 			)
 			.handle("acceptInvitation", ({ params }) =>
 				membership.accept({ invitationId: params.invitationId }).pipe(
-					asSessionUser,
+					asSignedInPerson,
 					Effect.catchTag("EmailUnverified", (unverified) =>
 						Effect.fail(
 							new Forbidden({ message: unverified.userMessage, details: EMAIL_UNVERIFIED }),

@@ -15,7 +15,7 @@ const IMAGE = "ghcr.io/nitrictech/sugabots-sandbox:latest";
 /** The desktop's own WebSocket for VNC viewers: display 1's, at 5900 + 1. */
 const VIEWER_PORT = 5901;
 /** Researcher's, the bot the slide shows, which the desktop is drawn in as the app would draw it. */
-const ACCENT = botPalettes.ice.face;
+const ACCENT = botPalettes.ice.eyes;
 /**
  * The desktop asks viewers for a password, which the API's relay gives and
  * the viewer, pointed past it, can't. In front of the real Xvnc on the

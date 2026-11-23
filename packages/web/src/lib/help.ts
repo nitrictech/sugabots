@@ -10,8 +10,8 @@ const UNKNOWN_VERSION = "unknown";
 /** How many characters of a commit hash identify it, as `git rev-parse --short` prints it. */
 const SHORT_COMMIT_LENGTH = 7;
 
-/** The build this installation runs: its release, and the commit it was made from. */
-export interface Build {
+/** The build this server runs: its release, and the commit it was made from. */
+interface Build {
 	/** The release as the API reports it, such as `0.2.0` or `edge`; `unknown` when not `versioned`. */
 	version: string;
 	/** Whether the build was given a version. A local `bun run dev` or a platform building from source isn't. */

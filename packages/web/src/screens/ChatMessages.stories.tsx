@@ -1,0 +1,1486 @@
+import type {
+	FilePart,
+	Message,
+	MessagePart,
+	MessageReaction,
+	Participant,
+	ToolCallPart,
+	WrittenFile,
+	WrittenFilePart,
+} from "@sugabots/contracts";
+import { testPerson } from "@sugabots/contracts/testing";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { HttpResponse, http } from "msw";
+import { type ComponentProps, useEffect, useState } from "react";
+import { expect, fn, screen, waitFor, within } from "storybook/test";
+import preview from "#storybook/preview";
+import { usePanelKeys } from "@/lib/panel-keys.ts";
+import { growthDesk } from "@/shell/story-fixtures.ts";
+import { ChatMessages } from "./ChatMessages.tsx";
+import { findAnsweringFace } from "./chat-layout.ts";
+import { queuedBehindReply } from "./queued-messages.ts";
+
+const host: Extract<Participant, { kind: "bot" }> = {
+	kind: "bot",
+	id: "0199a3a0-0000-7000-8000-000000000001",
+	name: "Issue Triager",
+	handle: "issue-triager",
+	color: "green",
+	eyes: "arc",
+	shape: "circle",
+};
+
+const person = testPerson({
+	id: "0199a3a0-0000-7000-8000-000000000002",
+	name: "Sam Rivera",
+});
+
+const jay = testPerson({
+	id: "0199a3a0-0000-7000-8000-000000000003",
+	name: "Jay Park",
+});
+
+function message(id: string, author: Message["author"], content: string): Message {
+	return {
+		id,
+		chatId: "0199a3a0-0000-7000-8000-00000000000a",
+		author,
+		kind: "text",
+		status: "complete",
+		parts: [{ type: "text", text: content }],
+		content,
+		createdAt: "2026-09-22T04:30:00.000Z",
+	};
+}
+
+const PROJECT = "0199a3a0-0000-7000-8000-00000000000b";
+
+/** Where a file would be served. Most stories have none, so nothing asks for one. */
+const fileUrlOf = (fileId: string) => `/files/${fileId}`;
+
+function toolCall(id: string, tool: string): ToolCallPart {
+	return {
+		type: "tool_call",
+		id,
+		tool,
+		input: {},
+		output: { ok: true },
+		status: "completed",
+		error: null,
+		writeOrDelete: false,
+		atOffset: 0,
+		startedAt: "2026-09-22T04:30:00.000Z",
+		finishedAt: "2026-09-22T04:30:01.200Z",
+	};
+}
+
+function reply(id: string, parts: MessagePart[]): Message {
+	const content = parts.map((part) => (part.type === "text" ? part.text : "")).join("");
+	return { ...message(id, host, content), parts };
+}
+
+const meta = preview.meta({
+	title: "Product/ChatMessages",
+	component: ChatMessages,
+	args: {
+		typing: { host, isRunning: false },
+		participants: [host, person],
+		peopleReachingProject: [person, jay],
+		chatKind: "project_chat",
+		onOpenNestedChat: fn(),
+		fileUrlOf,
+	},
+	decorators: [
+		function WithQueries(Story) {
+			// The bot has no connectors, so its tools are named without a mark.
+			const [queryClient] = useState(() => {
+				const client = new QueryClient();
+				client.setQueryData(["connectors", PROJECT], []);
+				return client;
+			});
+			useEffect(() => () => queryClient.clear(), [queryClient]);
+			return (
+				<QueryClientProvider client={queryClient}>
+					<div className="mx-auto py-4">
+						<Story />
+					</div>
+				</QueryClientProvider>
+			);
+		},
+	],
+});
+
+/** A picture drawn as an SVG, so the story needs no server and looks the same every run. */
+function pictureUrl(label: string, hue: number): string {
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="hsl(${hue} 45% 32%)"/><text x="320" y="250" font-family="sans-serif" font-size="40" fill="white" text-anchor="middle">${label}</text></svg>`;
+	return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+const attachedFiles: FilePart[] = [
+	["01", "pricing-page-old.png", "image/png", 412_000],
+	["02", "pricing-page-new.png", "image/png", 398_000],
+	["03", "acme-email.png", "image/png", 220_000],
+	["04", "acme-retail-request.pdf", "application/pdf", 245_760],
+].map(([suffix, name, contentType, size]) => ({
+	type: "file",
+	id: `0199a3a0-0000-7000-8000-0000000003${suffix}`,
+	name: String(name),
+	contentType: String(contentType),
+	size: Number(size),
+}));
+const filesOnly: FilePart = {
+	type: "file",
+	id: "0199a3a0-0000-7000-8000-000000000305",
+	name: "q4-pipeline.csv",
+	contentType: "text/csv",
+	size: 18_400,
+};
+const pictures = new Map(
+	attachedFiles
+		.slice(0, 3)
+		.map((file, index) => [file.id, pictureUrl(file.name.replace(".png", ""), 200 + index * 50)]),
+);
+
+const askedWithFiles: Message = {
+	...message(
+		"0199a3a0-0000-7000-8000-000000000310",
+		person,
+		"Here's Acme's request and both pricing pages. Can you check the numbers?",
+	),
+	parts: [
+		{
+			type: "text",
+			text: "Here's Acme's request and both pricing pages. Can you check the numbers?",
+		},
+		...attachedFiles,
+	],
+};
+const sentFilesOnly: Message = {
+	...message("0199a3a0-0000-7000-8000-000000000311", person, ""),
+	parts: [filesOnly],
+	createdAt: "2026-09-22T04:32:00.000Z",
+};
+/** The pictures where they are drawn, and every other file where it would be served. */
+const servedAt = (fileId: string) => pictures.get(fileId) ?? fileUrlOf(fileId);
+const stillSending: Message = {
+	...message("0199a3a0-0000-7000-8000-000000000312", person, "Numbers attached"),
+	parts: [{ type: "text", text: "Numbers attached" }, ...attachedFiles.slice(2)],
+};
+
+/**
+ * Files a person attached: under the words of a message with text, and on
+ * their own in a message that has nothing else. Images open full size; the
+ * PDF and the sheet download.
+ */
+export const WithFiles = meta.story({
+	args: {
+		fileUrlOf: servedAt,
+		messages: [askedWithFiles, sentFilesOnly],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText(/Can you check the numbers/)).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("button", { name: "Open pricing-page-old.png" }),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("link", { name: "Download acme-retail-request.pdf" }),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("link", { name: "Download q4-pipeline.csv" }),
+		).toBeInTheDocument();
+	},
+});
+
+/** A message still being sent: its files show, without links until the API can serve them. */
+export const FilesWhileSending = meta.story({
+	args: {
+		fileUrlOf: servedAt,
+		messages: [stillSending],
+		sending: new Set([stillSending.id]),
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("PDF · 240 KB")).toBeInTheDocument();
+		await expect(canvas.queryByRole("link", { name: /^Download/ })).toBeNull();
+	},
+});
+
+const tractionReport: WrittenFile = {
+	id: "0199a3a0-0000-7000-8000-000000000a15",
+	chatId: PROJECT,
+	kind: "document",
+	title: "Weekly traction",
+	version: 4,
+	createdBy: { botId: host.id, name: host.name },
+	createdAt: "2026-09-01T04:30:00.000Z",
+	updatedAt: "2026-09-22T04:29:00.000Z",
+	content: "# Weekly traction\n\nSign-ups are up 18% on last week.",
+	shownVersion: {
+		number: 4,
+		author: { botId: host.id, name: host.name },
+		createdAt: "2026-09-22T04:29:00.000Z",
+	},
+};
+
+const tractionCard: WrittenFilePart = {
+	type: "written_file",
+	fileId: tractionReport.id,
+	kind: tractionReport.kind,
+	title: tractionReport.title,
+	version: tractionReport.version,
+};
+
+/** The weekly traction automation's result, made of `parts`. */
+function tractionResult(parts: MessagePart[]): Message {
+	return {
+		...reply("0199a3a0-0000-7000-8000-000000000a11", parts),
+		automationResultOf: {
+			runId: "0199a3a0-0000-7000-8000-000000000a12",
+			chatId: "0199a3a0-0000-7000-8000-000000000a13",
+			automationId: "0199a3a0-0000-7000-8000-000000000a14",
+			automationName: "Weekly traction",
+		},
+	};
+}
+
+/**
+ * An automation run's result, posted in the automation's feed, with the file
+ * the run wrote as a card under its words, the same as under the reply in the
+ * run's own chat.
+ */
+export const AutomationResultWithFile = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${import.meta.env.VITE_API_URL}/projects/:projectId/files/:fileId/versions/4`, () =>
+				HttpResponse.json(tractionReport),
+			),
+		);
+	},
+	args: {
+		onOpenFile: fn(),
+		messages: [
+			tractionResult([
+				{ type: "text", text: "Weekly traction is updated: sign-ups are up 18%." },
+				tractionCard,
+			]),
+		],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await waitFor(() => expect(canvas.getByText("Document by Issue Triager")).toBeVisible());
+		await userEvent.click(canvas.getByRole("button", { name: "Open Weekly traction" }));
+		await expect(args.onOpenFile).toHaveBeenCalledWith(tractionReport.id);
+	},
+});
+
+/** An automation run's result that is only the file the run wrote, when its last reply had no words. */
+export const AutomationResultOnlyFile = meta.story({
+	beforeEach: AutomationResultWithFile.input.beforeEach,
+	args: { onOpenFile: fn(), messages: [tractionResult([tractionCard])] },
+	play: async ({ canvas }) => {
+		await waitFor(() => expect(canvas.getByText("Document by Issue Triager")).toBeVisible());
+		await expect(canvas.getByRole("button", { name: "Open Weekly traction" })).toBeVisible();
+	},
+});
+
+/**
+ * A group's first message has its time beside its author's name, and on hover
+ * the full date and time, with the year.
+ */
+export const TimeOnHover = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.hover(canvas.getByText(/\d:\d{2}/, { selector: "time" }));
+		// Date order and clock style follow the browser's locale; the year and seconds are what matter.
+		await waitFor(() => expect(screen.getByText(/2025 at \d{1,2}:\d{2}:46/)).toBeVisible());
+	},
+	args: {
+		messages: [
+			{
+				...message("0199a3a0-0000-7000-8000-000000000106", person, "Is the release still on?"),
+				createdAt: "2025-08-05T05:46:46.000Z",
+			},
+		],
+	},
+});
+
+const watchedMessages = [
+	message("0199a3a0-0000-7000-8000-000000000300", host, "Overnight outbound is queued."),
+	message("0199a3a0-0000-7000-8000-000000000301", person, "Can you check the overnight queue?"),
+	message("0199a3a0-0000-7000-8000-000000000302", host, "Done: 38 leads queued, six replied."),
+];
+
+/**
+ * WatchedWhileWriting shows a bot's newest reply while the viewer writes back:
+ * the face heading its run comes alive and watches them, while the face on its
+ * earlier reply stays still.
+ */
+export const WatchedWhileWriting = meta.story({
+	globals: { liveliness: "sometimes" },
+	args: {
+		messages: watchedMessages,
+		answeringFace: findAnsweringFace(watchedMessages, true),
+		viewerWriting: true,
+	},
+	play: async ({ canvas }) => {
+		await waitFor(() => expect(canvas.getByText(/six replied/)).toBeVisible());
+	},
+});
+
+const typingMessages = [
+	message("0199a3a0-0000-7000-8000-000000000310", host, "Outbound is queued for tonight."),
+	message("0199a3a0-0000-7000-8000-000000000311", person, "Can you check the overnight queue?"),
+	{
+		...message("0199a3a0-0000-7000-8000-000000000312", host, ""),
+		status: "writing" as const,
+		parts: [],
+	},
+];
+
+/**
+ * ThinkingWhileTyping shows a bot writing a reply that has nothing to show yet:
+ * the face on its reply before thinks, as the typing line says it's typing.
+ */
+export const ThinkingWhileTyping = meta.story({
+	globals: { liveliness: "often" },
+	args: {
+		messages: typingMessages,
+		answeringFace: findAnsweringFace(typingMessages, true),
+	},
+	play: async ({ canvas }) => {
+		await waitFor(() => expect(canvas.getByText(/is typing/)).toBeVisible());
+	},
+});
+
+/**
+ * Runs groups one author's messages under one face and name: a bot's over its
+ * words, a person's in their first bubble. Follow-ups show their time beside
+ * their actions, on hover.
+ */
+export const Runs = meta.story({
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000201",
+				host,
+				"Overnight outbound queued `38` leads and six have already replied.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000202",
+				host,
+				"The two Northwind accounts are in there, and both asked for pricing. Want me to draft replies?",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000203",
+				jay,
+				"Yes please. Keep the tone short, they hate long emails.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000204",
+				person,
+				"Also, billing timeouts are back on checkout.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000205",
+				person,
+				"Can you check Sentry and get it tracked if nothing's open?",
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		// Two messages in a row from one author carry the name once.
+		await expect(canvas.getAllByText("Issue Triager")).toHaveLength(1);
+		await expect(canvas.getAllByText("Jay Park")).toHaveLength(1);
+		await expect(canvas.getAllByText("Sam Rivera")).toHaveLength(1);
+	},
+});
+
+/** A minute apart, from the first message of the queue stories. */
+function minuteOfQueue(position: number): string {
+	return new Date(Date.parse("2026-09-22T04:30:00.000Z") + position * 60_000).toISOString();
+}
+
+const writingMessages = [
+	message(
+		"0199a3a0-0000-7000-8000-000000000221",
+		person,
+		"Billing timeouts are back on checkout. Can you check Sentry?",
+	),
+	{
+		...message("0199a3a0-0000-7000-8000-000000000222", host, ""),
+		status: "writing" as const,
+		parts: [],
+	},
+	message(
+		"0199a3a0-0000-7000-8000-000000000223",
+		jay,
+		"The Stripe webhook is failing too, might be the same thing.",
+	),
+	message("0199a3a0-0000-7000-8000-000000000224", jay, "Started around 9 this morning."),
+	message("0199a3a0-0000-7000-8000-000000000225", person, "Track both if nothing's open."),
+].map((written, position) => ({ ...written, createdAt: minuteOfQueue(position) }));
+/** Jay's first message, sent while the reply was being written, asked for the turn that waits. */
+const queuedSince = minuteOfQueue(2);
+
+/**
+ * Messages sent while the bot is still writing a reply wait for its next one,
+ * which answers them together. Each person's run says so once, so nobody
+ * wonders whether theirs was dropped.
+ */
+export const QueuedBehindAReply = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person, jay],
+		messages: writingMessages,
+		queued: queuedBehindReply(writingMessages, queuedSince),
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getAllByRole("article", { name: "Jay Park, queued" })).toHaveLength(2);
+		await expect(canvas.getByRole("article", { name: "Sam Rivera, queued" })).toBeInTheDocument();
+		// The question the reply is answering is not waiting on anything.
+		const sams = canvas.getAllByRole("article", { name: /^Sam Rivera, / });
+		await expect(sams.filter((bubble) => !bubble.ariaLabel?.endsWith("queued"))).toHaveLength(1);
+		// Once for each person's run, under its last message.
+		await expect(canvas.getAllByText("Queued")).toHaveLength(2);
+	},
+});
+
+/** How long the loop below stays on each state: writing, then landed. */
+const HAND_OFF_MS = 3_000;
+
+/** The reply the queued messages waited behind has landed, and the next one has started. */
+const handedOffMessages = [
+	...writingMessages.slice(0, 1),
+	{
+		...message(
+			"0199a3a0-0000-7000-8000-000000000222",
+			host,
+			"Checkout timeouts are tracked as NIT-1902.",
+		),
+		createdAt: minuteOfQueue(1),
+	},
+	...writingMessages.slice(2),
+	{
+		...message("0199a3a0-0000-7000-8000-000000000226", host, ""),
+		status: "writing" as const,
+		parts: [],
+		createdAt: minuteOfQueue(5),
+	},
+];
+
+/** Waits behind a reply, then sees it land and the next one start, over and over. */
+function HandingOff(props: ComponentProps<typeof ChatMessages>) {
+	const [tick, setTick] = useState(0);
+	useEffect(() => {
+		const next = setInterval(() => setTick((count) => count + 1), HAND_OFF_MS);
+		return () => clearInterval(next);
+	}, []);
+	const handedOff = tick % 2 === 1;
+	// Once the next reply has started, nothing waits for it.
+	const messages = handedOff ? handedOffMessages : writingMessages;
+	const queued = queuedBehindReply(messages, handedOff ? null : queuedSince);
+	return <ChatMessages {...props} messages={messages} queued={queued} />;
+}
+
+/** The bot takes the queued messages up: their notes go as it starts its next reply. */
+export const QueueHandOff = meta.story({
+	tags: ["ai-generated"],
+	args: { participants: [host, person, jay], messages: [] },
+	render: (args) => <HandingOff {...args} />,
+});
+
+/** Each day starts under a rule naming it, so a new day in the middle of a chat reads as a new stretch. */
+export const ANewDay = meta.story({
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000211",
+				host,
+				"Drafted both. They're in your outbox.",
+			),
+			{
+				...message("0199a3a0-0000-7000-8000-000000000212", person, "Did either of them reply?"),
+				createdAt: "2026-09-23T09:12:00.000Z",
+			},
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Sep 22")).toBeInTheDocument();
+		await expect(canvas.getByText("Sep 23")).toBeInTheDocument();
+	},
+});
+
+const other: Extract<Participant, { kind: "bot" }> = {
+	kind: "bot",
+	id: "0199a3a0-0000-7000-8000-000000000007",
+	name: "Linear Handler",
+	handle: "linear-handler",
+	color: "orange",
+	eyes: "dot",
+	shape: "circle",
+};
+
+/** InTheSidebar is a collaboration as its sidebar shows it: the same messages, a little smaller. */
+export const InTheSidebar = meta.story({
+	args: {
+		compact: true,
+		participants: [host, other],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000301",
+				host,
+				"Rowan is seeing billing timeouts on checkout. Can you check Sentry and open an issue if nothing's tracked?",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000302",
+				other,
+				"41 events in 24h, all on `POST /checkout`, hitting the 30s gateway limit.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000303",
+				other,
+				"Nothing open in Linear. I'd like to create one.",
+			),
+		],
+	},
+	decorators: [
+		(Story) => (
+			<div className="w-95">
+				<Story />
+			</div>
+		),
+	],
+	play: async ({ canvas }) => {
+		await expect(canvas.getAllByText("Linear Handler")).toHaveLength(1);
+	},
+});
+
+/**
+ * Failures in a collaboration's sidebar: a note under each message says why it
+ * stopped.
+ */
+export const FailedInTheSidebar = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		compact: true,
+		participants: [host, other],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000231",
+				host,
+				"Can you check whether the Stripe webhook is failing?",
+			),
+			{
+				...message("0199a3a0-0000-7000-8000-000000000232", other, "Checking the Stripe dashboard."),
+				status: "failed",
+				error: "The model provider did not answer.",
+			},
+			{
+				...message(
+					"0199a3a0-0000-7000-8000-000000000233",
+					host,
+					"Never mind, I'll open it myself.",
+				),
+				status: "cancelled",
+			},
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Reply failed.")).toBeInTheDocument();
+		await expect(canvas.getByText("Reply stopped")).toBeInTheDocument();
+	},
+});
+
+/** A fenced code block whose lines are far wider than the bubble. */
+export const WideCodeBlock = meta.story({
+	play: async ({ canvas }) => {
+		const code = canvas.getByRole("group", { name: "Code block" });
+		await expect(code.scrollWidth).toBeGreaterThan(code.clientWidth);
+		code.focus();
+		await expect(code).toHaveFocus();
+	},
+	args: {
+		messages: [
+			message("0199a3a0-0000-7000-8000-000000000101", person, "Why is the deploy failing?"),
+			message(
+				"0199a3a0-0000-7000-8000-000000000102",
+				host,
+				[
+					"The provisioner rejects the stack because the role has no attached policy:",
+					"",
+					"```ts",
+					'const provisioner = new StackProvisioner({ region: "ap-southeast-2", roleArn: "arn:aws:iam::123456789012:role/sugabots-deployment-role", retries: 3 });',
+					"await provisioner.apply(stack);",
+					"```",
+					"",
+					"Attach the policy and retry.",
+				].join("\n"),
+			),
+		],
+	},
+});
+
+/** A fence with no language on it, which is what a model writes most of the time. */
+export const UnlabelledCodeBlock = meta.story({
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000105",
+				host,
+				[
+					"The failing check is:",
+					"",
+					"```",
+					"AccessDenied: User arn:aws:sts::123456789012:assumed-role/sugabots-deployment-role/deploy is not authorized to perform iam:PassRole",
+					"```",
+				].join("\n"),
+			),
+		],
+	},
+});
+
+/**
+ * A block longer than a bubble should hold: it shows its first lines, fading
+ * out, and Show more opens the rest in place rather than in a scroller.
+ */
+export const LongCodeBlock = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		const body = canvas
+			.getByRole("group", { name: "Code block" })
+			.closest<HTMLElement>('[data-streamdown="code-block-body"]');
+		if (!body) throw new Error("No code block body");
+		await expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
+		await userEvent.click(canvas.getByRole("button", { name: "Show more" }));
+		await expect(body.scrollHeight).toBe(body.clientHeight);
+		await userEvent.click(canvas.getByRole("button", { name: "Show less" }));
+		await expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
+	},
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000106",
+				host,
+				[
+					"This retries the deploy with backoff and gives up after five attempts:",
+					"",
+					"```ts",
+					"const MAX_ATTEMPTS = 5;",
+					"const BASE_DELAY_MS = 500;",
+					"",
+					"export async function deployWithRetry(stack: Stack): Promise<DeployResult> {",
+					"\tlet lastError: unknown;",
+					"\tfor (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {",
+					"\t\ttry {",
+					"\t\t\tconst result = await provisioner.apply(stack);",
+					'\t\t\tlog.info("deployed", { stack: stack.name, attempt });',
+					"\t\t\treturn result;",
+					"\t\t} catch (error) {",
+					"\t\t\tlastError = error;",
+					"\t\t\tif (!isRetryable(error)) throw error;",
+					"\t\t\tconst delay = BASE_DELAY_MS * 2 ** (attempt - 1);",
+					'\t\t\tlog.warn("deploy failed, retrying", { attempt, delayMs: delay, error });',
+					"\t\t\tawait sleep(delay);",
+					"\t\t}",
+					"\t}",
+					"\tthrow new DeployFailed(stack.name, lastError);",
+					"}",
+					"",
+					"function isRetryable(error: unknown): boolean {",
+					"\tif (!(error instanceof ProvisionerError)) return false;",
+					'\treturn error.code === "Throttling" || error.code === "ServiceUnavailable";',
+					"}",
+					"",
+					"function sleep(ms: number): Promise<void> {",
+					"\treturn new Promise((resolve) => setTimeout(resolve, ms));",
+					"}",
+					"```",
+				].join("\n"),
+			),
+		],
+	},
+});
+
+const wideTableAnswer = [
+	"Here's where each region stands:",
+	"",
+	"| Region | Service | Requests (24h) | p95 latency (ms) | Error rate | Last deploy | Owner |",
+	"| --- | --- | --- | --- | --- | --- | --- |",
+	"| ap-southeast-2 | checkout-api | 1,284,019 | 412 | 0.8% | 2026-09-21 22:14 | payments-oncall |",
+	"| us-east-1 | checkout-api | 3,902,771 | 388 | 0.4% | 2026-09-21 22:09 | payments-oncall |",
+	"| eu-west-1 | checkout-api | 2,117,430 | 455 | 1.2% | 2026-09-20 18:40 | payments-oncall |",
+	"",
+	"eu-west-1 is the outlier.",
+].join("\n");
+
+/**
+ * Shows the last message as a reply being written, then finished, so it lands
+ * as it does while someone watches rather than being loaded with the history.
+ */
+function LastReplyLandsWhileWatched(props: ComponentProps<typeof ChatMessages>) {
+	const [landed, setLanded] = useState(false);
+	useEffect(() => setLanded(true), []);
+	const last = props.messages.at(-1);
+	if (landed || !last) return <ChatMessages {...props} />;
+	const writing: Message = { ...last, status: "writing", parts: [], content: "" };
+	return <ChatMessages {...props} messages={[...props.messages.slice(0, -1), writing]} />;
+}
+
+/**
+ * A table wider than the message, in a reply that finishes while the chat is
+ * open and grows in: it scrolls inside the message instead of running past its
+ * edge, and a keyboard can reach it to scroll it.
+ */
+export const WideTableArriving = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000109",
+				person,
+				"How is checkout doing in each region?",
+			),
+			message("0199a3a0-0000-7000-8000-000000000110", host, wideTableAnswer),
+		],
+	},
+	// As wide as the collaboration panel, too narrow for the table, which scrolls inside the message.
+	render: (args) => (
+		<div className="w-140">
+			<LastReplyLandsWhileWatched {...args} />
+		</div>
+	),
+	play: async ({ canvas }) => {
+		const table = await canvas.findByRole("group", { name: "Table" });
+		await waitFor(() => expect(table.scrollWidth).toBeGreaterThan(table.clientWidth));
+		table.focus();
+		await expect(table).toHaveFocus();
+	},
+});
+
+/** Tokens with nowhere to wrap: an inline code path, and a bare URL. */
+export const UnbreakableWords = meta.story({
+	play: async ({ canvas }) => {
+		for (const spilling of [/209 events/, /Thanks/]) {
+			const line = canvas.getByText(spilling);
+			await expect(line.scrollWidth).toBeLessThanOrEqual(line.clientWidth);
+		}
+	},
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000103",
+				host,
+				[
+					"Two routes account for most of the traffic:",
+					"",
+					"* `/api/projects/[projectId]/environments/[environmentId]/events/[containerId]/stream` (209 events).",
+					"* `/project/:projectId/env/:environmentId` (105 events).",
+					"",
+					"The full trace is at https://storage.example.com/traces/sugabots/2026-09-22/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/trace.json.",
+				].join("\n"),
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000104",
+				person,
+				"Thanks — https://storage.example.com/traces/sugabots/2026-09-22/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0/trace.json is the one I was missing.",
+			),
+		],
+	},
+});
+
+/**
+ * A bot that wrote a line before each tool call: the chat shows only its
+ * answer, and what it said on the way is in the activity log.
+ */
+export const NarratedBetweenToolCalls = meta.story({
+	play: async ({ canvas }) => {
+		await expect(canvas.getAllByRole("article")).toHaveLength(2);
+	},
+	args: {
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000106",
+				person,
+				"What's in the current cycle for Internal Bots?",
+			),
+			reply("0199a3a0-0000-7000-8000-000000000107", [
+				{ type: "text", text: "Let me start by finding the current cycle for the Suga Eng team:" },
+				toolCall("0199a3a0-0000-7000-8000-000000000201", "linear__get_team"),
+				{ type: "text", text: "Now let me get the current cycle with the team ID:" },
+				toolCall("0199a3a0-0000-7000-8000-000000000202", "linear__list_cycles"),
+				{ type: "text", text: "The current cycle is Cycle 33. Now the issues in it:" },
+				toolCall("0199a3a0-0000-7000-8000-000000000203", "linear__list_issues"),
+				{
+					type: "text",
+					text: "There are two high-priority issues in Cycle 33: NIT-1846, on slow chat history loading, and NIT-1819, a layout shift when enabling a provider.",
+				},
+			]),
+		],
+	},
+});
+
+/** How long the looping reply below spends typing before it lands. */
+const ARRIVING_TYPING_MS = 2_500;
+
+const arrivingAnswer = [
+	"There are two high-priority issues in Cycle 33:",
+	"",
+	"1. **NIT-1846** — Investigate and resolve slow initial chat history load time",
+	"2. **NIT-1819** — Trying to enable a provider causes a layout shift and error",
+	"",
+	"Both are in progress.",
+].join("\n");
+
+/** Types for a moment, then lands, then starts again, so the arrival can be watched. */
+function ArrivingReply(props: ComponentProps<typeof ChatMessages>) {
+	// Even ticks type, odd ticks land; each pair is a fresh reply.
+	const [tick, setTick] = useState(0);
+	useEffect(() => {
+		const next = setInterval(() => setTick((count) => count + 1), ARRIVING_TYPING_MS);
+		return () => clearInterval(next);
+	}, []);
+	const round = Math.floor(tick / 2);
+	const landed = tick % 2 === 1;
+	const answer = reply(`0199a3a0-0000-7000-8000-0000000003${String(round).padStart(2, "0")}`, [
+		{ type: "text", text: arrivingAnswer },
+	]);
+	return (
+		<ChatMessages
+			{...props}
+			messages={[
+				message("0199a3a0-0000-7000-8000-000000000108", person, "What's in the current cycle?"),
+				landed ? answer : { ...answer, status: "writing", parts: [], content: "" },
+			]}
+		/>
+	);
+}
+
+/** A reply landing while the chat is open: it grows out of the typing line and reveals its words. */
+export const AReplyArriving = meta.story({
+	args: { messages: [] },
+	render: (args) => <ArrivingReply {...args} />,
+});
+
+/**
+ * A mention names someone in their own colours: a bot on its tint, a person on
+ * a neutral chip, in your bubbles, other people's and a bot's markdown alike.
+ * Linear Handler has not joined; it is named from the project's bots. A handle in
+ * code and one that names nobody stay plain text, and an email address is a
+ * link rather than a mention.
+ */
+export const Mentions = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person, jay, other],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000401",
+				person,
+				"@linear-handler is checkout on the board? cc @jay-park",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000402",
+				jay,
+				"Asking @issue-triager too, and mailing jay@example.com and @nobody.",
+			),
+			message(
+				"0199a3a0-0000-7000-8000-000000000403",
+				host,
+				"I asked **@linear-handler**: checkout timeouts are on the board.\n\n- @sam-rivera owns it\n- `@issue-triager` in code is only a handle\n- ~~the retry fix~~ did not hold",
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		// A bot is named by its face and name, a person by their handle.
+		await expect(canvas.getAllByText("Linear Handler", { selector: "span" })).toHaveLength(2);
+		await expect(canvas.getByText("@sam-rivera", { selector: "span" })).toBeInTheDocument();
+		await expect(canvas.getByText("@issue-triager", { selector: "code" })).toBeInTheDocument();
+		// Mentions add to Streamdown's markdown rather than replacing it.
+		await expect(canvas.getByText("the retry fix", { selector: "del" })).toBeInTheDocument();
+		await expect(canvas.getByRole("link", { name: "jay@example.com" })).toBeInTheDocument();
+		await expect(canvas.getByText(/and @nobody\./)).toBeInTheDocument();
+	},
+});
+
+/**
+ * A link in a bot's reply is a real link: hovering shows where it goes, and a
+ * middle or Ctrl-click opens it in a new tab. A plain click on one off the app
+ * asks first, showing the whole address; one back into the app opens unasked.
+ */
+export const Links = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000501",
+				host,
+				"The timeout is tracked in [the checkout issue](https://linear.app/nitric/issue/CHK-12). The run that hit it is [in automations](/automations).",
+			),
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		const external = canvas.getByRole("link", { name: "the checkout issue" });
+		await expect(external).toHaveAttribute("href", "https://linear.app/nitric/issue/CHK-12");
+		await expect(canvas.getByRole("link", { name: "in automations" })).toHaveAttribute(
+			"href",
+			"/automations",
+		);
+		await userEvent.click(external);
+		const warning = await screen.findByRole("dialog", { name: "Open external link?" });
+		await expect(within(warning).getByRole("link", { name: "Open link" })).toHaveAttribute(
+			"href",
+			"https://linear.app/nitric/issue/CHK-12",
+		);
+		await userEvent.click(within(warning).getByRole("button", { name: "Cancel" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	},
+});
+
+/**
+ * An image in a bot's reply is a card naming it and the site it is on, linking
+ * to it, and is never loaded: its address could carry words from the
+ * chat out to whoever serves it. Following the link asks first
+ * whether to open the image.
+ */
+export const ImagesInAReply = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000502",
+				host,
+				"Here is the latency since the deploy: ![Checkout latency chart](https://charts.example.com/latency.png?since=deploy)",
+			),
+		],
+	},
+	play: async ({ canvas, canvasElement, userEvent }) => {
+		const image = canvas.getByRole("link", { name: /^Checkout latency chart/ });
+		await expect(image).toHaveAttribute(
+			"href",
+			"https://charts.example.com/latency.png?since=deploy",
+		);
+		await expect(canvasElement.querySelector('[src*="charts.example.com"]')).toBeNull();
+		await userEvent.click(image);
+		await expect(await screen.findByRole("dialog", { name: "Open image?" })).toBeInTheDocument();
+	},
+});
+
+/**
+ * A reply a model left a `**` open in is closed for it, but nothing it wrote
+ * is lost: a `<` that isn't the start of HTML stays, words after it included.
+ */
+export const UnclosedMarkupInAReply = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000510",
+				host,
+				"The parser returns a List<String for each row, so **check the empty ones",
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText(/List<String for each row/, { selector: "p" }),
+		).toBeInTheDocument();
+		await expect(
+			canvas.getByText("check the empty ones", { selector: "[data-streamdown=strong]" }),
+		).toBeInTheDocument();
+	},
+});
+
+/**
+ * A person's message is markdown too, as a bot's is, but keeps each line they
+ * typed, and a single `~` is only a tilde. HTML in it is shown as the text it
+ * is, and an image as a link to it, so it doesn't load for everyone who reads.
+ */
+export const PeoplesMarkdown = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000511",
+				person,
+				[
+					"**Deploy checklist** for `checkout-api`:",
+					"- bump the version",
+					"- ~~skip~~ run the migrations",
+					"",
+					"Then restart it with",
+					"```sh",
+					"bun run deploy --service checkout-api",
+					"```",
+					"Thanks!",
+					"Ping me after",
+					"<b>not bold</b>",
+					"",
+					"Back in ~5 min, ~10 at most. ![The deploy dashboard](https://example.com/deploys.png) [**![Status page](https://example.com/badge.png)**](https://status.example.com)",
+				].join("\n"),
+			),
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			canvas.getByText("Deploy checklist", { selector: "[data-streamdown=strong]" }),
+		).toBeInTheDocument();
+		await expect(canvas.getByText("checkout-api", { selector: "code" })).toBeInTheDocument();
+		await expect(canvas.getByText("skip", { selector: "del" })).toBeInTheDocument();
+		await expect(canvas.getByRole("group", { name: "Code block" })).toHaveTextContent(
+			"bun run deploy --service checkout-api",
+		);
+		// Two lines typed one under the other stay two lines.
+		const closing = canvas.getByText(/^Thanks!/);
+		await expect(closing.querySelectorAll("br")).toHaveLength(2);
+		await expect(closing).toHaveTextContent("<b>not bold</b>");
+		await expect(canvas.getAllByRole("deletion")).toHaveLength(1);
+		await expect(canvas.getByRole("link", { name: /^The deploy dashboard/ })).toHaveAttribute(
+			"href",
+			"https://example.com/deploys.png",
+		);
+		await expect(canvas.queryByRole("img", { name: "The deploy dashboard" })).toBeNull();
+		// An image inside a link is only its words there, not a second link.
+		const status = canvas.getByRole("link", { name: "Status page" });
+		await expect(status).toHaveAttribute("href", "https://status.example.com");
+		await expect(within(status).queryByRole("link")).toBeNull();
+	},
+});
+
+/**
+ * A link in a person's message that shows its address, as a bare URL does,
+ * opens without asking, accented letters and all. One whose text says
+ * something else asks first, showing where it really goes, as every link off
+ * the app in a bot's reply does. An `@` in an address is not a mention. Only
+ * web and email links are links: a relative one, or one that would open an
+ * app, is shown as written.
+ */
+export const PeoplesLinks = meta.story({
+	tags: ["ai-generated"],
+	args: {
+		participants: [host, person],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000512",
+				person,
+				"The notes are at https://example.com/café-notes and the setup is in [the docs](https://example.com/setup). Mine are at https://medium.com/@sam-rivera/notes. Old ones are [in automations](/automations) and <vscode://file/notes.md>.",
+			),
+		],
+	},
+	play: async ({ canvas, userEvent }) => {
+		// Keeps the test's own tab where it is; `defaultPrevented` still says whether the link asked first.
+		const asked: boolean[] = [];
+		function stayHere(event: MouseEvent) {
+			asked.push(event.defaultPrevented);
+			event.preventDefault();
+		}
+		window.addEventListener("click", stayHere);
+		try {
+			const bare = canvas.getByRole("link", { name: "https://example.com/café-notes" });
+			await expect(bare).toHaveAttribute("href", "https://example.com/caf%C3%A9-notes");
+			await userEvent.click(bare);
+			await expect(asked).toEqual([false]);
+			await expect(screen.queryByRole("dialog")).toBeNull();
+
+			await userEvent.click(canvas.getByRole("link", { name: "the docs" }));
+			const warning = await screen.findByRole("dialog", { name: "Open external link?" });
+			await expect(within(warning).getByText("https://example.com/setup")).toBeVisible();
+			await userEvent.click(within(warning).getByRole("button", { name: "Cancel" }));
+			await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+			const withHandle = canvas.getByRole("link", { name: "https://medium.com/@sam-rivera/notes" });
+			await expect(within(withHandle).queryByRole("button")).toBeNull();
+
+			await expect(canvas.queryByRole("link", { name: "in automations" })).toBeNull();
+			await expect(canvas.queryByRole("link", { name: "vscode://file/notes.md" })).toBeNull();
+			await expect(
+				canvas.getByText(/\[in automations\]\(\/automations\) and <vscode:\/\/file\/notes\.md>/),
+			).toBeInTheDocument();
+		} finally {
+			window.removeEventListener("click", stayHere);
+		}
+	},
+});
+
+/** The rest of the project, so `@here` has more people to notify than its card lists. */
+const projectMembers = ["Ana Lopez", "Ben Ito", "Cleo Hart", "Dev Rao", "Eli Moss", "Fay Chen"].map(
+	(name, index) => testPerson({ id: `0199a3a0-0000-7000-8000-0000000004${10 + index}`, name }),
+);
+
+/** The workspace the bots below are in, whose roster holds what each does. */
+const workspace = {
+	id: growthDesk.workspaceId,
+	name: "Nitric",
+	slug: "nitric",
+	timeZone: "UTC",
+	setUpAt: "2026-09-01T00:00:00.000Z",
+};
+
+/** Called by Escape in the panel `MentionCards` draws the chat in. */
+const closePanel = fn();
+
+/**
+ * Clicking a mention, or pressing Enter or Space on it, opens a card: a
+ * person's face, name, role and handle; a bot's, with what it does; and for
+ * `@here`, who it notifies, leaving out its writer and every bot. Escape
+ * closes the card and leaves the panel the chat is in open, and so
+ * does a click outside it.
+ */
+export const MentionCards = meta.story({
+	args: {
+		participants: [host, person, jay, ...projectMembers],
+		peopleReachingProject: [person, jay, ...projectMembers],
+		messages: [
+			message(
+				"0199a3a0-0000-7000-8000-000000000420",
+				jay,
+				"@sam-rivera can you pair with @issue-triager on the flaky test? @here the release waits on it. Not @nobody.",
+			),
+		],
+	},
+	decorators: [
+		function WithBots(Story) {
+			const [queryClient] = useState(() => {
+				const client = new QueryClient();
+				client.setQueryData(["connectors", PROJECT], []);
+				client.setQueryData(["workspaces"], [workspace]);
+				client.setQueryData(
+					["workspaces", workspace.id, "memberships"],
+					[
+						{
+							id: "0199a3a0-0000-7000-8000-000000000430",
+							role: "admin",
+							person: { id: person.id, email: person.email, name: person.name, image: null },
+							joinedAt: "2026-09-01T00:00:00.000Z",
+						},
+					],
+				);
+				client.setQueryData(
+					["bots", workspace.id],
+					[
+						{
+							...growthDesk,
+							id: host.id,
+							name: host.name,
+							handle: host.handle,
+							description: "Sorts new issues by area and urgency, and asks for what's missing.",
+						},
+					],
+				);
+				return client;
+			});
+			useEffect(() => () => queryClient.clear(), [queryClient]);
+			return (
+				<QueryClientProvider client={queryClient}>
+					<Story />
+				</QueryClientProvider>
+			);
+		},
+	],
+	beforeEach() {
+		closePanel.mockClear();
+	},
+	render: function InAPanel(args) {
+		const panel = usePanelKeys<HTMLDivElement>(closePanel);
+		return (
+			<div {...panel} className="outline-none">
+				<ChatMessages {...args} />
+			</div>
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		const page = within(document.body);
+		const sam = canvas.getByRole("button", { name: "@sam-rivera" });
+		await userEvent.click(sam);
+		const samCard = await page.findByRole("dialog", { name: /Sam Rivera/ });
+		await expect(within(samCard).getByText("@sam-rivera")).toBeVisible();
+		await expect(within(samCard).getByText("Admin")).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+		await expect(sam).toHaveFocus();
+		await expect(closePanel).not.toHaveBeenCalled();
+
+		canvas.getByRole("button", { name: /Issue Triager/ }).focus();
+		await userEvent.keyboard("{Enter}");
+		const botCard = await page.findByRole("dialog", { name: /Issue Triager/ });
+		await expect(within(botCard).getByText("@issue-triager")).toBeVisible();
+		await expect(
+			await within(botCard).findByText(/Sorts new issues by area and urgency/),
+		).toBeVisible();
+		await userEvent.click(canvas.getByText(/the release waits on it/));
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+
+		canvas.getByRole("button", { name: "@here" }).focus();
+		await userEvent.keyboard(" ");
+		const hereCard = await page.findByRole("dialog", { name: "@here" });
+		const notified = within(hereCard).getByRole("list", { name: "Notifies" });
+		// Sam and the six others: five named, then the rest counted. Not Jay, who wrote it.
+		await expect(within(notified).getAllByRole("listitem")).toHaveLength(5);
+		await expect(within(notified).getByText("Sam Rivera")).toBeVisible();
+		await expect(within(hereCard).queryByText("Jay Park")).toBeNull();
+		await expect(within(hereCard).getByText("and 2 more")).toBeVisible();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
+
+		// A handle nobody has is only text.
+		await expect(canvas.queryByRole("button", { name: "@nobody" })).toBeNull();
+		await expect(closePanel).not.toHaveBeenCalled();
+	},
+});
+
+/** JumpedTo is the message a chat was opened at, from a notification, pointed out for a moment. */
+export const JumpedTo = meta.story({
+	args: {
+		participants: [host, person, jay],
+		messages: [
+			message("0199a3a0-0000-7000-8000-000000000b11", host, "The release branch is green."),
+			message("0199a3a0-0000-7000-8000-000000000b12", jay, "@sam-rivera can you sign it off?"),
+			message("0199a3a0-0000-7000-8000-000000000b13", host, "I'll post the notes once it's out."),
+		],
+		highlightedMessageId: "0199a3a0-0000-7000-8000-000000000b12",
+	},
+});
+
+const releaseNotes = message(
+	"0199a3a0-0000-7000-8000-000000000c11",
+	host,
+	"The release notes are drafted. **Checkout** gets the retry fix, and search gets the new filters.",
+);
+
+/**
+ * Replies say whose message they answer, and its first line, over their
+ * author's name, and go to that message; a reply always starts a group of its
+ * own, even after the same author's last message.
+ */
+export const Replies = meta.story({
+	args: {
+		participants: [host, person, jay],
+		onJumpToMessage: fn(),
+		messages: [
+			releaseNotes,
+			{
+				...message("0199a3a0-0000-7000-8000-000000000c12", person, "Add the pricing page fix too"),
+				replyTo: {
+					id: releaseNotes.id,
+					author: host,
+					preview:
+						"The release notes are drafted. Checkout gets the retry fix, and search gets the new filters.",
+				},
+			},
+			{
+				...message("0199a3a0-0000-7000-8000-000000000c13", person, "And thank Jay for the filters"),
+				replyTo: {
+					id: "0199a3a0-0000-7000-8000-000000000c01",
+					author: jay,
+					preview: "Filters are merged, they're behind the search flag for now",
+				},
+			},
+		],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await userEvent.click(
+			canvas.getByRole("button", { name: /^Replying to Issue Triager: The release notes/ }),
+		);
+		await expect(args.onJumpToMessage).toHaveBeenCalledWith(releaseNotes.id);
+		await expect(canvas.getAllByRole("article", { name: /^Sam Rivera/ })).toHaveLength(2);
+	},
+});
+
+/**
+ * ReplyFromToolbar is the hover toolbar's Reply, which starts a reply quoting
+ * the message. The toolbar also opens for the keyboard, as focus reaches it.
+ */
+export const ReplyFromToolbar = meta.story({
+	args: {
+		onReply: fn(),
+		messages: [releaseNotes],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		canvas.getByRole("button", { name: "Reply" }).focus();
+		await userEvent.keyboard("{Enter}");
+		await expect(args.onReply).toHaveBeenCalledWith(releaseNotes);
+	},
+});
+
+function reacted(emoji: string, ...people: { id: string; name: string }[]): MessageReaction {
+	return {
+		emoji,
+		people: people.map(({ id, name }) => ({ id, name, at: "2026-09-22T04:31:00.000Z" })),
+	};
+}
+
+const reactedTo: Message = {
+	...releaseNotes,
+	reactions: [reacted("👍", person, jay), reacted("🎉", jay), reacted("👀", jay)],
+};
+
+/** Sam Rivera reading, reacting to messages. */
+const samReacting = { personId: person.id, onToggle: fn(), onAdd: fn() };
+
+/**
+ * Reactions sit under a message's words, each emoji with how many reacted
+ * with it, yours shaded apart. Hovering one names who reacted; clicking it
+ * adds yours or takes it back. Another is added from the message's toolbar.
+ */
+export const Reactions = meta.story({
+	args: {
+		participants: [host, person, jay],
+		reacting: samReacting,
+		messages: [reactedTo],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		const thumbs = canvas.getByRole("button", { name: /^👍 2: You and Jay Park reacted with 👍$/ });
+		await expect(thumbs).toHaveAttribute("aria-pressed", "true");
+		const party = canvas.getByRole("button", { name: /^🎉 1: Jay Park reacted with 🎉$/ });
+		await expect(party).toHaveAttribute("aria-pressed", "false");
+		await userEvent.hover(party);
+		await expect(await screen.findByText("Jay Park reacted with 🎉")).toBeVisible();
+		await userEvent.click(party);
+		await expect(args.reacting?.onToggle).toHaveBeenCalledWith(reactedTo, "🎉");
+	},
+});
+
+/** Where the person cannot react, as in a bots' collaboration, reactions are only shown. */
+export const ReactionsOnlyShown = meta.story({
+	args: { participants: [host, person, jay], messages: [reactedTo] },
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("list", { name: "Reactions" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: /^👍/ })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Add reaction" })).toBeNull();
+	},
+});
+
+/**
+ * ReactFromToolbar is the hover toolbar's Add reaction, which opens an emoji
+ * picker. Searching narrows it, and choosing an emoji adds it, as a reaction
+ * writes it, and closes it.
+ */
+export const ReactFromToolbar = meta.story({
+	args: {
+		reacting: samReacting,
+		messages: [releaseNotes],
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		canvas.getByRole("button", { name: "Add reaction" }).focus();
+		await userEvent.keyboard("{Enter}");
+		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
+		const search = within(picker).getByRole("searchbox", { name: "Search emoji" });
+		await waitFor(() => expect(search).toHaveFocus());
+		await userEvent.keyboard("thumbs up");
+		// The search's only result is active once it applies, and Enter chooses it. A
+		// click could miss, as the picker lays its rows out again while results arrive.
+		await waitFor(() =>
+			expect(within(picker).getByRole("gridcell", { name: "Thumbs up" })).toHaveAttribute(
+				"aria-selected",
+				"true",
+			),
+		);
+		await userEvent.keyboard("{Enter}");
+		// The picker's data writes 👍 with a variation selector after it, which a reaction leaves off.
+		await expect(args.reacting?.onAdd).toHaveBeenCalledWith(releaseNotes, "\u{1F44D}");
+		await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add reaction" })).toBeNull());
+	},
+});
+
+/**
+ * A message still on its way to the API can be copied, but not replied or
+ * reacted to until the API has it.
+ */
+export const StillSending = meta.story({
+	args: {
+		onReply: fn(),
+		reacting: samReacting,
+		messages: [
+			releaseNotes,
+			message("0199a3a0-0000-7000-8000-000000000c21", person, "Ship it after lunch"),
+		],
+		sending: new Set(["0199a3a0-0000-7000-8000-000000000c21"]),
+	},
+	play: async ({ canvas }) => {
+		const [notes, sent] = canvas.getAllByRole("article");
+		if (!notes || !sent) throw new Error("Both messages should be rows");
+		await expect(within(notes).getByRole("button", { name: "Reply" })).toBeInTheDocument();
+		await expect(within(notes).getByRole("button", { name: "Add reaction" })).toBeInTheDocument();
+		await expect(within(sent).getByRole("button", { name: "Copy text" })).toBeInTheDocument();
+		await expect(within(sent).queryByRole("button", { name: "Reply" })).toBeNull();
+		await expect(within(sent).queryByRole("button", { name: "Add reaction" })).toBeNull();
+	},
+});
+
+const EVERY_SLOT = [
+	"😀",
+	"😂",
+	"😍",
+	"🤔",
+	"😢",
+	"😡",
+	"👍",
+	"👎",
+	"👏",
+	"🙏",
+	"🔥",
+	"💯",
+	"✅",
+	"❌",
+	"👀",
+	"🚀",
+	"💡",
+	"📌",
+	"🐛",
+	"☕",
+];
+
+/**
+ * A message with as many different emoji as it can take says so in the
+ * picker, opened here from its toolbar, and still takes one of those.
+ */
+export const ReactionsAtTheLimit = meta.story({
+	args: {
+		reacting: samReacting,
+		messages: [{ ...releaseNotes, reactions: EVERY_SLOT.map((emoji) => reacted(emoji, jay)) }],
+	},
+	play: async ({ canvas, userEvent }) => {
+		canvas.getByRole("button", { name: "Add reaction" }).focus();
+		await userEvent.keyboard("{Enter}");
+		const picker = await screen.findByRole("dialog", { name: "Add reaction" });
+		await expect(within(picker).getByText(/This message has 20 different reactions/)).toBeVisible();
+	},
+});
+
+function asked(id: string, tool: string, approval: ToolCallPart["approval"]): Message {
+	return reply(id, [
+		{ type: "text", text: "I'll track the checkout timeouts in Linear." },
+		{
+			...toolCall(`${id.slice(0, -1)}9`, tool),
+			input: { title: "Checkout requests time out" },
+			writeOrDelete: true,
+			status: approval?.status === "denied" ? "failed" : "completed",
+			approval,
+		},
+	]);
+}
+
+/**
+ * Answered approvals stay as their cards, saying which way they went and who
+ * answered, without announcing it to a screen reader as the history loads.
+ */
+export const AnsweredApprovals = meta.story({
+	args: {
+		messages: [
+			asked("0199a3a0-0000-7000-8000-000000000b21", "linear__create_issue", {
+				status: "allowed",
+				decidedByName: "Sam Rivera",
+				decidedAt: "2026-09-22T04:31:00.000Z",
+			}),
+			asked("0199a3a0-0000-7000-8000-000000000b31", "linear__update_issue", {
+				status: "denied",
+				decidedByName: "Jay Park",
+				decidedAt: "2026-09-22T04:32:00.000Z",
+			}),
+		],
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText(/Allowed by Sam Rivera/)).toBeInTheDocument();
+		await expect(canvas.getByText(/Denied by Jay Park/)).toBeInTheDocument();
+		await expect(canvas.queryByRole("status")).toBeNull();
+	},
+});

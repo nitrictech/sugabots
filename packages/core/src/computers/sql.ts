@@ -13,7 +13,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { project, user, workspace } from "../workspaces/sql.ts";
+import { person, project, workspace } from "../workspaces/sql.ts";
 import type { DiskUsage } from "./computer-disk.ts";
 import type { Computers } from "./computers.ts";
 
@@ -29,10 +29,10 @@ export const computerProvider = pgTable(
 		workspaceId: uuid("workspace_id")
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
-		/** Follows `settings`, so the preset and its settings can't disagree. */
-		preset: text("preset")
-			.$type<ComputerProviderSettings["preset"]>()
-			.generatedAlwaysAs(sql`settings->>'preset'`)
+		/** Follows `settings`, so the built-in provider and its settings can't disagree. */
+		builtIn: text("built_in")
+			.$type<ComputerProviderSettings["builtIn"]>()
+			.generatedAlwaysAs(sql`settings->>'builtIn'`)
 			.notNull(),
 		/** What the workspace configured: where the provider is, and what to make computers from. */
 		settings: jsonb("settings").$type<ComputerProviderSettings>().notNull(),
@@ -46,29 +46,29 @@ export const computerProvider = pgTable(
 		managedResources: jsonb("managed_resources").$type<ComputerManagedResources>(),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
-		createdById: uuid("created_by_id").references(() => user.id, { onDelete: "set null" }),
+		createdById: uuid("created_by_id").references(() => person.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
 		uniqueIndex("computer_provider_enabled_idx").on(table.workspaceId).where(sql`${table.enabled}`),
 		uniqueIndex("computer_provider_id_workspace_id_idx").on(table.id, table.workspaceId),
-		check("computer_provider_preset_check", sql`${table.preset} in ('opensandbox', 'e2b')`),
+		check("computer_provider_built_in_check", sql`${table.builtIn} in ('opensandbox', 'e2b')`),
 	],
 );
 
 export type ComputerProviderRow = typeof computerProvider.$inferSelect;
 
-/** What Sugabots made in a provider's account, by preset. */
+/** What Sugabots made in a provider's account, by built-in provider. */
 type ComputerManagedResources = {
-	readonly preset: "e2b";
+	readonly builtIn: "e2b";
 	/** The last build of its template that Sugabots started, by E2B's ids for it. */
 	readonly templateBuild: { readonly templateId: string; readonly buildId: string };
 };
 
 /**
  * A project's online computer: the machine its bots run commands on while
- * they work in its threads, at the provider that made it. One per project,
+ * they work in its chats, at the provider that made it. One per project,
  * made the first time one of its bots needs it; a bot's own is its default
  * project's.
  */
@@ -92,8 +92,8 @@ export const computer = pgTable(
 		 * one, or a template's name.
 		 */
 		image: text("image").notNull(),
-		/** When it was paused for sitting idle; null while it runs. */
-		pausedAt: timestamp("paused_at", { withTimezone: true }),
+		/** When it was asleep for sitting idle; null while it runs. */
+		sleptAt: timestamp("slept_at", { withTimezone: true }),
 		/** When it was last opened or let go of, which is when its idle time starts. */
 		lastUsedAt: stamp("last_used_at"),
 		/** How full its disk was at `diskMeasuredAt`; null until it is measured, and again once it is replaced. */
@@ -124,7 +124,7 @@ export type ComputerRow = typeof computer.$inferSelect;
 
 /**
  * A turn using a computer, or a person viewing its desktop, which keeps it
- * from being paused. The holder renews it while it uses the computer and
+ * from sleeping. The holder renews it while it uses the computer and
  * deletes it when done; one left behind by a process that stopped simply
  * expires.
  */
@@ -161,7 +161,7 @@ export const allowedHost = pgTable(
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		host: text("host").notNull(),
 		/** Who added it, or approved the request for it. */
-		addedById: uuid("added_by_id").references(() => user.id, { onDelete: "set null" }),
+		addedById: uuid("added_by_id").references(() => person.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [compositePrimaryKey({ columns: [table.workspaceId, table.host] })],
@@ -178,7 +178,7 @@ export const projectAllowedHost = pgTable(
 		workspaceId: uuid("workspace_id").notNull(),
 		projectId: uuid("project_id").notNull(),
 		host: text("host").notNull(),
-		addedById: uuid("added_by_id").references(() => user.id, { onDelete: "set null" }),
+		addedById: uuid("added_by_id").references(() => person.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
@@ -203,7 +203,7 @@ export const blockedHost = pgTable(
 			.notNull()
 			.references(() => workspace.id, { onDelete: "cascade" }),
 		host: text("host").notNull(),
-		blockedById: uuid("blocked_by_id").references(() => user.id, { onDelete: "set null" }),
+		blockedById: uuid("blocked_by_id").references(() => person.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [compositePrimaryKey({ columns: [table.workspaceId, table.host] })],

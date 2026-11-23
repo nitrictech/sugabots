@@ -120,7 +120,7 @@ export function usePeopleReachingProject(projectId: string) {
 }
 
 /**
- * Adds a workspace member to a project, or takes them out. One mutation for both
+ * Adds a person in the workspace to a project, or takes them out. One mutation for both
  * directions because the caller is one list with an add and a remove on it.
  */
 export function usePlaceProjectMember(projectId: string) {
@@ -128,11 +128,11 @@ export function usePlaceProjectMember(projectId: string) {
 	const workspaceId = useWorkspace().workspace?.id;
 
 	return useMutation({
-		mutationFn: ({ userId, member }: { userId: string; member: boolean }) =>
+		mutationFn: ({ personId, member }: { personId: string; member: boolean }) =>
 			Effect.runPromise(
 				member
-					? client.api.projects.addMember({ params: { projectId }, payload: { userId } })
-					: client.api.projects.removeMember({ params: { projectId, userId } }),
+					? client.api.projects.addMember({ params: { projectId }, payload: { personId } })
+					: client.api.projects.removeMember({ params: { projectId, personId } }),
 			),
 		onSuccess: () => refreshMembership(queries, workspaceId, projectId),
 	});

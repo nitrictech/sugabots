@@ -14,7 +14,7 @@ const ALLOWED: Record<string, string> = {
 	// The in-memory event store is plain promise code, and its clock is an option.
 	"core/src/database/events/store.ts": "new Date(",
 	// Parses a cursor's timestamp; reads no clock.
-	"core/src/conversations/cursor.ts": "new Date(",
+	"core/src/chats/cursor.ts": "new Date(",
 };
 
 const direct = /new Date\(|Date\.now\(|randomUUID\(/g;

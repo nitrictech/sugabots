@@ -4,7 +4,7 @@ import { cn } from "cn";
 import { Bot as BotIcon, ChevronRight, Hash, Plus } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef } from "react";
 import { findBot, useAssistant, useBots } from "@/lib/bots.ts";
-import { useProjectMarkers } from "@/lib/chats.ts";
+import { useAttentionMarks } from "@/lib/chats.ts";
 import { useFolded } from "@/lib/folded.ts";
 import { botsLink, projectsLink } from "@/lib/links.ts";
 import { useNotificationSettings } from "@/lib/notifications.ts";
@@ -36,7 +36,7 @@ export type SidebarView = "settings" | "projects";
 
 /**
  * The column down the left. While the address is one of a bot's or a
- * project's pages (the bot or project itself, a thread, its files or its
+ * project's pages (the bot or project itself, a chat, its files or its
  * automations), the workspace narrowed to `IconRail` at the far left, and
  * beside it that bot's or project's own sidebar, `OwnerSidebar`. Everywhere
  * else: the person's Personal Assistant, the projects they are in, the bots
@@ -50,7 +50,7 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 	const { data: projects } = useProjects();
 	const { bots } = useBots();
 	const assistant = useAssistant();
-	const { markerOf } = useProjectMarkers();
+	const { attentionMarkOf } = useAttentionMarks();
 	const { data: notificationSettings } = useNotificationSettings();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
@@ -62,14 +62,14 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 	const backToPageLeft = useBackToHere("Back");
 	const assistantStanding = assistant && {
 		bot: assistant,
-		...markerOf(assistant.defaultProjectId),
+		...attentionMarkOf(assistant.defaultProjectId),
 	};
 	const projectStandings = (projects ?? [])
 		.filter((project) => project.isMember)
-		.map((project) => ({ project, ...markerOf(project.id) }));
+		.map((project) => ({ project, ...attentionMarkOf(project.id) }));
 	const botStandings = sidebarBots(bots ?? []).map((bot) => ({
 		bot,
-		...markerOf(bot.defaultProjectId),
+		...attentionMarkOf(bot.defaultProjectId),
 	}));
 	const owner = useOwnerInView(place);
 
@@ -85,7 +85,7 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 				view={place.view}
 				workspace={workspace}
 				workspaces={workspaces ?? []}
-				user={session.user ?? undefined}
+				signedIn={session.person ?? undefined}
 				settingsBack={place.inSettings ? undefined : backToPageLeft}
 				notificationSettings={notificationSettings}
 				onSignOut={() => void signOut()}
@@ -107,7 +107,7 @@ export function Sidebar({ resizable = true }: { resizable?: boolean }) {
 						<OwnerSidebar
 							key={"bot" in owner ? owner.bot.id : owner.project.id}
 							owner={owner}
-							selectedConversationId={place.conversationId}
+							selectedChatId={place.chatId}
 							page={place.ownerPage}
 						/>
 					)
@@ -152,15 +152,15 @@ interface SidebarPlace {
 	ownerPage: OwnerSidebarPage;
 	/** Whether the workspace's home is open, which is the Personal Assistant's page. */
 	atHome: boolean;
-	/** The conversation open, if one is. */
-	conversationId: string | undefined;
+	/** The chat open, if one is. */
+	chatId: string | undefined;
 	view: SidebarView | undefined;
 	inSettings: boolean;
 }
 
 function useSidebarPlace(): SidebarPlace {
 	const matchRoute = useMatchRoute();
-	const { project, bot, conversation } = useParams({ strict: false });
+	const { project, bot, chat } = useParams({ strict: false });
 	const inSettings = Boolean(matchRoute({ to: "/$workspace/settings", fuzzy: true }));
 	const view: SidebarView | undefined = inSettings
 		? "settings"
@@ -176,7 +176,7 @@ function useSidebarPlace(): SidebarPlace {
 				matchRoute({ to: `/$workspace/projects/$project/${page}`, fuzzy: true }),
 		),
 		atHome: Boolean(matchRoute({ to: "/$workspace" })),
-		conversationId: conversation,
+		chatId: chat,
 		view,
 		inSettings,
 	};
@@ -192,7 +192,7 @@ export function SidebarView({
 	view,
 	workspace,
 	workspaces = [],
-	user,
+	signedIn,
 	settingsBack,
 	notificationSettings,
 	onSignOut,
@@ -218,7 +218,7 @@ export function SidebarView({
 	workspace?: Workspace;
 	/** Every workspace the viewer belongs to, which your menu offers to switch to. */
 	workspaces?: readonly Workspace[];
-	user?: { name: string; email: string; image?: string | null };
+	signedIn?: { name: string; email: string; image?: string | null };
 	/** History state for settings links, so their Back returns to the page they left. */
 	settingsBack?: ReturnType<typeof useBackToHere>;
 	/** What the viewer is notified about, once loaded, which a project's menu changes. */
@@ -334,9 +334,9 @@ export function SidebarView({
 					</div>
 				)}
 				<div className="mt-auto flex items-center gap-1.5 border-border border-t px-3 py-2">
-					{user && workspace ? (
+					{signedIn && workspace ? (
 						<AccountMenu
-							user={user}
+							signedIn={signedIn}
 							current={workspace}
 							workspaces={workspaces}
 							settingsBack={settingsBack}

@@ -1,6 +1,6 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { healthResponseSchema, isoTimestampSchema, sessionUserSchema } from "./index.ts";
+import { healthResponseSchema, isoTimestampSchema, signedInPersonSchema } from "./index.ts";
 
 describe("healthResponseSchema", () => {
 	it("accepts a healthy response", () => {
@@ -31,7 +31,7 @@ describe("healthResponseSchema", () => {
 	});
 });
 
-describe("sessionUserSchema", () => {
+describe("signedInPersonSchema", () => {
 	const sam = {
 		id: "0199a3a0-0000-7000-8000-000000000009",
 		email: "sam@example.com",
@@ -40,17 +40,19 @@ describe("sessionUserSchema", () => {
 	};
 
 	it("accepts a user with no avatar", () => {
-		expect(Schema.decodeSync(sessionUserSchema)(sam)).toEqual(sam);
+		expect(Schema.decodeSync(signedInPersonSchema)(sam)).toEqual(sam);
 	});
 
 	it("rejects a user without a usable id", () => {
-		expect(Result.isSuccess(Schema.decodeResult(sessionUserSchema)({ ...sam, id: "1" }))).toBe(
+		expect(Result.isSuccess(Schema.decodeResult(signedInPersonSchema)({ ...sam, id: "1" }))).toBe(
 			false,
 		);
 	});
 
 	it.each(["sam+tag@example.com", "sam@sub.example.com"])("accepts email %s", (email) => {
-		expect(Result.isSuccess(Schema.decodeResult(sessionUserSchema)({ ...sam, email }))).toBe(true);
+		expect(Result.isSuccess(Schema.decodeResult(signedInPersonSchema)({ ...sam, email }))).toBe(
+			true,
+		);
 	});
 
 	it.each([
@@ -61,7 +63,9 @@ describe("sessionUserSchema", () => {
 		"sam@example.c",
 		" sam@example.com",
 	])("rejects email %s", (email) => {
-		expect(Result.isFailure(Schema.decodeResult(sessionUserSchema)({ ...sam, email }))).toBe(true);
+		expect(Result.isFailure(Schema.decodeResult(signedInPersonSchema)({ ...sam, email }))).toBe(
+			true,
+		);
 	});
 });
 

@@ -217,7 +217,7 @@ describe("a size limit on a stream", () => {
 
 describe("blob keys", () => {
 	it("refuses a segment that would escape its place in the path", () => {
-		expect(() => BlobStore.key("threads", "a/b")).toThrow();
-		expect(() => BlobStore.key("threads", "")).toThrow();
+		expect(() => BlobStore.key("chats", "a/b")).toThrow();
+		expect(() => BlobStore.key("chats", "")).toThrow();
 	});
 });

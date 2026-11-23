@@ -31,7 +31,7 @@ describe("computer hosts", () => {
 describe("computer images", () => {
 	const saves = (image: string) =>
 		Result.isSuccess(
-			Schema.decodeResult(computerProviderSettingsSchema)({ preset: "opensandbox", image }),
+			Schema.decodeResult(computerProviderSettingsSchema)({ builtIn: "opensandbox", image }),
 		);
 
 	it("takes images as Docker names them", () => {
@@ -59,10 +59,10 @@ describe("computer images", () => {
 		const provider = {
 			id: "01a1709a-9298-750b-9eec-df53b093ab7f",
 			workspaceId: "01a0fa75-37a6-75ce-a519-efca01103746",
-			preset: "opensandbox",
+			builtIn: "opensandbox",
 			name: "OpenSandbox",
 			settings: {
-				preset: "opensandbox",
+				builtIn: "opensandbox",
 				image: "docker pull ghcr.io/nitrictech/sugabots-sandbox:edge",
 			},
 			enabled: true,

@@ -1,6 +1,6 @@
 import {
 	type Automation,
-	type ConversationDetails,
+	type ChatDetails,
 	MAX_AUTOMATION_INSTRUCTIONS_CHARACTERS,
 	MAX_AUTOMATION_NAME_CHARACTERS,
 } from "@sugabots/contracts";
@@ -51,11 +51,11 @@ import {
 	triggerDraftOf,
 } from "./AutomationTriggers.tsx";
 import { WebhookGroups } from "./AutomationWebhook.tsx";
-import { ChatSidebar, ShowMore } from "./ChatSidebar.tsx";
+import { ShowMore, SidePanel } from "./SidePanel.tsx";
 
 /** What the panel reads of how the automation stands. */
 type PanelStanding = Pick<
-	NonNullable<ConversationDetails["automation"]>,
+	NonNullable<ChatDetails["automation"]>,
 	"id" | "projectId" | "state" | "pausedAfterFailures"
 >;
 
@@ -71,24 +71,24 @@ type PanelDialog =
 
 /**
  * An automation beside its feed, set up in place: whether it is on, what it
- * is told, what starts it, and where its results go, then Run now. Its ⋯
+ * is told, what starts it, and where its results go, then Start a run. Its ⋯
  * renames, duplicates or deletes it. Somebody who may not manage its bot's or
  * project's automations sees it without being able to change it.
  *
  * Without `onClose` it is the automation's own page rather than beside its
- * feed: under its breadcrumb, with whether it runs, Run now and its ⋯ at the
+ * feed: under its breadcrumb, with whether it runs, Start a run and its ⋯ at the
  * top, and its instructions written straight into.
  */
 export function AutomationPanel({
 	owner,
-	conversationId,
+	chatId,
 	standing,
 	onClose,
 }: {
 	/** The bot or project whose automation it is. */
 	owner: ResourceOwner;
 	/** Its feed, refreshed when it changes; undefined where it is shown without one. */
-	conversationId: string | undefined;
+	chatId: string | undefined;
 	/** How the automation stands, as its feed knows it. */
 	standing: PanelStanding;
 	/** Closes it beside the feed; undefined where it is the page. */
@@ -100,11 +100,11 @@ export function AutomationPanel({
 	const runner = useLeadBot(owner);
 	const automations = useAutomations(projectId).data;
 	const automation = automations?.find((one) => one.id === standing.id);
-	const controls = useAutomationControls(conversationId, standing);
+	const controls = useAutomationControls(chatId, standing);
 	const actions = useAutomationActions();
 	const navigateToOwnerPage = useNavigateToOwnerPage();
 	const [dialog, setDialog] = useState<PanelDialog>();
-	// Pausing and Run now go through the feed's own controls, so why they failed is kept here.
+	// Pausing and Start a run go through the feed's own controls, so why they failed is kept here.
 	const [controlFailure, setControlFailure] = useState<unknown>();
 	const mayManage = may.manageAutomations;
 	const active = standing.state === "enabled";
@@ -239,7 +239,7 @@ export function AutomationPanel({
 							onClick={() => void control(() => controls.runAgain())}
 						>
 							<Play aria-hidden size={12} strokeWidth={2} fill="currentColor" />
-							Run now
+							Start a run
 						</Button>
 					)}
 				</div>
@@ -325,7 +325,7 @@ export function AutomationPanel({
 									onClick={() => void control(() => controls.runAgain())}
 								>
 									<Play aria-hidden size={12} strokeWidth={2} fill="currentColor" />
-									Run now
+									Start a run
 								</Button>
 							)}
 							{more}
@@ -337,7 +337,7 @@ export function AutomationPanel({
 		);
 	}
 	return (
-		<ChatSidebar
+		<SidePanel
 			label="Automation"
 			onClose={onClose}
 			headerless
@@ -345,7 +345,7 @@ export function AutomationPanel({
 			actions={moreInBar && more}
 		>
 			{settings}
-		</ChatSidebar>
+		</SidePanel>
 	);
 }
 

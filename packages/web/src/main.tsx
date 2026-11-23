@@ -20,7 +20,7 @@ import { Splash } from "@/shell/Splash.tsx";
  *
  * Nothing mounts until `/me` has answered. A route guard has to be able to say
  * yes or no, and "not known yet" is neither: mounting first would send everyone
- * to the login page for a frame, then bounce those with a good token back,
+ * to the sign-in page for a frame, then bounce those with a good token back,
  * which the address bar and the back button both remember.
  */
 
@@ -29,7 +29,7 @@ const router = createAppRouter();
 function App() {
 	const session = useSessionFromApi();
 
-	if (session.user === undefined) {
+	if (session.person === undefined) {
 		return session.error ? (
 			<LoadFailure
 				title="Could not check your session"
@@ -41,7 +41,7 @@ function App() {
 		);
 	}
 
-	return <SessionRouter key={session.user?.id ?? "signed-out"} session={session} />;
+	return <SessionRouter key={session.person?.id ?? "signed-out"} session={session} />;
 }
 
 function SessionRouter({ session }: { session: Session }) {

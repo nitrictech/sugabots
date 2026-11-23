@@ -17,7 +17,7 @@ export function BotCrumb({ bot }: { bot: Bot }) {
 	return (
 		<Link {...botLink(bot)} className={CRUMB}>
 			<span aria-hidden className="flex shrink-0">
-				<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
+				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={16} />
 			</span>
 			<span className="min-w-0 truncate">{bot.name}</span>
 		</Link>
@@ -51,12 +51,12 @@ export function CrumbSeparator() {
 /** The label each owner page has in a breadcrumb. */
 const OWNER_PAGE_LABELS = {
 	automations: "Automations",
-	connections: "Connections",
+	connectors: "Connectors",
 	settings: "Settings",
 } as const;
 
 /**
- * The head of the breadcrumb of an automation, a connection or a page of a
+ * The head of the breadcrumb of an automation, a connector or a page of a
  * project's settings: its bot or project, then that one's `page`, which
  * leads back to it.
  */

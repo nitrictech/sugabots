@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import opentype from "opentype.js";
 import { botPalettes } from "../src/bot-colors.ts";
 import { botCrowd as crowd } from "../src/bot-crowd.ts";
-import type { BotLook } from "../src/bot-face.tsx";
+import type { AvatarParts } from "../src/bot-face.tsx";
 import { FACE_VIEWBOX_SIZE, type FaceMark, faceMarks } from "../src/face-marks.ts";
 import { type HeadPart, headShape } from "../src/head-shapes.ts";
 import { LOGO_SIZE, sugabotsLogo } from "../src/sugabots-logo.ts";
@@ -41,14 +41,14 @@ function partElement(part: HeadPart, fill: string): string {
 		: `<path d="${part.d}" fill="${fill}"/>`;
 }
 
-function faceElements({ color, face, shape = "circle" }: BotLook): string {
+function faceElements({ color, eyes, shape = "circle" }: AvatarParts): string {
 	const faceHex = botPalettes[color].face;
 	const eyesHex = botPalettes[color].eyes;
 	const head = headShape(shape);
 	const centre = FACE_VIEWBOX_SIZE / 2;
 	const { x, y, scale } = head.eyes;
 	const parts = head.parts.map((part) => partElement(part, faceHex)).join("");
-	const marks = faceMarks(face)
+	const marks = faceMarks(eyes)
 		.map((mark) => markElement(mark, eyesHex))
 		.join("");
 	// Eyes where a circle has them need no moving, which keeps a circle's markup as it was before shapes.
@@ -66,7 +66,7 @@ function writeAsset(name: string, width: number, height: number, content: string
 }
 
 /** A face drawn at `size` pixels with its top-left corner at (x, y). */
-function placedFace(bot: BotLook, x: number, y: number, size: number, rotate = 0): string {
+function placedFace(bot: AvatarParts, x: number, y: number, size: number, rotate = 0): string {
 	const centre = size / 2;
 	const scale = size / FACE_VIEWBOX_SIZE;
 	return `<g transform="translate(${x} ${y}) rotate(${rotate} ${centre} ${centre}) scale(${scale})">${faceElements(bot)}</g>`;

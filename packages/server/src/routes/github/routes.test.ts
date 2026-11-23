@@ -1,16 +1,16 @@
-import { Automations } from "@sugabots/core/conversations/automations/automations";
-import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
+import { Automations } from "@sugabots/core/chats/automations/automations";
+import { GitHubApps } from "@sugabots/core/providers/connectors/github/github-app";
 import {
 	DeliveryRefused,
-	GitHubConnections,
-} from "@sugabots/core/providers/connections/github/github-connections";
-import type { RepositoryActivity } from "@sugabots/core/providers/connections/github/github-events";
+	GitHubConnectors,
+} from "@sugabots/core/providers/connectors/github/github-connectors";
+import type { RepositoryActivity } from "@sugabots/core/providers/connectors/github/github-events";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
-const CONNECTION_ID = "0199a3a0-0000-7000-8000-000000000001";
+const CONNECTOR_ID = "0199a3a0-0000-7000-8000-000000000001";
 const WORKSPACE_ID = "0199a3a0-0000-7000-8000-000000000002";
 const USER_ID = "0199a3a0-0000-7000-8000-000000000004";
 const GOOD_SIGNATURE = "sha256=good";
@@ -30,40 +30,40 @@ const opened: RepositoryActivity = {
 };
 
 /**
- * The app with a GitHub connection that admits deliveries with the good
+ * The app with a GitHub connector that admits deliveries with the good
  * signature, and says a `pull_request` event opened a pull request.
  */
 function hookApp() {
-	const receiveDelivery = vi.fn<GitHubConnections.Interface["receiveDelivery"]>(
-		({ connectionId, headers }) =>
+	const receiveDelivery = vi.fn<GitHubConnectors.Interface["receiveDelivery"]>(
+		({ connectorId, headers }) =>
 			headers["x-hub-signature-256"] === GOOD_SIGNATURE
 				? Effect.succeed({
 						workspaceId: WORKSPACE_ID,
-						connectionId,
+						connectorId,
 						deliveryId: headers["x-github-delivery"],
 						activity: headers["x-github-event"] === "pull_request" ? opened : undefined,
 					})
-				: Effect.fail(new DeliveryRefused({ connectionId })),
+				: Effect.fail(new DeliveryRefused({ connectorId })),
 	);
-	const accept = vi.fn<Automations.ConnectionEventsInterface["accept"]>(() => Effect.succeed([]));
+	const accept = vi.fn<Automations.ConnectorEventsInterface["accept"]>(() => Effect.succeed([]));
 	const app = createTestApp(
 		Layer.mergeAll(
-			unimplemented(GitHubConnections.Service, { receiveDelivery }),
-			unimplemented(Automations.ConnectionEvents, { accept }),
+			unimplemented(GitHubConnectors.Service, { receiveDelivery }),
+			unimplemented(Automations.ConnectorEvents, { accept }),
 		),
 	);
 	return { app, receiveDelivery, accept };
 }
 
 const deliver = (app: ReturnType<typeof hookApp>["app"], headers: Record<string, string>) =>
-	app.request(`/hooks/connections/${CONNECTION_ID}`, {
+	app.request(`/webhooks/connectors/${CONNECTOR_ID}`, {
 		method: "POST",
 		headers: { "content-type": "application/json", ...headers },
 		body: '{ "action":  "opened" }',
 	});
 
-describe("A GitHub connection's deliveries", () => {
-	it("hands the connection the exact body, and the automations what it says happened", async () => {
+describe("A GitHub connector's deliveries", () => {
+	it("hands the connector the exact body, and the automations what it says happened", async () => {
 		const { app, receiveDelivery, accept } = hookApp();
 
 		const response = await deliver(app, {
@@ -74,12 +74,12 @@ describe("A GitHub connection's deliveries", () => {
 
 		expect(response.status).toBe(204);
 		expect(receiveDelivery.mock.calls[0]?.[0]).toMatchObject({
-			connectionId: CONNECTION_ID,
+			connectorId: CONNECTOR_ID,
 			body: '{ "action":  "opened" }',
 		});
 		expect(accept).toHaveBeenCalledWith({
 			workspaceId: WORKSPACE_ID,
-			connectionId: CONNECTION_ID,
+			connectorId: CONNECTOR_ID,
 			deliveryId: "delivery-1",
 			activity: opened,
 		});
@@ -131,40 +131,40 @@ describe("Setting up a bot's GitHub App", () => {
 		const response = await setupApp({
 			made: () =>
 				Effect.succeed({ kind: "next", url: "https://github.com/apps/acme/installations/new" }),
-		}).request("/connections/github/made?code=the-code&state=s-1", signedIn);
+		}).request("/connectors/github/made?code=the-code&state=s-1", signedIn);
 
 		expect(response.status).toBe(302);
 		expect(response.headers.get("location")).toBe("https://github.com/apps/acme/installations/new");
 	});
 
-	it("sends the browser back to the project's new connection once the app is installed", async () => {
+	it("sends the browser back to the project's new connector once the app is installed", async () => {
 		const installed = vi.fn<GitHubApps.Interface["installed"]>(() =>
-			Effect.succeed({ kind: "done", at: ofProject, connectionId: CONNECTION_ID }),
+			Effect.succeed({ kind: "done", at: ofProject, connectorId: CONNECTOR_ID }),
 		);
 
 		const response = await setupApp({ installed }).request(
-			"/connections/github/installed?installation_id=7&state=s-1",
+			"/connectors/github/installed?installation_id=7&state=s-1",
 			signedIn,
 		);
 
 		expect(installed).toHaveBeenCalledWith({ installationId: 7, state: "s-1" });
 		expect(response.status).toBe(302);
 		expect(response.headers.get("location")).toBe(
-			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}&connection=${CONNECTION_ID}`,
+			`http://localhost:5173/connectors/github/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}&connector=${CONNECTOR_ID}`,
 		);
 	});
 
 	it("sends the browser back with why setup stopped, naming the bot only when the step was the caller's", async () => {
 		const back = (outcome: GitHubApps.SetupOutcome) =>
 			setupApp({ made: () => Effect.succeed(outcome) })
-				.request("/connections/github/made?state=s-1", signedIn)
+				.request("/connectors/github/made?state=s-1", signedIn)
 				.then((response) => response.headers.get("location"));
 
 		expect(await back({ kind: "failed", at: ofProject, failure: "cancelled" })).toBe(
-			`http://localhost:5173/connections/github/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}&github_error=cancelled`,
+			`http://localhost:5173/connectors/github/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}&github_error=cancelled`,
 		);
 		expect(await back({ kind: "failed", at: undefined, failure: "expired" })).toBe(
-			"http://localhost:5173/connections/github/return?github_error=expired",
+			"http://localhost:5173/connectors/github/return?github_error=expired",
 		);
 	});
 
@@ -172,7 +172,7 @@ describe("Setting up a bot's GitHub App", () => {
 		const made = vi.fn<GitHubApps.Interface["made"]>();
 
 		const response = await setupApp({ made }).request(
-			"/connections/github/made?code=the-code&state=s-1",
+			"/connectors/github/made?code=the-code&state=s-1",
 			{ ...signedIn, method: "HEAD" },
 		);
 

@@ -8,12 +8,12 @@ import {
 } from "@/lib/resource-owner.tsx";
 import { AutomationsPage } from "@/shell/Automations.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
-import { BotConversation, botRoute } from "./bots.tsx";
-import { ConversationPage } from "./conversation.tsx";
+import { BotChatScreen, botRoute } from "./bots.tsx";
+import { ChatPage } from "./chat.tsx";
 import { lazyNamed } from "./lazy-screen.tsx";
 import { useBotRouteOwner, useProjectRouteOwner } from "./owner.ts";
-import { ProjectConversation, projectRoute } from "./projects.tsx";
-import { type ConversationSearch, validateConversationSearch } from "./search.ts";
+import { ProjectChatScreen, projectRoute } from "./projects.tsx";
+import { type ChatSearch, validateChatSearch } from "./search.ts";
 
 const AutomationSetup = lazyNamed(
 	() =>
@@ -52,30 +52,30 @@ function OwnerAutomations({
 
 /**
  * An automation's own page: how it is set up, under its breadcrumb. With
- * `?itemPage=`, one of its runs instead, as the sidebar opens them.
+ * `?nestedChatPage=`, one of its runs instead, as the sidebar opens them.
  */
 function AutomationPage<Owner extends ResourceOwner>({
 	owner,
 	automationId,
-	itemPage,
+	nestedChatPage,
 	feed,
 }: {
 	owner: Owner | undefined;
 	automationId: string;
-	itemPage: string | undefined;
+	nestedChatPage: string | undefined;
 	/** The automation's feed, open with the run as its page. */
 	feed: (owner: Owner, feedId: string) => ReactNode;
 }) {
 	if (!owner) return null;
 	// A run is history, which somebody who manages the bot without reaching it does not read.
-	return itemPage && resourcePermissions(owner).readHistory ? (
+	return nestedChatPage && resourcePermissions(owner).readHistory ? (
 		<AutomationFeed key={automationId} owner={owner} automationId={automationId} feed={feed} />
 	) : (
 		<AutomationSetup key={automationId} owner={owner} automationId={automationId} />
 	);
 }
 
-/** The automation's feed, opened first when it has none, with the run `?itemPage=` names as the page. */
+/** The automation's feed, opened first when it has none, with the run `?nestedChatPage=` names as the page. */
 function AutomationFeed<Owner extends ResourceOwner>({
 	owner,
 	automationId,
@@ -131,8 +131,8 @@ export const automationsIndexRoute = createRoute({
 export const automationFeedRoute = createRoute({
 	getParentRoute: () => automationsRoute,
 	path: "/$automation",
-	validateSearch: validateConversationSearch,
-	loader: () => ConversationPage.preload(),
+	validateSearch: validateChatSearch,
+	loader: () => ChatPage.preload(),
 	component: () => {
 		const { automation } = automationFeedRoute.useParams();
 		const search = automationFeedRoute.useSearch();
@@ -141,11 +141,11 @@ export const automationFeedRoute = createRoute({
 			<AutomationPage
 				owner={useBotRouteOwner()}
 				automationId={automation}
-				itemPage={search.itemPage}
+				nestedChatPage={search.nestedChatPage}
 				feed={(owner, feedId) => (
-					<BotConversation
+					<BotChatScreen
 						bot={owner.bot}
-						conversationId={feedId}
+						chatId={feedId}
 						search={search}
 						navigate={(change) => void navigate(change)}
 					/>
@@ -187,8 +187,8 @@ export const projectAutomationsIndexRoute = createRoute({
 export const projectAutomationRoute = createRoute({
 	getParentRoute: () => projectAutomationsRoute,
 	path: "/$automation",
-	validateSearch: validateConversationSearch,
-	loader: () => ConversationPage.preload(),
+	validateSearch: validateChatSearch,
+	loader: () => ChatPage.preload(),
 	component: () => {
 		const { automation } = projectAutomationRoute.useParams();
 		const search = projectAutomationRoute.useSearch();
@@ -197,12 +197,12 @@ export const projectAutomationRoute = createRoute({
 			<AutomationPage
 				owner={useProjectRouteOwner()}
 				automationId={automation}
-				itemPage={search.itemPage}
+				nestedChatPage={search.nestedChatPage}
 				feed={(owner, feedId) => (
-					<ProjectConversation
+					<ProjectChatScreen
 						projectSlug={owner.project.slug}
-						conversationId={feedId}
-						search={search satisfies ConversationSearch}
+						chatId={feedId}
+						search={search satisfies ChatSearch}
 						navigate={(change) => void navigate(change)}
 					/>
 				)}

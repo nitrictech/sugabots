@@ -13,7 +13,7 @@ services:
       DATABASE_URL: postgres://sugabots:sugabots@postgres:5432/sugabots
       PUBLIC_URL: http://localhost:3000
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set it in .env}
-      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?Set it in .env}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?Set it in .env}
       EMAIL_TRANSACTIONAL_FROM: Sugabots <sugabots@localhost>
       # Files are kept in the database. To keep them on a volume instead, do it
       # before you use Sugabots: uncomment the two settings, the two volumes

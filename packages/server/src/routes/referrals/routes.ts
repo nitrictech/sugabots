@@ -2,7 +2,7 @@ import { NotFound } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError } from "../../http/errors.ts";
 
@@ -14,13 +14,13 @@ export const referralRoutes = HttpApiBuilder.group(ServerApi, "referrals", (hand
 			.handle("link", () =>
 				accounts.referralLink.pipe(
 					Effect.map((url) => ({ url: url ?? null })),
-					asSessionUser,
+					asSignedInPerson,
 				),
 			)
 			.handle("resetLink", () =>
 				accounts.resetReferralLink.pipe(
 					Effect.map((url) => ({ url })),
-					asSessionUser,
+					asSignedInPerson,
 					asHttpError({ ReferralsOff: NotFound }),
 				),
 			);

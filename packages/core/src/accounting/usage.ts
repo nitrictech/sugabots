@@ -17,9 +17,9 @@ import { bot, modelProvider, modelRequest, providerModel, workspace } from "../d
 /** What a workspace's models cost, from the request ledger. */
 export interface Interface {
 	/**
-	 * One month's spend in a workspace named by its id or its slug, with the
+	 * One month's usage in a workspace named by its id or its slug, with the
 	 * month and its days in the workspace's time zone. It shows every bot's
-	 * spend, so it takes the current actor's `workspace.usage.manage`; the
+	 * usage, so it takes the current actor's `workspace.usage.manage`; the
 	 * Personal Assistants', each its own person's, only together.
 	 */
 	readonly month: (
@@ -52,7 +52,7 @@ export const layer = layerNoDeps.pipe(Layer.provide(Authorization.layer));
  * How long a request can be out before it is taken to have been cut off by
  * its process stopping: twice the longest a request is waited on, which is
  * compaction's five minutes. One started more recently is still going, and is
- * left out rather than counted as unpriced.
+ * left out rather than counted as of unknown cost.
  */
 const INTERRUPTED_AFTER_MINUTES = 10;
 
@@ -83,30 +83,30 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 		select 1 from ${bot}
 		where ${bot.id} = ${modelRequest.botId} and ${bot.assistantOf} is not null
 	)`;
-	const spend = {
+	const usageColumns = {
 		usd: sql<number>`coalesce(sum(${modelRequest.costUsd}), 0)`.mapWith(Number),
 		// A failed request answered nothing, which providers don't charge for.
 		// Any other request without a price might have cost something.
-		unpricedRequests:
+		unknownCostRequests:
 			sql<number>`count(*) filter (where ${modelRequest.costUsd} is null and ${modelRequest.outcome} <> 'failed')`.mapWith(
 				Number,
 			),
 	};
-	const spendWhere = (where: SQL | undefined) =>
-		query((db) => db.select(spend).from(modelRequest).where(where)).pipe(
-			Effect.map(([row]) => row ?? { usd: 0, unpricedRequests: 0 }),
+	const usageWhere = (where: SQL | undefined) =>
+		query((db) => db.select(usageColumns).from(modelRequest).where(where)).pipe(
+			Effect.map(([row]) => row ?? { usd: 0, unknownCostRequests: 0 }),
 		);
 
 	// One query at a time: inside a transaction the executor is one connection,
 	// which runs them one after another anyway.
-	const total = yield* spendWhere(inMonth);
-	const systemBots = yield* spendWhere(and(inMonth, bySystemBots));
-	const personalAssistants = yield* spendWhere(and(inMonth, byBots, byPersonalAssistants));
+	const total = yield* usageWhere(inMonth);
+	const systemBots = yield* usageWhere(and(inMonth, bySystemBots));
+	const personalAssistants = yield* usageWhere(and(inMonth, byBots, byPersonalAssistants));
 	const dayRows = yield* query((db) =>
 		db
 			.select({
 				date: sql<string>`to_char(${modelRequest.startedAt} at time zone ${timeZone}, 'YYYY-MM-DD')`,
-				usd: spend.usd,
+				usd: usageColumns.usd,
 			})
 			.from(modelRequest)
 			.where(inMonth)
@@ -120,14 +120,14 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 				botId: modelRequest.botId,
 				name: bot.name,
 				color: bot.color,
-				face: bot.face,
+				eyes: bot.eyes,
 				shape: bot.shape,
-				...spend,
+				...usageColumns,
 			})
 			.from(modelRequest)
 			.leftJoin(bot, eq(bot.id, modelRequest.botId))
 			.where(and(inMonth, byBots, isNull(bot.assistantOf)))
-			.groupBy(modelRequest.botId, bot.name, bot.color, bot.face, bot.shape),
+			.groupBy(modelRequest.botId, bot.name, bot.color, bot.eyes, bot.shape),
 	);
 	const models = yield* query((db) =>
 		db
@@ -135,8 +135,8 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 				model: modelRequest.model,
 				displayName: providerModel.displayName,
 				providerName: modelProvider.name,
-				preset: modelRequest.preset,
-				...spend,
+				builtIn: modelRequest.builtIn,
+				...usageColumns,
 			})
 			.from(modelRequest)
 			.leftJoin(modelProvider, eq(modelProvider.id, modelRequest.providerId))
@@ -151,17 +151,17 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 			.groupBy(
 				modelRequest.model,
 				modelRequest.providerId,
-				modelRequest.preset,
+				modelRequest.builtIn,
 				modelProvider.name,
 				providerModel.displayName,
 			),
 	);
-	const spentByDay = new Map(dayRows.map((row) => [row.date, row.usd]));
+	const costByDay = new Map(dayRows.map((row) => [row.date, row.usd]));
 	return {
 		month,
 		timeZone,
 		...total,
-		days: datesIn(month).map((date) => ({ date, usd: spentByDay.get(date) ?? 0 })),
+		days: datesIn(month).map((date) => ({ date, usd: costByDay.get(date) ?? 0 })),
 		bots: mostExpensiveFirst(
 			bots.flatMap(({ botId, ...rest }) => (botId ? [{ botId, ...rest }] : [])),
 		),
@@ -171,11 +171,11 @@ const loadMonth = Effect.fn("Usage.loadMonth")(function* (workspaceId: string, m
 	} satisfies WorkspaceUsage;
 });
 
-function mostExpensiveFirst<Row extends { usd: number; unpricedRequests: number }>(
+function mostExpensiveFirst<Row extends { usd: number; unknownCostRequests: number }>(
 	rows: readonly Row[],
 ): Row[] {
 	return rows.toSorted(
-		(left, right) => right.usd - left.usd || right.unpricedRequests - left.unpricedRequests,
+		(left, right) => right.usd - left.usd || right.unknownCostRequests - left.unknownCostRequests,
 	);
 }
 

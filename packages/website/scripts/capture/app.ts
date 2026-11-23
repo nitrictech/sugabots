@@ -108,9 +108,9 @@ export async function click(stage: Stage, locator: Locator) {
 
 /**
  * Opens the bot named `bot` from its row in the sidebar, whose page starts a
- * new thread with it, and waits for that page's composer.
+ * new chat with it, and waits for that page's composer.
  */
-export async function openNewThread(stage: Stage, bot: string) {
+export async function openNewChat(stage: Stage, bot: string) {
 	const row = stage.app.getByRole("link", { name: bot, exact: true }).first();
 	await row.waitFor({ timeout: 20_000 });
 	await click(stage, row);

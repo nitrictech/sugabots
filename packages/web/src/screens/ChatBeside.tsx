@@ -1,24 +1,24 @@
 import type {
+	ChatDetails,
 	ChatHistoryEntry,
-	ConversationDetails,
 	FilePart,
 	Message,
-	SessionUser,
+	SignedInPerson,
 } from "@sugabots/contracts";
 import { useLocation } from "@tanstack/react-router";
-import { type ConversationPlace, placeBot } from "@/lib/chats.ts";
-import { conversationFileUrl } from "@/lib/conversation-files.ts";
+import { chatFileUrl } from "@/lib/chat-files.ts";
+import { type ChatLocation, placeBot } from "@/lib/chats.ts";
 import { useLeadBot } from "@/lib/resource-owner.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { AutomationPanel } from "./AutomationPanel.tsx";
 import { AutomationsStage, type AutomationsView } from "./AutomationsStage.tsx";
 import type { ChatPlace } from "./ChatHeader.tsx";
 import { DesktopStage } from "./DesktopViewer.tsx";
-import { type ConversationContents, DetailsSidebar, ProjectDetails } from "./DetailsSidebar.tsx";
+import { type ChatContents, DetailsPanel, ProjectDetails } from "./DetailsPanel.tsx";
 import { FileStage } from "./Files.tsx";
-import { ItemPanel } from "./ItemPanel.tsx";
-import { opensBeside } from "./item-opening.ts";
-import type { ProjectThreadToChange } from "./ProjectThreadMenu.tsx";
+import { NestedChatPanel } from "./NestedChatPanel.tsx";
+import { opensBeside } from "./nested-chat-opening.ts";
+import type { ProjectChatToChange } from "./ProjectChatMenu.tsx";
 import type { Staged, StagedChange } from "./staged.ts";
 
 /**
@@ -27,44 +27,44 @@ import type { Staged, StagedChange } from "./staged.ts";
  * are open.
  */
 export function ChatBeside({
-	conversationPlace: owner,
+	chatLocation: owner,
 	details,
-	conversationId,
-	user,
+	chatId,
+	signedIn,
 	place,
 	staged,
 	onStagedChange,
-	itemConversationId,
+	nestedChatId,
 	entries,
-	onItemChange,
-	onOpenItem,
+	onNestedChatChange,
+	onOpenNestedChat,
 	onOpenFile,
 	onOpenAutomations,
 	shownMessages,
-	projectThreadName,
-	projectThreadToChange,
+	projectChatName,
+	projectChatToChange,
 }: {
-	conversationPlace: ConversationPlace;
-	details: ConversationDetails;
-	conversationId: string;
-	user: SessionUser;
+	chatLocation: ChatLocation;
+	details: ChatDetails;
+	chatId: string;
+	signedIn: SignedInPerson;
 	place: ChatPlace;
 	staged: Staged | undefined;
 	onStagedChange: StagedChange;
 	/** The collaboration or automation's run the chat's address names, if any. */
-	itemConversationId: string | undefined;
+	nestedChatId: string | undefined;
 	/** The collaborations and automations' runs the chat has opened. */
 	entries: ChatHistoryEntry[];
-	onItemChange: (itemConversationId: string | undefined) => void;
-	onOpenItem: (itemConversationId: string) => void;
+	onNestedChatChange: (nestedChatId: string | undefined) => void;
+	onOpenNestedChat: (nestedChatId: string) => void;
 	onOpenFile: (fileId: string) => void;
 	onOpenAutomations: (view?: AutomationsView) => void;
 	/** The messages loaded so far, whose files Details lists. */
 	shownMessages: readonly Message[];
-	/** What a project's thread is called, as its project lists it. */
-	projectThreadName: string;
-	/** Renaming and archiving a project's thread, for whoever may change the project. */
-	projectThreadToChange: ProjectThreadToChange | undefined;
+	/** What a project's chat is called, as its project lists it. */
+	projectChatName: string;
+	/** Renaming a project's chat, for whoever may change the project. */
+	projectChatToChange: ProjectChatToChange | undefined;
 }) {
 	const { leaveFor } = useLeave();
 	const { pathname } = useLocation();
@@ -92,20 +92,13 @@ export function ChatBeside({
 		);
 	}
 	if (staged?.kind === "desktop" && lead) {
-		return (
-			<DesktopStage
-				conversationId={details.conversation.id}
-				owner={owner}
-				bot={lead}
-				onClose={closeStage}
-			/>
-		);
+		return <DesktopStage chatId={details.chat.id} owner={owner} bot={lead} onClose={closeStage} />;
 	}
 	if (staged?.kind === "automations" && bot) {
 		return (
 			<AutomationsStage
 				bot={bot}
-				user={user}
+				signedIn={signedIn}
 				view={staged.view}
 				onViewChange={onOpenAutomations}
 				onStagedChange={onStagedChange}
@@ -113,35 +106,35 @@ export function ChatBeside({
 			/>
 		);
 	}
-	if (itemConversationId && opensBeside(itemConversationId, entries)) {
+	if (nestedChatId && opensBeside(nestedChatId, entries)) {
 		return (
-			<ItemPanel
-				conversationId={conversationId}
+			<NestedChatPanel
+				chatId={chatId}
 				chatBotId={bot?.id}
-				itemConversationId={itemConversationId}
-				entry={entries.find((entry) => entry.conversationId === itemConversationId)}
+				nestedChatId={nestedChatId}
+				entry={entries.find((entry) => entry.chatId === nestedChatId)}
 				history={entries}
-				frame={{ kind: "sidebar", onClose: () => onItemChange(undefined) }}
-				onOpenItem={onOpenItem}
+				frame={{ kind: "beside", onClose: () => onNestedChatChange(undefined) }}
+				onOpenNestedChat={onOpenNestedChat}
 				onOpenFile={onOpenFile}
 			/>
 		);
 	}
 	if (place.kind !== "own" || !place.detailsOpen) return null;
 	const closeDetails = () => place.onDetailsChange(false);
-	const contents: ConversationContents = {
+	const contents: ChatContents = {
 		participants: details.participants,
 		files: shownMessages.flatMap((message) =>
 			message.parts.filter((part): part is FilePart => part.type === "file"),
 		),
-		fileUrlOf: (fileId) => conversationFileUrl(conversationId, fileId),
+		fileUrlOf: (fileId) => chatFileUrl(chatId, fileId),
 	};
 	// A project's automation's feed is set up beside it, as a bot's is.
 	if (details.automation) {
 		return (
 			<AutomationPanel
 				owner={owner}
-				conversationId={conversationId}
+				chatId={chatId}
 				standing={details.automation}
 				onClose={closeDetails}
 			/>
@@ -151,16 +144,16 @@ export function ChatBeside({
 		return (
 			<ProjectDetails
 				project={owner.project}
-				name={projectThreadName}
+				name={projectChatName}
 				people={details.peopleReachingProject.length}
 				bots={details.projectBots.length}
-				toChange={projectThreadToChange}
-				user={user}
+				toChange={projectChatToChange}
+				signedIn={signedIn}
 				contents={contents}
 				computer={
 					lead && {
 						bot: lead,
-						conversationId: details.conversation.id,
+						chatId: details.chat.id,
 						onOpen: () => onStagedChange({ kind: "desktop" }),
 					}
 				}
@@ -169,9 +162,9 @@ export function ChatBeside({
 		);
 	}
 	return (
-		<DetailsSidebar
+		<DetailsPanel
 			bot={owner.bot}
-			conversationId={details.conversation.id}
+			chatId={details.chat.id}
 			contents={contents}
 			onOpenDesktop={() => onStagedChange({ kind: "desktop" })}
 			onOpenAutomations={(automationId) =>

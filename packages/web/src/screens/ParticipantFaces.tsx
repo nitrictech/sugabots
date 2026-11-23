@@ -12,11 +12,11 @@ const RING_WIDTH_PX = 2;
 const COUNT_FONT = { share: 0.45, minimumPx: 9 };
 
 /**
- * The faces of who is in a conversation, overlapping in a row: people first, then
+ * The faces of who is in a chat, overlapping in a row: people first, then
  * bots, each in the order given, the first `shown` of them and then how many
  * more. Every face, and the count, sits over the one before it the same way,
  * ringed in `surface`, the colour of what the stack is on. For decoration
- * only: whatever holds it names who is in the conversation.
+ * only: whatever holds it names who is in the chat.
  */
 export function ParticipantFaces({
 	participants,
@@ -48,7 +48,7 @@ export function ParticipantFaces({
 					<span key={participant.id} className="relative flex" style={place(index)}>
 						<BotAvatar
 							color={participant.color}
-							face={participant.face}
+							eyes={participant.eyes}
 							shape={participant.shape}
 							size={size}
 							ringed={{ color: surface, width: RING_WIDTH_PX }}

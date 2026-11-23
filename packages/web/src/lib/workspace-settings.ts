@@ -3,7 +3,7 @@ import type { WorkspacePermissions } from "@sugabots/contracts";
 /**
  * The workspace's own settings sections, as the navigation lists them under
  * Workspace, with your own settings above them. A bot's settings, and a
- * project's, are among its own pages, beside its threads.
+ * project's, are among its own pages, beside its chats.
  *
  * `needs` names a workspace permission the API resolves, so a section
  * disappears for the same reason its routes refuse: the person does not hold
@@ -11,7 +11,7 @@ import type { WorkspacePermissions } from "@sugabots/contracts";
  */
 export const workspaceSettingSections = [
 	{ id: "general", label: "General", path: "/settings" },
-	{ id: "members", label: "People", path: "/settings/members" },
+	{ id: "people", label: "People", path: "/settings/people" },
 	{ id: "providers", label: "Models", path: "/settings/providers", needs: "manageProviders" },
 	{ id: "computers", label: "Computers", path: "/settings/computers", needs: "manageProviders" },
 	{ id: "search", label: "Web search", path: "/settings/search", needs: "manageProviders" },
@@ -20,7 +20,7 @@ export const workspaceSettingSections = [
 
 /** Your own settings, under You at the head of the navigation. */
 export const yourSettingSections = [
-	{ id: "profile", label: "General", path: "/settings/profile" },
+	{ id: "account", label: "General", path: "/settings/account" },
 	{ id: "notifications", label: "Notifications", path: "/settings/notifications" },
 ] as const satisfies ReadonlyArray<SectionShape>;
 

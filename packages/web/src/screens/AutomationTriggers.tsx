@@ -112,7 +112,7 @@ export function triggerDraftOf(trigger: AutomationTriggerInput): TriggerDraft {
 			return {
 				kind: "github",
 				repository: {
-					repository: { connectionId: trigger.connectionId, repository: trigger.repository },
+					repository: { connectorId: trigger.connectorId, repository: trigger.repository },
 					events: trigger.events,
 				},
 			};
@@ -267,7 +267,7 @@ export function TriggerDialog({
 	onRemove,
 	done,
 }: {
-	/** The bot or project; its connections decide which integrations' triggers it may have. */
+	/** The bot or project; its connectors decide which connectors' triggers it may have. */
 	owner: ResourceOwner;
 	/** The trigger being changed, as a draft; undefined while adding one. */
 	editing: TriggerDraft | undefined;

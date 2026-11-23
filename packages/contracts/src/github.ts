@@ -5,18 +5,18 @@ import { Schema } from "effect";
  * made from its manifest, and once it is installed. Each answers with a
  * redirect to {@link GITHUB_SETUP_RETURN_PATH} in the web app.
  */
-export const GITHUB_APP_MADE_PATH = "/connections/github/made";
-export const GITHUB_APP_INSTALLED_PATH = "/connections/github/installed";
+export const GITHUB_APP_MADE_PATH = "/connectors/github/made";
+export const GITHUB_APP_INSTALLED_PATH = "/connectors/github/installed";
 
-/** Where, under the API, a GitHub connection's app sends its events: the connection's id follows. */
-export const GITHUB_WEBHOOK_PATH = "/hooks/connections";
+/** Where, under the API, a GitHub connector's app sends its events: the connector's id follows. */
+export const GITHUB_WEBHOOK_PATH = "/webhooks/connectors";
 
 /**
  * Where the web app takes the browser back from GitHub: `workspace` and
- * `project` name the project, `connection` its GitHub app once it is made,
+ * `project` name the project, `connector` its GitHub app once it is made,
  * and `github_error`, when set, a {@link GitHubSetupFailure}.
  */
-export const GITHUB_SETUP_RETURN_PATH = "/connections/github/return";
+export const GITHUB_SETUP_RETURN_PATH = "/connectors/github/return";
 
 const gitHubSetupFailureSchema = Schema.Literals([
 	/** The link was old, altered, or someone else's. */
@@ -49,7 +49,7 @@ export const gitHubAppFormSchema = Schema.Struct({ url: Schema.String, manifest:
 
 export type GitHubAppForm = typeof gitHubAppFormSchema.Type;
 
-/** Where the browser goes to install the connection's app, or to change which repositories it reaches. */
+/** Where the browser goes to install the connector's app, or to change which repositories it reaches. */
 export const gitHubAppInstallSchema = Schema.Struct({ url: Schema.String });
 
 /** A repository's path, as GitHub writes it: `owner/name`. */
@@ -60,7 +60,7 @@ export const repositoryPathSchema = Schema.String.check(
 	}),
 );
 
-/** A repository the connection's app reaches, which the connection may work on. */
+/** A repository the connector's app reaches, which the connector may work on. */
 export const accountRepositorySchema = Schema.Struct({
 	repository: repositoryPathSchema,
 	private: Schema.Boolean,
@@ -89,11 +89,11 @@ export const repositoryEventSchema = Schema.Literals(REPOSITORY_EVENTS);
 export type RepositoryEvent = typeof repositoryEventSchema.Type;
 
 /**
- * The repositories a GitHub connection's tools work on, the account they
+ * The repositories a GitHub connector's tools work on, the account they
  * belong to, and where its app is changed or deleted on GitHub.
  */
-export const connectionRepositoriesSchema = Schema.Struct({
-	/** Null until the connection's app is installed. */
+export const connectorRepositoriesSchema = Schema.Struct({
+	/** Null until the connector's app is installed. */
 	account: Schema.NullOr(Schema.String),
 	repositories: Schema.Array(
 		Schema.Struct({
@@ -104,7 +104,7 @@ export const connectionRepositoriesSchema = Schema.Struct({
 	),
 });
 
-export type ConnectionRepositories = typeof connectionRepositoriesSchema.Type;
+export type ConnectorRepositories = typeof connectorRepositoriesSchema.Type;
 
-/** A repository to add to or remove from a GitHub connection. */
-export const connectionRepositoryChangeSchema = Schema.Struct({ repository: repositoryPathSchema });
+/** A repository to add to or remove from a GitHub connector. */
+export const connectorRepositoryChangeSchema = Schema.Struct({ repository: repositoryPathSchema });

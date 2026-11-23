@@ -1,13 +1,13 @@
 import { Schema } from "effect";
-import { botColorSchema, botFaceSchema, botShapeSchema } from "./bots.ts";
-import { providerPresetIdSchema } from "./provider-catalog.ts";
+import { botColorSchema, botEyesSchema, botShapeSchema } from "./bots.ts";
+import { builtInProviderIdSchema } from "./built-in-providers.ts";
 
 /**
  * What a workspace's models cost over one month, estimated from each
  * provider's published prices.
  *
  * Every amount is in US dollars. A request whose cost could not be known is
- * left out of every amount and counted in `unpricedRequests` instead, so an
+ * left out of every amount and counted in `unknownCostRequests` instead, so an
  * unknown is never shown as free.
  */
 
@@ -25,9 +25,9 @@ const usdSchema = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 const countSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /** What a slice of the month cost, and how many of its requests had no price. */
-const spendFields = {
+const usageFields = {
 	usd: usdSchema,
-	unpricedRequests: countSchema,
+	unknownCostRequests: countSchema,
 };
 
 const usageDaySchema = Schema.Struct({
@@ -36,47 +36,46 @@ const usageDaySchema = Schema.Struct({
 	usd: usdSchema,
 });
 
-/** A bot's spend: the requests its own turns made. */
+/** A bot's usage: the requests its own turns made. */
 const botUsageSchema = Schema.Struct({
 	botId: Schema.String,
 	/** Null for a bot that has since been deleted. */
 	name: Schema.NullOr(Schema.String),
 	color: Schema.NullOr(botColorSchema),
-	face: Schema.NullOr(botFaceSchema),
+	eyes: Schema.NullOr(botEyesSchema),
 	shape: Schema.NullOr(botShapeSchema),
-	...spendFields,
+	...usageFields,
 });
 
-/** A model's spend through one provider, the bots' and the system bots' together. */
+/** A model's usage through one provider, the bots' and the system bots' together. */
 const modelUsageSchema = Schema.Struct({
 	/** The model id sent to the provider. */
 	model: Schema.String,
 	displayName: Schema.NullOr(Schema.String),
 	/** The provider's name now; null for one that has since been removed. */
 	providerName: Schema.NullOr(Schema.String),
-	preset: Schema.NullOr(providerPresetIdSchema),
-	...spendFields,
+	builtIn: Schema.NullOr(builtInProviderIdSchema),
+	...usageFields,
 });
 
 export const workspaceUsageSchema = Schema.Struct({
 	month: usageMonthSchema,
 	/** The workspace's IANA time zone, which the month and its days are in, as `Workspace.timeZone` gives it. */
 	timeZone: Schema.String,
-	...spendFields,
+	...usageFields,
 	/** Every day of the month, first to last, including those still to come. */
 	days: Schema.Array(usageDaySchema),
 	/** Most expensive first, but for the Personal Assistants, in `personalAssistants`. */
 	bots: Schema.Array(botUsageSchema),
 	models: Schema.Array(modelUsageSchema),
 	/**
-	 * What the system bots spent: routing, compaction, and trying models
-	 * out from settings.
+	 * What the system bots spent: compaction, and model tests.
 	 */
-	systemBots: Schema.Struct(spendFields),
+	systemBots: Schema.Struct(usageFields),
 	/**
 	 * What every person's Personal Assistant spent, together: each is its
 	 * person's alone, so none is named.
 	 */
-	personalAssistants: Schema.Struct(spendFields),
+	personalAssistants: Schema.Struct(usageFields),
 });
 export type WorkspaceUsage = typeof workspaceUsageSchema.Type;

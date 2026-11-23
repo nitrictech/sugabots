@@ -13,7 +13,7 @@ const meta = preview.meta({
 		pending: false,
 		title: "Delete Engineering?",
 		description:
-			"Its 2 bots, their chats, automations and connections will be deleted. This can't be undone.",
+			"Its 2 bots, their chats, automations and connectors will be deleted. This can't be undone.",
 	},
 });
 

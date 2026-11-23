@@ -4,15 +4,13 @@ import { cn } from "cn";
 import { CircleCheck, Monitor, PanelRight, RefreshCcw, RotateCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useModelName } from "@/lib/bots.ts";
-import { useAttentionCounts } from "@/lib/chats.ts";
-import { botLink, inboxLink, projectLink } from "@/lib/links.ts";
+import { botLink, projectLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { ownerLinkOptions, type ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useSession } from "@/lib/session.ts";
 import { useSidebarHiddenBesideChat } from "@/lib/sidebar-hidden.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { BotCrumb, CrumbSeparator } from "@/shell/BotCrumb.tsx";
-import { InboxNews } from "@/shell/InboxNews.tsx";
 import { StageBack, type StageParent } from "@/shell/Stage.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { BACK_BUTTON, BackChevron, isPlainClick, useLeave } from "@/ui/back-button.tsx";
@@ -29,11 +27,10 @@ import { CHAT_HEADER_CONTAINER, ChatComputer } from "./ComputerButton.tsx";
 import { ComputerSheet } from "./ComputerSheet.tsx";
 import { ParticipantFaces } from "./ParticipantFaces.tsx";
 
-/** Where a page's Back on a phone returns to: the list it covers, or for a conversation, where it lives. */
+/** Where a page's Back on a phone returns to: the list it covers, or for a chat, where it lives. */
 export type BackTo =
 	| { to: "project"; project: Project }
-	| { to: "inbox" }
-	/** A bot's thread goes back to its bot. */
+	/** A bot's chat goes back to its bot. */
 	| { to: "bot"; bot: Bot }
 	/** A page under a project's or a bot's Settings, such as a project's People, goes back to them. */
 	| { to: "ownerSettings"; owner: ResourceOwner };
@@ -45,22 +42,16 @@ export function backToOwner(owner: ResourceOwner): BackTo {
 		: { to: "bot", bot: owner.bot };
 }
 
-/**
- * Where a chat is shown. On its own page it has Details, opened and closed
- * from its header. Shown elsewhere, as Inbox shows one, it has none: its
- * header has a Back to where it was opened from, and a way to the chat itself.
- */
-export type ChatPlace =
-	| {
-			kind: "own";
-			detailsOpen: boolean;
-			onDetailsChange: (open: boolean) => void;
-			/** At the right of the header, such as a stage's Close. */
-			trailing?: ReactNode;
-			/** The level the chat was opened from inside a stage, which its header's Back returns to. */
-			parent?: StageParent;
-	  }
-	| { kind: "away"; back: BackTo; trailing: ReactNode };
+/** Where a chat is shown: on its own page, with Details opened and closed from its header. */
+export type ChatPlace = {
+	kind: "own";
+	detailsOpen: boolean;
+	onDetailsChange: (open: boolean) => void;
+	/** At the right of the header, such as a stage's Close. */
+	trailing?: ReactNode;
+	/** The level the chat was opened from inside a stage, which its header's Back returns to. */
+	parent?: StageParent;
+};
 
 /** What a chat's header does around its title: where Back goes, what is at its right, and its Details. */
 export interface HeaderPlace {
@@ -81,9 +72,9 @@ interface DetailsToggle {
 }
 
 /**
- * The bar across the top of a bot's thread: a breadcrumb of the bot and the
- * thread's title, the faces of the people in it once there is more than one,
- * Mark done, and, with `details`, the way into its Details: the cards button,
+ * The bar across the top of a bot's chat: a breadcrumb of the bot and the
+ * chat's title, the faces of the people in it once there is more than one,
+ * Resolve, and, with `details`, the way into its Details: the cards button,
  * or the title, which is how a phone reaches them. A phone also has the way
  * into the bot's computer, which from a tablet up is a card in Details.
  */
@@ -91,24 +82,24 @@ export function ChatHeader({
 	bot,
 	overChat,
 	title,
-	done,
+	resolved,
 	people = [],
-	conversationId,
+	chatId,
 	onOpenDesktop,
 	back,
 	trailing,
 	details,
 }: Omit<HeaderPlace, "parent"> & {
 	bot: Bot;
-	/** Over the thread, which scrolls up under it, rather than a bar of its own above it. */
+	/** Over the chat, which scrolls up under it, rather than a bar of its own above it. */
 	overChat: boolean;
-	/** The thread's title, shown in place of the bot's name once it is loaded. */
+	/** The chat's title, shown in place of the bot's name once it is loaded. */
 	title?: string;
-	/** Whether the thread is done, and how to mark it done or reopen it. */
-	done?: DoneToggle;
-	/** The people in the thread, whose faces show beside Mark done once there is more than one. */
+	/** Whether the chat is resolved, and how to mark it resolved or reopen it. */
+	resolved?: ResolvedToggle;
+	/** The people in the chat, whose faces show beside Resolve once there is more than one. */
 	people?: readonly PersonParticipant[];
-	conversationId: string;
+	chatId: string;
 	onOpenDesktop: () => void;
 }) {
 	const name = title ?? bot.name;
@@ -128,7 +119,7 @@ export function ChatHeader({
 						face={
 							<BotAvatar
 								color={bot.color}
-								face={bot.face}
+								eyes={bot.eyes}
 								shape={bot.shape}
 								size={PHONE_FACE_SIZE_PX}
 							/>
@@ -147,7 +138,7 @@ export function ChatHeader({
 			}
 		>
 			{/*
-			 * A breadcrumb: the bot, which leads to its page, then the thread's
+			 * A breadcrumb: the bot, which leads to its page, then the chat's
 			 * title, "Growth Desk / Fernhill pricing".
 			 */}
 			<div className="flex min-w-0 flex-1 items-center max-md:sr-only">
@@ -177,19 +168,19 @@ export function ChatHeader({
 			{/*
 			 * From a tablet up the computer is a card in Details, and automations
 			 * are in the bot's sidebar; a phone has room for one control beside a
-			 * thread's title, which holds the computer and done.
+			 * chat's title, which holds the computer and Resolve.
 			 */}
-			{done ? (
-				<ConversationMenu done={done} back={back} onOpenDesktop={openComputer} />
+			{resolved ? (
+				<ChatMenu resolved={resolved} back={back} onOpenDesktop={openComputer} />
 			) : (
 				<span className="contents md:hidden">
-					<ChatComputer bot={bot} conversationId={conversationId} onOpen={openComputer} />
+					<ChatComputer bot={bot} chatId={chatId} onOpen={openComputer} />
 				</span>
 			)}
-			{people.length > 1 && <PeopleInThread people={people} />}
-			{done && (
+			{people.length > 1 && <PeopleInChat people={people} />}
+			{resolved && (
 				<span className="contents max-md:hidden">
-					<DoneButton {...done} />
+					<ResolveButton {...resolved} />
 				</span>
 			)}
 			{details && <DetailsButton {...details} cards />}
@@ -197,7 +188,7 @@ export function ChatHeader({
 			<Dialog open={computerOpen} onOpenChange={setComputerOpen}>
 				<ComputerSheet
 					bot={bot}
-					conversationId={conversationId}
+					chatId={chatId}
 					onDismiss={() => setComputerOpen(false)}
 					onOpenFull={() => {
 						setComputerOpen(false);
@@ -209,34 +200,40 @@ export function ChatHeader({
 	);
 }
 
-/** On a phone, the ⋯ beside a thread's title: its bot's computer, and marking it done or reopening it. */
-function ConversationMenu({
-	done,
+/** On a phone, the ⋯ beside a chat's title: its bot's computer, and marking it resolved or reopening it. */
+function ChatMenu({
+	resolved,
 	back,
 	onOpenDesktop,
 }: {
-	done: DoneToggle;
-	/** Where the thread is left for once it is done. */
+	resolved: ResolvedToggle;
+	/** Where the chat is left for once it is resolved. */
 	back: BackTo;
 	onOpenDesktop: () => void;
 }) {
 	const place = useBackPlace(back);
-	// Done with, it is left as Back leaves it, rather than stayed in; once saved, so a failure
-	// is seen on the thread it was for.
-	const markDone = async () => {
-		if (await done.onChange(true)) place.leave();
+	// Resolved, it is left as Back leaves it, rather than stayed in; once saved, so a failure
+	// is seen on the chat it was for.
+	const markResolved = async () => {
+		if (await resolved.onChange(true)) place.leave();
 	};
 	return (
-		<MoreMenu label="More for this thread" variant="bar" className="md:hidden">
+		<MoreMenu label="More for this chat" variant="bar" className="md:hidden">
 			<DropdownMenuItem onClick={onOpenDesktop}>
 				<Monitor aria-hidden size={16} />
 				Computer
 			</DropdownMenuItem>
 			<DropdownMenuItem
-				onClick={done.isDone ? () => void done.onChange(false) : () => void markDone()}
+				onClick={
+					resolved.isResolved ? () => void resolved.onChange(false) : () => void markResolved()
+				}
 			>
-				{done.isDone ? <RotateCcw aria-hidden size={16} /> : <CircleCheck aria-hidden size={16} />}
-				{done.isDone ? "Reopen" : "Mark done"}
+				{resolved.isResolved ? (
+					<RotateCcw aria-hidden size={16} />
+				) : (
+					<CircleCheck aria-hidden size={16} />
+				)}
+				{resolved.isResolved ? "Reopen" : "Resolve"}
 			</DropdownMenuItem>
 		</MoreMenu>
 	);
@@ -296,7 +293,7 @@ function HeaderBar({
 /**
  * Whose chat it is, in a phone's header, on a pill of glass: its face, if it
  * has one, beside its title, with `sub` under the title, such as a bot's model
- * or where a thread is, each cut short to the room the header leaves. It opens
+ * or where a chat is, each cut short to the room the header leaves. It opens
  * the chat's Details where it has them. Hidden from assistive technology, which
  * reads the header's own title.
  */
@@ -354,24 +351,24 @@ export function AutomationFace() {
 function BotFace({ bot }: { bot: Bot }) {
 	return (
 		<span aria-hidden className="flex shrink-0">
-			<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={14} />
+			<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={14} />
 		</span>
 	);
 }
 
 /**
- * The people in a bot's thread with more than one in it: their faces stacked,
+ * The people in a bot's chat with more than one in it: their faces stacked,
  * which list them by name when clicked, the viewer among them as you.
  */
-function PeopleInThread({ people }: { people: readonly PersonParticipant[] }) {
-	const user = useSession().user;
+function PeopleInChat({ people }: { people: readonly PersonParticipant[] }) {
+	const signedIn = useSession().person;
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
 				render={
 					<button
 						type="button"
-						aria-label={`${people.length} people in this thread`}
+						aria-label={`${people.length} people in this chat`}
 						className="focus-ring flex h-8 items-center gap-1.5 rounded-md px-1.5 text-muted-foreground text-xs transition-colors hover:bg-row-hover hover:text-foreground data-popup-open:bg-row-selected max-md:hidden"
 					>
 						<ParticipantFaces participants={people} shown={3} size={20} />
@@ -384,7 +381,7 @@ function PeopleInThread({ people }: { people: readonly PersonParticipant[] }) {
 						<PersonAvatar person={person} size={20} />
 						<span className="min-w-0 flex-1 truncate">
 							{person.name}
-							{person.id === user?.id && <span className="text-subtle-foreground"> (you)</span>}
+							{person.id === signedIn?.id && <span className="text-subtle-foreground"> (you)</span>}
 						</span>
 					</DropdownMenuItem>
 				))}
@@ -395,7 +392,7 @@ function PeopleInThread({ people }: { people: readonly PersonParticipant[] }) {
 
 /**
  * The button that opens a chat's Details, or closes them: as a column beside
- * the chat, or, in a thread, as floating `cards`.
+ * the chat, or, in a chat, as floating `cards`.
  */
 function DetailsButton({ open, onChange, cards = false }: DetailsToggle & { cards?: boolean }) {
 	return (
@@ -433,16 +430,16 @@ function CardsIcon() {
 }
 
 /**
- * The bar across the top of any chat but a bot's thread: a project's thread or
+ * The bar across the top of any chat but a bot's chat: a project's chat or
  * an automation's feed. Its title, after where it sits as
  * a breadcrumb, then what can be done with it and its Details where it has
  * them. Unlike `ChatHeader` it has no bot's breadcrumb or computer: a
- * project's thread reaches its lead bot's work through its Details.
+ * project's chat reaches its lead bot's work through its Details.
  */
 export function PlainChatHeader({
 	title,
 	menu,
-	done,
+	resolved,
 	within,
 	face,
 	crumbs,
@@ -458,15 +455,15 @@ export function PlainChatHeader({
 	crumbs?: ReactNode;
 	/** What else can be done with it, at the end of the header. */
 	menu?: ReactNode;
-	/** Whether the thread is done, and how to mark it done or reopen it; absent on anything but a thread. */
-	done?: DoneToggle;
-	/** What the thread is in, its project, which a phone names under it. */
+	/** Whether the chat is resolved, and how to mark it resolved or reopen it; absent on anything but a project's chat. */
+	resolved?: ResolvedToggle;
+	/** What the chat is in, its project, which a phone names under it. */
 	within?: string;
 	/** Whose the chat is, as a face, such as an automation's, which a phone shows beside its name. */
 	face?: ReactNode;
 	/** Over the chat, which scrolls up under it, rather than a bar of its own above it. */
 	overChat?: boolean;
-	/** Whether its Details float as cards over the chat, as a thread's do, rather than a column beside it. */
+	/** Whether its Details float as cards over the chat, as a chat's do, rather than a column beside it. */
 	cards?: boolean;
 }) {
 	const openDetails = details && (() => details.onChange(!details.open));
@@ -476,8 +473,8 @@ export function PlainChatHeader({
 			parent={parent}
 			plain={overChat}
 			badge={
-				// A thread can be marked done, and goes by its title and where it is; anything else by its name.
-				done ? (
+				// A project's chat can be marked resolved, and goes by its title and where it is; anything else by its name.
+				resolved ? (
 					<HeaderBadge title={title} sub={within && `in ${within}`} onClick={openDetails} />
 				) : (
 					<HeaderBadge face={face} title={title} onClick={openDetails} />
@@ -496,7 +493,7 @@ export function PlainChatHeader({
 					<h1 className="m-0 min-w-0 truncate font-medium text-foreground text-sm">{title}</h1>
 				</div>
 			</div>
-			{done && <DoneButton {...done} />}
+			{resolved && <ResolveButton {...resolved} />}
 			{details && <DetailsButton {...details} cards={cards} />}
 			{menu}
 			{trailing}
@@ -504,26 +501,26 @@ export function PlainChatHeader({
 	);
 }
 
-/** Whether a thread is done, and what marks it done or reopens it. */
-export interface DoneToggle {
-	isDone: boolean;
-	/** Saves the change, resolving to whether it saved; a failure is shown where the thread is. */
-	onChange: (done: boolean) => Promise<boolean>;
+/** Whether a chat is resolved, and what marks it resolved or reopens it. */
+export interface ResolvedToggle {
+	isResolved: boolean;
+	/** Saves the change, settling on whether it saved; a failure is shown where the chat is. */
+	onChange: (resolved: boolean) => Promise<boolean>;
 }
 
 /**
- * Marks the thread done, which takes it off the sidebar once it is left, or
+ * Marks the chat resolved, which takes it off the sidebar once it is left, or
  * reopens it; its name, and tooltip, say which it will do.
  */
-function DoneButton({ isDone, onChange }: DoneToggle) {
+function ResolveButton({ isResolved, onChange }: ResolvedToggle) {
 	return (
 		<IconButton
-			label={isDone ? "Reopen" : "Mark done"}
+			label={isResolved ? "Reopen" : "Resolve"}
 			variant="bar"
-			onClick={() => void onChange(!isDone)}
+			onClick={() => void onChange(!isResolved)}
 			className={HEADER_ICON_CLASS_NAME}
 		>
-			{isDone ? (
+			{isResolved ? (
 				<RotateCcw size={16} strokeWidth={1.75} />
 			) : (
 				<CircleCheck size={16} strokeWidth={1.75} />
@@ -543,36 +540,23 @@ const HEADER_ICON_CLASS_NAME = cn(
 
 /**
  * The round Back a phone shows at the left of a page's header, to the list
- * the page covers, with what is new in Inbox beside its chevron.
+ * the page covers.
  */
 export function HeaderBack({ back }: { back: BackTo }) {
-	const { unreadForYou, unreadInInbox } = useAttentionCounts();
 	const { label: backLabel } = useLeave();
-	const className = cn(BACK_BUTTON, "md:hidden", unreadInInbox > 0 && "px-2");
-	const content = (
-		<>
-			<BackChevron />
-			<InboxNews
-				unreadForYou={unreadForYou}
-				unreadInInbox={unreadInInbox}
-				size="md"
-				countClassName="h-5 min-w-5 text-xs"
-			/>
-		</>
-	);
 	const place = useBackPlace(back);
 	return (
 		<a
 			href={place.href}
 			aria-label={backLabel(place.name)}
-			className={className}
+			className={cn(BACK_BUTTON, "md:hidden")}
 			onClick={(event) => {
 				if (!isPlainClick(event)) return;
 				event.preventDefault();
 				place.leave();
 			}}
 		>
-			{content}
+			<BackChevron />
 		</a>
 	);
 }
@@ -603,8 +587,6 @@ function backAddress(router: ReturnType<typeof useRouter>, back: BackTo) {
 			};
 		case "bot":
 			return { href: router.buildLocation(botLink(back.bot)).href, name: back.bot.name };
-		case "inbox":
-			return { href: router.buildLocation(inboxLink()).href, name: "Inbox" };
 		case "ownerSettings":
 			return {
 				href: router.buildLocation(ownerLinkOptions(back.owner, { page: "settings" })).href,

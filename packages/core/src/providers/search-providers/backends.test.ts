@@ -2,16 +2,16 @@ import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { EgressRefused } from "../network/egress.ts";
 import { parseExaText, type SearchRequest, searchBackend, searchEndpoint } from "./backends.ts";
-import type { SearchConnection } from "./search-connection.ts";
+import type { SearchProviderAccess } from "./search-provider-access.ts";
 
 type FakeFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 const at = new Date("2026-09-14T00:00:00.000Z");
 
-/** The connection's backend, answering as a promise. */
-function backend(connection: Omit<SearchConnection, "configurationUpdatedAt">, fetch: FakeFetch) {
+/** The provider access's backend, answering as a promise. */
+function backend(access: Omit<SearchProviderAccess, "configurationUpdatedAt">, fetch: FakeFetch) {
 	const search = searchBackend(
-		{ ...connection, configurationUpdatedAt: at },
+		{ ...access, configurationUpdatedAt: at },
 		fetch as typeof globalThis.fetch,
 	);
 	return (request: SearchRequest) => Effect.runPromise(search(request));
@@ -36,7 +36,7 @@ describe("the Brave backend", () => {
 		);
 
 		const outcome = await backend(
-			{ preset: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "brave-key" },
+			{ builtIn: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "brave-key" },
 			fetch,
 		)({ query: "open bots", count: 5 });
 
@@ -61,7 +61,7 @@ describe("the Brave backend", () => {
 		const unauthorised = vi.fn<FakeFetch>(async () => new Response("no", { status: 401 }));
 		expect(
 			await backend(
-				{ preset: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
+				{ builtIn: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
 				unauthorised,
 			)({ query: "q", count: 1 }),
 		).toEqual({ ok: false, reason: "Brave Search answered HTTP 401", providerMessage: "no" });
@@ -69,7 +69,7 @@ describe("the Brave backend", () => {
 		const odd = vi.fn<FakeFetch>(async () => Response.json({ hello: "world" }));
 		expect(
 			await backend(
-				{ preset: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
+				{ builtIn: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
 				odd,
 			)({
 				query: "q",
@@ -80,7 +80,7 @@ describe("the Brave backend", () => {
 		const broken = vi.fn<FakeFetch>(async () => Response.json({ web: { results: "nope" } }));
 		expect(
 			await backend(
-				{ preset: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
+				{ builtIn: "brave", baseUrl: "https://api.search.brave.com/res/v1", apiKey: "x" },
 				broken,
 			)({ query: "q", count: 1 }),
 		).toEqual({
@@ -99,7 +99,7 @@ describe("the Brave backend", () => {
 
 		const outcome = await backend(
 			{
-				preset: "brave",
+				builtIn: "brave",
 				baseUrl: "https://api.search.brave.com/res/v1",
 				apiKey: "brave-secret-key",
 			},
@@ -129,7 +129,7 @@ describe("the Exa backend", () => {
 		);
 
 		const outcome = await backend(
-			{ preset: "exa", baseUrl: "https://api.exa.ai", apiKey: "exa-key" },
+			{ builtIn: "exa", baseUrl: "https://api.exa.ai", apiKey: "exa-key" },
 			fetch,
 		)({
 			query: "open bots",
@@ -176,7 +176,7 @@ describe("the Exa backend", () => {
 		);
 
 		const outcome = await backend(
-			{ preset: "exa", baseUrl: "https://api.exa.ai" },
+			{ builtIn: "exa", baseUrl: "https://api.exa.ai" },
 			fetch,
 		)({ query: "q", count: 1 });
 
@@ -204,7 +204,7 @@ describe("the Tavily backend", () => {
 		);
 
 		const outcome = await backend(
-			{ preset: "tavily", baseUrl: "https://api.tavily.com", apiKey: "tvly-key" },
+			{ builtIn: "tavily", baseUrl: "https://api.tavily.com", apiKey: "tvly-key" },
 			fetch,
 		)({ query: "open bots", count: 3 });
 
@@ -230,7 +230,7 @@ describe("the Tavily backend", () => {
 
 		expect(
 			await backend(
-				{ preset: "tavily", baseUrl: "https://api.tavily.com", apiKey: "x" },
+				{ builtIn: "tavily", baseUrl: "https://api.tavily.com", apiKey: "x" },
 				fetch,
 			)({
 				query: "q",
@@ -253,7 +253,7 @@ describe("the SearXNG backend", () => {
 		);
 
 		const outcome = await backend(
-			{ preset: "searxng", baseUrl: "http://searx.local:8080/" },
+			{ builtIn: "searxng", baseUrl: "http://searx.local:8080/" },
 			fetch,
 		)({
 			query: "open bots",
@@ -277,7 +277,7 @@ describe("the SearXNG backend", () => {
 
 		expect(
 			await backend(
-				{ preset: "searxng", baseUrl: "http://searx.local:8080" },
+				{ builtIn: "searxng", baseUrl: "http://searx.local:8080" },
 				fetch,
 			)({
 				query: "q",
@@ -296,7 +296,7 @@ describe("the SearXNG backend", () => {
 
 		expect(
 			await backend(
-				{ preset: "searxng", baseUrl: "http://searx.local:8080" },
+				{ builtIn: "searxng", baseUrl: "http://searx.local:8080" },
 				fetch,
 			)({
 				query: "q",
@@ -305,7 +305,7 @@ describe("the SearXNG backend", () => {
 		).toEqual({
 			ok: false,
 			reason:
-				"That address is on a local or private network, which this installation doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.",
+				"That address is on a local or private network, which this server doesn't connect to, so other services on the network stay out of reach. Use a public address, or ask whoever runs Sugabots to allow local network addresses.",
 		});
 	});
 
@@ -316,7 +316,7 @@ describe("the SearXNG backend", () => {
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
 		const result = await backend(
-			{ preset: "searxng", baseUrl: "http://searx.local:8080" },
+			{ builtIn: "searxng", baseUrl: "http://searx.local:8080" },
 			fetch,
 		)({ query: "q", count: 1 });
 
@@ -329,11 +329,11 @@ describe("where a search goes", () => {
 	it("is the provider's address, except Exa without a key, which is the free endpoint", () => {
 		const at = new Date();
 		expect(
-			searchEndpoint({ preset: "exa", baseUrl: "https://api.exa.ai", configurationUpdatedAt: at }),
+			searchEndpoint({ builtIn: "exa", baseUrl: "https://api.exa.ai", configurationUpdatedAt: at }),
 		).toBe("https://mcp.exa.ai/mcp");
 		expect(
 			searchEndpoint({
-				preset: "exa",
+				builtIn: "exa",
 				baseUrl: "https://api.exa.ai",
 				apiKey: "k",
 				configurationUpdatedAt: at,
@@ -341,7 +341,7 @@ describe("where a search goes", () => {
 		).toBe("https://api.exa.ai");
 		expect(
 			searchEndpoint({
-				preset: "brave",
+				builtIn: "brave",
 				baseUrl: "https://api.search.brave.com/res/v1",
 				configurationUpdatedAt: at,
 			}),

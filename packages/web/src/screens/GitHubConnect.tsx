@@ -2,13 +2,13 @@ import { BookOpen, Lock, X } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
-	useConnectionRepositories,
+	useConnectorRepositories,
 	useMakeGitHubApp,
 	usePrefetchReachableRepositories,
 	useReachableRepositories,
-} from "@/lib/github-connections.ts";
+} from "@/lib/github-connectors.ts";
 import { Alert } from "@/ui/alert.tsx";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
 	DialogFormBody,
@@ -58,7 +58,7 @@ export function GitHubConnectStep({
 			<DialogFormHeader title="GitHub" onBack={onBack} backDisabled={make.isPending} />
 			<DialogFormBody>
 				<div className="flex flex-col items-center gap-1.5 pb-1 text-center">
-					<ConnectionMark presetId="github" name="GitHub" />
+					<ConnectorMark markId="github" name="GitHub" />
 					<span className="text-xs text-muted-foreground">
 						The project gets a private GitHub App of its own: you make it on GitHub, then install it
 						on the account it works on.
@@ -91,27 +91,27 @@ export function GitHubConnectStep({
 }
 
 /**
- * A GitHub connection's repositories, on its page: who added each, and, for
- * someone who manages the project's connections, removing one or adding another
- * the connection's app reaches. Nothing until the app is installed.
+ * A GitHub connector's repositories, on its page: who added each, and, for
+ * someone who manages the project's connectors, removing one or adding another
+ * the connector's app reaches. Nothing until the app is installed.
  */
 export function GitHubRepositoriesGroup({
 	projectId,
-	connectionId,
+	connectorId,
 	appSettingsUrl,
 	canManage,
 }: {
 	projectId: string;
-	connectionId: string;
+	connectorId: string;
 	/** Where the app's owner changes it on GitHub. */
 	appSettingsUrl: string;
 	canManage: boolean;
 }) {
-	const { repositories, add, remove } = useConnectionRepositories(projectId, connectionId);
+	const { repositories, add, remove } = useConnectorRepositories(projectId, connectorId);
 	// Listing what the app reaches takes GitHub a while, so it starts before Add repository is chosen.
 	usePrefetchReachableRepositories(
 		projectId,
-		connectionId,
+		connectorId,
 		canManage && !!repositories.data?.account,
 	);
 	const [choosing, setChoosing] = useState(false);
@@ -123,7 +123,7 @@ export function GitHubRepositoriesGroup({
 		<>
 			<SettingsGroup
 				label="Repositories"
-				// On the connection's page, straight under the page's own heading.
+				// On the connector's page, straight under the page's own heading.
 				headingLevel={2}
 				note={
 					<>
@@ -167,7 +167,7 @@ export function GitHubRepositoriesGroup({
 				{choosing && (
 					<AddRepositoryDialog
 						projectId={projectId}
-						connectionId={connectionId}
+						connectorId={connectorId}
 						account={account}
 						accountRepositories={listed.map((one) => one.repository.toLowerCase())}
 						onAdd={(repository) => add.mutateAsync(repository)}
@@ -179,24 +179,24 @@ export function GitHubRepositoriesGroup({
 	);
 }
 
-/** Adding one of the repositories the connection's app reaches that the connection doesn't have yet. */
+/** Adding one of the repositories the connector's app reaches that the connector doesn't have yet. */
 function AddRepositoryDialog({
 	projectId,
-	connectionId,
+	connectorId,
 	account,
 	accountRepositories,
 	onAdd,
 	done,
 }: {
 	projectId: string;
-	connectionId: string;
+	connectorId: string;
 	account: string;
-	/** The connection's repositories, lowercased, which aren't offered again. */
+	/** The connector's repositories, lowercased, which aren't offered again. */
 	accountRepositories: readonly string[];
 	onAdd: (repository: string) => Promise<unknown>;
 	done: () => void;
 }) {
-	const reached = useReachableRepositories(projectId, connectionId);
+	const reached = useReachableRepositories(projectId, connectorId);
 	const [adding, setAdding] = useState<string>();
 	const [error, setError] = useState<unknown>();
 	const addable = (reached.data ?? []).filter(
@@ -257,7 +257,7 @@ function AddRepositoryDialog({
 							!reached.isError && (
 								<p className="m-0 px-1 text-muted-foreground text-xs">
 									{!searching
-										? `The connection has every repository the app reaches on ${account}.`
+										? `The connector has every repository the app reaches on ${account}.`
 										: `No repository matches “${query.trim()}”.`}
 								</p>
 							)

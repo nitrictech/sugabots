@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { Layer } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { noComputers } from "../../computers/testing.ts";
-import { bot, user, workspace, workspaceMember } from "../../database/schema.ts";
+import { bot, membership, person, workspace } from "../../database/schema.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -11,11 +11,11 @@ import {
 } from "../../database/testing.ts";
 import { servedOnPostgresAs } from "../testing.ts";
 import { BotAdministration } from "./bot-administration.ts";
-import { BotRepository } from "./bot-repository.ts";
+import { BotStore } from "./bot-store.ts";
 
 describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => {
-	let bots: Promised<BotRepository.Interface>;
-	let administrationAs: (userId: string) => Promised<BotAdministration.Interface>;
+	let bots: Promised<BotStore.Interface>;
+	let administrationAs: (personId: string) => Promised<BotAdministration.Interface>;
 	/** The administration as the administrator of both workspaces. */
 	let administration: Promised<BotAdministration.Interface>;
 	let workspaceId: string;
@@ -23,7 +23,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 	let creatorId: string;
 
 	beforeAll(async () => {
-		bots = await servedOnPostgres(BotRepository.Service, BotRepository.layer);
+		bots = await servedOnPostgres(BotStore.Service, BotStore.layer);
 		administrationAs = await servedOnPostgresAs(
 			BotAdministration.Service,
 			BotAdministration.layer.pipe(Layer.provide(noComputers)),
@@ -46,21 +46,21 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 				.returning(),
 		);
 		const [space, other] = made;
-		const [person] = await onDatabase((db) =>
+		const [somebody] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
 				.returning(),
 		);
-		if (!space || !other || !person) throw new Error("could not create the fixtures");
+		if (!space || !other || !somebody) throw new Error("could not create the fixtures");
 		workspaceId = space.id;
 		otherWorkspaceId = other.id;
-		creatorId = person.id;
+		creatorId = somebody.id;
 		administration = administrationAs(creatorId);
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values([
-				{ workspaceId, userId: creatorId, role: "admin" },
-				{ workspaceId: otherWorkspaceId, userId: creatorId, role: "admin" },
+			db.insert(membership).values([
+				{ workspaceId, personId: creatorId, role: "admin" },
+				{ workspaceId: otherWorkspaceId, personId: creatorId, role: "admin" },
 			]),
 		);
 	});
@@ -132,7 +132,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the workspace's system bots", () => 
 					handle: "second-compaction",
 					systemBotKey: "compact",
 					color: "purple",
-					face: "square",
+					eyes: "square",
 					model: null,
 				}),
 			),

@@ -1,24 +1,24 @@
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { AutomationRuns } from "@sugabots/core/chats/automations/runs";
+import { ChatServices } from "@sugabots/core/chats/chat-services";
+import { Chats } from "@sugabots/core/chats/chats/chats";
+import { BuiltInTools } from "@sugabots/core/chats/tools/built-in";
+import { ComputerTools } from "@sugabots/core/chats/tools/computer";
+import { ConnectorTools } from "@sugabots/core/chats/tools/connectors";
+import { Turns } from "@sugabots/core/chats/turns/turns";
+import { ChatWorkflows } from "@sugabots/core/chats/workflows";
 import { noComputers } from "@sugabots/core/computers/testing";
-import { AutomationRuns } from "@sugabots/core/conversations/automations/runs";
-import { Chats } from "@sugabots/core/conversations/chats/chats";
-import { Conversations } from "@sugabots/core/conversations/conversations";
-import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
-import { ComputerTools } from "@sugabots/core/conversations/tools/computer";
-import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
-import { Turns } from "@sugabots/core/conversations/turns/turns";
-import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventStore } from "@sugabots/core/database/events/store";
 import {
 	bot,
 	collaboration,
+	membership,
 	message,
+	person,
 	turn,
-	user,
 	workspace,
-	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Notifications } from "@sugabots/core/notifications/notifications";
@@ -33,7 +33,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 /**
  * The whole round trip through the real turn workflows: the host's
- * model calls the collaborate tool, the helper's turn runs in its own
+ * model uses the collaborate tool, the helper's turn runs in its own
  * workflow, and the host's turn should finish as soon as the helper's does,
  * not when the wait expires.
  */
@@ -66,9 +66,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		// memory, with the model above and no tools but collaboration. The automation
 		// scheduler, pruning and seeding are left out: nothing here needs them.
 		const runtime = ManagedRuntime.make(
-			ConversationWorkflows.layer.pipe(
+			ChatWorkflows.layer.pipe(
 				Layer.provideMerge(
-					Conversations.layer.pipe(
+					ChatServices.layer.pipe(
 						Layer.provideMerge(Layer.mergeAll(Turns.signalsLayer, AutomationRuns.layer)),
 					),
 				),
@@ -77,12 +77,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						Layer.succeed(Models.Service, model),
 						Layer.succeed(BuiltInTools.Service, BuiltInTools.none),
 						Layer.succeed(ComputerTools.Service, ComputerTools.none),
-						Layer.succeed(ConnectionTools.Service, ConnectionTools.none),
+						Layer.succeed(ConnectorTools.Service, ConnectorTools.none),
 						unimplemented(Notifications.Service, { handler: () => Effect.void }),
 						noComputers,
 					),
 				),
-				Layer.provideMerge(Layer.mergeAll(EventOutbox.layer, ConversationWorkflows.lanes)),
+				Layer.provideMerge(Layer.mergeAll(EventOutbox.layer, ChatWorkflows.lanes)),
 				Layer.provideMerge(
 					Layer.mergeAll(
 						Layer.sync(EventBus.Service, () =>
@@ -108,15 +108,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					.values({ name: `RT ${suffix}`, slug: `rt-${suffix}` })
 					.returning(),
 			);
-			const [member] = await onDatabase((db) =>
+			const [sam] = await onDatabase((db) =>
 				db
-					.insert(user)
+					.insert(person)
 					.values({ name: "Sam", email: `rt-${suffix}@example.com` })
 					.returning(),
 			);
-			if (!space || !member) throw new Error("fixture");
+			if (!space || !sam) throw new Error("fixture");
 			await onDatabase((db) =>
-				db.insert(workspaceMember).values({ workspaceId: space.id, userId: member.id }),
+				db.insert(membership).values({ workspaceId: space.id, personId: sam.id }),
 			);
 			const bots = await onDatabase((db) =>
 				db
@@ -127,9 +127,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							name: "Host",
 							handle: "host",
 							color: "rose",
-							face: "pill",
+							eyes: "pill",
 							model: "m",
-							createdById: member.id,
+							createdById: sam.id,
 						},
 						{
 							workspaceId: space.id,
@@ -137,41 +137,41 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							handle: "helper",
 							description: "Has pets.",
 							color: "rose",
-							face: "dot",
+							eyes: "dot",
 							model: "m",
-							createdById: member.id,
+							createdById: sam.id,
 						},
 					])
 					.returning({ id: bot.id, name: bot.name }),
 			);
 			const host = bots.find((one) => one.name === "Host");
 			if (!host) throw new Error("fixture");
-			return { member, host };
+			return { sam, host };
 		}
 
-		async function startThread(input: { hostBotId: string; userId: string; content: string }) {
+		async function startChat(input: { hostBotId: string; personId: string; content: string }) {
 			const asPerson = CurrentActor.provide(
-				CurrentActor.AuthenticatedUserId.vouchedFor(input.userId),
+				CurrentActor.AuthenticatedPersonId.vouchedFor(input.personId),
 			);
 			return runtime.runPromise(
 				Effect.gen(function* () {
 					const chats = yield* Chats.Service;
-					const started = yield* chats.startProjectThread({
+					const started = yield* chats.startProjectChat({
 						projectId: yield* defaultProjectOf(input.hostBotId),
 						messageId: crypto.randomUUID(),
 						content: input.content,
 					});
-					return started.conversation;
+					return started.chat;
 				}).pipe(asPerson),
 			);
 		}
 
 		it("finishes the host's turn when the helper answers", async () => {
-			const { member, host } = await aRoom();
+			const { sam, host } = await aRoom();
 			const started = Date.now();
-			const opened = await startThread({
+			const opened = await startChat({
 				hostBotId: host.id,
-				userId: member.id,
+				personId: sam.id,
 				content: "What pets does Helper have?",
 			});
 
@@ -182,20 +182,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					db
 						.select({ status: turn.status })
 						.from(turn)
-						.where(and(eq(turn.conversationId, opened.id), eq(turn.botId, host.id))),
+						.where(and(eq(turn.chatId, opened.id), eq(turn.botId, host.id))),
 				);
 				if (hostTurn?.status === "done") break;
 				await new Promise((resolve) => setTimeout(resolve, 100));
 			}
 			const elapsed = Date.now() - started;
 			const [made] = await onDatabase((db) =>
-				db.select().from(collaboration).where(eq(collaboration.parentConversationId, opened.id)),
+				db.select().from(collaboration).where(eq(collaboration.parentChatId, opened.id)),
 			);
 			const [reply] = await onDatabase((db) =>
 				db
 					.select({ content: message.content })
 					.from(message)
-					.where(and(eq(message.conversationId, opened.id), eq(message.authorBotId, host.id))),
+					.where(and(eq(message.chatId, opened.id), eq(message.authorBotId, host.id))),
 			);
 
 			expect(hostTurn?.status).toBe("done");

@@ -6,7 +6,7 @@ import { Tooltip } from "@/ui/tooltip.tsx";
 import { TypingDots } from "@/ui/typing-dots.tsx";
 
 /**
- * A quiet row for an automation's run among a thread's messages. It lines up
+ * A quiet row for an automation's run among a chat's messages. It lines up
  * with the messages, its mark where their faces are, and the whole of it
  * opens the run.
  */
@@ -20,7 +20,8 @@ export function RunRow({
 	automationName: string;
 	triggerKind: RunTriggerKind;
 	state: WorkState;
-	at?: string;
+	/** When the run started. */
+	at: string;
 	onOpen: () => void;
 }) {
 	const text = automationText(automationName, state);
@@ -46,13 +47,11 @@ export function RunRow({
 			{state === "running" ? (
 				<TypingDots className="shrink-0 text-muted-foreground" />
 			) : (
-				at && (
-					<Tooltip label={formatFullTimestamp(at)} side="top">
-						<time dateTime={at} className="shrink-0 text-subtle-foreground text-xs">
-							{formatClockTime(new Date(at))}
-						</time>
-					</Tooltip>
-				)
+				<Tooltip label={formatFullTimestamp(at)} side="top">
+					<time dateTime={at} className="shrink-0 text-subtle-foreground text-xs">
+						{formatClockTime(new Date(at))}
+					</time>
+				</Tooltip>
 			)}
 		</button>
 	);

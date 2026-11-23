@@ -1,13 +1,13 @@
 import type { Bot } from "@sugabots/contracts";
 import { ActionForbidden, ResourceHidden } from "@sugabots/core/authorization/access";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
+import { ModelProviderStore } from "@sugabots/core/providers/model-providers/model-provider-store";
 import { unimplemented } from "@sugabots/core/testing";
 import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
-import { BotRepository } from "@sugabots/core/workspaces/bots/bot-repository";
+import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import type { UserResolver } from "../../http/app.test-support.ts";
+import type { PersonResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
@@ -17,7 +17,7 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000101";
 const BOT = "0199a3a0-0000-7000-8000-000000000201";
-const MEMBER = "0199a3a0-0000-7000-8000-000000000002";
+const PERSON = "0199a3a0-0000-7000-8000-000000000002";
 const MODEL = "gpt-4o-mini";
 
 const bot: Bot = {
@@ -27,7 +27,7 @@ const bot: Bot = {
 	handle: "triage",
 	description: null,
 	color: "teal",
-	face: "pill",
+	eyes: "pill",
 	shape: "circle",
 	model: MODEL,
 	prompt: "",
@@ -47,7 +47,7 @@ const bot: Bot = {
 			readHistory: true,
 			openSettings: true,
 			deleteFiles: true,
-			manageConnections: true,
+			manageConnectors: true,
 			manageComputer: true,
 			useDesktop: true,
 			manageAutomations: true,
@@ -57,8 +57,8 @@ const bot: Bot = {
 	createdAt: "2026-09-10T00:00:00.000Z",
 };
 
-const resolveUser: UserResolver = async () => ({
-	id: MEMBER,
+const resolvePerson: PersonResolver = async () => ({
+	id: PERSON,
 	name: "Sam",
 	email: "sam@example.com",
 	image: null,
@@ -67,13 +67,13 @@ const resolveUser: UserResolver = async () => ({
 /** The app with `bots` as the only bot methods it has. */
 const app = (bots: Partial<BotAdministration.Interface> = {}) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolveUser), unimplemented(BotAdministration.Service, bots)),
+		Layer.merge(identifiedBy(resolvePerson), unimplemented(BotAdministration.Service, bots)),
 	);
 
 const auth = (body?: unknown): RequestInit => ({
 	method: body === undefined ? "GET" : "POST",
 	headers: {
-		authorization: "Bearer member",
+		authorization: "Bearer sam",
 		...(body === undefined ? {} : { "content-type": "application/json" }),
 	},
 	body: body === undefined ? undefined : JSON.stringify(body),
@@ -98,8 +98,8 @@ describe("bot routes", () => {
 		let created: unknown;
 		const response = await app({
 			create: (input) =>
-				Effect.map(CurrentActor.Service, ({ userId }) => {
-					created = { ...input, userId };
+				Effect.map(CurrentActor.Service, ({ personId }) => {
+					created = { ...input, personId };
 					return bot;
 				}),
 		}).request(`/workspaces/${WORKSPACE}/bots`, auth({ name: "Writer", model: MODEL }));
@@ -108,14 +108,14 @@ describe("bot routes", () => {
 		expect(created).toEqual({
 			workspace: WORKSPACE,
 			bot: { name: "Writer", model: MODEL },
-			userId: MEMBER,
+			personId: PERSON,
 		});
 	});
 
 	it("reports a model the workspace does not offer as a bad request", async () => {
 		const response = await app({
 			create: (input) =>
-				Effect.fail(new ModelProviderRepository.ModelNotEnabled({ model: input.bot.model })),
+				Effect.fail(new ModelProviderStore.ModelNotEnabled({ model: input.bot.model })),
 		}).request(`/workspaces/${WORKSPACE}/bots`, auth({ name: "Writer", model: "disabled" }));
 
 		expect(response.status).toBe(400);
@@ -128,7 +128,7 @@ describe("bot routes", () => {
 	it("reports a name another bot in the workspace has as a conflict", async () => {
 		const response = await app({
 			create: (input) =>
-				Effect.fail(new BotRepository.BotNameTaken({ field: "name", value: input.bot.name })),
+				Effect.fail(new BotStore.BotNameTaken({ field: "name", value: input.bot.name })),
 		}).request(`/workspaces/${WORKSPACE}/bots`, auth({ name: "Triage", model: MODEL }));
 
 		expect(response.status).toBe(409);
@@ -142,8 +142,8 @@ describe("bot routes", () => {
 		const asked: unknown[] = [];
 		const routes = app({
 			setPinned: (input) =>
-				Effect.map(CurrentActor.Service, ({ userId }) => {
-					asked.push({ ...input, userId });
+				Effect.map(CurrentActor.Service, ({ personId }) => {
+					asked.push({ ...input, personId });
 					return { ...bot, pinned: input.pinned };
 				}),
 		});
@@ -156,8 +156,8 @@ describe("bot routes", () => {
 		expect(unpinned.status).toBe(200);
 		expect(await unpinned.json()).toMatchObject({ pinned: false });
 		expect(asked).toEqual([
-			{ botId: BOT, pinned: true, userId: MEMBER },
-			{ botId: BOT, pinned: false, userId: MEMBER },
+			{ botId: BOT, pinned: true, personId: PERSON },
+			{ botId: BOT, pinned: false, personId: PERSON },
 		]);
 	});
 

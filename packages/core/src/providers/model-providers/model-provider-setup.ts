@@ -2,20 +2,20 @@ export * as ModelProviderSetup from "./model-provider-setup.ts";
 
 import type {
 	BotMove,
+	BuiltInProviderId,
 	ModelProvider,
 	ModelProviderUpdate,
 	NewModelProvider,
 	ProviderModel,
 	ProviderModelUpdate,
-	ProviderPresetId,
 	ProviderSignInOutcome,
 	ProviderSignInStarted,
 	WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import {
-	presetSignInService,
+	builtInSignInService,
+	providerBuiltIn,
 	providerLacksCredential,
-	providerPreset,
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
@@ -24,10 +24,10 @@ import { Clock, Context, Data, DateTime, Effect, Layer, Schema } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
 import { Authorization } from "../../authorization/authorization.ts";
 import type { CurrentActor } from "../../authorization/current-actor.ts";
-import { Credentials } from "../../credentials/credentials.ts";
 import { serviceOperations } from "../../database/database.ts";
+import { Secrets } from "../../secrets/secrets.ts";
 import type { UserFacing } from "../../user-message.ts";
-import { BotRepository } from "../../workspaces/bots/bot-repository.ts";
+import { BotStore } from "../../workspaces/bots/bot-store.ts";
 import { Egress } from "../network/egress.ts";
 import { changesAddress, requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import {
@@ -37,7 +37,7 @@ import {
 	withHeldModelsLocked,
 } from "./held-models.ts";
 import { offeredModels, providerIn, providersIn } from "./model-provider-reads.ts";
-import { ModelProviderRepository } from "./model-provider-repository.ts";
+import { ModelProviderStore } from "./model-provider-store.ts";
 import {
 	type DiscoveryFailure,
 	fetchProviderModels,
@@ -78,7 +78,7 @@ export interface Interface {
 		ModelProvider,
 		| AuthorizationDenied
 		| UrlNotAllowed
-		| ModelProviderRepository.ModelProviderNameConflict
+		| ModelProviderStore.ModelProviderNameConflict
 		| ModelProviderNotFound,
 		CurrentActor.Service
 	>;
@@ -147,7 +147,7 @@ export interface Interface {
 		AuthorizationDenied | ModelProviderNotFound | ProviderSignInNotOffered | ModelInUse,
 		CurrentActor.Service
 	>;
-	readonly fetchModels: (
+	readonly discoverModels: (
 		input: InProvider,
 	) => Effect.Effect<
 		{ added: number; updated: number; unchanged: number },
@@ -199,7 +199,7 @@ export interface Interface {
 		| ModelProviderNotFound
 		| ProviderModelsRequireCredential
 		| ProviderModelNotFound
-		| ModelProviderRepository.ModelNotEnabled
+		| ModelProviderStore.ModelNotEnabled
 		| ModelInUse,
 		CurrentActor.Service
 	>;
@@ -211,10 +211,7 @@ export interface Interface {
 		input: InProvider & { moveBots: readonly BotMove[] } & SettingMoves,
 	) => Effect.Effect<
 		number,
-		| AuthorizationDenied
-		| ModelProviderNotFound
-		| ModelProviderRepository.ModelNotEnabled
-		| ModelInUse,
+		AuthorizationDenied | ModelProviderNotFound | ModelProviderStore.ModelNotEnabled | ModelInUse,
 		CurrentActor.Service
 	>;
 	/** Makes `model`, which the workspace must offer, the one its new bots start on. */
@@ -222,7 +219,7 @@ export interface Interface {
 		input: InWorkspace & { model: string },
 	) => Effect.Effect<
 		WorkspaceModelsResponse,
-		AuthorizationDenied | ModelProviderRepository.ModelNotEnabled,
+		AuthorizationDenied | ModelProviderStore.ModelNotEnabled,
 		CurrentActor.Service
 	>;
 }
@@ -255,11 +252,11 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ModelProviderSetup");
 	const authorization = yield* Authorization.Service;
-	const providers = yield* ModelProviderRepository.Service;
-	const bots = yield* BotRepository.Service;
+	const providers = yield* ModelProviderStore.Service;
+	const bots = yield* BotStore.Service;
 	const egress = yield* Egress.Service;
 	/** Seals a sign-in in progress; the same key as the stored credentials'. */
-	const cipher = yield* Credentials.Service;
+	const cipher = yield* Secrets.Service;
 
 	/** The id of the workspace `workspace` names, once the actor may configure its providers. */
 	const managed = (workspace: string) =>
@@ -280,7 +277,7 @@ export const make = Effect.gen(function* () {
 			Effect.filterOrFail(
 				(provider) => !providerLacksCredential(provider),
 				(provider) =>
-					new ProviderModelsRequireCredential({ missing: missingCredential(provider.preset) }),
+					new ProviderModelsRequireCredential({ missing: missingCredential(provider.builtIn) }),
 			),
 		);
 
@@ -321,7 +318,7 @@ export const make = Effect.gen(function* () {
 	/** The provider's sign-in, and a client that reaches its service. */
 	const requireSignIn = (workspaceId: string, providerId: string) =>
 		requireProvider(workspaceId, providerId).pipe(
-			Effect.map((provider) => signInFor(provider.preset)),
+			Effect.map((provider) => signInFor(provider.builtIn)),
 			Effect.filterOrFail(
 				(signIn): signIn is SubscriptionSignIn => signIn !== undefined,
 				() => new ProviderSignInNotOffered(),
@@ -332,7 +329,7 @@ export const make = Effect.gen(function* () {
 			})),
 		);
 
-	const sealSignInAttempt = (attempt: SignInAttempt) => cipher.encrypt(JSON.stringify(attempt));
+	const encryptSignInAttempt = (attempt: SignInAttempt) => cipher.encrypt(JSON.stringify(attempt));
 
 	const openSignInAttempt = (sealed: string, workspaceId: string, providerId: string) =>
 		Effect.gen(function* () {
@@ -412,10 +409,10 @@ export const make = Effect.gen(function* () {
 					yield* requireAllowedUrl(
 						egress,
 						provider.baseUrl ??
-							("preset" in provider ? providerPreset(provider.preset).baseUrl : ""),
+							("builtIn" in provider ? providerBuiltIn(provider.builtIn).baseUrl : ""),
 					);
 					const created = yield* providers.create(workspaceId, {
-						createdById: actor.userId,
+						createdById: actor.personId,
 						provider,
 					});
 					if (created.apiKeyEncrypted !== null) {
@@ -450,10 +447,10 @@ export const make = Effect.gen(function* () {
 						!changes.apiKey
 					) {
 						return yield* new ProviderActivationRequiresCredential({
-							missing: missingCredential(current.preset),
+							missing: missingCredential(current.builtIn),
 						});
 					}
-					const write = providers.update(workspaceId, providerId, changes, actor.userId);
+					const write = providers.update(workspaceId, providerId, changes, actor.personId);
 					// Switching it off, taking its key away and moving it all stop it
 					// answering. A new key or address does only until it is tried, just below.
 					const takesAway = changes.active === false || changes.apiKey === null || moved;
@@ -507,7 +504,7 @@ export const make = Effect.gen(function* () {
 					return {
 						verificationUrl: code.verificationUrl,
 						userCode: code.userCode,
-						attempt: sealSignInAttempt({
+						attempt: encryptSignInAttempt({
 							workspaceId,
 							providerId,
 							deviceCode: code.deviceCode,
@@ -534,7 +531,7 @@ export const make = Effect.gen(function* () {
 					if (!tokens) return { status: "pending" as const };
 					return {
 						status: "signed_in" as const,
-						provider: yield* saveSignIn(workspaceId, providerId, tokens, actor.userId),
+						provider: yield* saveSignIn(workspaceId, providerId, tokens, actor.personId),
 					};
 				}),
 			),
@@ -553,9 +550,9 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		fetchModels: ({ workspace, providerId }) =>
+		discoverModels: ({ workspace, providerId }) =>
 			operation(
-				"fetchModels",
+				"discoverModels",
 				Effect.flatMap(managed(workspace), (workspaceId) =>
 					fetchProviderModels(providers, workspaceId, providerId, egress.providers),
 				),
@@ -653,7 +650,7 @@ export const make = Effect.gen(function* () {
 						workspaceId,
 						{ moves: moveBots, newBotsTo, systemBotsTo },
 						Effect.filterOrFail(
-							providers.update(workspaceId, providerId, { active: false }, actor.userId),
+							providers.update(workspaceId, providerId, { active: false }, actor.personId),
 							(updated) => updated !== undefined,
 							() => new ModelProviderNotFound(),
 						),
@@ -676,7 +673,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, ModelProviderRepository.layer, BotRepository.layer]),
+	Layer.provide([Authorization.layer, ModelProviderStore.layer, BotStore.layer]),
 );
 
 /** A device code in progress, sealed and handed to the page so the server keeps no state for it. */
@@ -707,8 +704,8 @@ export class ModelProviderNotFound
 /** What a provider lacks before it can be used: a key, or a sign-in to a subscription. */
 type MissingCredential = "api-key" | SignInServiceId;
 
-function missingCredential(preset: ProviderPresetId | null): MissingCredential {
-	return presetSignInService(preset) ?? "api-key";
+function missingCredential(builtIn: BuiltInProviderId | null): MissingCredential {
+	return builtInSignInService(builtIn) ?? "api-key";
 }
 
 export class ProviderModelsRequireCredential

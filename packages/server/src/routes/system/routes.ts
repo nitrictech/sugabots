@@ -1,9 +1,9 @@
-import { CurrentUser } from "@sugabots/contracts/http";
+import { CurrentPerson } from "@sugabots/contracts/http";
 import { COMMIT, VERSION } from "@sugabots/core/version";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -16,14 +16,14 @@ export const systemRoutes = HttpApiBuilder.group(ServerApi, "system", (handlers)
 			)
 			.handle("me", () =>
 				Effect.all(
-					{ user: Effect.service(CurrentUser), workspaces: membership.workspaces },
+					{ person: Effect.service(CurrentPerson), workspaces: membership.workspaces },
 					{ concurrency: "unbounded" },
-				).pipe(asSessionUser),
+				).pipe(asSignedInPerson),
 			)
 			.handle("workspaceAccess", ({ params }) =>
 				membership
 					.access({ workspace: params.workspace })
-					.pipe(asSessionUser, asHttpError(refusals)),
+					.pipe(asSignedInPerson, asHttpError(refusals)),
 			);
 	}),
 );

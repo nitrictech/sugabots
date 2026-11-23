@@ -2,10 +2,10 @@ import type { AnsweredApproval, ApprovalRequest } from "@sugabots/contracts";
 import { Link, linkOptions } from "@tanstack/react-router";
 import { ChevronRight, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { useApprovalApp, useAskedIn } from "@/lib/approval-app.ts";
-import { useApprovalInbox } from "@/lib/chats.ts";
-import { useReviewToolCall } from "@/lib/conversations.ts";
-import { PendingApprovalAnswer, RequestConversationLink } from "@/screens/ApprovalPage.tsx";
+import { useApprovalToolSource, useAskedIn } from "@/lib/approval-tool-source.ts";
+import { useReviewToolCall } from "@/lib/chat-query.ts";
+import { useWorkspaceApprovals } from "@/lib/chats.ts";
+import { PendingApprovalAnswer, RequestChatLink } from "@/screens/ApprovalPage.tsx";
 import { FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ListTime, Page } from "@/shell/Page.tsx";
@@ -19,19 +19,19 @@ const ANSWERED_SHOWN = 10;
  * full.
  */
 export function Approvals() {
-	const inbox = useApprovalInbox();
-	const waiting = inbox.data?.waiting ?? [];
-	const answered = inbox.data?.answered ?? [];
+	const approvals = useWorkspaceApprovals();
+	const waiting = approvals.data?.waiting ?? [];
+	const answered = approvals.data?.answered ?? [];
 	const [showAll, setShowAll] = useState(false);
 	const answeredShown = showAll ? answered : answered.slice(0, ANSWERED_SHOWN);
 
 	return (
 		<Page title="Approvals" place={{ kind: "tab" }}>
 			<div className="flex flex-col gap-3 px-6 pt-6 pb-12 max-md:px-4 max-md:pt-1.5">
-				{inbox.isError && (
+				{approvals.isError && (
 					<p className="m-0 px-1 text-muted-foreground">Approvals could not be loaded.</p>
 				)}
-				{inbox.isSuccess && (
+				{approvals.isSuccess && (
 					<>
 						{waiting.length === 0 ? (
 							<NothingWaiting />
@@ -61,7 +61,7 @@ export function Approvals() {
 									<button
 										type="button"
 										onClick={() => setShowAll(true)}
-										// As Open conversation is on a request's page, centred and sized for a thumb on a phone.
+										// As Open chat is on a request's page, centred and sized for a thumb on a phone.
 										className="focus-ring self-start rounded-sm px-1 font-medium text-xs text-link max-md:self-center max-md:py-2 max-md:text-sm"
 									>
 										Show older
@@ -122,13 +122,13 @@ function approvalLink(request: ApprovalRequest) {
 /**
  * A request waiting on the person, as a card: what the bot would do, which
  * bot, in which project and when, the request itself, and Allow and Deny, with a
- * way to the conversation it was asked in.
+ * way to the chat it was asked in.
  */
 function WaitingCard({ request }: { request: ApprovalRequest }) {
 	const { bot, call } = request;
-	const { action } = useApprovalApp(request);
+	const { action } = useApprovalToolSource(request);
 	const { project, askedIn: asked } = useAskedIn(request);
-	const review = useReviewToolCall(request.conversationId);
+	const review = useReviewToolCall(request.chatId);
 	return (
 		<article
 			aria-label={`${bot.name}: ${action}`}
@@ -138,7 +138,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 				{...approvalLink(request)}
 				className="focus-ring -m-1 flex items-start gap-3 rounded-lg p-1 max-md:items-center"
 			>
-				<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={24} />
+				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={24} />
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 					<h3 className="m-0 font-semibold text-sm text-foreground max-md:font-medium max-md:text-base">
 						{action}
@@ -160,10 +160,10 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 			<div className="ml-9 flex flex-wrap items-center gap-3 max-md:ml-0 max-md:flex-col max-md:items-stretch">
 				<PendingApprovalAnswer request={request} actionLabel={action} review={review} />
 				<span className="flex-1 max-md:hidden" />
-				<RequestConversationLink
+				<RequestChatLink
 					request={request}
 					project={project}
-					// A phone reaches the conversation from the request's own page.
+					// A phone reaches the chat from the request's own page.
 					className="focus-ring rounded-sm text-xs text-muted-foreground hover:text-foreground max-md:hidden"
 				/>
 			</div>
@@ -173,14 +173,14 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 
 /** A request already answered: which bot, what it would have done, which way it went, and when. */
 function ResolvedRow({ request }: { request: AnsweredApproval }) {
-	const { action } = useApprovalApp(request);
+	const { action } = useApprovalToolSource(request);
 	const { bot, answer } = request;
 	return (
 		<Link
 			{...approvalLink(request)}
 			className="focus-ring flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition-colors hover:bg-message-hover max-md:min-h-14 max-md:px-1 max-md:text-sm max-md:active:bg-row-selected"
 		>
-			<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={20} />
+			<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={20} />
 			{/* On a phone, what it would have done over which bot, as two lines. */}
 			<span className="min-w-0 flex-1 truncate text-muted-foreground max-md:flex max-md:flex-col max-md:gap-0.5">
 				<span className="text-foreground max-md:order-2 max-md:truncate max-md:text-xs max-md:text-subtle-foreground">

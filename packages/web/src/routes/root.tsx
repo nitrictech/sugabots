@@ -9,7 +9,7 @@ import { EmptyState } from "@/ui/empty-state.tsx";
  * until the next navigation: components read the session with `useSession()`.
  */
 export interface RouterContext {
-	user: Session["user"];
+	person: Session["person"];
 	/** The session's query cache, which loaders prime for the page they lead to. */
 	queries: QueryClient;
 }
@@ -25,19 +25,19 @@ export const rootRoute = createRootRouteWithContext<RouterContext>()({
 });
 
 /**
- * Signed out means the login page. `undefined` cannot reach here: `main.tsx`
+ * Signed out means the sign-in page. `undefined` cannot reach here: `main.tsx`
  * waits for `/me` to answer before it mounts the router at all.
  */
-export function requireUser({
+export function requireSignedIn({
 	context,
 	location,
 }: {
 	context: RouterContext;
 	location: ParsedLocation;
 }): void {
-	if (context.user === null) {
+	if (context.person === null) {
 		throw redirect({
-			to: "/login",
+			to: "/sign-in",
 			search: location.href === "/" ? {} : { returnTo: location.href },
 		});
 	}

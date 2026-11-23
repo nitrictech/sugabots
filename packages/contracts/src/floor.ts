@@ -1,4 +1,4 @@
-import type { ConversationKind } from "./conversations.ts";
+import type { ChatKind } from "./messages.ts";
 
 const nobody: Floor = { kind: "nobody" };
 
@@ -7,9 +7,9 @@ const nobody: Floor = { kind: "nobody" };
  * "Floor"). The server decides it once the message is sent and asks for the
  * turns; the composer decides it for the draft, to say who will answer and to
  * hold Send while a bot that must answer has no model. People post in two kinds
- * of conversation:
+ * of chat:
  *
- * - A project's thread (`project_thread`), the same rule in every project, a
+ * - A project's chat (`project_chat`), the same rule in every project, a
  *   bot's default project included:
  *   1. Mentioning the project's bots: each of them, taking a turn at once.
  *   2. Otherwise, replying to the message of one of the project's bots: that bot.
@@ -18,7 +18,7 @@ const nobody: Floor = { kind: "nobody" };
  *      with no model takes no such turn, which could only fail.
  *   4. Otherwise the lead bot.
  *   Mentions of bots outside the project are ignored, so in a bot's own
- *   threads, where it is the only bot, only it ever answers.
+ *   chats, where it is the only bot, only it ever answers.
  * - An automation's feed (`automation_feed`), in the automation's project:
  *   1. Mentioning only people: nobody.
  *   2. Otherwise the project's lead bot, which runs the automation, whichever
@@ -26,9 +26,9 @@ const nobody: Floor = { kind: "nobody" };
  *      collaborating, not by joining.
  */
 export function decideFloor(message: AddressedMessage): Floor {
-	switch (message.conversationKind) {
-		case "project_thread":
-			return projectThreadFloor(message);
+	switch (message.chatKind) {
+		case "project_chat":
+			return projectChatFloor(message);
 		case "automation_feed": {
 			const { lead } = message;
 			if (lead === null || message.peopleOnly) return nobody;
@@ -39,9 +39,9 @@ export function decideFloor(message: AddressedMessage): Floor {
 	}
 }
 
-/** What the floor is decided from, of a person's message and the conversation it is in. */
+/** What the floor is decided from, of a person's message and the chat it is in. */
 export interface AddressedMessage {
-	conversationKind: ConversationKind;
+	chatKind: ChatKind;
 	/**
 	 * The project's lead bot, and whether it has a model, without which it is not
 	 * offered a turn it may decline. Null outside a project.
@@ -63,7 +63,7 @@ export type Floor =
 	| { kind: "turns"; bots: Array<{ botId: string; reason: FloorTurnReason }> }
 	| { kind: "nobody" };
 
-function projectThreadFloor(message: AddressedMessage): Floor {
+function projectChatFloor(message: AddressedMessage): Floor {
 	if (message.mentionedBotIds.length > 0) {
 		return {
 			kind: "turns",

@@ -1,29 +1,28 @@
 import { useRender } from "@base-ui/react/use-render";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { cn } from "cn";
-import { House, Inbox, ShieldCheck } from "lucide-react";
+import { House, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useAttentionCounts } from "@/lib/chats.ts";
 import { useSession } from "@/lib/session.ts";
-import { InboxNews } from "@/shell/InboxNews.tsx";
 import { PersonAvatar } from "@/ui/avatar.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 
-/** The phone's four places, along the foot of the screen, in their order there. */
-const TABS = ["home", "inbox", "approvals", "you"] as const;
+/** The phone's three places, along the foot of the screen, in their order there. */
+const TABS = ["home", "approvals", "you"] as const;
 
 type MobileTab = (typeof TABS)[number];
 
 /**
- * Home, Inbox, Approvals and You, floating along the foot of a phone's
+ * Home, Approvals and You, floating along the foot of a phone's
  * screen, the one the page is under marked. Out of the way while the
  * keyboard is up.
  */
 export function MobileTabBar() {
 	const tab = useMobileTab();
 	const typing = useTyping();
-	const { unreadForYou, unreadInInbox, waitingApprovals } = useAttentionCounts();
-	const { user } = useSession();
+	const { waitingApprovals } = useAttentionCounts();
+	const { person: signedIn } = useSession();
 	if (typing) return null;
 	return (
 		<nav
@@ -33,11 +32,11 @@ export function MobileTabBar() {
 			// over the page, which scrolls on under it; only the bar itself takes a tap.
 			className="pointer-events-none absolute inset-x-0 bottom-0 z-40 px-4 pb-safe-or-3 view-transition-tabs md:hidden"
 		>
-			<div className="glass pointer-events-auto relative grid grid-cols-4 gap-0.5 rounded-4xl p-1.25">
+			<div className="glass pointer-events-auto relative grid grid-cols-3 gap-0.5 rounded-4xl p-1.25">
 				{/*
 				 * The highlight behind the open tab, one for the bar, so it slides
 				 * from tab to tab rather than one going dark as another lights.
-				 * A quarter of the bar inside its padding and the three gaps;
+				 * A third of the bar inside its padding and the two gaps;
 				 * each step is its own width and a gap.
 				 */}
 				<span
@@ -52,24 +51,13 @@ export function MobileTabBar() {
 					label="Home"
 				/>
 				<TabLink
-					render={<Link from="/$workspace" to="./inbox" />}
-					current={tab === "inbox"}
-					icon={<Inbox />}
-					label="Inbox"
-					count={<InboxNews unreadForYou={unreadForYou} unreadInInbox={unreadInInbox} size="sm" />}
-				/>
-				<TabLink
 					render={<Link from="/$workspace" to="./approvals" />}
 					current={tab === "approvals"}
 					icon={<ShieldCheck />}
 					label="Approvals"
 					count={
 						waitingApprovals > 0 && (
-							<CountBadge
-								count={waitingApprovals}
-								size="sm"
-								label={`${waitingApprovals} waiting on you`}
-							/>
+							<CountBadge count={waitingApprovals} label={`${waitingApprovals} waiting on you`} />
 						)
 					}
 				/>
@@ -77,9 +65,9 @@ export function MobileTabBar() {
 					render={<Link from="/$workspace" to="./you" />}
 					current={tab === "you"}
 					icon={
-						user ? (
+						signedIn ? (
 							<PersonAvatar
-								person={user}
+								person={signedIn}
 								size={24}
 								className={cn(tab === "you" && "ring-2 ring-foreground")}
 							/>
@@ -130,12 +118,11 @@ function TabLink({
 }
 
 /**
- * Which tab the page is under: anything in a project is Home's, a chat opened
- * from Inbox is Inbox's, and settings, reached from You, are You's.
+ * Which tab the page is under: anything in a project is Home's, an approval
+ * is Approvals', and settings, reached from You, are You's.
  */
 function useMobileTab(): MobileTab {
 	const matchRoute = useMatchRoute();
-	if (matchRoute({ to: "/$workspace/inbox", fuzzy: true })) return "inbox";
 	if (matchRoute({ to: "/$workspace/approvals", fuzzy: true })) return "approvals";
 	if (
 		matchRoute({ to: "/$workspace/you", fuzzy: true }) ||

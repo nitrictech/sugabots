@@ -1,7 +1,7 @@
 import { Notifications } from "@sugabots/core/notifications/notifications";
 import { DateTime, Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -10,12 +10,12 @@ export const notificationRoutes = HttpApiBuilder.group(ServerApi, "notifications
 	Effect.gen(function* () {
 		const notifications = yield* Notifications.Service;
 		return handlers
-			.handle("settings", () => notifications.settings.pipe(asSessionUser))
+			.handle("settings", () => notifications.settings.pipe(asSignedInPerson))
 			.handle("updatePreferences", ({ payload }) =>
-				notifications.updatePreferences(payload).pipe(asSessionUser),
+				notifications.updatePreferences(payload).pipe(asSignedInPerson),
 			)
 			.handle("setLevel", ({ params, payload }) =>
-				notifications.setLevel(params, payload.level).pipe(asSessionUser, asHttpError(refusals)),
+				notifications.setLevel(params, payload.level).pipe(asSignedInPerson, asHttpError(refusals)),
 			)
 			.handle("mute", ({ params, payload }) =>
 				notifications
@@ -23,11 +23,11 @@ export const notificationRoutes = HttpApiBuilder.group(ServerApi, "notifications
 						params,
 						payload.until === null ? null : DateTime.toDate(DateTime.makeUnsafe(payload.until)),
 					)
-					.pipe(asSessionUser, asHttpError(refusals)),
+					.pipe(asSignedInPerson, asHttpError(refusals)),
 			)
-			.handle("sendTest", () => notifications.sendTest.pipe(asSessionUser))
+			.handle("sendTest", () => notifications.sendTest.pipe(asSignedInPerson))
 			.handle("reportPresence", ({ payload }) =>
-				notifications.reportPresence(payload).pipe(asSessionUser),
+				notifications.reportPresence(payload).pipe(asSignedInPerson),
 			);
 	}),
 );

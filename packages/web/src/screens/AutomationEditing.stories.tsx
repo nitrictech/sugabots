@@ -108,20 +108,20 @@ const releaseWatch = placed(11, "Release watch", oncall, [
 	scheduled("0 17 * * 5"),
 	{ kind: "webhook", auth: { kind: "bearer" } },
 ]);
-const GITHUB_CONNECTION_ID = "0199b0f2-6a4e-7c1d-9a52-3c5e1f2d4b6a";
+const GITHUB_CONNECTOR_ID = "0199b0f2-6a4e-7c1d-9a52-3c5e1f2d4b6a";
 const pullRequestReviews = placed(10, "Pull request reviews", oncall, {
 	kind: "github",
-	connectionId: GITHUB_CONNECTION_ID,
+	connectorId: GITHUB_CONNECTOR_ID,
 	repository: "acme/web",
 	events: ["pull_request_opened", "pull_request_review"],
 });
 
 /** Each project's GitHub app, installed on `acme`, working on `acme/web` and `acme/infra`. */
 const projectRepositories = [
-	http.get(`${API}/projects/:projectId/connections`, ({ params }) =>
+	http.get(`${API}/projects/:projectId/connectors`, ({ params }) =>
 		HttpResponse.json([
 			{
-				id: GITHUB_CONNECTION_ID,
+				id: GITHUB_CONNECTOR_ID,
 				workspaceId: engineering.workspaceId,
 				projectId: params.projectId,
 				name: "GitHub",
@@ -148,7 +148,7 @@ const projectRepositories = [
 			},
 		]),
 	),
-	http.get(`${API}/projects/:projectId/connections/:connectionId/repositories`, () =>
+	http.get(`${API}/projects/:projectId/connectors/:connectorId/repositories`, () =>
 		HttpResponse.json({
 			account: "acme",
 			repositories: ["acme/web", "acme/infra"].map((repository) => ({
@@ -187,9 +187,9 @@ function automationsAnswer(items: BotsAutomation[]) {
 					.filter((automation) => automation.projectId === params.projectId),
 			),
 		),
-		http.get(`${API}/projects/:projectId/threads`, ({ params }) =>
+		http.get(`${API}/projects/:projectId/chats`, ({ params }) =>
 			HttpResponse.json({
-				threads: [],
+				chats: [],
 				automations: items
 					.filter((item) => item.bot.defaultProjectId === params.projectId)
 					.map(({ automation, bot }) => ({
@@ -200,7 +200,7 @@ function automationsAnswer(items: BotsAutomation[]) {
 							pausedAfterFailures: false,
 						},
 						bot,
-						conversation: {
+						chat: {
 							kind: "automation_feed" as const,
 							id: feedOf({ automation, bot }),
 							workspaceId: storyWorkspace.id,
@@ -215,16 +215,16 @@ function automationsAnswer(items: BotsAutomation[]) {
 					})),
 			}),
 		),
-		http.get(`${API}/conversations/:conversationId`, ({ params }) => {
-			const one = items.find((item) => feedOf(item) === params.conversationId);
-			if (!one) return HttpResponse.json({ message: "No such conversation" }, { status: 404 });
+		http.get(`${API}/chats/:chatId`, ({ params }) => {
+			const one = items.find((item) => feedOf(item) === params.chatId);
+			if (!one) return HttpResponse.json({ message: "No such chat" }, { status: 404 });
 			const details = storyChatDetails(one.bot);
 			return HttpResponse.json({
 				...details,
-				conversation: {
-					...details.conversation,
+				chat: {
+					...details.chat,
 					id: feedOf(one),
-					rootConversationId: feedOf(one),
+					rootChatId: feedOf(one),
 					kind: "automation_feed",
 					title: one.automation.name,
 				},
@@ -237,7 +237,7 @@ function automationsAnswer(items: BotsAutomation[]) {
 				},
 			});
 		}),
-		http.get(`${API}/conversations/:conversationId/messages`, () =>
+		http.get(`${API}/chats/:chatId/messages`, () =>
 			HttpResponse.json({ items: [], nextCursor: null }),
 		),
 	];
@@ -291,7 +291,7 @@ const meta = preview.meta({
 	},
 });
 
-/** An automation with a routine in its panel: on, when it runs, where its result goes, Run now, and ⋯. */
+/** An automation with a routine in its panel: on, when it runs, where its result goes, Start a run, and ⋯. */
 export const WithARoutine = meta.story({
 	render: () => <StoryApp path={pageOf(overnight)} />,
 	play: async ({ canvas }) => {
@@ -302,7 +302,7 @@ export const WithARoutine = meta.story({
 		await expect(panel.getByRole("switch", { name: "Automation on" })).toBeChecked();
 		await expect(await sectionRows(canvas, "Routines")).toHaveLength(2);
 		await expect(panel.getByRole("button", { name: /^Daily at 6:00/ })).toBeInTheDocument();
-		await expect(panel.getByRole("button", { name: "Run now" })).toBeInTheDocument();
+		await expect(panel.getByRole("button", { name: "Start a run" })).toBeInTheDocument();
 		await expect(
 			panel.getByRole("button", { name: "More for Overnight outbound" }),
 		).toBeInTheDocument();
@@ -344,7 +344,7 @@ export const SeveralTriggers = meta.story({
 
 /**
  * Add trigger's first step: the kinds of trigger, Sugabots' own, then the
- * integrations the bot is connected to, found by typing. Routines are added
+ * connectors the bot has, found by typing. Routines are added
  * from their own section, so they are not among them.
  */
 export const AddTrigger = meta.story({
@@ -357,7 +357,7 @@ export const AddTrigger = meta.story({
 		await expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible();
 		await expect(await within(step).findByRole("button", { name: /^GitHub/ })).toBeVisible();
 		await expect(within(step).queryByRole("button", { name: /^Routine/ })).toBeNull();
-		await expect(within(step).getByRole("link", { name: /^Connect another app/ })).toBeVisible();
+		await expect(within(step).getByRole("link", { name: /^Add another connector/ })).toBeVisible();
 		await userEvent.type(within(step).getByRole("searchbox", { name: "Search triggers" }), "hook");
 		await expect(within(step).getByRole("button", { name: /^Webhook/ })).toBeVisible();
 		await expect(within(step).queryByRole("button", { name: /^GitHub/ })).toBeNull();
@@ -413,7 +413,7 @@ export const Monthly = meta.story({
 	},
 });
 
-/** ⋯ beside Run now holds what else can be done: Duplicate, and Delete automation. */
+/** ⋯ beside Start a run holds what else can be done: Duplicate, and Delete automation. */
 export const MoreMenu = meta.story({
 	render: () => <StoryApp path={pageOf(overnight)} />,
 	play: async ({ canvas, userEvent }) => {
@@ -430,13 +430,13 @@ export const MoreMenu = meta.story({
 	},
 });
 
-/** Paused: its switch is off, and Run now still works. */
+/** Paused: its switch is off, and Start a run still works. */
 export const Paused = meta.story({
 	render: () => <StoryApp path={pageOf(churnReport)} />,
 	play: async ({ canvas }) => {
 		const panel = await openPanel(canvas);
 		await expect(await panel.findByRole("switch", { name: "Automation on" })).not.toBeChecked();
-		await expect(panel.getByRole("button", { name: "Run now" })).toBeInTheDocument();
+		await expect(panel.getByRole("button", { name: "Start a run" })).toBeInTheDocument();
 	},
 });
 
@@ -446,7 +446,7 @@ export const Webhook = meta.story({
 	play: async ({ canvas }) => {
 		const dialog = within(await openFirstTrigger(canvas));
 		await expect(
-			await dialog.findByText(new RegExp(`/hooks/triggers/${incidentIntake.automation.id}$`)),
+			await dialog.findByText(new RegExp(`/webhooks/triggers/${incidentIntake.automation.id}$`)),
 		).toBeInTheDocument();
 		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeInTheDocument();
 		await expect(
@@ -537,7 +537,7 @@ export const SlackWebhook = meta.story({
 	},
 });
 
-/** The source menu: Generic, then the senders whose signing is known, each with its logo; picking one closes it. */
+/** The source menu: Generic, then the webhook sources, whose signing is known, each with its logo; picking one closes it. */
 export const SourceMenu = meta.story({
 	render: () => <StoryApp path={pageOf(incidentIntake)} />,
 	play: async ({ canvas, userEvent }) => {
@@ -647,10 +647,10 @@ export const ChoosingDays = meta.story({
 });
 
 /** Somebody who may not manage a bot's automations reads them without the controls to change them. */
-export const AsAMember = meta.story({
+export const AsAnEditor = meta.story({
 	beforeEach({ msw }) {
 		// A bot's automations are its default project's, so what may be done with them is the bot's.
-		const asMember = storyBots.map((bot) => ({
+		const asEditor = storyBots.map((bot) => ({
 			...bot,
 			permissions: {
 				...bot.permissions,
@@ -663,7 +663,7 @@ export const AsAMember = meta.story({
 		}));
 		msw.use(
 			...automationsAnswer(everyAutomation),
-			...appHandlers({ role: "member", bots: asMember }),
+			...appHandlers({ role: "editor", bots: asEditor }),
 		);
 	},
 	render: () => <StoryApp path={pageOf(overnight)} />,
@@ -673,7 +673,7 @@ export const AsAMember = meta.story({
 			await panel.findByRole("heading", { name: "Overnight outbound" }),
 		).toBeInTheDocument();
 		await expect(panel.getByRole("switch", { name: "Automation on" })).toBeDisabled();
-		await expect(panel.queryByRole("button", { name: "Run now" })).toBeNull();
+		await expect(panel.queryByRole("button", { name: "Start a run" })).toBeNull();
 		await expect(panel.queryByRole("button", { name: /^More for / })).toBeNull();
 		await expect(canvas.queryByRole("link", { name: "New automation" })).toBeNull();
 		await expect(panel.getByText("Daily at 6:00")).toBeInTheDocument();

@@ -1,7 +1,7 @@
 import {
 	type Bot,
 	botColors,
-	botFaces,
+	botEyes,
 	botShapes,
 	type ModelProvider,
 	type ProviderModel,
@@ -60,7 +60,7 @@ function model(
 
 function provider(
 	n: number,
-	preset: ModelProvider["preset"],
+	builtIn: ModelProvider["builtIn"],
 	name: string,
 	models: ProviderModel[],
 	over: Partial<ModelProvider> = {},
@@ -68,7 +68,7 @@ function provider(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000002${String(n).padStart(2, "0")}`,
 		workspaceId: WORKSPACE,
-		preset,
+		builtIn,
 		name,
 		baseUrl: "https://api.example.com/v1",
 		apiFormat: "openai",
@@ -86,13 +86,13 @@ function provider(
 }
 
 const anthropic = provider(1, "anthropic", "Anthropic", [
-	model("claude-opus", "Claude Opus", false, ["tools", "vision", "reasoning"]),
-	model("claude-sonnet", "Claude Sonnet", true, ["tools", "vision", "reasoning"]),
+	model("claude-opus", "Claude Opus", false, ["tools", "vision", "thinking"]),
+	model("claude-sonnet", "Claude Sonnet", true, ["tools", "vision", "thinking"]),
 	model("claude-haiku", "Claude Haiku", true, ["tools", "vision"]),
 ]);
 const openai = provider(2, "openai", "OpenAI", [
-	model("gpt-5", "GPT-5", true, ["tools", "vision", "images", "reasoning"]),
-	model("gpt-5-mini", "GPT-5 mini", false, ["tools", "vision", "reasoning"]),
+	model("gpt-5", "GPT-5", true, ["tools", "vision", "images", "thinking"]),
+	model("gpt-5-mini", "GPT-5 mini", false, ["tools", "vision", "thinking"]),
 	model("gpt-5-nano", "GPT-5 nano", false, ["tools"]),
 ]);
 const ollama = provider(
@@ -145,7 +145,7 @@ const chatgptSignedIn: ModelProvider = {
 	active: true,
 	status: "connected",
 	signedIn: true,
-	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "reasoning"])],
+	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "thinking"])],
 };
 const supergrok = provider(6, "supergrok", "SuperGrok", [], {
 	baseUrl: "https://api.x.ai/v1",
@@ -199,7 +199,7 @@ const systemBots: SystemBot[] = (["compact"] as const).map((key) => ({
 	name: "Compaction",
 	description: null,
 	color: "ice",
-	face: "pill",
+	eyes: "pill",
 	shape: "circle",
 	model: "claude-haiku",
 }));
@@ -229,8 +229,8 @@ function Preview({
 			permissions: {
 				createProjects: true,
 				manageProviders: true,
-				manageMembers: true,
-				configureBuiltInBots: true,
+				managePeople: true,
+				chooseSystemModel: true,
 				manageUsage: true,
 			},
 		});
@@ -247,7 +247,7 @@ function Preview({
 					.map((model) => ({
 						providerId: provider.id,
 						providerName: provider.name,
-						providerPreset: provider.preset,
+						providerBuiltIn: provider.builtIn,
 						modelId: model.modelId,
 						displayName: model.displayName,
 						capabilities: model.capabilities.filter(
@@ -323,18 +323,18 @@ export const SortedByState = meta.story({
 		const order = canvas
 			.getAllByRole("link")
 			.map((link) => link.textContent ?? "")
-			.filter((text) => /Connected|Connection failed|Disabled/.test(text))
+			.filter((text) => /Connected|Didn't answer|Disabled/.test(text))
 			.map((text) => text.match(/^(OpenRouter|Anthropic|OpenAI|Ollama|Groq)/)?.[0]);
 		await expect(order).toEqual(["Anthropic", "OpenAI", "Ollama", "Groq", "OpenRouter"]);
 	},
 });
 
-/** A key that failed its test reads Connection failed, not Disabled: it wants a new key, not switching on. */
-export const ConnectionFailed = meta.story({
+/** A key that failed its test reads Didn't answer, not Disabled: it wants a new key, not switching on. */
+export const DidNotAnswer = meta.story({
 	parameters: { providers: [...providers, rejectedGroq] },
 	play: async ({ canvas }) => {
 		const row = await canvas.findByRole("link", { name: /Groq/ });
-		await expect(row).toHaveTextContent("Connection failed");
+		await expect(row).toHaveTextContent("Didn't answer");
 		await expect(row).not.toHaveTextContent("Disabled");
 	},
 });
@@ -380,7 +380,7 @@ const crowdOnGpt5: Bot[] = Array.from({ length: 40 }, (_, index) => ({
 	name: `Helper ${index + 1}`,
 	handle: `helper-${index + 1}`,
 	color: botColors[index % botColors.length] as Bot["color"],
-	face: botFaces[index % botFaces.length] as Bot["face"],
+	face: botEyes[index % botEyes.length] as Bot["eyes"],
 	shape: botShapes[index % botShapes.length] as Bot["shape"],
 	model: "gpt-5",
 }));
@@ -563,7 +563,7 @@ export const SwitchOffProviderInUse = meta.story({
 });
 
 /** A provider that resells hundreds of models: a search, which also finds them by who makes them. */
-export const LargeCatalog = meta.story({
+export const ManyBuiltInProviders = meta.story({
 	render: () => <ProviderSettings providerId={openrouter.id} />,
 	play: async ({ canvas, userEvent }) => {
 		const search = await canvas.findByRole("searchbox", { name: "Search models" });
@@ -602,7 +602,7 @@ export const ChatgptSignIn = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await expect(await canvas.findByText("Not signed in")).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "Sign in with ChatGPT" }));
-		const warning = await screen.findByRole("dialog", { name: "Single-user installs only" });
+		const warning = await screen.findByRole("dialog", { name: "Single-person servers only" });
 		await expect(within(warning).getByRole("link", { name: "OpenAI's terms" })).toHaveAttribute(
 			"href",
 			"https://openai.com/policies/terms-of-use/#registration-and-access",
@@ -636,7 +636,7 @@ export const SupergrokSignIn = meta.story({
 	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Sign in with xAI" }));
-		const warning = await screen.findByRole("dialog", { name: "Single-user installs only" });
+		const warning = await screen.findByRole("dialog", { name: "Single-person servers only" });
 		await expect(within(warning).getByText(/A SuperGrok plan is for one person/)).toBeVisible();
 		await expect(within(warning).getByRole("link", { name: "xAI's terms" })).toHaveAttribute(
 			"href",
@@ -695,7 +695,7 @@ function AddProviderPreview({
 	);
 }
 
-/** Adding a provider: the catalog, minus what is already connected, and a custom one. */
+/** Adding a provider: the built-in providers, minus what is already connected, and a custom one. */
 export const AddProvider = meta.story({
 	render: () => <AddProviderPreview />,
 	play: async () => {
@@ -708,7 +708,7 @@ export const AddProvider = meta.story({
 	},
 });
 
-/** A preset's one step: its key, with where to get one. */
+/** A built-in provider's one step: its key, with where to get one. */
 export const AddProviderKey = meta.story({
 	render: () => <AddProviderPreview />,
 	play: async ({ userEvent }) => {

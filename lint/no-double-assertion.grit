@@ -1,0 +1,5 @@
+language js(typescript)
+
+`$_ as unknown as $_` as $assertion where {
+	register_diagnostic(span=$assertion, message="`as unknown as` turns any value into any type, a proof's included. Parse the value, or give the code a type that fits it.")
+}

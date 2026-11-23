@@ -2,7 +2,7 @@ import {
 	type BotParticipant,
 	MESSAGE_MAX_LENGTH,
 	type MessageReplyTo,
-	type SessionUser,
+	type SignedInPerson,
 } from "@sugabots/contracts";
 import { isApiFailure } from "@sugabots/sdk";
 import { type Dispatch, type SetStateAction, useState } from "react";
@@ -28,8 +28,8 @@ export interface MessageSending {
  * to its latest message as it goes.
  */
 export function useMessageSending({
-	conversationId,
-	user,
+	chatId,
+	signedIn,
 	draft,
 	setDraft,
 	replyingTo,
@@ -38,8 +38,8 @@ export function useMessageSending({
 	recipients,
 	scrollToLatest,
 }: {
-	conversationId: string;
-	user: SessionUser;
+	chatId: string;
+	signedIn: SignedInPerson;
 	draft: string;
 	setDraft: Dispatch<SetStateAction<string>>;
 	replyingTo: MessageReplyTo | undefined;
@@ -48,7 +48,7 @@ export function useMessageSending({
 	recipients: Pick<ChatRecipients, "named" | "answering">;
 	scrollToLatest: () => void;
 }): MessageSending {
-	const send = useSendMessage(conversationId, user);
+	const send = useSendMessage(chatId, signedIn);
 	const [startError, setStartError] = useState<string>();
 
 	async function submit() {

@@ -1,23 +1,22 @@
 import {
 	type Bot,
 	botParticipantOf,
+	type ChatDetails,
 	type ChatMessageItem,
-	type ConversationActivity,
-	type ConversationDetails,
 	type Message,
 	type NotificationSettings,
 	type Project,
-	type ProjectThread,
-	type SessionUser,
+	type ProjectChat,
+	type SignedInPerson,
 	type SystemBot,
 	type WorkspacePermissions,
 	type WorkspaceRole,
 } from "@sugabots/contracts";
 import {
-	connectionWithTools,
-	listedConnection,
-	listedThread,
-	type TestConnection,
+	connectorWithTools,
+	listedChat,
+	listedConnector,
+	type TestConnector,
 	testPerson,
 } from "@sugabots/contracts/testing";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -41,12 +40,12 @@ import { projectsWithBots, storyBots } from "@/shell/story-fixtures.ts";
 const API = import.meta.env.VITE_API_URL as string;
 const api = (path: string) => `${API}${path}`;
 
-export const storyUser: SessionUser = {
+export const storyPerson: SignedInPerson = {
 	id: "0199a3a0-0000-7000-8000-000000000009",
 	name: "Rowan Ellis",
 	email: "rowan@example.com",
 	image: null,
-} as SessionUser;
+} as SignedInPerson;
 
 const firstProject = projectsWithBots[0]?.project as Project;
 
@@ -55,7 +54,7 @@ export const storyWorkspace = {
 	name: "Nitric",
 	slug: "nitric",
 	timeZone: "UTC",
-	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+	setUpAt: "2026-09-01T00:00:00.000Z",
 };
 
 /** Every project. */
@@ -64,40 +63,39 @@ export const storyProjects: Project[] = projectsWithBots.map(({ project }) => pr
 /** The bots added to each project, by the project's id. */
 const botsInProject = new Map(projectsWithBots.map(({ project, bots }) => [project.id, bots]));
 
-/** One thread per bot, by the bot's id. */
-export function storyThreadFor(bot: Bot): ProjectThread {
+/** One chat per bot, by the bot's id. */
+export function storyChatFor(bot: Bot): ProjectChat {
 	const suffix = bot.id.slice(-4);
 	return {
-		kind: "project_thread",
+		kind: "project_chat",
 		id: `0199a3a0-0000-7000-8000-00000000c${suffix.slice(1)}`,
 		workspaceId: bot.workspaceId,
 		projectId: bot.defaultProjectId,
 		botId: bot.id,
 		title: `Working with ${bot.name}`,
-		archivedAt: null,
-		doneAt: null,
+		resolvedAt: null,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
 	};
 }
 
-/** Another thread with `bot`, apart from its first. */
-export function storyConversationFor(bot: Bot): ProjectThread {
+/** Another chat with `bot`, apart from its first. */
+export function storySecondChatFor(bot: Bot): ProjectChat {
 	const suffix = bot.id.slice(-4);
 	return {
-		...storyThreadFor(bot),
+		...storyChatFor(bot),
 		id: `0199a3a0-0000-7000-8000-00000000d${suffix.slice(1)}`,
-		title: `Conversation with ${bot.name}`,
+		title: `Chat with ${bot.name}`,
 	};
 }
 
 export const storyModel = {
 	providerId: "0199a3a0-0000-7000-8000-000000000201",
 	providerName: "Anthropic",
-	providerPreset: "anthropic",
+	providerBuiltIn: "anthropic",
 	modelId: "claude-sonnet-4-20250514",
 	displayName: "Claude Sonnet",
-	capabilities: ["tools", "vision", "reasoning"],
+	capabilities: ["tools", "vision", "thinking"],
 };
 
 const systemBots: SystemBot[] = (["compact"] as const).map((key) => ({
@@ -105,7 +103,7 @@ const systemBots: SystemBot[] = (["compact"] as const).map((key) => ({
 	name: "Compaction",
 	description: null,
 	color: "ice",
-	face: "pill",
+	eyes: "pill",
 	shape: "circle",
 	model: storyModel.modelId,
 }));
@@ -115,11 +113,11 @@ const NO_PERMISSIONS: WorkspacePermissions = {
 	createBots: false,
 	updateWorkspace: false,
 	manageProviders: false,
-	manageMembers: false,
-	configureBuiltInBots: false,
+	managePeople: false,
+	chooseSystemModel: false,
 	manageUsage: false,
 	manageAdmins: false,
-	transferOwnership: false,
+	handOverOwnership: false,
 	deleteWorkspace: false,
 };
 
@@ -130,11 +128,11 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 		createBots: true,
 		updateWorkspace: true,
 		manageProviders: true,
-		manageMembers: true,
-		configureBuiltInBots: true,
+		managePeople: true,
+		chooseSystemModel: true,
 		manageUsage: true,
 		manageAdmins: true,
-		transferOwnership: true,
+		handOverOwnership: true,
 		deleteWorkspace: true,
 	},
 	admin: {
@@ -142,34 +140,34 @@ const PERMISSIONS_BY_ROLE: Record<WorkspaceRole, WorkspacePermissions> = {
 		createBots: true,
 		updateWorkspace: true,
 		manageProviders: true,
-		manageMembers: true,
-		configureBuiltInBots: true,
+		managePeople: true,
+		chooseSystemModel: true,
 		manageUsage: true,
 		manageAdmins: false,
-		transferOwnership: false,
+		handOverOwnership: false,
 		deleteWorkspace: false,
 	},
-	member: NO_PERMISSIONS,
+	editor: NO_PERMISSIONS,
 	viewer: NO_PERMISSIONS,
 };
 
-/** What a bot's first thread holds: its messages, and who is in it. */
-export function storyChatDetails(bot: Bot, messages: Message[] = []): ConversationDetails {
-	const chat = storyThreadFor(bot);
+/** What a bot's first chat holds: its messages, and who is in it. */
+export function storyChatDetails(bot: Bot, messages: Message[] = []): ChatDetails {
+	const chat = storyChatFor(bot);
 	const participant = botParticipantOf(bot);
-	const person = testPerson({ id: storyUser.id, name: storyUser.name });
+	const person = testPerson({ id: storyPerson.id, name: storyPerson.name });
 	return {
-		conversation: {
+		chat: {
 			id: chat.id,
 			workspaceId: bot.workspaceId,
 			projectId: chat.projectId,
 			botId: bot.id,
-			rootConversationId: chat.id,
-			kind: "project_thread",
+			rootChatId: chat.id,
+			kind: "project_chat",
 			title: chat.title,
 			status: "done",
-			parentConversationId: null,
-			doneAt: null,
+			parentChatId: null,
+			resolvedAt: null,
 			createdAt: chat.createdAt,
 			updatedAt: chat.updatedAt,
 		},
@@ -186,32 +184,31 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): Conversati
 	};
 }
 
-/** A project's one thread in the stories, Planning, by the project's id. */
-export function storyProjectThreadFor(project: Project): ProjectThread {
+/** A project's one chat in the stories, Planning, by the project's id. */
+export function storyProjectChatFor(project: Project): ProjectChat {
 	return {
-		kind: "project_thread",
+		kind: "project_chat",
 		id: `0199a3a0-0000-7000-8000-00000000c9${project.id.slice(-2)}`,
 		workspaceId: project.workspaceId,
 		projectId: project.id,
 		botId: null,
 		title: "Planning",
-		archivedAt: null,
-		doneAt: null,
+		resolvedAt: null,
 		createdAt: "2026-09-18T06:00:00.000Z",
 		updatedAt: "2026-09-18T06:10:00.000Z",
 	};
 }
 
-/** What a project's thread holds: its messages, and the project's people and bots to mention. */
-export function storyProjectThreadDetails(
+/** What a project's chat holds: its messages, and the project's people and bots to mention. */
+export function storyProjectChatDetails(
 	project: Project,
 	bots: readonly Bot[],
 	messages: Message[] = [],
-): ConversationDetails {
-	const chat = storyProjectThreadFor(project);
-	const person = testPerson({ id: storyUser.id, name: storyUser.name });
+): ChatDetails {
+	const chat = storyProjectChatFor(project);
+	const person = testPerson({ id: storyPerson.id, name: storyPerson.name });
 	return {
-		conversation: {
+		chat: {
 			id: chat.id,
 			workspaceId: chat.workspaceId,
 			projectId: chat.projectId,
@@ -219,11 +216,11 @@ export function storyProjectThreadDetails(
 			title: chat.title,
 			createdAt: chat.createdAt,
 			updatedAt: chat.updatedAt,
-			rootConversationId: chat.id,
-			kind: "project_thread",
+			rootChatId: chat.id,
+			kind: "project_chat",
 			status: "done",
-			parentConversationId: null,
-			doneAt: null,
+			parentChatId: null,
+			resolvedAt: null,
 		},
 		capabilities: { approveToolCalls: true },
 		automationRun: null,
@@ -239,10 +236,7 @@ export function storyProjectThreadDetails(
 	};
 }
 
-/** What a chat's sidebar shows: nothing measured yet. */
-export const storyChatActivity: ConversationActivity = { context: null };
-
-/** A stream that stays open and says nothing, as a quiet conversation's does. */
+/** A stream that stays open and says nothing, as a quiet chat's does. */
 function quietStream() {
 	return new HttpResponse(new ReadableStream({ start() {} }), {
 		headers: { "content-type": "text/event-stream" },
@@ -253,12 +247,12 @@ interface StoryAppData {
 	role?: WorkspaceRole;
 	projects?: Project[];
 	bots?: Bot[];
-	/** Messages in each bot's first thread, by the bot's id. */
+	/** Messages in each bot's first chat, by the bot's id. */
 	messages?: Record<string, Message[]>;
-	/** Messages in each project's thread, by the project's id. */
-	projectThreadMessages?: Record<string, Message[]>;
+	/** Messages in each project's chat, by the project's id. */
+	projectChatMessages?: Record<string, Message[]>;
 	models?: (typeof storyModel)[];
-	/** The viewer's referral link, where the installation signs people up by referral. */
+	/** The viewer's referral link, where the server signs people up by referral. */
 	referralLink?: string;
 }
 
@@ -283,19 +277,18 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 	const projects = data.projects ?? storyProjects;
 	const bots = data.bots ?? storyBots;
 	const messages = data.messages ?? {};
-	const botForConversation = (conversationId: string) =>
-		bots.find((bot) => storyThreadFor(bot).id === conversationId);
-	const projectForChat = (conversationId: string) =>
-		projects.find((project) => storyProjectThreadFor(project).id === conversationId);
+	const botForChat = (chatId: string) => bots.find((bot) => storyChatFor(bot).id === chatId);
+	const projectForChat = (chatId: string) =>
+		projects.find((project) => storyProjectChatFor(project).id === chatId);
 
 	return [
 		http.get(api("/workspaces"), () => HttpResponse.json([storyWorkspace])),
-		http.get(api("/workspaces/:workspace/members"), () =>
+		http.get(api("/workspaces/:workspace/memberships"), () =>
 			HttpResponse.json([
 				{
 					id: "0199a3a0-0000-7000-8000-0000000000d1",
 					role: data.role ?? "owner",
-					user: storyUser,
+					person: storyPerson,
 					joinedAt: "2026-09-01T00:00:00.000Z",
 				},
 			]),
@@ -325,44 +318,35 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 		http.get(api("/workspaces/:workspace/search-provider"), () => HttpResponse.json(null)),
 		http.get(api("/workspaces/:workspace/events"), quietStream),
 		http.get(api("/me/events"), quietStream),
-		http.get(api("/workspaces/:workspace/chats/inbox"), () => HttpResponse.json({ items: [] })),
 		http.get(api("/workspaces/:workspace/chats/approvals"), () =>
 			HttpResponse.json({ waiting: [], answered: [] }),
 		),
-		http.get(api("/workspaces/:workspace/chats/project-markers"), () =>
+		http.get(api("/workspaces/:workspace/chats/attention-marks"), () =>
 			HttpResponse.json({ projects: {} }),
 		),
 		http.get(api("/workspaces/:workspace/chats/attention"), () =>
 			HttpResponse.json({
-				unreadInInbox: 0,
 				waitingApprovals: 0,
 				unreadForYou: 0,
 			}),
 		),
-		http.post(
-			api("/conversations/:conversationId/read"),
-			() => new HttpResponse(null, { status: 204 }),
-		),
-		http.post(api("/items/:conversationId/read"), () => new HttpResponse(null, { status: 204 })),
-		http.get(api("/projects/:projectId/threads"), ({ params }) => {
+		http.post(api("/chats/:chatId/read"), () => new HttpResponse(null, { status: 204 })),
+		http.post(api("/nested-chats/:chatId/read"), () => new HttpResponse(null, { status: 204 })),
+		http.get(api("/projects/:projectId/chats"), ({ params }) => {
 			const projectId = String(params.projectId);
 			const project = projects.find((one) => one.id === projectId);
 			const bot = bots.find((one) => one.defaultProjectId === projectId);
-			const thread = project
-				? storyProjectThreadFor(project)
-				: bot
-					? storyThreadFor(bot)
-					: undefined;
-			if (!thread) return new HttpResponse(null, { status: 404 });
-			return HttpResponse.json({ threads: [listedThread(thread)], automations: [] });
+			const chat = project ? storyProjectChatFor(project) : bot ? storyChatFor(bot) : undefined;
+			if (!chat) return new HttpResponse(null, { status: 404 });
+			return HttpResponse.json({ chats: [listedChat(chat)], automations: [] });
 		}),
-		http.get(api("/conversations/:conversationId/messages"), ({ params }) => {
-			const bot = botForConversation(String(params.conversationId));
-			const project = projectForChat(String(params.conversationId));
+		http.get(api("/chats/:chatId/messages"), ({ params }) => {
+			const bot = botForChat(String(params.chatId));
+			const project = projectForChat(String(params.chatId));
 			const said = bot
 				? messages[bot.id]
 				: project
-					? data.projectThreadMessages?.[project.id]
+					? data.projectChatMessages?.[project.id]
 					: undefined;
 			return HttpResponse.json({
 				items: (said ?? [])
@@ -371,26 +355,24 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				nextCursor: null,
 			});
 		}),
-		http.get(api("/conversations/:conversationId/history"), () =>
+		http.get(api("/chats/:chatId/history"), () =>
 			HttpResponse.json({ items: [], nextCursor: null }),
 		),
-		http.get(api("/conversations/:conversationId/events"), quietStream),
-		http.post(
-			api("/conversations/:conversationId/typing"),
-			() => new HttpResponse(null, { status: 204 }),
-		),
-		http.get(api("/conversations/:conversationId/activity"), ({ params }) => {
-			const bot = botForConversation(String(params.conversationId));
-			return bot ? HttpResponse.json(storyChatActivity) : new HttpResponse(null, { status: 404 });
+		http.get(api("/chats/:chatId/events"), quietStream),
+		http.post(api("/chats/:chatId/typing"), () => new HttpResponse(null, { status: 204 })),
+		// Nothing in a story's chats has been measured yet.
+		http.get(api("/chats/:chatId/context"), ({ params }) => {
+			const bot = botForChat(String(params.chatId));
+			return bot ? HttpResponse.json(null) : new HttpResponse(null, { status: 404 });
 		}),
-		http.get(api("/conversations/:conversationId"), ({ params }) => {
-			const project = projectForChat(String(params.conversationId));
+		http.get(api("/chats/:chatId"), ({ params }) => {
+			const project = projectForChat(String(params.chatId));
 			if (project) {
 				return HttpResponse.json(
-					storyProjectThreadDetails(project, bots, data.projectThreadMessages?.[project.id]),
+					storyProjectChatDetails(project, bots, data.projectChatMessages?.[project.id]),
 				);
 			}
-			const bot = botForConversation(String(params.conversationId));
+			const bot = botForChat(String(params.chatId));
 			return bot
 				? HttpResponse.json(storyChatDetails(bot, messages[bot.id]))
 				: new HttpResponse(null, { status: 404 });
@@ -400,21 +382,21 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			const inProject = botsInProject.get(projectId) ?? [];
 			return HttpResponse.json(bots.filter((bot) => inProject.some((one) => one.id === bot.id)));
 		}),
-		http.get(api("/projects/:projectId/connections"), () => HttpResponse.json([])),
+		http.get(api("/projects/:projectId/connectors"), () => HttpResponse.json([])),
 		// No computers in the example workspace.
 		http.get(api("/projects/:projectId/computer"), () =>
 			HttpResponse.json({ computer: { kind: "none" }, providerEnabled: false }),
 		),
 		// The viewer alone reaches each project, as its members list answers.
 		http.get(api("/projects/:projectId/people"), () =>
-			HttpResponse.json([testPerson({ id: storyUser.id, name: storyUser.name })]),
+			HttpResponse.json([testPerson({ id: storyPerson.id, name: storyPerson.name })]),
 		),
 		http.get(api("/projects/:projectId/members"), () =>
 			HttpResponse.json([
 				{
-					userId: storyUser.id,
-					name: storyUser.name,
-					email: storyUser.email,
+					personId: storyPerson.id,
+					name: storyPerson.name,
+					email: storyPerson.email,
 					image: null,
 					removable: false,
 				},
@@ -435,29 +417,29 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 }
 
 /**
- * Answers a bot's connection reads from `connections` in full: the list with
- * counts, and one connection with its tools. Put them before `appHandlers`,
- * whose own answer is no connections.
+ * Answers a bot's connector reads from `connectors` in full: the list with
+ * counts, and one connector with its tools. Put them before `appHandlers`,
+ * whose own answer is no connectors.
  */
-export function connectionHandlers(connections: readonly TestConnection[]): RequestHandler[] {
+export function connectorHandlers(connectors: readonly TestConnector[]): RequestHandler[] {
 	return [
-		http.get(api("/projects/:projectId/connections"), ({ params }) =>
+		http.get(api("/projects/:projectId/connectors"), ({ params }) =>
 			HttpResponse.json(
-				connections.filter((one) => one.projectId === params.projectId).map(listedConnection),
+				connectors.filter((one) => one.projectId === params.projectId).map(listedConnector),
 			),
 		),
-		http.get(api("/projects/:projectId/connections/:connectionId"), ({ params }) => {
-			const found = connections.find(
-				(one) => one.projectId === params.projectId && one.id === params.connectionId,
+		http.get(api("/projects/:projectId/connectors/:connectorId"), ({ params }) => {
+			const found = connectors.find(
+				(one) => one.projectId === params.projectId && one.id === params.connectorId,
 			);
 			return found
-				? HttpResponse.json(connectionWithTools(found))
+				? HttpResponse.json(connectorWithTools(found))
 				: new HttpResponse(null, { status: 404 });
 		}),
 	];
 }
 
-/** The app at `path`, signed in as `storyUser`, with a cache of its own. */
+/** The app at `path`, signed in as `storyPerson`, with a cache of its own. */
 export function StoryApp({ path }: { path: string }) {
 	const [queryClient] = useState(() => createQueryClient());
 	const [router] = useState(() =>
@@ -467,7 +449,7 @@ export function StoryApp({ path }: { path: string }) {
 		}),
 	);
 	useEffect(() => () => queryClient.clear(), [queryClient]);
-	const session = { user: storyUser, error: undefined, refresh: async () => {} };
+	const session = { person: storyPerson, error: undefined, refresh: async () => {} };
 	return (
 		<QueryClientProvider client={queryClient}>
 			<div className="h-screen">
@@ -477,7 +459,7 @@ export function StoryApp({ path }: { path: string }) {
 	);
 }
 
-/** Where a bot's first thread is. */
+/** Where a bot's first chat is. */
 export function chatPath(bot: Bot): string {
-	return `/${storyWorkspace.slug}/bots/${bot.handle}/threads/${storyThreadFor(bot).id}`;
+	return `/${storyWorkspace.slug}/bots/${bot.handle}/chats/${storyChatFor(bot).id}`;
 }

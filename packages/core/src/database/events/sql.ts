@@ -6,15 +6,14 @@ export const event = pgTable(
 	"event",
 	{
 		seq: bigserial("seq", { mode: "number" }).primaryKey(),
-		// The column and its index keep the name the table was created with.
-		stream: text("channel").notNull(),
+		stream: text("stream").notNull(),
 		type: text("type").notNull(),
 		payload: jsonb("payload").$type<StreamEvent>().notNull(),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
 		// Every read is "this stream, after this seq", in that order.
-		index("event_channel_seq_idx").on(table.stream, table.seq),
+		index("event_stream_seq_idx").on(table.stream, table.seq),
 		// The nightly prune, which is the only query that ignores the stream.
 		index("event_created_at_idx").on(table.createdAt),
 	],

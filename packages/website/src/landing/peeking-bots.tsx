@@ -1,5 +1,5 @@
 import {
-	type BotLook,
+	type AvatarParts,
 	defaultLiveliness,
 	LivelinessContext,
 	LivelyBotFace,
@@ -12,7 +12,7 @@ import { useRef } from "react";
 import { Reveal, riseIn } from "@/components/reveal";
 
 interface PeekingBot {
-	look: BotLook;
+	look: AvatarParts;
 	/** Its size, and how far below the edge it sits, as Tailwind classes: never past its eyes. */
 	place: string;
 }
@@ -23,31 +23,31 @@ interface PeekingBot {
  */
 const peekingBots: readonly PeekingBot[] = [
 	{
-		look: { color: "rose", face: "dot", shape: "flower" },
+		look: { color: "rose", eyes: "dot", shape: "flower" },
 		place: "hidden xl:block xl:size-24 xl:translate-y-1/4",
 	},
 	{
-		look: { color: "amber", face: "wink", shape: "bowl" },
+		look: { color: "amber", eyes: "wink", shape: "bowl" },
 		place: "size-11 translate-y-1/4 sm:size-22 lg:size-32 lg:translate-y-3/10",
 	},
 	{
-		look: { color: "sky", face: "arc", shape: "pebble" },
+		look: { color: "sky", eyes: "arc", shape: "pebble" },
 		place: "size-16 translate-y-3/10 sm:size-28 lg:size-40",
 	},
 	{
-		look: { color: "purple", face: "pill", shape: "hexagon" },
+		look: { color: "purple", eyes: "pill", shape: "hexagon" },
 		place: "size-24 translate-y-1/4 sm:size-44 lg:size-64",
 	},
 	{
-		look: { color: "green", face: "dot", shape: "leaf" },
+		look: { color: "green", eyes: "dot", shape: "leaf" },
 		place: "size-18 translate-y-2/9 sm:size-26 lg:size-36",
 	},
 	{
-		look: { color: "orange", face: "square", shape: "ghost" },
+		look: { color: "orange", eyes: "square", shape: "ghost" },
 		place: "size-13 translate-y-2/7 sm:size-20 lg:size-28",
 	},
 	{
-		look: { color: "pink", face: "arc", shape: "star" },
+		look: { color: "pink", eyes: "arc", shape: "star" },
 		place: "hidden xl:block xl:size-20 xl:translate-y-1/4",
 	},
 ];
@@ -78,7 +78,7 @@ function PeekingBotFace({ look, place }: PeekingBot) {
 		<motion.div
 			variants={riseIn}
 			className={cn("pointer-events-none relative shrink-0", place)}
-			onPointerEnter={() => face.current?.play("hop")}
+			onPointerEnter={() => face.current?.hop()}
 		>
 			<LivelyBotFace {...look} watchPointer ref={face} className="size-full" />
 			{/*

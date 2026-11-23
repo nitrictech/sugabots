@@ -1,7 +1,7 @@
 export * as ModelRequests from "./model-requests.ts";
 
 import type { RequestUsage, Usd } from "@sugabots/accounting";
-import type { ProviderPresetId } from "@sugabots/contracts";
+import type { BuiltInProviderId } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { query, serviceOperations, writtenRow } from "../database/database.ts";
@@ -31,14 +31,13 @@ export const make = Effect.gen(function* () {
 						.insert(modelRequest)
 						.values({
 							workspaceId: request.workspaceId,
-							purpose: request.activity.purpose,
-							botId: "botId" in request.activity ? request.activity.botId : null,
-							conversationId:
-								"conversationId" in request.activity ? request.activity.conversationId : null,
-							turnId: "turnId" in request.activity ? request.activity.turnId : null,
+							purpose: request.purpose.name,
+							botId: "botId" in request.purpose ? request.purpose.botId : null,
+							chatId: "chatId" in request.purpose ? request.purpose.chatId : null,
+							turnId: "turnId" in request.purpose ? request.purpose.turnId : null,
 							step: request.step,
 							providerId: request.providerId,
-							preset: request.preset,
+							builtIn: request.builtIn,
 							model: request.model,
 							outcome: "started",
 							startedAt: request.startedAt,
@@ -73,31 +72,27 @@ export const make = Effect.gen(function* () {
 });
 
 /**
- * What a model request was made for, which is whose spend it is. System work
- * names the conversation it served and no bot: it is never charged to a bot
- * that did not make it.
+ * What a model request was made for, which is whose usage it counts as.
+ * Background work names the chat it served and no bot: it is never charged
+ * to a bot that did not make it.
  */
-export type Activity =
+export type RequestPurpose =
 	| {
-			readonly purpose: "bot-turn";
+			readonly name: "bot-turn";
 			readonly botId: string;
-			readonly conversationId: string;
+			readonly chatId: string;
 			readonly turnId: string;
 	  }
-	| { readonly purpose: "facilitation"; readonly conversationId: string }
 	| {
-			readonly purpose: "compaction";
-			readonly conversationId: string;
-			/** The system bot's own turn, in a conversation of its own. */
+			readonly name: "compaction";
+			readonly chatId: string;
+			/** The system bot's own turn, in a chat of its own. */
 			readonly turnId: string;
 	  }
-	/**
-	 * Trying a model out from settings: a trial before giving it to a system
-	 * bot, or checking that a provider's enabled model answers at all.
-	 */
-	| { readonly purpose: "trial" | "provider-check" };
+	/** Test questions put to a model before system bots run on it. */
+	| { readonly name: "model-test" };
 
-export type Purpose = Activity["purpose"];
+export type PurposeName = RequestPurpose["name"];
 
 /**
  * Where a request got to. `started` until it ends; a request still `started`
@@ -118,11 +113,11 @@ export interface Cost {
 
 export interface Started {
 	readonly workspaceId: string;
-	readonly activity: Activity;
+	readonly purpose: RequestPurpose;
 	/** Which of its stream's requests this is, from zero. */
 	readonly step: number;
 	readonly providerId: string;
-	readonly preset: ProviderPresetId | null;
+	readonly builtIn: BuiltInProviderId | null;
 	/** The model id sent to the provider. */
 	readonly model: string;
 	readonly startedAt: Date;

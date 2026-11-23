@@ -1,13 +1,13 @@
-import type { ConversationDetails, ToolCallPart } from "@sugabots/contracts";
+import type { ChatDetails, ToolCallPart } from "@sugabots/contracts";
 
-/** What a person may decide in a conversation, as its details say. */
-export type ApprovalCapabilities = NonNullable<ConversationDetails["capabilities"]>;
+/** What a person may decide in a chat, as its details say. */
+export type ApprovalCapabilities = NonNullable<ChatDetails["capabilities"]>;
 
 /**
  * Whether the person may answer `call`'s approval, which the bot `botId`
- * raised: the conversation's approvals, or, for a request to change the
+ * raised: the chat's approvals, or, for a request to change the
  * computer that bot works on, whether they manage that computer, which is its
- * project's: the conversation's project, or in a collaboration the bot's
+ * project's: the chat's project, or in a collaboration the bot's
  * default project.
  */
 export function mayAnswer(
@@ -15,14 +15,14 @@ export function mayAnswer(
 	botId: string,
 	capabilities: ApprovalCapabilities | undefined,
 ) {
-	return call.approval?.deciders === "computer-managers"
+	return call.approval?.approvers === "computer-managers"
 		? (capabilities?.approveComputerRequestsOf?.includes(botId) ?? false)
 		: (capabilities?.approveToolCalls ?? false);
 }
 
 /** Who a person who may not answer `call` is waiting for. */
-export function awaitedDeciders(call: ToolCallPart) {
-	return call.approval?.deciders === "computer-managers"
+export function awaitedApprovers(call: ToolCallPart) {
+	return call.approval?.approvers === "computer-managers"
 		? "Waiting for someone who manages this computer to answer this."
 		: "Waiting for someone with permission to answer this.";
 }

@@ -36,7 +36,7 @@ const madeLead = (db: Executor, { workspaceId, slug, createdById }: ProjectSeed)
 				name: `Lead of ${slug}`,
 				handle: `lead-of-${slug}`,
 				color: "sky",
-				face: "pill",
+				eyes: "pill",
 				createdById,
 			})
 			.returning({ id: bot.id });

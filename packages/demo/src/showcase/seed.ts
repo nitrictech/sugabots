@@ -1,44 +1,44 @@
 import { NodeRuntime } from "@effect/platform-node";
 import type {
 	BotColor,
-	BotFace,
+	BotEyes,
 	BotShape,
+	BuiltInProviderId,
 	NewAutomation,
 	ProjectColor,
-	ProviderPresetId,
 } from "@sugabots/contracts";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
-import { ComputerCredentials } from "@sugabots/core/computers/computer-credentials";
-import { Automations } from "@sugabots/core/conversations/automations/automations";
-import { AutomationRuns } from "@sugabots/core/conversations/automations/runs";
-import { ConversationEvents } from "@sugabots/core/conversations/conversation-events";
-import { Credentials } from "@sugabots/core/credentials/credentials";
+import { Automations } from "@sugabots/core/chats/automations/automations";
+import { AutomationRuns } from "@sugabots/core/chats/automations/runs";
+import { ChatEvents } from "@sugabots/core/chats/chat-events";
+import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
 import {
 	automationTrigger,
 	bot as botTable,
 	modelProvider,
 	modelRequest,
+	person,
 	project,
 	providerModel,
-	user,
 	workspace,
 	workspaceDefaultModel,
 } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Files } from "@sugabots/core/files/files";
 import { Ids } from "@sugabots/core/ids/ids";
-import { Installation } from "@sugabots/core/installation/installation";
-import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
+import { ModelProviderStore } from "@sugabots/core/providers/model-providers/model-provider-store";
 import { Egress } from "@sugabots/core/providers/network/egress";
+import { Secrets } from "@sugabots/core/secrets/secrets";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
-import { BotRepository } from "@sugabots/core/workspaces/bots/bot-repository";
+import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
 import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
 import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
-import { ProjectRepository } from "@sugabots/core/workspaces/projects/project-repository";
+import { ProjectStore } from "@sugabots/core/workspaces/projects/project-store";
+import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
 import { userText } from "@sugabots/errors";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
@@ -46,13 +46,13 @@ import { Effect, Layer } from "effect";
 import { ensureAccount, seedAccountsLayer } from "../accounts.ts";
 import {
 	type AutomationRun,
-	type ChatScene,
-	ensureConnections,
-	ensureConversations,
-	type SeedConnection,
-	SUPPORT_HANDOVER_THREAD,
-	type ThreadScene,
-} from "./conversations.ts";
+	type BotChatScene,
+	ensureChats,
+	ensureConnectors,
+	type ProjectChatScene,
+	type SeedConnector,
+	SUPPORT_HANDOVER_CHAT,
+} from "./chats.ts";
 import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
 
 /**
@@ -65,12 +65,12 @@ import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
  *
  * Anita made every bot. The team's bots are public, each added to the
  * project whose work it does and pinned for that project's people; her own
- * two are private. The conversations come already written (see
- * `conversations.ts`): people talking in the projects' threads and the
- * bots they mention answering there, threads people started with a bot, a
- * collaboration, a file, and automation runs. Support's thread holds only the
+ * two are private. The chats come already written (see
+ * `chats.ts`): people talking in the projects' chats and the
+ * bots they mention answering there, chats people started with a bot, a
+ * collaboration, a file, and automation runs. Support's chat holds only the
  * morning's handover, where the demo's story starts (see `stage.ts`). Each
- * project's bots get its connections too, signed out.
+ * project's bots get its connectors too, signed out.
  *
  * Each bot goes on the first model the workspace offers that it prefers,
  * else the workspace's default. A new workspace offers none, so connect
@@ -152,51 +152,51 @@ const PROJECTS: Record<
  * Subscription and local providers charge nothing.
  */
 interface ModelChoice {
-	preset: ProviderPresetId;
+	builtIn: BuiltInProviderId;
 	matches: RegExp;
 	ledgerModel: string;
 	usdPerMillion: { input: number; output: number };
 }
 
 const CLAUDE_SONNET: ModelChoice = {
-	preset: "anthropic",
+	builtIn: "anthropic",
 	matches: /^claude-sonnet/,
 	ledgerModel: "claude-sonnet-4-5",
 	usdPerMillion: { input: 3, output: 15 },
 };
 const CLAUDE_HAIKU: ModelChoice = {
-	preset: "anthropic",
+	builtIn: "anthropic",
 	matches: /^claude-haiku/,
 	ledgerModel: "claude-haiku-4-5",
 	usdPerMillion: { input: 1, output: 5 },
 };
 const CHATGPT: ModelChoice = {
-	preset: "chatgpt",
+	builtIn: "chatgpt",
 	matches: /^gpt-5/,
 	ledgerModel: "gpt-5",
 	usdPerMillion: { input: 0, output: 0 },
 };
 const OPENAI_MINI: ModelChoice = {
-	preset: "openai",
+	builtIn: "openai",
 	matches: /^gpt-5.*mini/,
 	ledgerModel: "gpt-5-mini",
 	usdPerMillion: { input: 0.25, output: 2 },
 };
 const GEMINI_FLASH: ModelChoice = {
-	preset: "gemini",
+	builtIn: "gemini",
 	matches: /gemini-.*flash/,
 	ledgerModel: "gemini-2.5-flash",
 	usdPerMillion: { input: 0.3, output: 2.5 },
 };
 const OLLAMA_LLAMA: ModelChoice = {
-	preset: "ollama",
+	builtIn: "ollama",
 	matches: /^llama/,
 	ledgerModel: "llama3.2",
 	usdPerMillion: { input: 0, output: 0 },
 };
 /** Claude through OpenRouter, for a workspace that reaches Anthropic that way. */
 const OPENROUTER_CLAUDE: ModelChoice = {
-	preset: "openrouter",
+	builtIn: "openrouter",
 	matches: /^anthropic\/claude-(sonnet|haiku)/,
 	ledgerModel: "anthropic/claude-sonnet-4.5",
 	usdPerMillion: { input: 3, output: 15 },
@@ -207,7 +207,7 @@ interface SeedBot {
 	/** The project a public bot is in; a private bot, only Anita's, is in none. */
 	project: ProjectKey | "private";
 	color: BotColor;
-	face: BotFace;
+	eyes: BotEyes;
 	shape: BotShape;
 	description: string;
 	prompt: string;
@@ -223,7 +223,7 @@ const BOTS: readonly SeedBot[] = [
 		name: "Growth Desk",
 		project: "growth",
 		color: "green",
-		face: "pill",
+		eyes: "pill",
 		shape: "leaf",
 		description: "Answers pricing and renewal questions for the sales team.",
 		prompt:
@@ -235,7 +235,7 @@ const BOTS: readonly SeedBot[] = [
 		name: "Pricing Analyst",
 		project: "growth",
 		color: "sky",
-		face: "square",
+		eyes: "square",
 		shape: "hexagon",
 		description: "Checks discounts against margin and drafts quotes.",
 		prompt:
@@ -247,7 +247,7 @@ const BOTS: readonly SeedBot[] = [
 		name: "Copywriter",
 		project: "growth",
 		color: "orange",
-		face: "arc",
+		eyes: "arc",
 		shape: "blob",
 		description: "Drafts replies, posts and invites.",
 		prompt:
@@ -259,7 +259,7 @@ const BOTS: readonly SeedBot[] = [
 		name: "Ticket Desk",
 		project: "support",
 		color: "purple",
-		face: "dot",
+		eyes: "dot",
 		shape: "circle",
 		description: "Works the support queue and handles refunds.",
 		prompt:
@@ -271,7 +271,7 @@ const BOTS: readonly SeedBot[] = [
 		name: "Inbox Sorter",
 		project: "support",
 		color: "yellow",
-		face: "pill",
+		eyes: "pill",
 		shape: "squircle",
 		description: "Triage, reminders and quick jobs.",
 		prompt:
@@ -283,7 +283,7 @@ const BOTS: readonly SeedBot[] = [
 		name: "Billing Engineer",
 		project: "support",
 		color: "red",
-		face: "square",
+		eyes: "square",
 		shape: "antenna",
 		description: "Digs into billing bugs on its computer.",
 		prompt:
@@ -296,7 +296,7 @@ const BOTS: readonly SeedBot[] = [
 		name: "Code Reviewer",
 		project: "engineering",
 		color: "rose",
-		face: "wink",
+		eyes: "wink",
 		shape: "octagon",
 		description: "Reviews pull requests and runs the tests on its computer.",
 		prompt:
@@ -309,11 +309,11 @@ const BOTS: readonly SeedBot[] = [
 		name: "Researcher",
 		project: "engineering",
 		color: "ice",
-		face: "arc",
+		eyes: "arc",
 		shape: "drop",
 		description: "Reads the long stuff so you don't have to.",
 		prompt:
-			"You read papers, docs, changelogs and long threads for the engineering team, and summarise what matters for Fieldnote. Quote the source for every claim. Use your computer to try code samples before recommending them.",
+			"You read papers, docs, changelogs and long chats for the engineering team, and summarise what matters for Fieldnote. Quote the source for every claim. Use your computer to try code samples before recommending them.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		usesComputer: true,
 		requestsPerWeekday: 9,
@@ -322,7 +322,7 @@ const BOTS: readonly SeedBot[] = [
 		name: "Journal",
 		project: "private",
 		color: "teal",
-		face: "dot",
+		eyes: "dot",
 		shape: "pebble",
 		description: "Private notes that stay private.",
 		prompt:
@@ -334,7 +334,7 @@ const BOTS: readonly SeedBot[] = [
 		name: "Trip Planner",
 		project: "private",
 		color: "sky",
-		face: "pill",
+		eyes: "pill",
 		shape: "dome",
 		description: "Plans trips and keeps the bookings in one place.",
 		prompt:
@@ -412,15 +412,15 @@ const AUTOMATIONS: readonly { bot: string; automation: NewAutomation }[] = [
 ];
 
 /**
- * What the projects' people said in their threads, and what the bots they
+ * What the projects' people said in their chats, and what the bots they
  * mentioned answered there. Times are on the morning of the day they happen
- * (see `conversations.ts`). Support's thread has only the morning's handover,
+ * (see `chats.ts`). Support's chat has only the morning's handover,
  * where the demo's story starts.
  */
-const CHATS: readonly ChatScene<PersonKey>[] = [
+const PROJECT_CHATS: readonly ProjectChatScene<PersonKey>[] = [
 	{
 		project: "growth",
-		thread: "Pipeline",
+		chat: "Pipeline",
 		messages: [
 			{
 				at: { time: "9:02" },
@@ -457,7 +457,7 @@ const CHATS: readonly ChatScene<PersonKey>[] = [
 	},
 	{
 		project: "engineering",
-		thread: "Export queue",
+		chat: "Export queue",
 		messages: [
 			{
 				at: { time: "9:40" },
@@ -493,7 +493,7 @@ const CHATS: readonly ChatScene<PersonKey>[] = [
 	},
 	{
 		project: "support",
-		thread: SUPPORT_HANDOVER_THREAD,
+		chat: SUPPORT_HANDOVER_CHAT,
 		messages: [
 			{
 				at: { time: "8:41" },
@@ -518,10 +518,10 @@ const CHATS: readonly ChatScene<PersonKey>[] = [
 ];
 
 /**
- * Threads people started with a bot. Anyone who can see the bot can read them
+ * Chats people started with a bot. Anyone who can see the bot can read them
  * and join in, as Lorraine does in Gary's.
  */
-const THREADS: readonly ThreadScene<PersonKey>[] = [
+const BOT_CHATS: readonly BotChatScene<PersonKey>[] = [
 	{
 		bot: "Growth Desk",
 		messages: [
@@ -569,7 +569,7 @@ const THREADS: readonly ThreadScene<PersonKey>[] = [
 					{ text: "Pulling their account and deals from HubSpot, and checking their site.\n\n" },
 					{
 						toolCall: {
-							connection: "hubspot",
+							connector: "hubspot",
 							tool: "search_companies",
 							input: { query: "Fernhill Outfitters" },
 							output: {
@@ -588,7 +588,7 @@ const THREADS: readonly ThreadScene<PersonKey>[] = [
 					},
 					{
 						toolCall: {
-							connection: "hubspot",
+							connector: "hubspot",
 							tool: "search_deals",
 							input: { companyId: "18842", stage: "open" },
 							output: {
@@ -639,7 +639,7 @@ const THREADS: readonly ThreadScene<PersonKey>[] = [
 				parts: [
 					{
 						toolCall: {
-							connection: "hubspot",
+							connector: "hubspot",
 							tool: "search_notes",
 							input: { companyId: "18842", query: "SSO" },
 							output: {
@@ -705,7 +705,7 @@ const THREADS: readonly ThreadScene<PersonKey>[] = [
 				parts: [
 					{
 						toolCall: {
-							connection: "hubspot",
+							connector: "hubspot",
 							tool: "get_company",
 							input: { companyId: "18842", properties: ["renewal_date", "billing_cycle"] },
 							output: { renewal_date: "2027-01-14", billing_cycle: "monthly" },
@@ -994,7 +994,7 @@ const THREADS: readonly ThreadScene<PersonKey>[] = [
 	},
 ];
 
-/** Past runs of automations, so their conversations and run lists have history. */
+/** Past runs of automations, so their chats and run lists have history. */
 const AUTOMATION_RUNS: readonly AutomationRun[] = [
 	{
 		bot: "Growth Desk",
@@ -1010,7 +1010,7 @@ const AUTOMATION_RUNS: readonly AutomationRun[] = [
 		scheduledAt: { time: "8:00" },
 		finishedAt: { time: "8:01" },
 		result: "I started on this morning's renewals but couldn't read the deals.",
-		failed: userText`HubSpot's sign-in has expired, so the renewals couldn't be read. Sign in to HubSpot again in Growth Desk's connections, then run it again.`,
+		failed: userText`HubSpot's sign-in has expired, so the renewals couldn't be read. Sign in to HubSpot again in Growth Desk's connectors, then run it again.`,
 	},
 	{
 		bot: "Ticket Desk",
@@ -1039,7 +1039,7 @@ const AUTOMATION_RUNS: readonly AutomationRun[] = [
 ];
 
 /** The projects' MCP servers, signed out: sign in to one in Settings to use it for real. */
-/** Linear's own MCP tools, so its connection's permissions look as they do when signed in for real. */
+/** Linear's own connector tools, so its connector's permissions look as they do when signed in for real. */
 const LINEAR_READING = [
 	"list_issues",
 	"get_issue",
@@ -1094,7 +1094,7 @@ const LINEAR_OFF = [
 ] as const;
 
 /** A tool described as its name reads: `save_issue` is "Save issue". */
-function connectionTool(name: string, { readOnly }: { readOnly: boolean }) {
+function connectorTool(name: string, { readOnly }: { readOnly: boolean }) {
 	const words = name.replaceAll("_", " ");
 	return {
 		name,
@@ -1104,7 +1104,7 @@ function connectionTool(name: string, { readOnly }: { readOnly: boolean }) {
 	};
 }
 
-const CONNECTIONS: readonly SeedConnection[] = [
+const CONNECTORS: readonly SeedConnector[] = [
 	{
 		project: "growth",
 		name: "HubSpot",
@@ -1112,9 +1112,9 @@ const CONNECTIONS: readonly SeedConnection[] = [
 		url: "https://mcp.hubspot.com",
 		tools: [
 			...["search_companies", "get_company", "search_deals", "search_notes"].map((name) =>
-				connectionTool(name, { readOnly: true }),
+				connectorTool(name, { readOnly: true }),
 			),
-			connectionTool("create_note", { readOnly: false }),
+			connectorTool("create_note", { readOnly: false }),
 		],
 		toolAccess: { create_note: "ask" },
 	},
@@ -1158,8 +1158,8 @@ const CONNECTIONS: readonly SeedConnection[] = [
 		handle: "linear",
 		url: "https://mcp.linear.app/mcp",
 		tools: [
-			...LINEAR_READING.map((name) => connectionTool(name, { readOnly: true })),
-			...LINEAR_CHANGES.map((name) => connectionTool(name, { readOnly: false })),
+			...LINEAR_READING.map((name) => connectorTool(name, { readOnly: true })),
+			...LINEAR_CHANGES.map((name) => connectorTool(name, { readOnly: false })),
 		],
 		toolAccess: {
 			save_issue: "ask",
@@ -1187,27 +1187,27 @@ const CONNECTIONS: readonly SeedConnection[] = [
 ];
 
 const seed = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
-	if (installation.isProduction) {
+	const serverSettings = yield* ServerSettings.Service;
+	if (serverSettings.isProduction) {
 		return yield* Effect.die(new Error("The showcase seed cannot run in production."));
 	}
 
 	const people = yield* Effect.forEach(
 		Object.entries(PEOPLE) as [PersonKey, (typeof PEOPLE)[PersonKey]][],
-		([key, person]) =>
+		([key, seed]) =>
 			Effect.gen(function* () {
 				const id = yield* ensureAccount({
-					name: person.name,
-					email: person.email,
+					name: seed.name,
+					email: seed.email,
 					password: PASSWORD,
 				});
-				yield* query((db) => db.update(user).set({ image: person.image }).where(eq(user.id, id)));
+				yield* query((db) => db.update(person).set({ image: seed.image }).where(eq(person.id, id)));
 				return [key, id] as const;
 			}),
 	).pipe(Effect.map((entries) => Object.fromEntries(entries) as Record<PersonKey, string>));
 
 	const workspaceId = yield* ensureWorkspace(people[OWNER]);
-	yield* Onboarding.recordSetupCompleted(workspaceId);
+	yield* WorkspaceSetup.recordSetUp(workspaceId);
 	yield* Effect.forEach(
 		(Object.keys(PEOPLE) as PersonKey[]).filter((key) => key !== OWNER),
 		(key) =>
@@ -1215,7 +1215,7 @@ const seed = Effect.gen(function* () {
 				workspaceId,
 				ownerId: people[OWNER],
 				email: PEOPLE[key].email,
-				userId: people[key],
+				personId: people[key],
 			}),
 		{ discard: true },
 	);
@@ -1245,16 +1245,16 @@ const seed = Effect.gen(function* () {
 				: Effect.die(new Error(`No bot is named ${bot}`));
 		},
 		{ discard: true },
-	).pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(people[OWNER])));
+	).pipe(CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(people[OWNER])));
 	yield* holdScheduledAutomations(workspaceId);
 
-	yield* ensureConnections({
+	yield* ensureConnectors({
 		workspaceId,
 		projectIds,
 		createdById: people[OWNER],
-		connections: CONNECTIONS,
+		connectors: CONNECTORS,
 	});
-	const conversations = yield* ensureConversations(
+	const chats = yield* ensureChats(
 		{
 			workspaceId,
 			people,
@@ -1262,7 +1262,7 @@ const seed = Effect.gen(function* () {
 			botIds,
 			botModels: new Map(BOTS.map((bot) => [bot.name, chooseModel(bot, offered)])),
 		},
-		{ chats: CHATS, threads: THREADS, runs: AUTOMATION_RUNS },
+		{ projectChats: PROJECT_CHATS, botChats: BOT_CHATS, runs: AUTOMATION_RUNS },
 	);
 
 	const ledgerRows = yield* fillLedger({ workspaceId, botIds });
@@ -1279,9 +1279,9 @@ const seed = Effect.gen(function* () {
 			: `bots on: ${BOTS.map((bot) => `${bot.name} → ${chooseModel(bot, offered)}`).join(", ")}`,
 	);
 	console.log(
-		conversations === 0
-			? "conversations already there"
-			: `conversations: ${conversations} projects' threads, bots' threads and automation runs written`,
+		chats === 0
+			? "chats already there"
+			: `chats: ${chats} projects' chats, bots' chats and automation runs written`,
 	);
 	console.log(
 		ledgerRows === 0
@@ -1290,7 +1290,7 @@ const seed = Effect.gen(function* () {
 	);
 });
 
-/** Made the way the app makes one, so it has its system bots, preset providers and the owner's Personal Assistant. */
+/** Made the way the app makes one, so it has its system bots, built-in providers and the owner's Personal Assistant. */
 const ensureWorkspace = (ownerId: string) =>
 	Effect.gen(function* () {
 		const membership = yield* Membership.Service;
@@ -1302,7 +1302,7 @@ const ensureWorkspace = (ownerId: string) =>
 				},
 			})
 			.pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(ownerId)),
+				CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(ownerId)),
 				Effect.map((created) => created.id),
 				Effect.catchTag("SlugTaken", () =>
 					Effect.flatMap(
@@ -1324,7 +1324,7 @@ const joinWorkspace = (input: {
 	workspaceId: string;
 	ownerId: string;
 	email: string;
-	userId: string;
+	personId: string;
 }) =>
 	Effect.gen(function* () {
 		const membership = yield* Membership.Service;
@@ -1332,19 +1332,19 @@ const joinWorkspace = (input: {
 			membership
 				.invite({
 					workspace: input.workspaceId,
-					invitation: { email: input.email, role: "member", resend },
+					invitation: { email: input.email, role: "editor", resend },
 				})
-				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(input.ownerId)));
+				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(input.ownerId)));
 		const invitation = yield* invite(false).pipe(
 			Effect.catchTag("AlreadyInvited", () => invite(true)),
-			Effect.catchTag("AlreadyMember", () => Effect.succeed(undefined)),
+			Effect.catchTag("AlreadyInWorkspace", () => Effect.succeed(undefined)),
 			Effect.orDie,
 		);
 		if (!invitation) return;
 		yield* membership
 			.accept({ invitationId: invitation.id })
 			.pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(input.userId)),
+				CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(input.personId)),
 				Effect.orDie,
 			);
 	});
@@ -1360,9 +1360,9 @@ const ensureProjects = (
 	botIds: ReadonlyMap<string, string>,
 ) =>
 	Effect.gen(function* () {
-		const projectRepository = yield* ProjectRepository.Service;
+		const projectStore = yield* ProjectStore.Service;
 		const personalAssistants = yield* PersonalAssistants.Service;
-		yield* personalAssistants.provision({ workspaceId, userId: people[OWNER] });
+		yield* personalAssistants.provision({ workspaceId, personId: people[OWNER] });
 		const projects = yield* Effect.forEach(
 			Object.entries(PROJECTS) as [ProjectKey, (typeof PROJECTS)[ProjectKey]][],
 			([key, { name, color, members }]) =>
@@ -1371,7 +1371,7 @@ const ensureProjects = (
 					const leadBotId = lead && botIds.get(lead.name);
 					if (!leadBotId)
 						return yield* Effect.die(new Error(`Project ${key} has no bot to lead it`));
-					const projectId = yield* projectRepository
+					const projectId = yield* projectStore
 						.create(workspaceId, { creatorId: people[OWNER], name, slug: key, color, leadBotId })
 						.pipe(
 							Effect.map((created) => created.id),
@@ -1380,7 +1380,7 @@ const ensureProjects = (
 						);
 					yield* Effect.forEach(
 						members,
-						(member) => projectRepository.addMember(workspaceId, projectId, people[member]),
+						(member) => projectStore.addMember(workspaceId, projectId, people[member]),
 						{ discard: true },
 					);
 					return [key, projectId] as const;
@@ -1411,8 +1411,8 @@ const placeBots = (input: {
 	botIds: ReadonlyMap<string, string>;
 }) =>
 	Effect.gen(function* () {
-		const projects = yield* ProjectRepository.Service;
-		const bots = yield* BotRepository.Service;
+		const projects = yield* ProjectStore.Service;
+		const bots = yield* BotStore.Service;
 		for (const bot of BOTS) {
 			const botId = input.botIds.get(bot.name);
 			if (bot.project === "private" || !botId) continue;
@@ -1424,7 +1424,7 @@ const placeBots = (input: {
 				(member) =>
 					bots.setPinned({
 						workspaceId: input.workspaceId,
-						userId: input.people[member],
+						personId: input.people[member],
 						botId,
 						pinned: true,
 					}),
@@ -1434,19 +1434,19 @@ const placeBots = (input: {
 	});
 
 /**
- * The catalog providers the bots prefer that a new workspace isn't given,
+ * The built-in providers the bots prefer that a new workspace isn't given,
  * added switched off and without a key, so the ledger's history names them.
  * Connecting one is left to Settings.
  */
 const ensureProviders = (workspaceId: string, createdById: string) =>
 	Effect.gen(function* () {
-		const providers = yield* ModelProviderRepository.Service;
-		const presets = new Set(BOTS.flatMap((bot) => bot.models.map((choice) => choice.preset)));
+		const providers = yield* ModelProviderStore.Service;
+		const builtIns = new Set(BOTS.flatMap((bot) => bot.models.map((choice) => choice.builtIn)));
 		yield* Effect.forEach(
-			presets,
-			(preset) =>
+			builtIns,
+			(builtIn) =>
 				providers
-					.create(workspaceId, { createdById, provider: { preset } })
+					.create(workspaceId, { createdById, provider: { builtIn } })
 					.pipe(Effect.catchTag("ModelProviderNameConflict", () => Effect.void)),
 			{ discard: true },
 		);
@@ -1454,7 +1454,7 @@ const ensureProviders = (workspaceId: string, createdById: string) =>
 
 interface OfferedModel {
 	modelId: string;
-	preset: ProviderPresetId | null;
+	builtIn: BuiltInProviderId | null;
 	isDefault: boolean;
 }
 
@@ -1464,7 +1464,7 @@ const offeredModels = (workspaceId: string) =>
 		db
 			.select({
 				modelId: providerModel.modelId,
-				preset: modelProvider.preset,
+				builtIn: modelProvider.builtIn,
 				defaultModel: workspaceDefaultModel.modelId,
 			})
 			.from(providerModel)
@@ -1482,7 +1482,7 @@ const offeredModels = (workspaceId: string) =>
 			rows
 				.map((row) => ({
 					modelId: row.modelId,
-					preset: row.preset,
+					builtIn: row.builtIn,
 					isDefault: row.modelId === row.defaultModel,
 				}))
 				// Newest first among a provider's matches, as model ids carry their version.
@@ -1494,7 +1494,7 @@ const offeredModels = (workspaceId: string) =>
 function chooseModel(bot: SeedBot, offered: readonly OfferedModel[]): string {
 	for (const choice of bot.models) {
 		const match = offered.find(
-			(model) => model.preset === choice.preset && choice.matches.test(model.modelId),
+			(model) => model.builtIn === choice.builtIn && choice.matches.test(model.modelId),
 		);
 		if (match) return match.modelId;
 	}
@@ -1509,7 +1509,7 @@ const ensureBot = (input: {
 	model: string;
 }) =>
 	Effect.gen(function* () {
-		const bots = yield* BotRepository.Service;
+		const bots = yield* BotStore.Service;
 		const { bot } = input;
 		const created = yield* bots
 			.create(input.workspaceId, {
@@ -1518,7 +1518,7 @@ const ensureBot = (input: {
 					name: bot.name,
 					visibility: bot.project === "private" ? "private" : "public",
 					color: bot.color,
-					face: bot.face,
+					eyes: bot.eyes,
 					shape: bot.shape,
 					description: bot.description,
 					prompt: bot.prompt,
@@ -1641,11 +1641,11 @@ const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, st
 
 		const providers = yield* query((db) =>
 			db
-				.select({ id: modelProvider.id, preset: modelProvider.preset })
+				.select({ id: modelProvider.id, builtIn: modelProvider.builtIn })
 				.from(modelProvider)
 				.where(eq(modelProvider.workspaceId, input.workspaceId)),
 		);
-		const providerIdByPreset = new Map(providers.map((row) => [row.preset, row.id]));
+		const providerIdByBuiltIn = new Map(providers.map((row) => [row.builtIn, row.id]));
 		const random = seededRandom(LEDGER_DAYS);
 		const now = Date.now();
 		const rows: (typeof modelRequest.$inferInsert)[] = [];
@@ -1656,7 +1656,7 @@ const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, st
 			const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 			for (const bot of BOTS) {
 				const [choice] = bot.models;
-				const providerId = providerIdByPreset.get(choice.preset);
+				const providerId = providerIdByBuiltIn.get(choice.builtIn);
 				const botId = input.botIds.get(bot.name);
 				if (!providerId || !botId) continue;
 				const busyness = (isWeekend ? WEEKEND_SHARE : 1) * (0.6 + random() * 0.8);
@@ -1678,7 +1678,7 @@ const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, st
 						botId,
 						step: 0,
 						providerId,
-						preset: choice.preset,
+						builtIn: choice.builtIn,
 						model: choice.ledgerModel,
 						outcome: "completed",
 						inputTokens,
@@ -1704,8 +1704,8 @@ const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, st
 
 /** As `request-cost.ts` would have named it. */
 function costSourceOf(choice: ModelChoice): string {
-	if (choice.preset === "ollama") return "local";
-	if (choice.preset === "chatgpt") return "subscription";
+	if (choice.builtIn === "ollama") return "local";
+	if (choice.builtIn === "chatgpt") return "subscription";
 	return "showcase-seed";
 }
 
@@ -1727,30 +1727,30 @@ seed.pipe(
 			Authentication.layer,
 			Membership.layer,
 			PersonalAssistants.layer,
-			ProjectRepository.layer,
-			BotRepository.layer,
-			ModelProviderRepository.layer,
+			ProjectStore.layer,
+			BotStore.layer,
+			ModelProviderStore.layer,
 			Files.authoringLayer,
 			// The seed defines automations and never runs one, which is all these are for.
 			Automations.layer.pipe(
 				Layer.provide([
 					unimplemented(AutomationRuns.Service, {}),
-					unimplemented(ConversationEvents.Service, {}),
+					unimplemented(ChatEvents.Service, {}),
 				]),
 			),
 		).pipe(
 			Layer.provideMerge(
 				Layer.mergeAll(
-					Credentials.layer,
+					Secrets.layer,
 					// Leaving and deleting go through the bots' computers; the seed never makes one.
 					Egress.layer,
-					ComputerCredentials.none,
+					ComputerSignIn.none,
 					seedAccountsLayer,
 					BlobStore.layer,
 					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
 				).pipe(
 					Layer.provideMerge(Ids.layer),
-					Layer.provideMerge(Installation.layer),
+					Layer.provideMerge(ServerSettings.layer),
 					Layer.provideMerge(databaseLayer),
 				),
 			),

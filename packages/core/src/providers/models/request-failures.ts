@@ -277,7 +277,7 @@ export class ProviderContextLengthExceeded
 		return describe(this.cause);
 	}
 	get userMessage() {
-		return userText`The conversation is too long for ${this.model} to read. Start a new conversation, or choose a model that reads more.`;
+		return userText`The chat is too long for ${this.model} to read. Start a new chat, or choose a model that reads more.`;
 	}
 }
 

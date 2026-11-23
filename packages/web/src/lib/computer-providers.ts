@@ -42,8 +42,8 @@ export function useComputerDisks() {
 }
 
 /**
- * Whether the workspace's bots can be given a computer. Any member may read
- * it. Its key starts with the providers' key, so changing a provider refetches it.
+ * Whether the workspace's bots can be given a computer. Anyone in the workspace may
+ * read it. Its key starts with the providers' key, so changing a provider refetches it.
  */
 export function useComputerAccess() {
 	const workspaceId = useWorkspace().workspace?.id;

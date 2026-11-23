@@ -7,7 +7,7 @@ import { uuidSchema } from "./uuid.ts";
  * Computer providers: where a workspace's projects get the Linux machines
  * their bots run commands on. Experimental.
  *
- * A workspace may configure several, each from a preset with its own account
+ * A workspace may configure several, each from a built-in provider with its own account
  * and key, but at most one is enabled at a time, and that one makes every
  * project's computer, a bot's default project's included. Bots are offered
  * the computer tools only while one is.
@@ -49,15 +49,15 @@ export const computerMemoryGiBSchema = Schema.Int.check(
 	Schema.isBetween({ minimum: 1, maximum: 64 }),
 );
 
-const computerProviderPresetIdSchema = Schema.Literals(["opensandbox", "e2b"]);
-export type ComputerProviderPresetId = typeof computerProviderPresetIdSchema.Type;
+const builtInComputerProviderIdSchema = Schema.Literals(["opensandbox", "e2b"]);
+export type BuiltInComputerProviderId = typeof builtInComputerProviderIdSchema.Type;
 
-interface ComputerProviderPreset {
-	id: ComputerProviderPresetId;
+interface BuiltInComputerProvider {
+	id: BuiltInComputerProviderId;
 	name: string;
-	/** A local preset is a server you run, at an address you give; a remote one has its own. */
+	/** A local built-in provider is a server you run, at an address you give; a remote one has its own. */
 	hosting: "remote" | "local";
-	/** The address a local preset is usually at. */
+	/** The address a local built-in provider is usually at. */
 	baseUrl?: string;
 	/** What computers are made from: an image for OpenSandbox, a template for E2B. */
 	imageLabel: string;
@@ -68,7 +68,7 @@ interface ComputerProviderPreset {
 	description: string;
 }
 
-export const computerProviderCatalog: readonly ComputerProviderPreset[] = [
+export const builtInComputerProviders: readonly BuiltInComputerProvider[] = [
 	{
 		id: "opensandbox",
 		name: "OpenSandbox",
@@ -90,24 +90,24 @@ export const computerProviderCatalog: readonly ComputerProviderPreset[] = [
 	},
 ];
 
-export function computerProviderPreset(id: ComputerProviderPresetId): ComputerProviderPreset {
-	const preset = computerProviderCatalog.find((candidate) => candidate.id === id);
-	if (!preset) {
-		throw new Error(`Unknown computer provider preset: ${id}`);
+export function computerBuiltInProvider(id: BuiltInComputerProviderId): BuiltInComputerProvider {
+	const builtIn = builtInComputerProviders.find((candidate) => candidate.id === id);
+	if (!builtIn) {
+		throw new Error(`Unknown built-in computer provider: ${id}`);
 	}
-	return preset;
+	return builtIn;
 }
 
 const apiKeySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
 const nameSchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(512));
 
 /**
- * How a provider's computers reach the internet: `allowlist`, only the
+ * How a provider's computers reach the internet: `allowed-hosts-only`, only the
  * trusted hosts and those the workspace and each project add; or `open`, every
  * host but those the workspace blocks, as far as the provider can refuse
  * hosts by name. E2B can't, so its open computers reach every host.
  */
-const computerNetworkModeSchema = Schema.Literals(["allowlist", "open"]);
+const computerNetworkModeSchema = Schema.Literals(["allowed-hosts-only", "open"]);
 
 export type ComputerNetworkMode = typeof computerNetworkModeSchema.Type;
 
@@ -134,7 +134,7 @@ const imageSchema = Schema.Trim.check(
 function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 	return Schema.Union([
 		Schema.Struct({
-			preset: Schema.Literal("opensandbox"),
+			builtIn: Schema.Literal("opensandbox"),
 			serverUrl: Schema.optional(providerUrlSchema),
 			image: Schema.optional(image),
 			/** The most each computer may use. */
@@ -144,7 +144,7 @@ function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 			networkMode: Schema.optional(computerNetworkModeSchema),
 		}),
 		Schema.Struct({
-			preset: Schema.Literal("e2b"),
+			builtIn: Schema.Literal("e2b"),
 			/** E2B Embed's API and its address for reaching computers; both left out for E2B Cloud. */
 			apiUrl: Schema.optional(providerUrlSchema),
 			sandboxUrl: Schema.optional(providerUrlSchema),
@@ -159,7 +159,7 @@ function providerSettingsWithImageSchema(image: Schema.Codec<string, string>) {
 }
 
 /**
- * A provider's settings, by preset, as they are saved. A provider may be
+ * A provider's settings, by built-in provider, as they are saved. A provider may be
  * saved before it has every address it needs; it can't be enabled until it
  * has. An image, template or size left out follows the default, so a new
  * default reaches every provider not set to something else.
@@ -181,7 +181,7 @@ export type ComputerProviderSettings = typeof computerProviderSettingsSchema.Typ
 export const computerProviderSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	preset: computerProviderPresetIdSchema,
+	builtIn: builtInComputerProviderIdSchema,
 	name: Schema.String,
 	settings: savedComputerProviderSettingsSchema,
 	/** Whether this provider makes the workspace's computers. At most one is. */
@@ -195,7 +195,7 @@ export const computerProviderSchema = Schema.Struct({
 export type ComputerProvider = typeof computerProviderSchema.Type;
 
 export const newComputerProviderSchema = Schema.Struct({
-	/** Its preset is the provider's for good. */
+	/** Its built-in provider is the provider's for good. */
 	settings: computerProviderSettingsSchema,
 	/** Enabling it disables whichever provider was enabled before. */
 	enabled: Schema.optional(Schema.Boolean),
@@ -209,7 +209,7 @@ export const computerProviderUpdateSchema = Schema.Struct({
 	enabled: Schema.optional(Schema.Boolean),
 	/** Absent leaves the stored key alone; null removes it. */
 	apiKey: Schema.optional(Schema.NullOr(apiKeySchema)),
-	/** Replaces the settings whole; their preset must be the provider's. */
+	/** Replaces the settings whole; their built-in provider must be the provider's. */
 	settings: Schema.optional(computerProviderSettingsSchema),
 }).check(
 	Schema.makeFilter((value) => Object.keys(value).length > 0, { message: "Nothing to change" }),
@@ -235,10 +235,10 @@ const byteCountSchema = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /** A folder of a project's computer and how much of its disk it takes. */
 const computerDiskFolderSchema = Schema.Union([
-	/** A bot's home, kept across all its conversations on the computer. */
+	/** A bot's home, kept across all its chats on the computer. */
 	Schema.Struct({ kind: Schema.Literal("home"), botId: uuidSchema, bytes: byteCountSchema }),
-	/** Every conversation's folder together, where the bots clone and build. */
-	Schema.Struct({ kind: Schema.Literal("conversations"), bytes: byteCountSchema }),
+	/** Every chat's folder together, where the bots clone and build. */
+	Schema.Struct({ kind: Schema.Literal("chats"), bytes: byteCountSchema }),
 	/** `/tmp`. */
 	Schema.Struct({ kind: Schema.Literal("temporary"), bytes: byteCountSchema }),
 ]);
@@ -247,7 +247,7 @@ export type ComputerDiskFolder = typeof computerDiskFolderSchema.Type;
 
 /**
  * How full a project's computer's disk was when last measured, which it is every
- * few minutes while it runs. A paused computer's disk doesn't change, so its
+ * few minutes while it runs. A sleeping computer's disk doesn't change, so its
  * last measurement still holds.
  */
 const computerDiskSchema = Schema.Struct({
@@ -304,7 +304,7 @@ const projectComputerStateSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("present"),
 		/** `lost`: the provider no longer has it. `unreachable`: its provider didn't answer. */
-		state: Schema.Literals(["running", "paused", "lost", "unreachable"]),
+		state: Schema.Literals(["running", "asleep", "lost", "unreachable"]),
 		/** What it was made from, as its provider names it; null when the provider didn't answer. */
 		image: Schema.NullOr(Schema.String),
 		providerName: Schema.String,
@@ -351,7 +351,7 @@ export const computerTemplateSchema = Schema.Struct({
  * A host a computer may reach: a domain name such as `api.example.com`, or a
  * leading wildcard such as `*.example.com`, which covers the domain's
  * subdomains but not the domain itself. Lowercase. Addresses and ports aren't
- * hosts here: the providers' allowlists match names. Names for local networks
+ * hosts here: the providers' rules match names. Names for local networks
  * and services whose names resolve to any address someone writes in them
  * (`10-0-0-1.nip.io`) aren't either, since the providers allow whatever
  * address a name resolves to.

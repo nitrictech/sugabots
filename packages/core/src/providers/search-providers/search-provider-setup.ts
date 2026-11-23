@@ -6,7 +6,7 @@ import type {
 	SearchProviderTestResult,
 	SearchProviderUpdate,
 } from "@sugabots/contracts";
-import { searchProviderPreset } from "@sugabots/contracts";
+import { searchBuiltInProvider } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { Clock, Context, Data, Effect, Layer } from "effect";
 import type { AuthorizationDenied } from "../../authorization/access.ts";
@@ -18,7 +18,7 @@ import { Egress } from "../network/egress.ts";
 import { requireAllowedUrl, type UrlNotAllowed } from "../tested-configuration.ts";
 import { searchBackend, searchEndpoint } from "./backends.ts";
 import { searchProviderOf, toSearchProvider } from "./search-provider-reads.ts";
-import { SearchProviderRepository } from "./search-provider-repository.ts";
+import { SearchProviderStore } from "./search-provider-store.ts";
 
 /**
  * Choosing where a workspace's `web_search` goes: checking an address against
@@ -41,7 +41,7 @@ export interface Interface {
 		provider: NewSearchProvider;
 	}) => Effect.Effect<
 		SearchProvider,
-		AuthorizationDenied | UrlNotAllowed | SearchProviderRepository.SearchProviderApiKeyRequired,
+		AuthorizationDenied | UrlNotAllowed | SearchProviderStore.SearchProviderApiKeyRequired,
 		CurrentActor.Service
 	>;
 	readonly update: (input: {
@@ -52,7 +52,7 @@ export interface Interface {
 		| AuthorizationDenied
 		| SearchProviderNotFound
 		| UrlNotAllowed
-		| SearchProviderRepository.SearchProviderApiKeyRequired,
+		| SearchProviderStore.SearchProviderApiKeyRequired,
 		CurrentActor.Service
 	>;
 	readonly remove: (
@@ -75,7 +75,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("SearchProviderSetup");
 	const authorization = yield* Authorization.Service;
-	const providers = yield* SearchProviderRepository.Service;
+	const providers = yield* SearchProviderStore.Service;
 	const egress = yield* Egress.Service;
 
 	/** The id of the workspace `workspace` names, once the actor may configure its providers. */
@@ -114,10 +114,10 @@ export const make = Effect.gen(function* () {
 					);
 					yield* requireAllowedUrl(
 						egress,
-						provider.baseUrl ?? searchProviderPreset(provider.preset).baseUrl,
+						provider.baseUrl ?? searchBuiltInProvider(provider.builtIn).baseUrl,
 					);
 					return toSearchProvider(
-						yield* providers.replace(workspaceId, { createdById: actor.userId, provider }),
+						yield* providers.replace(workspaceId, { createdById: actor.personId, provider }),
 					);
 				}),
 			),
@@ -154,8 +154,8 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const workspaceId = yield* managed(workspace);
 					yield* requireProvider(workspaceId);
-					const connection = yield* providers.connection(workspaceId);
-					if (!connection) {
+					const access = yield* providers.access(workspaceId);
+					if (!access) {
 						return {
 							reachable: false,
 							latencyMs: 0,
@@ -164,12 +164,12 @@ export const make = Effect.gen(function* () {
 					}
 					const started = yield* Clock.currentTimeMillis;
 					const outcome = yield* searchBackend(
-						connection,
-						egress.providers.for({ baseUrl: searchEndpoint(connection) }),
+						access,
+						egress.providers.for({ baseUrl: searchEndpoint(access) }),
 					)({ query: TEST_QUERY, count: 3 });
 					const latencyMs = (yield* Clock.currentTimeMillis) - started;
 					const error = outcome.ok ? undefined : outcome.reason;
-					yield* providers.recordTest(workspaceId, connection.configurationUpdatedAt, error);
+					yield* providers.recordTest(workspaceId, access.configurationUpdatedAt, error);
 					return {
 						reachable: outcome.ok,
 						latencyMs,
@@ -183,7 +183,7 @@ export const make = Effect.gen(function* () {
 export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(
-	Layer.provide([Authorization.layer, SearchProviderRepository.layer]),
+	Layer.provide([Authorization.layer, SearchProviderStore.layer]),
 );
 
 export class SearchProviderNotFound

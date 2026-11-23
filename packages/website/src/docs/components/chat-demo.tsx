@@ -5,7 +5,7 @@ import { ChatCollaboration, ChatMessage, ChatText } from "@/components/chat";
 import { MotionDemoCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { Button } from "@/components/ui/button";
 
-/** Seconds between one line of a demo conversation and the next. */
+/** Seconds between one line of a demo chat and the next. */
 const LINE_STAGGER_S = 0.55;
 
 interface SayProps {
@@ -35,7 +35,7 @@ interface ChatProps {
 	children: ReactNode;
 }
 
-/** A pretend conversation that plays out line by line when it scrolls into view, and again on request. */
+/** A pretend chat that plays out line by line when it scrolls into view, and again on request. */
 export function Chat({ title, children }: ChatProps) {
 	const [playCount, setPlayCount] = useState(0);
 	return (

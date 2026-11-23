@@ -121,11 +121,13 @@ export function useProviderActions() {
 			},
 			onSuccess: refresh,
 		}),
-		fetchModels: useMutation({
+		discoverModels: useMutation({
 			mutationFn: ({ providerId }: { providerId: string }) => {
 				const workspaceId = requiredWorkspaceId();
 				return Effect.runPromise(
-					client.api.modelProviders.fetchModels({ params: { workspace: workspaceId, providerId } }),
+					client.api.modelProviders.discoverModels({
+						params: { workspace: workspaceId, providerId },
+					}),
 				);
 			},
 			onSettled: refresh,

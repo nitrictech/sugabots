@@ -2,7 +2,7 @@ import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -13,79 +13,79 @@ export const modelProviderRoutes = HttpApiBuilder.group(ServerApi, "modelProvide
 			.handle("list", ({ params }) =>
 				providers
 					.list({ workspace: params.workspace })
-					.pipe(asSessionUser, asHttpError(providerErrors)),
+					.pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("listEnabledModels", ({ params }) =>
 				providers
 					.listEnabledModels({ workspace: params.workspace })
-					.pipe(asSessionUser, asHttpError(providerErrors)),
+					.pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("setDefaultModel", ({ params, payload }) =>
 				providers
 					.setDefaultModel({ workspace: params.workspace, model: payload.model })
-					.pipe(asSessionUser, asHttpError(providerErrors)),
+					.pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("create", ({ params, payload }) =>
 				providers
 					.create({ workspace: params.workspace, provider: payload })
-					.pipe(asSessionUser, asHttpError(providerErrors)),
+					.pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("update", ({ params, payload }) =>
 				providers
 					.update({ ...params, changes: payload })
-					.pipe(asSessionUser, asHttpError(providerErrors)),
+					.pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("remove", ({ params }) =>
-				providers.remove(params).pipe(asSessionUser, asHttpError(providerErrors)),
+				providers.remove(params).pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("switchOff", ({ params, payload }) =>
 				providers.switchOff({ ...params, ...payload }).pipe(
-					asSessionUser,
+					asSignedInPerson,
 					asHttpError(providerErrors),
 					Effect.map((moved) => ({ moved })),
 				),
 			)
 			.handle("test", ({ params }) =>
-				providers.test(params).pipe(asSessionUser, asHttpError(providerErrors)),
+				providers.test(params).pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("startSignIn", ({ params }) =>
-				providers.startSignIn(params).pipe(asSessionUser, asHttpError(providerErrors)),
+				providers.startSignIn(params).pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("completeSignIn", ({ params, payload }) =>
 				providers
 					.completeSignIn({ ...params, attempt: payload.attempt })
-					.pipe(asSessionUser, asHttpError(providerErrors)),
+					.pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("signOut", ({ params }) =>
-				providers.signOut(params).pipe(asSessionUser, asHttpError(providerErrors)),
+				providers.signOut(params).pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
-			.handle("fetchModels", ({ params }) =>
-				providers.fetchModels(params).pipe(asSessionUser, asHttpError(providerErrors)),
+			.handle("discoverModels", ({ params }) =>
+				providers.discoverModels(params).pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("addModel", ({ params, payload }) =>
 				providers
 					.addModel({ ...params, model: payload })
-					.pipe(asSessionUser, asHttpError(providerErrors)),
+					.pipe(asSignedInPerson, asHttpError(providerErrors)),
 			)
 			.handle("setModelsEnabled", ({ params, payload }) =>
 				providers
 					.setModelsEnabled({ ...params, modelIds: payload.modelIds, enabled: payload.enabled })
 					.pipe(
-						asSessionUser,
+						asSignedInPerson,
 						asHttpError(providerErrors),
 						Effect.map((updated) => ({ updated })),
 					),
 			)
 			.handle("updateModel", ({ params, payload }) =>
 				providers.updateModel({ ...params, changes: payload }).pipe(
-					asSessionUser,
+					asSignedInPerson,
 					asHttpError(providerErrors),
 					Effect.map((updated) => ({ updated })),
 				),
 			)
 			.handle("switchOffModel", ({ params, payload }) =>
 				providers.switchOffModel({ ...params, ...payload }).pipe(
-					asSessionUser,
+					asSignedInPerson,
 					asHttpError(providerErrors),
 					Effect.map((moved) => ({ moved })),
 				),

@@ -15,7 +15,7 @@ const at = "2026-09-18T08:00:00.000Z";
 /** A file Sales keeps, which the person may read. */
 const salesPlan: WrittenFile = {
 	id: "0199a3a0-0000-7000-8000-000000000f01",
-	conversationId: "0199a3a0-0000-7000-8000-000000000f02",
+	chatId: "0199a3a0-0000-7000-8000-000000000f02",
 	kind: "document",
 	title: "Sales plan",
 	version: 1,

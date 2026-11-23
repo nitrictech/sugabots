@@ -57,7 +57,7 @@ export function pollWhileAutomationsRun(
 		: false;
 }
 
-/** How many of a project's latest runs its sidebar lists among its threads. */
+/** How many of a project's latest runs its sidebar lists among its chats. */
 const SIDEBAR_RUN_COUNT = 30;
 
 /**
@@ -127,9 +127,9 @@ export function useAutomationActions() {
 	const refresh = () =>
 		Promise.all([
 			refreshAutomations(queries),
-			// A project's thread list holds its automations, by name and how they stand:
-			// `projectThreadsKey()` in chats.ts, which imports this module.
-			queries.invalidateQueries({ queryKey: ["project-threads"] }),
+			// A project's chat list holds its automations, by name and how they stand:
+			// `projectChatsKey()` in chats.ts, which imports this module.
+			queries.invalidateQueries({ queryKey: ["project-chats"] }),
 		]);
 	const keepSecret = (triggerId: string, current: AutomationCurrentSecret) =>
 		queries.setQueryData([SECRET_KEY, triggerId], current);

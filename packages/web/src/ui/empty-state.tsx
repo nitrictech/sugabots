@@ -12,6 +12,7 @@ export function EmptyState({
 	title,
 	icon,
 	page,
+	compact = false,
 	children,
 	actions,
 }: {
@@ -22,6 +23,8 @@ export function EmptyState({
 	 * above the tabs, so there is nothing to scroll.
 	 */
 	page?: "min" | "fill";
+	/** In a small surface such as a sheet: no padding of its own, and its actions as wide as it is. */
+	compact?: boolean;
 	/** A mark of what would be here, on a tile above the title. */
 	icon?: ReactNode;
 	children?: ReactNode;
@@ -31,11 +34,16 @@ export function EmptyState({
 		<div
 			className={cn(
 				"grid place-items-center",
-				page === "fill" ? "h-above-tab-bar px-6 pt-6 pb-26" : "flex-1 p-6",
+				compact ? "pt-2" : page === "fill" ? "h-above-tab-bar px-6 pt-6 pb-26" : "flex-1 p-6",
 				page === "min" && "min-h-80",
 			)}
 		>
-			<div className="flex max-w-100 flex-col items-center gap-2.5 text-center">
+			<div
+				className={cn(
+					"flex max-w-100 flex-col items-center gap-2.5 text-center",
+					compact && "w-full",
+				)}
+			>
 				{icon && (
 					<span
 						aria-hidden
@@ -49,7 +57,12 @@ export function EmptyState({
 					<div className="text-xs text-muted-foreground leading-relaxed">{children}</div>
 				)}
 				{actions && (
-					<div className="flex flex-col items-center gap-3 pt-0.5 text-xs text-muted-foreground leading-relaxed">
+					<div
+						className={cn(
+							"flex flex-col gap-3 pt-0.5 text-xs text-muted-foreground leading-relaxed",
+							compact ? "mt-3 items-stretch self-stretch" : "items-center",
+						)}
+					>
 						{actions}
 					</div>
 				)}

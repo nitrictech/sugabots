@@ -1,9 +1,9 @@
 import {
-	MAX_WEBHOOK_FILTER_CONDITIONS,
+	MAX_WEBHOOK_FILTER_TESTS,
 	MAX_WEBHOOK_FILTER_TEXT_CHARACTERS,
 	MAX_WEBHOOK_FILTER_VALUES,
-	type WebhookCondition,
-	webhookConditionSchema,
+	type WebhookFilterTest,
+	webhookFilterTestSchema,
 } from "@sugabots/contracts";
 import { Option, Schema } from "effect";
 import { Trash2 } from "lucide-react";
@@ -16,21 +16,21 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { SettingsAddRow, SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 import { Textarea } from "@/ui/textarea.tsx";
 
-const decodeCondition = Schema.decodeOption(webhookConditionSchema);
+const decodeFilterTest = Schema.decodeOption(webhookFilterTestSchema);
 
 export function FilterGroup({
 	filter,
 	onChange,
 	onEditingChange,
 }: {
-	filter: readonly WebhookCondition[];
-	onChange: (filter: WebhookCondition[]) => Promise<unknown>;
+	filter: readonly WebhookFilterTest[];
+	onChange: (filter: WebhookFilterTest[]) => Promise<unknown>;
 	onEditingChange?: (editing: boolean) => void;
 }) {
 	const [editing, setEditing] = useState<number | "new">();
 	const saving = useSaving();
 	const { pending } = saving;
-	async function save(next: WebhookCondition[]) {
+	async function save(next: WebhookFilterTest[]) {
 		if (!(await saving.save(() => onChange(next)))) return;
 		setEditing(undefined);
 		onEditingChange?.(false);
@@ -47,37 +47,37 @@ export function FilterGroup({
 	return (
 		<SettingsGroup
 			label="Filter"
-			note="Every condition must match. Paths join JSON keys with dots, such as data.labels.name. Each value is a separate alternative; commas and whitespace are matched literally."
+			note="Every test must pass. Paths join JSON keys with dots, such as data.labels.name. Each value is a separate alternative; commas and whitespace are matched literally."
 		>
-			{filter.map((condition, index) =>
+			{filter.map((filterTest, index) =>
 				editing === index ? (
-					<ConditionEditor
-						key={JSON.stringify(condition)}
-						condition={condition}
+					<FilterTestEditor
+						key={JSON.stringify(filterTest)}
+						filterTest={filterTest}
 						pending={pending}
 						onSave={(next) => void save(filter.map((saved, at) => (at === index ? next : saved)))}
 						onCancel={cancel}
 					/>
 				) : (
 					<SettingsRow
-						// biome-ignore lint/suspicious/noArrayIndexKey: saved rows hold no drafts; the active editor is keyed by its condition.
+						// biome-ignore lint/suspicious/noArrayIndexKey: saved rows hold no drafts; the active editor is keyed by its test.
 						key={index}
-						label={<span className="font-mono">{condition.path}</span>}
-						sub={condition.oneOf.map((value) => JSON.stringify(value)).join(", ")}
+						label={<span className="font-mono">{filterTest.path}</span>}
+						sub={filterTest.oneOf.map((value) => JSON.stringify(value)).join(", ")}
 						trailing={
 							<div className="flex items-center gap-2">
 								<Button
 									type="button"
 									variant="secondary"
 									size="sm"
-									aria-label={`Edit condition ${index + 1}`}
+									aria-label={`Edit test ${index + 1}`}
 									disabled={pending || editing !== undefined}
 									onClick={() => beginEditing(index)}
 								>
 									Edit
 								</Button>
 								<IconButton
-									label={`Remove condition ${index + 1}`}
+									label={`Remove test ${index + 1}`}
 									disabled={pending || editing !== undefined}
 									onClick={() => void save(filter.filter((_, at) => at !== index))}
 								>
@@ -89,17 +89,17 @@ export function FilterGroup({
 				),
 			)}
 			{editing === "new" ? (
-				<ConditionEditor
+				<FilterTestEditor
 					pending={pending}
 					onSave={(next) => void save([...filter, next])}
 					onCancel={cancel}
 				/>
-			) : editing === undefined && !pending && filter.length < MAX_WEBHOOK_FILTER_CONDITIONS ? (
-				<SettingsAddRow label="Add condition" onClick={() => beginEditing("new")} />
+			) : editing === undefined && !pending && filter.length < MAX_WEBHOOK_FILTER_TESTS ? (
+				<SettingsAddRow label="Add test" onClick={() => beginEditing("new")} />
 			) : null}
-			{filter.length >= MAX_WEBHOOK_FILTER_CONDITIONS && (
+			{filter.length >= MAX_WEBHOOK_FILTER_TESTS && (
 				<p className="m-0 px-4 py-3 text-muted-foreground text-xs">
-					At most {MAX_WEBHOOK_FILTER_CONDITIONS} conditions.
+					At most {MAX_WEBHOOK_FILTER_TESTS} tests.
 				</p>
 			)}
 			{saving.failure !== undefined && <Alert>{failureMessage(saving.failure)}</Alert>}
@@ -107,23 +107,23 @@ export function FilterGroup({
 	);
 }
 
-function ConditionEditor({
-	condition,
+function FilterTestEditor({
+	filterTest,
 	pending,
 	onSave,
 	onCancel,
 }: {
-	condition?: WebhookCondition;
+	filterTest?: WebhookFilterTest;
 	pending: boolean;
-	onSave: (condition: WebhookCondition) => void;
+	onSave: (filterTest: WebhookFilterTest) => void;
 	onCancel: () => void;
 }) {
 	const pathId = useId();
-	const [path, setPath] = useState(condition?.path ?? "");
+	const [path, setPath] = useState(filterTest?.path ?? "");
 	const [values, setValues] = useState(() =>
-		(condition?.oneOf ?? [""]).map((text) => ({ id: crypto.randomUUID(), text })),
+		(filterTest?.oneOf ?? [""]).map((text) => ({ id: crypto.randomUUID(), text })),
 	);
-	const decoded = decodeCondition({ path, oneOf: values.map((value) => value.text) });
+	const decoded = decodeFilterTest({ path, oneOf: values.map((value) => value.text) });
 	return (
 		<fieldset
 			disabled={pending}
@@ -133,7 +133,7 @@ function ConditionEditor({
 					event.preventDefault();
 			}}
 		>
-			<legend className="sr-only">{condition ? "Edit condition" : "New condition"}</legend>
+			<legend className="sr-only">{filterTest ? "Edit test" : "New test"}</legend>
 			<label htmlFor={pathId} className="text-foreground text-xs">
 				JSON path
 			</label>
@@ -189,7 +189,7 @@ function ConditionEditor({
 			</p>
 			<div className="flex justify-end gap-2">
 				<Button type="button" variant="secondary" onClick={onCancel}>
-					Cancel condition
+					Cancel test
 				</Button>
 				<Button
 					type="button"
@@ -198,7 +198,7 @@ function ConditionEditor({
 						if (Option.isSome(decoded)) onSave(decoded.value);
 					}}
 				>
-					Save condition
+					Save test
 				</Button>
 			</div>
 		</fieldset>

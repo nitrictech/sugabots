@@ -1,12 +1,12 @@
 ---
 title: Projects
-description: Long-running work shared by many people and many bots, in threads, with the files made there.
+description: Long-running work shared by many people and many bots, in chats, with the files made there.
 ---
 
 A project is where a group works on something together: a team, a family, a
 flat, a launch. It has its people and its bots, led by one **lead bot**, its
-**threads**, where they talk, and the **files** made there. A project is made
-of its threads, each one conversation, such as one bug, one trip or one week's
+**chats**, where they talk, and the **files** made there. A project is made
+of its chats, each one chat, such as one bug, one trip or one week's
 report, that lasts as long as people keep it going.
 
 <ProjectMap />
@@ -24,15 +24,15 @@ The owner and admins are in every project people made, public or private.
 
 ## Make a project
 
-Owners, admins and members can make projects from the project directory. Give
+Owners, admins and editors can make projects from the project directory. Give
 it a name like "Support", a line saying what it's for, choose its lead bot, and
-choose public or private. You're its first member, and the lead bot its first
+choose public or private. You're the first person in it, and the lead bot its first
 bot.
 
 The sidebar lists the projects you're in, one row each, as it lists bots.
 Choose one to open it: its own sidebar takes the place of the list, with its
-threads, its **Files** and **Automations**, and the way back to everything. A
-new project has no threads until someone starts one.
+chats, its **Files** and **Automations**, and the way back to everything. A
+new project has no chats until someone starts one.
 
 ## People
 
@@ -53,47 +53,48 @@ made private leaves every project people made that it was in.
 ## Lead bot
 
 Every project has one **lead bot**, chosen from the public bots, which works on
-the project and answers its threads unless another is asked. Mention one or
+the project and answers its chats unless another is asked. Mention one or
 more bots by handle and each of them answers at once, or reply to a bot's
 message and that bot answers. A message that mentions only people is read by
 the lead bot, if it has a model, which answers only if it can help and
 otherwise reacts 👀. If the lead bot has no model, the message is posted
 without a bot reply. Any other message the lead bot answers. See
-[Conversations](/docs/conversations#who-answers).
+[Chats](/docs/chats#who-answers).
 
 The owner and admins can choose another lead bot in the project's settings.
 The lead bot stays in the project until another is chosen: it can't be taken
 out of it, made private or deleted before then. A project made before projects
 had lead bots, which had no bots then, asks for one when it's opened.
 
-## Threads
+## Chats
 
-Anyone in the project can start a thread with **New thread** in the project's
+Anyone in the project can start a chat with **New chat** in the project's
 own sidebar, or beside the project's row in the sidebar, by writing its first
 message, which is answered like any other (see
-[who answers](/docs/conversations#who-answers)). Everyone in the project sees
-every thread, with all the project's people and bots in it.
+[who answers](/docs/chats#who-answers)). Everyone in the project sees
+every chat, with all the project's people and bots in it.
 
-The project's own sidebar lists its threads, the most recently active first,
+The project's own sidebar lists its chats, the most recently active first,
 and can search them or show only some. Opening the project opens its newest
-thread, or, while it has none, starts one.
+chat, or, while it has none, starts one.
 
-Anyone in a thread can mark it done once its work is finished. The owner and
-admins can rename a thread, or archive it, which takes it off the list.
+Anyone in a chat can mark it resolved once its work is finished, which
+moves it to the Resolved list at the foot, where it can be reopened. The
+owner and admins can rename a chat.
 
 ## Files
 
-A project's **Files** are the ones uploaded or made in its threads. Everyone in the project can open them. The owner and admins can delete
+A project's **Files** are the ones uploaded or made in its chats. Everyone in the project can open them. The owner and admins can delete
 them.
 
 ## Computer
 
 A project has one online **computer**, a machine its bots run commands on,
-keep files on and browse from while they work in its threads. It's made the
-first time one of its bots needs it, kept between threads, and paused when
-idle. A bot working in this project's threads uses this computer, not its own,
+keep files on and browse from while they work in its chats. It's made the
+first time one of its bots needs it, kept between chats, and paused when
+idle. A bot working in this project's chats uses this computer, not its own,
 so everything done for the project stays on the project's machine. Each bot
-keeps a home folder of its own there, and each thread a folder of its own.
+keeps a home folder of its own there, and each chat a folder of its own.
 
 A bot uses a computer only if its creator or an admin let it, in the bot's
 settings, and only while the workspace has a computer provider set up.
@@ -104,11 +105,11 @@ admins, who can change the project, choose which internet addresses its
 computer may reach beyond the workspace's, reset or upgrade it, and allow its
 bots' requests to reach more.
 
-## Connections
+## Connectors
 
-A project has its own [connections](/docs/connections): the apps and APIs its
+A project has its own [connectors](/docs/connectors): the services and APIs its
 bots work with, and at most one GitHub app. A bot working in the project's
-threads uses the project's connections and its own; where both have one with
+chats uses the project's connectors and its own; where both have one with
 the same name, the project's is used. The owner and admins add and manage
 them, and everyone in the project can see which ones it has.
 
@@ -116,7 +117,7 @@ them, and everyone in the project can see which ones it has.
 
 A project has its own [automations](/docs/automations): work its lead bot does
 on its own, on a timetable or when something calls it, posting in the
-automation's feed, on the project's computer and with its connections. The owner and admins
+automation's feed, on the project's computer and with its connectors. The owner and admins
 make and change them; everyone in the project can see them and their runs, and
 anyone but viewers can run one now.
 
@@ -126,7 +127,7 @@ The owner and admins can rename a project, change what it's for, and delete it.
 
 <Careful title="Deleting a project">
 
-**Delete project** removes its threads, files, connections and automations,
+**Delete project** removes its chats, files, connectors and automations,
 and destroys its computer with everything on it. Its bots stay in the workspace. It can't be undone.
 
 </Careful>

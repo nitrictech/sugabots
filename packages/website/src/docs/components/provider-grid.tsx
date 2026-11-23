@@ -1,4 +1,4 @@
-import { type ProviderPreset, providerCatalog } from "@sugabots/contracts";
+import { type BuiltInProvider, builtInProviders } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
 import { useState } from "react";
 import { Reveal, RevealItem } from "@/components/reveal";
@@ -12,16 +12,16 @@ const filterLabels = {
 
 type Filter = keyof typeof filterLabels;
 
-const filterMatches: Record<Filter, (preset: ProviderPreset) => boolean> = {
+const filterMatches: Record<Filter, (builtIn: BuiltInProvider) => boolean> = {
 	all: () => true,
-	remote: (preset) => preset.hosting === "remote",
-	local: (preset) => preset.hosting === "local",
+	remote: (builtIn) => builtIn.hosting === "remote",
+	local: (builtIn) => builtIn.hosting === "local",
 };
 
-/** Every model provider Sugabots has a preset for, straight from its catalog, filterable by where it runs. */
+/** Every built-in model provider, straight from the list Sugabots ships, filterable by where it runs. */
 export function ProviderGrid() {
 	const [filter, setFilter] = useState<Filter>("all");
-	const shown = providerCatalog.filter(filterMatches[filter]);
+	const shown = builtInProviders.filter(filterMatches[filter]);
 
 	return (
 		<div className="my-8 flex flex-col gap-4">
@@ -39,17 +39,17 @@ export function ProviderGrid() {
 				viewport={{ once: true, amount: "some" }}
 				className="grid gap-2 sm:grid-cols-2"
 			>
-				{shown.map((preset) => (
+				{shown.map((builtIn) => (
 					<RevealItem
-						key={preset.id}
+						key={builtIn.id}
 						className="flex items-start gap-3 rounded-2xl bg-card p-3.5 ring-1 ring-foreground/10"
 					>
 						<span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-background ring-1 ring-foreground/10">
-							<ProviderLogo preset={preset.id} className="size-5" />
+							<ProviderLogo builtIn={builtIn.id} className="size-5" />
 						</span>
 						<span className="flex min-w-0 flex-col">
-							<span className="font-semibold">{preset.name}</span>
-							<span className="text-sm text-muted-foreground text-pretty">{preset.hint}</span>
+							<span className="font-semibold">{builtIn.name}</span>
+							<span className="text-sm text-muted-foreground text-pretty">{builtIn.hint}</span>
 						</span>
 					</RevealItem>
 				))}

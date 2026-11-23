@@ -9,7 +9,7 @@ import { EventStore } from "./store.ts";
  * provoke through a socket.
  */
 
-const STREAM = "conversation:c1";
+const STREAM = "chat:c1";
 
 function rawEvent(type: EventType, data: Record<string, unknown> = {}): StreamEvent {
 	return { ...data, v: EVENT_VERSION, type };
@@ -88,12 +88,12 @@ describe("publish and subscribe", () => {
 
 	it("keeps streams apart", async () => {
 		const events = bus();
-		const conversation = take(events.subscribe(STREAM), 1);
+		const chat = take(events.subscribe(STREAM), 1);
 
-		await events.publish("workspace:w1", rawEvent("conversation.created"));
+		await events.publish("workspace:w1", rawEvent("chat.created"));
 		await events.publish(STREAM, rawEvent("message.created"));
 
-		expect(types(await conversation)).toEqual(["message.created"]);
+		expect(types(await chat)).toEqual(["message.created"]);
 	});
 
 	it("numbers durable events and leaves deltas unnumbered", async () => {
@@ -228,7 +228,7 @@ describe("resume", () => {
 
 	it("resets an id that was never on this stream", async () => {
 		const events = bus();
-		await events.publish("workspace:w1", rawEvent("conversation.created"));
+		await events.publish("workspace:w1", rawEvent("chat.created"));
 
 		const stream = take(events.subscribe(STREAM, { since: 1 }), 1);
 		expect(types(await stream)).toEqual(["reset"]);

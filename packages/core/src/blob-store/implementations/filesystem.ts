@@ -7,12 +7,12 @@ import { BlobStore } from "../blob-store.ts";
 /**
  * Blobs as files under `root`, for a single server with a disk of its own.
  *
- * Each key is a directory: `threads/a/files/1` is `<root>/threads/a/files/1/`,
+ * Each key is a directory: `chats/a/files/1` is `<root>/chats/a/files/1/`,
  * holding the bytes in `.bytes` and the media type in `.content-type`, so a key
  * can name a blob and hold others beneath it at once. Each segment is
  * percent-encoded with its dots too, so no segment can be `..` or start with
  * the `.` that marks the files the store itself keeps. Deleting removes the
- * directories it leaves empty, so deleted conversations leave nothing behind.
+ * directories it leaves empty, so deleted chats leave nothing behind.
  *
  * `put` streams to temporary files, syncs them to disk and renames them into
  * place, so a reader never sees a blob half written and one that was put

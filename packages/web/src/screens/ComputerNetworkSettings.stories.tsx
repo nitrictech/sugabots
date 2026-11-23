@@ -15,7 +15,7 @@ const trustedHosts = [
 ];
 
 const settings: ComputerNetworkSettings = {
-	mode: "allowlist",
+	mode: "allowed-hosts-only",
 	blocking: true,
 	trustedHosts,
 	addedHosts: [
@@ -37,7 +37,7 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	args: {
-		modeRow: <SettingsRow label="Allowlist" sub="Only the hosts below" />,
+		modeRow: <SettingsRow label="Allowed hosts only" sub="Only the hosts below" />,
 		settings,
 		pending: false,
 		onAdd: fn(async () => undefined),
@@ -91,7 +91,13 @@ export const BlockedHosts = meta.story({
 /** Only the trusted hosts, listed once asked for. */
 export const TrustedOnly = meta.story({
 	args: {
-		settings: { mode: "allowlist", blocking: true, trustedHosts, addedHosts: [], blockedHosts: [] },
+		settings: {
+			mode: "allowed-hosts-only",
+			blocking: true,
+			trustedHosts,
+			addedHosts: [],
+			blockedHosts: [],
+		},
 	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByText("Trusted hosts"));

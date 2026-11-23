@@ -6,7 +6,7 @@ import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 /**
  * Whose project `projectId` is, as its pages show it: the bot whose default
  * project it is, else the project itself while the person is in it, since
- * only members open a project's pages. Undefined for a project neither list
+ * only its members open a project's pages. Undefined for a project neither list
  * has, or not yet.
  */
 export function ownerOfProject(
@@ -22,7 +22,7 @@ export function ownerOfProject(
 
 /**
  * Whose project `projectId` is (see `ownerOfProject`), from the roster and
- * the project list.
+ * the projects listed.
  */
 export function useOwnerOfProject(projectId: string): ResourceOwner | undefined {
 	const { bots } = useBots();

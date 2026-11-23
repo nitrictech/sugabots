@@ -50,7 +50,7 @@ export const asHttpError =
 
 /**
  * How core's refusals are answered, for the `asHttpError` of any endpoint
- * whose use case authorizes. Something the caller cannot reach is `NotFound`,
+ * whose operation authorizes. Something the caller cannot reach is `NotFound`,
  * so an id cannot be probed for; something they reach but may not act on is
  * `Forbidden`.
  */

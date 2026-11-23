@@ -27,14 +27,14 @@ describe.skipIf(!process.env.DATABASE_URL)("model requests, against Postgres", (
 
 	const started = (): ModelRequests.Started => ({
 		workspaceId: randomUUID(),
-		activity: {
-			purpose: "compaction",
-			conversationId: randomUUID(),
+		purpose: {
+			name: "compaction",
+			chatId: randomUUID(),
 			turnId: randomUUID(),
 		},
 		step: 0,
 		providerId: randomUUID(),
-		preset: "anthropic",
+		builtIn: "anthropic",
 		model: "claude-haiku-4-5",
 		startedAt: new Date("2026-09-28T10:00:00Z"),
 	});

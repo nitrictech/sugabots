@@ -1,14 +1,14 @@
 import { Schema } from "effect";
 
 /**
- * What a member may do in a workspace.
+ * What a person may do in a workspace.
  *
  * - `owner` is the one person who holds the workspace: an administrator who
  *   also decides who else administers it, and who alone can hand it on.
  *   Every workspace has exactly one, from the moment its creator makes it.
  * - `admin` administers the workspace, its people, its providers, every
  *   project and every bot.
- * - `member` makes bots and projects, and uses the public bots and the
+ * - `editor` makes bots and projects, and uses the public bots and the
  *   projects they are in.
  * - `viewer` reads and takes part in the projects they are in and with the
  *   public bots, and configures nothing.
@@ -20,7 +20,7 @@ import { Schema } from "effect";
  * The grants each role holds are in
  * `packages/core/src/authorization/permissions.ts`.
  */
-export const WORKSPACE_ROLES = ["owner", "admin", "member", "viewer"] as const;
+export const WORKSPACE_ROLES = ["owner", "admin", "editor", "viewer"] as const;
 
 export const workspaceRoleSchema = Schema.Literals(WORKSPACE_ROLES);
 
@@ -28,7 +28,7 @@ export const workspaceRoleSchema = Schema.Literals(WORKSPACE_ROLES);
  * The roles somebody can be invited with or given. Owner is not one: it
  * changes hands only by the owner transferring it, so there is always one.
  */
-export const ASSIGNABLE_WORKSPACE_ROLES = ["admin", "member", "viewer"] as const;
+export const ASSIGNABLE_WORKSPACE_ROLES = ["admin", "editor", "viewer"] as const;
 
 export const assignableWorkspaceRoleSchema = Schema.Literals(ASSIGNABLE_WORKSPACE_ROLES);
 
@@ -63,7 +63,7 @@ export type WorkspaceRole = typeof workspaceRoleSchema.Type;
 const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
 	owner: "Owner",
 	admin: "Admin",
-	member: "Member",
+	editor: "Editor",
 	viewer: "Viewer",
 };
 
@@ -75,15 +75,15 @@ const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
  * `packages/core/src/authorization/permissions.ts` — when those move, these are
  * the sentences that become lies, and they should be one edit away from them.
  *
- * Deliberately say what the role does rather than everything it cannot: a
- * Member does not change other people's bots, and a Viewer may still take
- * part in a conversation.
+ * Deliberately say what the role does rather than everything it cannot: an
+ * Editor does not change other people's bots, and a Viewer may still take
+ * part in a chat.
  */
 const WORKSPACE_ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
 	owner: "Administers the workspace, decides who else does, and can hand it on.",
 	admin:
 		"Administers the workspace, its providers, every project people made and every bot but others' Personal Assistants.",
-	member: "Makes bots and projects, and works with the public bots.",
+	editor: "Makes bots and projects, and works with the public bots.",
 	viewer: "Reads and takes part in projects and with public bots.",
 };
 
@@ -116,15 +116,15 @@ export const workspacePermissionsSchema = Schema.Struct({
 	/** Configure the model and search providers the workspace runs on. */
 	manageProviders: Schema.Boolean,
 	/** Invite, remove and set the access of the people in the workspace. */
-	manageMembers: Schema.Boolean,
+	managePeople: Schema.Boolean,
 	/** Choose the model Compaction runs on. */
-	configureBuiltInBots: Schema.Boolean,
+	chooseSystemModel: Schema.Boolean,
 	/** See what the workspace's models cost, and limit it. */
 	manageUsage: Schema.Boolean,
 	/** Make somebody an administrator or stop them being one, and remove an administrator. */
 	manageAdmins: Schema.Boolean,
-	/** Hand the workspace to another member, who becomes its owner. */
-	transferOwnership: Schema.Boolean,
+	/** Hand the workspace to another person in it, who becomes its owner. */
+	handOverOwnership: Schema.Boolean,
 	/** Delete the workspace and everything in it. */
 	deleteWorkspace: Schema.Boolean,
 });

@@ -71,7 +71,7 @@ export function NewAutomation({ owner }: { owner: ResourceOwner }) {
 
 /**
  * One of `owner`'s automations as its own page: how it is set up, under its
- * breadcrumb, with whether it runs and Run now at the top. Somebody who
+ * breadcrumb, with whether it runs and Start a run at the top. Somebody who
  * manages its automations without reaching the bot, as an administrator does
  * another person's private bot, changes it the same way, but how it ran is
  * not theirs to read.
@@ -103,7 +103,7 @@ export function AutomationSetup({
 			<BackToAutomations owner={owner} />
 			<AutomationPanel
 				owner={owner}
-				conversationId={listed?.conversation?.id}
+				chatId={listed?.chat?.id}
 				standing={{
 					id: automation.id,
 					projectId: automation.projectId,

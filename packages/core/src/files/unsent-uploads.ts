@@ -1,7 +1,7 @@
 export * as UnsentUploads from "./unsent-uploads.ts";
 
 import { Duration, Effect, Layer, Schedule } from "effect";
-import { ConversationFiles } from "./conversation-files.ts";
+import { ChatFileStore } from "./chat-file-store.ts";
 
 /** How long an upload may wait to be attached to a message before it is removed. */
 const UNSENT_FOR = Duration.hours(24);
@@ -16,7 +16,7 @@ const INTERVAL = Duration.hours(1);
  */
 export const layer = Layer.effectDiscard(
 	Effect.gen(function* () {
-		const files = yield* ConversationFiles.Service;
+		const files = yield* ChatFileStore.Service;
 		yield* Effect.forkScoped(
 			files.removeUnsentUploads(UNSENT_FOR).pipe(
 				Effect.catchCause((cause) => Effect.logError("Removing unsent uploads failed", cause)),
@@ -24,4 +24,4 @@ export const layer = Layer.effectDiscard(
 			),
 		);
 	}),
-).pipe(Layer.provide(ConversationFiles.layer));
+).pipe(Layer.provide(ChatFileStore.layer));

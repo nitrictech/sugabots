@@ -64,7 +64,7 @@ quiet_edge="$(mix "$accent" "#e2e2df" 70)"
 quiet_ink="#6b6a66"
 
 # Every file here is written under another name and moved into place: the
-# bot's desktops in other conversations share the home, and may be reading it.
+# bot's desktops in other chats share the home, and may be reading it.
 render() {
 	local file="$1" width="$2" height="$3" content="$4"
 	printf '<svg xmlns="http://www.w3.org/2000/svg" width="%s" height="%s">%s</svg>' \

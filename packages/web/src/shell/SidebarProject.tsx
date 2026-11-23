@@ -1,8 +1,8 @@
-import type { NotificationSettings, Project, ProjectMarker } from "@sugabots/contracts";
+import type { AttentionMark, NotificationSettings, Project } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
 import { Lock, Plus } from "lucide-react";
-import { projectLink, projectNewThreadLink, projectSettingsLink } from "@/lib/links.ts";
+import { projectLink, projectNewChatLink, projectSettingsLink } from "@/lib/links.ts";
 import { ownerMarkTransition } from "@/lib/owner-mark.ts";
 import { useOwnerProblems } from "@/lib/owner-pages.ts";
 import { projectPalettes } from "@/lib/project-looks.ts";
@@ -13,15 +13,15 @@ import { IconButton } from "@/ui/icon-button.tsx";
 import { initialOf } from "@/ui/letter-tile.tsx";
 import { SettingsIcon } from "@/ui/settings-icon.tsx";
 
-/** A project the viewer is in, with how its threads stand for them. */
-export type ProjectStanding = ProjectMarker & { project: Project };
+/** A project the viewer is in, with how its chats stand for them. */
+export type ProjectStanding = AttentionMark & { project: Project };
 
 /**
  * A project in the sidebar: one row, as a bot is, whose name opens the
- * project, where its threads are listed beside the rail. It says how much is
+ * project, where its chats are listed beside the rail. It says how much is
  * new in it, with an alert beside that while something is wrong that its
  * settings or automations set right, as a bot's row has, and is shaded while
- * the page open is in it. Under the pointer or on focus, New thread and its
+ * the page open is in it. Under the pointer or on focus, New chat and its
  * settings come in at the end. Right-clicked, it
  * offers its notifications. A private project's name carries a lock.
  */
@@ -80,9 +80,9 @@ export function SidebarProject({
 					</span>
 				)}
 				<IconButton
-					label={`New thread in ${project.name}`}
+					label={`New chat in ${project.name}`}
 					size="sm"
-					render={<Link {...projectNewThreadLink(project)} />}
+					render={<Link {...projectNewChatLink(project)} />}
 					className="hidden group-hover/project:grid group-has-focus-visible/project:grid"
 				>
 					<Plus strokeWidth={2.2} />
@@ -146,7 +146,7 @@ export function ProjectInitial({
 	 * `sm` is a quieter mark for a row that names its project: the letter in the
 	 * project's colour on a tint of it. `row` heads a settings row, `nav` is
 	 * the sidebar row's and the icon rail's alike, `lg` stands beside the title of the project's own
-	 * settings, and `xl` heads a thread's details on a phone.
+	 * settings, and `xl` heads a chat's details on a phone.
 	 */
 	size?: keyof typeof PROJECT_INITIAL_SIZES;
 	className?: string;

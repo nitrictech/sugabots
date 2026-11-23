@@ -3,7 +3,7 @@ const WEEK_DAYS = 7;
 const YESTERDAY = "Yesterday";
 
 /**
- * When a message was sent, as a conversation list shows it: the time for
+ * When a message was sent, as a chat list shows it: the time for
  * today, "Yesterday", the weekday within the week, then the date, with the
  * year only when it is not this one. Inside a sentence, use
  * {@link formatListTimeInSentence}.
@@ -72,7 +72,7 @@ function wholeMonthsBetween(from: Date, to: Date): number {
 
 /**
  * The hour and minute without an AM or PM, as the design writes times: "6:12".
- * The day beside it, or the conversation around it, makes the period plain.
+ * The day beside it, or the chat around it, makes the period plain.
  */
 export function formatClockTime(at: Date, locale?: string): string {
 	return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" })

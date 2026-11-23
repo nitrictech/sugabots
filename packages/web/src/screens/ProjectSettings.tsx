@@ -23,11 +23,11 @@ import {
 	useUpdateProject,
 } from "@/lib/projects.ts";
 import { useSession } from "@/lib/session.ts";
-import { useWorkspaceMembers } from "@/lib/workspace.ts";
+import { useMemberships } from "@/lib/workspace.ts";
+import { ProjectColourPicker } from "@/shell/AvatarPicker.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { OwnerCrumb, OwnerPageCrumb } from "@/shell/BotCrumb.tsx";
-import { LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
-import { ProjectColourPicker } from "@/shell/LookPicker.tsx";
+import { BotMenuItem, LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
@@ -65,9 +65,9 @@ const SECTION_TITLES = {
 } as const satisfies Record<ProjectSettingsSection, string>;
 
 /**
- * One project's settings, as pages of its own beside its threads: its own,
+ * One project's settings, as pages of its own beside its chats: its own,
  * its lead bot among them, with its people and its bots each a page under
- * it. Its computer and connections are pages of the project's own. Only
+ * it. Its computer and connectors are pages of the project's own. Only
  * public bots can be added, and a bot made private leaves its projects,
  * unless it leads one.
  */
@@ -114,7 +114,7 @@ function ProjectSettingsSectionContent({
 			return (
 				<SettingsPage
 					description={`Who is in ${project.name}.`}
-					headerAction={project.permissions.manageMembers && <AddPeopleButton project={project} />}
+					headerAction={project.permissions.managePeople && <AddPeopleButton project={project} />}
 				>
 					<Members project={project} />
 				</SettingsPage>
@@ -161,7 +161,7 @@ function ProjectDetails({ project }: { project: Project }) {
 			{may.rename && (
 				<SettingsGroup
 					label="Lead bot"
-					note="Answers the project's threads unless people mention another bot, and reads those that mention only people."
+					note="Answers the project's chats unless people mention another bot, and reads those that mention only people."
 				>
 					<SettingsControlRow label="Lead bot">
 						<LeadBotPicker
@@ -240,7 +240,7 @@ function ProjectDetails({ project }: { project: Project }) {
 			{may.delete && (
 				<SettingsDanger
 					label="Delete project"
-					description="Removes its threads and files."
+					description="Removes its chats and files."
 					action="Delete"
 					onClick={() => setConfirmingDelete(true)}
 				/>
@@ -249,7 +249,7 @@ function ProjectDetails({ project }: { project: Project }) {
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
 				title={`Delete ${project.name}?`}
-				description="Its threads and files will be deleted. This can't be undone."
+				description="Its chats and files will be deleted. This can't be undone."
 				pending={remove.isPending}
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={deleteProject}
@@ -288,15 +288,11 @@ function ProjectBots({ project }: { project: Project }) {
 								<DropdownMenuItem disabled>Every public bot is here.</DropdownMenuItem>
 							) : (
 								addable.map((bot) => (
-									<DropdownMenuItem
+									<BotMenuItem
 										key={bot.id}
+										bot={bot}
 										onClick={() => place.mutate({ botId: bot.id, added: true })}
-									>
-										<span aria-hidden>
-											<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={22} />
-										</span>
-										<span className="min-w-0 flex-1 truncate">{bot.name}</span>
-									</DropdownMenuItem>
+									/>
 								))
 							)}
 						</DropdownMenuContent>
@@ -314,7 +310,7 @@ function ProjectBots({ project }: { project: Project }) {
 				{bots.data?.map((bot) => (
 					<SettingsRow
 						key={bot.id}
-						icon={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={24} />}
+						icon={<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={24} />}
 						// The name opens the bot's settings and Remove sits beside it, so no button is inside a link.
 						label={
 							<Link {...botSettingsLink(bot)} className="focus-ring rounded-sm hover:underline">
@@ -350,29 +346,29 @@ function ProjectBots({ project }: { project: Project }) {
  */
 function Members({ project }: { project: Project }) {
 	const members = useProjectMembers(project.id);
-	const workspaceMembers = useWorkspaceMembers(project.workspaceId);
+	const memberships = useMemberships(project.workspaceId);
 	const remove = usePlaceProjectMember(project.id);
 	const leave = useLeaveProject(project.id);
 	const navigate = useNavigate();
 	const [removing, setRemoving] = useState<ProjectMember>();
 	const session = useSession();
-	const roleOf = (userId: string) =>
-		workspaceMembers.data?.find((member) => member.user.id === userId)?.role;
-	const isYou = (userId: string) => userId === session.user?.id;
+	const roleOf = (personId: string) =>
+		memberships.data?.find((membership) => membership.person.id === personId)?.role;
+	const isYou = (personId: string) => personId === session.person?.id;
 	const mayTakeOut = (member: ProjectMember) =>
-		isYou(member.userId)
+		isYou(member.personId)
 			? project.permissions.leave
-			: project.permissions.manageMembers && member.removable;
-	const leaving = removing !== undefined && isYou(removing.userId);
+			: project.permissions.managePeople && member.removable;
+	const leaving = removing !== undefined && isYou(removing.personId);
 	const pending = leaving ? leave : remove;
 
 	async function takeOut(member: ProjectMember) {
-		const isLeaving = isYou(member.userId);
+		const isLeaving = isYou(member.personId);
 		try {
 			if (isLeaving) {
 				await leave.mutateAsync();
 			} else {
-				await remove.mutateAsync({ userId: member.userId, member: false });
+				await remove.mutateAsync({ personId: member.personId, member: false });
 			}
 		} catch {
 			return;
@@ -389,21 +385,21 @@ function Members({ project }: { project: Project }) {
 	} else {
 		rows = members.data?.map((member) => (
 			<SettingsRow
-				key={member.userId}
+				key={member.personId}
 				icon={<PersonAvatar person={member} size={24} />}
 				label={member.name}
 				trailing={
 					<>
 						<SettingsValue>
-							{isYou(member.userId)
+							{isYou(member.personId)
 								? "You"
 								: // Said once the workspace roster has answered, not guessed before it.
-									workspaceMembers.data && workspaceRoleLabel(roleOf(member.userId))}
+									memberships.data && workspaceRoleLabel(roleOf(member.personId))}
 						</SettingsValue>
 						{mayTakeOut(member) && (
 							<IconButton
 								variant="destructive"
-								label={isYou(member.userId) ? `Leave ${project.name}` : `Remove ${member.name}`}
+								label={isYou(member.personId) ? `Leave ${project.name}` : `Remove ${member.name}`}
 								disabled={remove.isPending || leave.isPending}
 								onClick={() => setRemoving(member)}
 							>
@@ -431,8 +427,8 @@ function Members({ project }: { project: Project }) {
 				}
 				description={
 					leaving
-						? "You leave its threads. If it's public, you can join again."
-						: "They leave its threads. You can add them back at any time."
+						? "You leave its chats. If it's public, you can join again."
+						: "They leave its chats. You can add them back at any time."
 				}
 				confirmLabel={leaving ? "Leave" : "Remove"}
 				pending={pending.isPending}
@@ -452,10 +448,11 @@ function Members({ project }: { project: Project }) {
  */
 function AddPeopleButton({ project }: { project: Project }) {
 	const members = useProjectMembers(project.id);
-	const workspaceMembers = useWorkspaceMembers(project.workspaceId);
+	const memberships = useMemberships(project.workspaceId);
 	const invite = usePlaceProjectMember(project.id);
-	const inProject = new Set(members.data?.map((member) => member.userId));
-	const invitable = workspaceMembers.data?.filter((member) => !inProject.has(member.user.id)) ?? [];
+	const inProject = new Set(members.data?.map((member) => member.personId));
+	const invitable =
+		memberships.data?.filter((membership) => !inProject.has(membership.person.id)) ?? [];
 	return (
 		<div className="flex flex-col items-end gap-2">
 			<DropdownMenu>
@@ -463,21 +460,21 @@ function AddPeopleButton({ project }: { project: Project }) {
 					Add people
 				</SettingsAddButton>
 				<DropdownMenuContent align="end" className="min-w-52">
-					{workspaceMembers.isPending ? (
+					{memberships.isPending ? (
 						<DropdownMenuItem disabled>Loading…</DropdownMenuItem>
 					) : invitable.length === 0 ? (
 						<DropdownMenuItem disabled>Everyone in the workspace is here.</DropdownMenuItem>
 					) : (
-						invitable.map((member) => (
+						invitable.map((membership) => (
 							<DropdownMenuItem
-								key={member.user.id}
-								onClick={() => invite.mutate({ userId: member.user.id, member: true })}
+								key={membership.person.id}
+								onClick={() => invite.mutate({ personId: membership.person.id, member: true })}
 							>
 								{/* Hidden from the name, or the initials would read as part of it. */}
 								<span aria-hidden>
-									<PersonAvatar person={member.user} size={22} />
+									<PersonAvatar person={membership.person} size={22} />
 								</span>
-								<span className="min-w-0 flex-1 truncate">{member.user.name}</span>
+								<span className="min-w-0 flex-1 truncate">{membership.person.name}</span>
 							</DropdownMenuItem>
 						))
 					)}

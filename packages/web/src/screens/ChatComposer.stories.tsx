@@ -28,7 +28,7 @@ const issueTriager = {
 	name: "Issue Triager",
 	handle: "issue-triager",
 	color: "green",
-	face: "arc",
+	eyes: "arc",
 	shape: "circle",
 } as const;
 
@@ -38,7 +38,7 @@ const workspace = {
 	name: "Nitric",
 	slug: "nitric",
 	timeZone: "UTC",
-	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+	setUpAt: "2026-09-01T00:00:00.000Z",
 };
 
 const sam = testPerson({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam Rivera" });
@@ -54,7 +54,7 @@ const mentionable: Participant[] = [
 		name: "Linear Handler",
 		handle: "linear-handler",
 		color: "orange",
-		face: "dot",
+		eyes: "dot",
 		shape: "circle",
 	},
 	sam,
@@ -72,7 +72,7 @@ const meta = preview.meta({
 		submitLabel: "Send message",
 		mentionable: [
 			...mentionable,
-			...groupMentionsBy({ kind: "person", id: WRITER_ID }, [sam], "project_thread"),
+			...groupMentionsBy({ kind: "person", id: WRITER_ID }, [sam], "project_chat"),
 		],
 		attachments: withFiles([]),
 	},
@@ -122,7 +122,7 @@ export const LongDraft = meta.story({
 			"Please summarise the customer feedback from the last sprint.",
 			"Highlight anything we should act on today.",
 			"Group the rest by theme so we can plan next week.",
-			"Then post the summary back in this conversation.",
+			"Then post the summary back in this chat.",
 			"Mention anyone who already has a fix in flight.",
 			"Finish with the three things you would do first.",
 			"Keep it short enough to read on a phone.",
@@ -460,7 +460,7 @@ export const ReplyingTo = meta.story({
 });
 
 /**
- * Before a new thread exists there is nowhere to upload to, so the composer
+ * Before a new chat exists there is nowhere to upload to, so the composer
  * has no attachments: Upload files is off, and a pasted file writes nothing
  * into the draft.
  */

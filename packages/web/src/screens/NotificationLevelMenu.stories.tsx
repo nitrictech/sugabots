@@ -32,10 +32,10 @@ async function chooseAndClose(item: HTMLElement) {
 }
 
 /*
- * Inbox, as a page with the whole sidebar: on a bot's or project's own pages
+ * Approvals, as a page with the whole sidebar: on a bot's or project's own pages
  * the sidebar narrows to their icons, which have no menu.
  */
-const inboxPath = `/${storyWorkspace.slug}/inbox`;
+const approvalsPath = `/${storyWorkspace.slug}/approvals`;
 
 const meta = preview.meta({
 	title: "Views/NotificationLevelMenu",
@@ -95,7 +95,7 @@ const meta = preview.meta({
  * Nothing marks it muted, until it goes back to following its project.
  */
 export const MutingABot = meta.story({
-	render: () => <StoryApp path={inboxPath} />,
+	render: () => <StoryApp path={approvalsPath} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);
@@ -117,7 +117,7 @@ export const MutingABot = meta.story({
  * and the same menu then offers to unmute it.
  */
 export const MutingABotForAWhile = meta.story({
-	render: () => <StoryApp path={inboxPath} />,
+	render: () => <StoryApp path={approvalsPath} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);
@@ -135,7 +135,7 @@ export const MutingABotForAWhile = meta.story({
 
 /** More options ends with the way to every notification setting. */
 export const OpeningNotificationSettings = meta.story({
-	render: () => <StoryApp path={inboxPath} />,
+	render: () => <StoryApp path={approvalsPath} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);

@@ -9,14 +9,14 @@ import { Data, Effect, Schema } from "effect";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
 import { upstreamErrorText } from "../upstream-error-text.ts";
-import type { SearchConnection } from "./search-connection.ts";
+import type { SearchProviderAccess } from "./search-provider-access.ts";
 
 /**
  * The search services `web_search` knows how to call, one function each.
  *
  * Every backend takes the same request and answers the same shape, so the
  * tool and the settings test are written once. A failure is an answer with a
- * reason, never a throw: the bot, or the admin testing the connection,
+ * reason, never a throw: the bot, or the admin testing the provider,
  * reads it as a sentence, and the bot also gets what the service said.
  */
 
@@ -50,30 +50,28 @@ export const MAX_SEARCH_RESULTS = 10;
 const SEARCH_TIMEOUT_MS = 10_000;
 
 /**
- * Where a connection's searches go, which is what its egress client is bound
+ * Where a provider access's searches go, which is what its egress client is bound
  * to. Exa without a key is the one case where that is not the provider's
  * configured address.
  */
-export function searchEndpoint(connection: SearchConnection): string {
-	return connection.preset === "exa" && !connection.apiKey
-		? EXA_FREE_SEARCH_URL
-		: connection.baseUrl;
+export function searchEndpoint(access: SearchProviderAccess): string {
+	return access.builtIn === "exa" && !access.apiKey ? EXA_FREE_SEARCH_URL : access.baseUrl;
 }
 
-/** The backend for a workspace's connection, calling through its bound egress client. */
+/** The backend for a workspace's provider access, calling through its bound egress client. */
 export function searchBackend(
-	connection: SearchConnection,
+	access: SearchProviderAccess,
 	fetch: EgressHttpClient,
 ): SearchBackend {
-	switch (connection.preset) {
+	switch (access.builtIn) {
 		case "brave":
-			return braveSearch(connection, fetch);
+			return braveSearch(access, fetch);
 		case "exa":
-			return connection.apiKey ? exaSearch(connection, fetch) : exaFreeSearch(fetch);
+			return access.apiKey ? exaSearch(access, fetch) : exaFreeSearch(fetch);
 		case "tavily":
-			return tavilySearch(connection, fetch);
+			return tavilySearch(access, fetch);
 		case "searxng":
-			return searxngSearch(connection, fetch);
+			return searxngSearch(access, fetch);
 	}
 }
 
@@ -93,9 +91,9 @@ const braveResponse = Schema.Struct({
 	),
 });
 
-function braveSearch(connection: SearchConnection, fetch: EgressHttpClient): SearchBackend {
+function braveSearch(access: SearchProviderAccess, fetch: EgressHttpClient): SearchBackend {
 	return ({ query, count, signal }) => {
-		const url = new URL(`${connection.baseUrl.replace(/\/$/, "")}/web/search`);
+		const url = new URL(`${access.baseUrl.replace(/\/$/, "")}/web/search`);
 		url.searchParams.set("q", query);
 		url.searchParams.set("count", String(count));
 		return answer("Brave Search", signal, async (stop) => {
@@ -103,11 +101,11 @@ function braveSearch(connection: SearchConnection, fetch: EgressHttpClient): Sea
 				signal: stop,
 				headers: {
 					accept: "application/json",
-					"x-subscription-token": connection.apiKey ?? "",
+					"x-subscription-token": access.apiKey ?? "",
 				},
 			});
 			if (!response.ok) {
-				return httpRefusal("Brave Search", response, connection.apiKey);
+				return httpRefusal("Brave Search", response, access.apiKey);
 			}
 			const parsed = Schema.decodeUnknownResult(braveResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -137,9 +135,9 @@ const exaResponse = Schema.Struct({
 	),
 });
 
-function exaSearch(connection: SearchConnection, fetch: EgressHttpClient): SearchBackend {
+function exaSearch(access: SearchProviderAccess, fetch: EgressHttpClient): SearchBackend {
 	return ({ query, count, signal }) => {
-		const url = `${connection.baseUrl.replace(/\/$/, "")}/search`;
+		const url = `${access.baseUrl.replace(/\/$/, "")}/search`;
 		return answer("Exa", signal, async (stop) => {
 			const response = await fetch(url, {
 				method: "POST",
@@ -147,7 +145,7 @@ function exaSearch(connection: SearchConnection, fetch: EgressHttpClient): Searc
 				headers: {
 					accept: "application/json",
 					"content-type": "application/json",
-					"x-api-key": connection.apiKey ?? "",
+					"x-api-key": access.apiKey ?? "",
 				},
 				body: JSON.stringify({
 					query,
@@ -158,7 +156,7 @@ function exaSearch(connection: SearchConnection, fetch: EgressHttpClient): Searc
 				}),
 			});
 			if (!response.ok) {
-				return httpRefusal("Exa", response, connection.apiKey);
+				return httpRefusal("Exa", response, access.apiKey);
 			}
 			const parsed = Schema.decodeUnknownResult(exaResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -188,9 +186,9 @@ const tavilyResponse = Schema.Struct({
 	),
 });
 
-function tavilySearch(connection: SearchConnection, fetch: EgressHttpClient): SearchBackend {
+function tavilySearch(access: SearchProviderAccess, fetch: EgressHttpClient): SearchBackend {
 	return ({ query, count, signal }) => {
-		const url = `${connection.baseUrl.replace(/\/$/, "")}/search`;
+		const url = `${access.baseUrl.replace(/\/$/, "")}/search`;
 		return answer("Tavily", signal, async (stop) => {
 			const response = await fetch(url, {
 				method: "POST",
@@ -198,12 +196,12 @@ function tavilySearch(connection: SearchConnection, fetch: EgressHttpClient): Se
 				headers: {
 					accept: "application/json",
 					"content-type": "application/json",
-					authorization: `Bearer ${connection.apiKey ?? ""}`,
+					authorization: `Bearer ${access.apiKey ?? ""}`,
 				},
 				body: JSON.stringify({ query, max_results: count, search_depth: "basic" }),
 			});
 			if (!response.ok) {
-				return httpRefusal("Tavily", response, connection.apiKey);
+				return httpRefusal("Tavily", response, access.apiKey);
 			}
 			const parsed = Schema.decodeUnknownResult(tavilyResponse)(await response.json());
 			if (parsed._tag === "Failure") {
@@ -309,9 +307,9 @@ const searxngResponse = Schema.Struct({
 	),
 });
 
-function searxngSearch(connection: SearchConnection, fetch: EgressHttpClient): SearchBackend {
+function searxngSearch(access: SearchProviderAccess, fetch: EgressHttpClient): SearchBackend {
 	return ({ query, count, signal }) => {
-		const url = new URL(`${connection.baseUrl.replace(/\/$/, "")}/search`);
+		const url = new URL(`${access.baseUrl.replace(/\/$/, "")}/search`);
 		url.searchParams.set("q", query);
 		url.searchParams.set("format", "json");
 		return answer("SearXNG", signal, async (stop) => {
@@ -320,7 +318,7 @@ function searxngSearch(connection: SearchConnection, fetch: EgressHttpClient): S
 				headers: {
 					accept: "application/json",
 					// A key is unusual for SearXNG itself; a proxy in front of it may check one.
-					...(connection.apiKey ? { authorization: `Bearer ${connection.apiKey}` } : {}),
+					...(access.apiKey ? { authorization: `Bearer ${access.apiKey}` } : {}),
 				},
 			});
 			if (response.status === 403) {
@@ -329,7 +327,7 @@ function searxngSearch(connection: SearchConnection, fetch: EgressHttpClient): S
 				);
 			}
 			if (!response.ok) {
-				return httpRefusal("SearXNG", response, connection.apiKey);
+				return httpRefusal("SearXNG", response, access.apiKey);
 			}
 			const parsed = Schema.decodeUnknownResult(searxngResponse)(await response.json());
 			if (parsed._tag === "Failure") {

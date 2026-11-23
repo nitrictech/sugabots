@@ -20,7 +20,7 @@ export const OWNER_PAGE_NAMES = [
 	"files",
 	"automations",
 	"computer",
-	"connections",
+	"connectors",
 	"settings",
 ] as const;
 
@@ -30,7 +30,7 @@ export type OwnerPageName = (typeof OWNER_PAGE_NAMES)[number];
  * The owner's own pages the viewer may open, in the order they are listed:
  * its files and automations, then, for whoever may open its settings, its
  * computers while the workspace has them and the owner uses one, its
- * connections and its settings. A project's bots all use its computer.
+ * connectors and its settings. A project's bots all use its computer.
  */
 export function ownerPages(
 	owner: ResourceOwner,
@@ -45,7 +45,7 @@ export function ownerPages(
 					...(usesComputer
 						? [{ to: { page: "computer" } as const, label: "Computers", icon: Monitor }]
 						: []),
-					{ to: { page: "connections" } as const, label: "Connections", icon: Wrench },
+					{ to: { page: "connectors" } as const, label: "Connectors", icon: Wrench },
 					{ to: { page: "settings" } as const, label: "Settings", icon: Settings2 },
 				]
 			: []),

@@ -1,7 +1,7 @@
 import { HttpResponse, http } from "msw";
 import { expect, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, StoryApp, storyUser, storyWorkspace } from "../story-app.tsx";
+import { appHandlers, StoryApp, storyPerson, storyWorkspace } from "../story-app.tsx";
 
 /*
  * Settings as the app shows them: the grouped sections down the left, the open
@@ -55,24 +55,26 @@ export const DeleteWorkspace = meta.story({
 });
 
 /** Your General, under You at the head of the navigation: you, your name to change, the theme, and signing out. */
-export const Profile = meta.story({
-	render: () => <StoryApp path={`${settings}/profile`} />,
+export const Account = meta.story({
+	render: () => <StoryApp path={`${settings}/account`} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: storyUser.name })).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: storyPerson.name }),
+		).toBeInTheDocument();
 		const nav = canvas.getByRole("navigation", { name: "Settings" });
 		await expect(
 			within(within(nav).getByRole("group", { name: "You" })).getByRole("link", {
 				name: "General",
 			}),
 		).toHaveAttribute("aria-current", "page");
-		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(storyUser.name);
+		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(storyPerson.name);
 		await expect(canvas.getByRole("group", { name: "Theme" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
 	},
 });
 
-/** Profile where sign-up is by referral: your link to copy, and resetting it. */
-export const ProfileWithReferralLink = meta.story({
+/** Account where sign-up is by referral: your link to copy, and resetting it. */
+export const AccountWithReferralLink = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			http.post(api("/referral-link/reset"), () =>
@@ -81,10 +83,10 @@ export const ProfileWithReferralLink = meta.story({
 			...appHandlers({ referralLink: "https://sugabots.example/join/k7x2p9qa4mz8c" }),
 		);
 	},
-	render: () => <StoryApp path={`${settings}/profile`} />,
+	render: () => <StoryApp path={`${settings}/account`} />,
 	play: async ({ canvas, userEvent }) => {
 		await expect(
-			await canvas.findByRole("heading", { name: "Share your invite link" }),
+			await canvas.findByRole("heading", { name: "Share your referral link" }),
 		).toBeInTheDocument();
 		await expect(canvas.getByText(/join\/k7x2p9qa4m/)).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "Reset link" }));
@@ -92,10 +94,10 @@ export const ProfileWithReferralLink = meta.story({
 	},
 });
 
-/** A member reads the same sections, less the ones only an administrator may open. */
-export const AsAMember = meta.story({
+/** An editor reads the same sections, less the ones only an administrator may open. */
+export const AsAnEditor = meta.story({
 	beforeEach({ msw }) {
-		msw.use(...appHandlers({ role: "member" }));
+		msw.use(...appHandlers({ role: "editor" }));
 	},
 	render: () => <StoryApp path={settings} />,
 	play: async ({ canvas }) => {
@@ -114,8 +116,8 @@ export const TabletList = meta.story({
 		// The sidebar beside it is the way out, so there is no Done.
 		await expect(within(list).queryByRole("link", { name: "Done" })).toBeNull();
 		await expect(
-			within(list).getByRole("link", { name: /Profile and notifications/ }),
-		).toHaveAttribute("href", expect.stringMatching(/\/settings\/profile$/));
+			within(list).getByRole("link", { name: /Account and notifications/ }),
+		).toHaveAttribute("href", expect.stringMatching(/\/settings\/account$/));
 		await expect(within(list).getByRole("link", { name: /General/ })).toBeInTheDocument();
 	},
 });
@@ -132,7 +134,7 @@ export const PhoneList = meta.story({
 /** On a phone, a section opens full screen, with the way back to the You tab's Settings. */
 export const PhoneSection = meta.story({
 	globals: PHONE,
-	render: () => <StoryApp path={`${settings}/members`} />,
+	render: () => <StoryApp path={`${settings}/people`} />,
 	play: async ({ canvas }) => {
 		const page = await canvas.findByRole("main");
 		await expect(await within(page).findByRole("link", { name: "Settings" })).toBeInTheDocument();

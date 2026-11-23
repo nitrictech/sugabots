@@ -1,0 +1,194 @@
+import { eq } from "drizzle-orm";
+import { Effect } from "effect";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ActionForbidden } from "../../authorization/access.ts";
+import {
+	bot,
+	membership,
+	modelProvider,
+	person,
+	providerModel,
+	workspace,
+	workspaceDefaultModel,
+} from "../../database/schema.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
+import { onPostgresAs } from "../testing.ts";
+import { WorkspaceSetup } from "./workspace-setup.ts";
+
+describe.skipIf(!process.env.DATABASE_URL)("workspace setup, against Postgres", () => {
+	let workspaceSetup: WorkspaceSetup.Interface;
+	let workspaceId: string;
+	let adminId: string;
+	let editorId: string;
+	let customBotId: string;
+	let systemBotId: string;
+
+	beforeAll(async () => {
+		workspaceSetup = await runOnPostgres(
+			Effect.provide(WorkspaceSetup.Service, WorkspaceSetup.layer),
+		);
+	});
+
+	afterAll(async () => {
+		await closeDatabase();
+	});
+
+	const as = (personId: string) =>
+		onPostgresAs(personId)({
+			complete: workspaceSetup.complete,
+		});
+	const complete = (personId: string, botId: string) =>
+		as(personId).complete({ workspaceId, botId });
+
+	beforeEach(async () => {
+		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		const [madeWorkspace] = await onDatabase((db) =>
+			db
+				.insert(workspace)
+				.values({ name: `Test ${stamp}`, slug: `workspace-setup-${stamp}` })
+				.returning(),
+		);
+		const people = await onDatabase((db) =>
+			db
+				.insert(person)
+				.values([
+					{ name: "Admin", email: `admin-${stamp}@example.com` },
+					{ name: "Editor", email: `editor-${stamp}@example.com` },
+				])
+				.returning(),
+		);
+		const [admin, editor] = people;
+		if (!madeWorkspace || !admin || !editor)
+			throw new Error("could not create workspace setup fixtures");
+		workspaceId = madeWorkspace.id;
+		adminId = admin.id;
+		editorId = editor.id;
+		await onDatabase((db) =>
+			db.insert(membership).values([
+				{ workspaceId, personId: adminId, role: "admin" },
+				{ workspaceId, personId: editorId, role: "editor" },
+			]),
+		);
+		const [provider] = await onDatabase((db) =>
+			db
+				.insert(modelProvider)
+				.values({
+					workspaceId,
+					builtIn: null,
+					name: "Test provider",
+					baseUrl: "https://models.example.com",
+					apiFormat: "openai",
+					active: true,
+					createdById: adminId,
+				})
+				.returning(),
+		);
+		if (!provider) throw new Error("could not create model provider");
+		await onDatabase((db) =>
+			db.insert(providerModel).values({
+				workspaceId,
+				providerId: provider.id,
+				modelId: "model",
+				enabled: true,
+				source: "manual",
+			}),
+		);
+		const madeBots = await onDatabase((db) =>
+			db
+				.insert(bot)
+				.values([
+					{
+						workspaceId,
+						name: "Coordinator",
+						handle: "coordinator",
+						color: "green",
+						eyes: "pill",
+						model: "model",
+						createdById: adminId,
+					},
+					{
+						workspaceId,
+						// The workspace's Compaction bot, with no model until the workspace
+						// settles on one.
+						name: "Compaction",
+						handle: "compaction",
+						systemBotKey: "compact",
+						color: "purple",
+						eyes: "square",
+						model: null,
+						createdById: adminId,
+					},
+				])
+				.returning(),
+		);
+		const [custom, system] = madeBots;
+		if (!custom || !system) throw new Error("could not create workspace setup bots");
+		customBotId = custom.id;
+		systemBotId = system.id;
+	});
+
+	it("does not complete for a bot with no model the workspace offers", async () => {
+		await onDatabase((db) =>
+			db.update(bot).set({ model: "not-switched-on" }).where(eq(bot.id, customBotId)),
+		);
+		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(
+			WorkspaceSetup.NoModelChosen,
+		);
+
+		await onDatabase((db) => db.update(bot).set({ model: null }).where(eq(bot.id, customBotId)));
+		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(
+			WorkspaceSetup.NoModelChosen,
+		);
+	});
+
+	it("makes the first bot's model the workspace's default and Compaction's", async () => {
+		await complete(adminId, customBotId);
+
+		const [compaction] = await onDatabase((db) =>
+			db.select({ model: bot.model }).from(bot).where(eq(bot.id, systemBotId)),
+		);
+		expect(compaction?.model).toBe("model");
+		const [chosen] = await onDatabase((db) =>
+			db
+				.select({ modelId: workspaceDefaultModel.modelId })
+				.from(workspaceDefaultModel)
+				.where(eq(workspaceDefaultModel.workspaceId, workspaceId)),
+		);
+		expect(chosen?.modelId).toBe("model");
+	});
+
+	it("records when the workspace's setup was completed, the first time only", async () => {
+		const setUpAt = () =>
+			onDatabase((db) =>
+				db.select({ at: workspace.setUpAt }).from(workspace).where(eq(workspace.id, workspaceId)),
+			).then(([row]) => row?.at);
+		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(
+			WorkspaceSetup.NotReadyToFinish,
+		);
+		expect(await setUpAt()).toBeNull();
+
+		await complete(adminId, customBotId);
+		const first = await setUpAt();
+		await complete(adminId, customBotId);
+
+		expect(first).toBeInstanceOf(Date);
+		expect(await setUpAt()).toEqual(first);
+	});
+
+	it("does not accept a system bot or an editor who may not choose the workspace's models", async () => {
+		await expect(complete(adminId, systemBotId)).rejects.toBeInstanceOf(
+			WorkspaceSetup.NotReadyToFinish,
+		);
+		await expect(complete(editorId, customBotId)).rejects.toBeInstanceOf(ActionForbidden);
+	});
+
+	it("does not accept a bot somebody else created", async () => {
+		await onDatabase((db) =>
+			db.update(bot).set({ createdById: editorId }).where(eq(bot.id, customBotId)),
+		);
+
+		await expect(complete(adminId, customBotId)).rejects.toBeInstanceOf(
+			WorkspaceSetup.NotReadyToFinish,
+		);
+	});
+});

@@ -16,7 +16,7 @@ export const MAX_EVERY_MONTHS = 12;
 const MINUTES_PER_DAY = 24 * 60;
 const MAX_WEBHOOK_HEADER_CHARACTERS = 100;
 const MAX_WEBHOOK_USERNAME_CHARACTERS = 100;
-export const MAX_WEBHOOK_FILTER_CONDITIONS = 10;
+export const MAX_WEBHOOK_FILTER_TESTS = 10;
 export const MAX_WEBHOOK_FILTER_VALUES = 20;
 export const MAX_WEBHOOK_FILTER_TEXT_CHARACTERS = 200;
 export const MIN_WEBHOOK_SECRET_CHARACTERS = 16;
@@ -65,7 +65,7 @@ const webhookUsernameSchema = Schema.Trim.check(
 );
 
 /**
- * Senders whose own way of signing is known, so an automation they call needs
+ * Webhook sources: the callers whose own way of signing is known, so an automation they call needs
  * only the signing secret they make: GitHub, Stripe, Slack, and Linear,
  * which signs Standard Webhooks.
  */
@@ -80,7 +80,7 @@ export type WebhookSignatureEncoding = typeof webhookSignatureEncodingSchema.Typ
 
 /**
  * How a webhook trigger's caller proves it holds the trigger's secret: as a
- * known source signs, or, for any other sender, one of the generic kinds.
+ * webhook source signs, or, for any other caller, one of the generic kinds.
  * `hmac` signs the raw body with the secret using `algorithm` and sends the
  * digest in `header`, written in `encoding`, optionally after the
  * algorithm's name (`sha256=`). The others send the secret itself.
@@ -112,7 +112,7 @@ const webhookDeliveryIdHeaderSchema = Schema.optional(Schema.NullOr(webhookHeade
  * `data.labels.name` is met by any label with the name. Numbers and
  * booleans are compared as the text they print as.
  */
-export const webhookConditionSchema = Schema.Struct({
+export const webhookFilterTestSchema = Schema.Struct({
 	path: Schema.Trim.check(
 		Schema.isMinLength(1),
 		Schema.isMaxLength(MAX_WEBHOOK_FILTER_TEXT_CHARACTERS),
@@ -123,20 +123,20 @@ export const webhookConditionSchema = Schema.Struct({
 		Schema.String.check(Schema.isMaxLength(MAX_WEBHOOK_FILTER_TEXT_CHARACTERS)),
 	).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_WEBHOOK_FILTER_VALUES)),
 });
-export type WebhookCondition = typeof webhookConditionSchema.Type;
+export type WebhookFilterTest = typeof webhookFilterTestSchema.Type;
 
 /**
  * What a webhook trigger requires of a call before it starts a run: every
- * condition must be met. A call that fails one is answered but runs nothing.
+ * test must pass. A call that fails one is answered but runs nothing.
  * None, as for a trigger made before filters, runs every call.
  */
-const webhookFilterSchema = Schema.Array(webhookConditionSchema).check(
-	Schema.isMaxLength(MAX_WEBHOOK_FILTER_CONDITIONS),
+const webhookFilterSchema = Schema.Array(webhookFilterTestSchema).check(
+	Schema.isMaxLength(MAX_WEBHOOK_FILTER_TESTS),
 );
 
 /**
  * What marks the secrets made for each kind, so people can tell them apart.
- * Basic's password has none, and nor does a source's, which the sender makes.
+ * Basic's password has none, and nor does a webhook source's, which the source makes.
  */
 export const WEBHOOK_SECRET_PREFIXES: Record<WebhookAuthKind, string> = {
 	hmac: "whsec_",
@@ -160,13 +160,13 @@ const webhookSecretSchema = Schema.Trim.check(
 );
 
 /**
- * Whether `secret` is long enough for a webhook checked by `kind`. A source's
- * secret is the one its sender made, however long that is; one made up for
+ * Whether `secret` is long enough for a webhook checked by `kind`. A webhook source's
+ * secret is the one the source made, however long that is; one made up for
  * a generic webhook needs `MIN_WEBHOOK_SECRET_CHARACTERS`, to be hard to guess.
  */
 export function webhookSecretLongEnough(kind: WebhookAuthKind, secret: string): boolean {
-	const sendersOwn = (WEBHOOK_SOURCES as readonly string[]).includes(kind);
-	return sendersOwn || secret.trim().length >= MIN_WEBHOOK_SECRET_CHARACTERS;
+	const madeBySource = (WEBHOOK_SOURCES as readonly string[]).includes(kind);
+	return madeBySource || secret.trim().length >= MIN_WEBHOOK_SECRET_CHARACTERS;
 }
 
 const minutesPastMidnightSchema = Schema.Int.check(
@@ -241,11 +241,11 @@ export type RoutineSchedule = typeof routineScheduleSchema.Type;
 export type CalendarSchedule = Exclude<RoutineSchedule, { repeat: "cron" }>;
 
 /**
- * A GitHub trigger's connection, the GitHub app of the automation's project,
+ * A GitHub trigger's connector, the GitHub app of the automation's project,
  * the repository there it watches, and the events there that start a run.
  */
 const gitHubTriggerFields = {
-	connectionId: uuidSchema,
+	connectorId: uuidSchema,
 	repository: repositoryPathSchema,
 	events: Schema.Array(repositoryEventSchema).check(Schema.isMinLength(1)),
 };
@@ -273,7 +273,7 @@ const automationTriggerSchema = Schema.Union([
 
 export type AutomationTrigger = typeof automationTriggerSchema.Type;
 
-/** A GitHub automation's connection, repository and the events there that run it. */
+/** A GitHub automation's connector, repository and the events there that run it. */
 export type GitHubTrigger = Omit<Extract<AutomationTrigger, { kind: "github" }>, "kind" | "id">;
 
 export const automationSchema = Schema.Struct({
@@ -394,7 +394,7 @@ export const runTriggerSchema = Schema.Union([
 	}),
 	Schema.Struct({
 		kind: Schema.Literal("github"),
-		connectionId: uuidSchema,
+		connectorId: uuidSchema,
 		receivedAt: isoTimestampSchema,
 		/** The service's id for the delivery, which a retry of it repeats. */
 		deliveryId: Schema.String.check(
@@ -427,7 +427,7 @@ export const runTriggerSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("manual"),
 		requestedAt: isoTimestampSchema,
-		requestedByUserId: uuidSchema,
+		requestedByPersonId: uuidSchema,
 		requestId: uuidSchema,
 	}),
 ]);
@@ -440,10 +440,10 @@ export const runSchema = Schema.Struct({
 	workspaceId: uuidSchema,
 	/** The bot that did the run: its project's lead bot when it started. */
 	botId: uuidSchema,
-	/** The run's own conversation. */
-	conversationId: uuidSchema,
+	/** The run's own chat. */
+	chatId: uuidSchema,
 	/** The automation's feed, which lists the run beside its other runs. */
-	rootConversationId: uuidSchema,
+	rootChatId: uuidSchema,
 	automationName: automationNameSchema,
 	instructions: automationInstructionsSchema,
 	trigger: runTriggerSchema,
@@ -527,12 +527,12 @@ export const automationTriggerAuthorSchema = Schema.Struct({
 export type AutomationTriggerAuthor = typeof automationTriggerAuthorSchema.Type;
 
 /**
- * The run whose result a message is, in the automation's feed or a project's thread:
- * the automation, and the conversation the run's work is in.
+ * The run whose result a message is, in the automation's feed or a project's chat:
+ * the automation, and the chat the run's work is in.
  */
 export const automationResultOfSchema = Schema.Struct({
 	runId: uuidSchema,
-	conversationId: uuidSchema,
+	chatId: uuidSchema,
 	automationId: uuidSchema,
 	automationName: automationNameSchema,
 });
@@ -543,7 +543,7 @@ export const manualAutomationRunSchema = Schema.Struct({ requestId: uuidSchema }
 
 export const acceptedRunSchema = Schema.Struct({
 	runId: uuidSchema,
-	conversationId: uuidSchema,
+	chatId: uuidSchema,
 	duplicate: Schema.Boolean,
 });
 

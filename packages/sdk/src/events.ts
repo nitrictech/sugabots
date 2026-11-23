@@ -10,7 +10,7 @@ import type { TokenStore } from "./tokens.ts";
  * Live updates, as an async iterable that reconnects.
  *
  * ```ts
- * for await (const event of client.events.conversation(conversationId)) { … }
+ * for await (const event of client.events.chat(chatId)) { … }
  * ```
  *
  * Not `EventSource`: it cannot send an `Authorization` header for bearer
@@ -35,10 +35,10 @@ export interface EventStream extends AsyncIterable<StreamEvent> {
 }
 
 export interface EventsApi {
-	/** Conversations, unread counts, bots and projects across one workspace. */
+	/** Chats, unread counts, bots and projects across one workspace. */
 	workspace(workspaceId: string, options?: EventStreamOptions): EventStream;
-	/** One conversation's messages, turns, tool calls and collaborations. */
-	conversation(conversationId: string, options?: EventStreamOptions): EventStream;
+	/** One chat's messages, turns, tool calls and collaborations. */
+	chat(chatId: string, options?: EventStreamOptions): EventStream;
 	/** What is for the signed-in person alone, such as their notifications. */
 	me(options?: EventStreamOptions): EventStream;
 }
@@ -73,8 +73,7 @@ export function createEventsApi({
 	return {
 		workspace: (workspaceId, options) =>
 			open(`/workspaces/${encodeURIComponent(workspaceId)}/events`, options),
-		conversation: (conversationId, options) =>
-			open(`/conversations/${encodeURIComponent(conversationId)}/events`, options),
+		chat: (chatId, options) => open(`/chats/${encodeURIComponent(chatId)}/events`, options),
 		me: (options) => open("/me/events", options),
 	};
 }

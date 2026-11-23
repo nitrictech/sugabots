@@ -1,0 +1,5 @@
+language js(typescript)
+
+`authenticated.$_($_)` as $built where {
+	register_diagnostic(span=$built, message="Only `core/src/authentication/` builds a principal, once it has authenticated the caller. Take the principal an entrypoint passed in.")
+}

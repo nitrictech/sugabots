@@ -20,7 +20,7 @@ import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
 import { useProjects } from "@/lib/projects.ts";
 import { useSession } from "@/lib/session.ts";
 import { useBackTarget, useSettingsBack } from "@/lib/settings-back.tsx";
-import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
+import { useMemberships, useWorkspace, useWorkspacePermissions } from "@/lib/workspace.ts";
 import {
 	type SettingSection,
 	workspaceSettingSection,
@@ -45,7 +45,7 @@ import {
  * Settings, from a tablet up as a dialog over the dimmed app: your own and the
  * workspace's sections down the left, the open page beside them under a trail
  * of where it sits. A bot's and a project's settings are its own pages, beside
- * its threads. Below a laptop's width there is no room for both, so
+ * its chats. Below a laptop's width there is no room for both, so
  * settings drill down as a phone's do: the sections as one list, and each
  * opening with a way back to it.
  *
@@ -190,16 +190,16 @@ function parentPage(pathname: string): BackTarget {
 
 /**
  * The page `pathname` sits under on a phone, whose settings are listed in its
- * You tab: Notifications under your profile, and what would sit under the
+ * You tab: Notifications under your account, and what would sit under the
  * list of settings under the tab.
  */
 function phoneParentPage(pathname: string): BackTarget {
 	const [, sectionId] = pathname.split("/").filter(Boolean);
-	// Opened from a row on your profile.
+	// Opened from a row on your account.
 	if (sectionId === "notifications") {
 		return {
 			label: "You",
-			render: <Link from="/$workspace" to="./settings/$section" params={{ section: "profile" }} />,
+			render: <Link from="/$workspace" to="./settings/$section" params={{ section: "account" }} />,
 		};
 	}
 	const parent = parentPage(pathname);
@@ -211,11 +211,11 @@ function phoneParentPage(pathname: string): BackTarget {
 function useWorkspaceSections() {
 	const may = useWorkspacePermissions();
 	const { workspace } = useWorkspace();
-	const { data: members } = useWorkspaceMembers(workspace?.id);
+	const { data: memberships } = useMemberships(workspace?.id);
 	// The one person a workspace always has is you, so the roster starts at two.
-	const people = members?.length;
+	const people = memberships?.length;
 	const counts: Partial<Record<SettingSection["id"], number | undefined>> = {
-		members: people === 1 ? undefined : people,
+		people: people === 1 ? undefined : people,
 	};
 	const sections = workspaceSettingSections.filter(
 		(section: SettingSection) => !("needs" in section) || may[section.needs],
@@ -247,7 +247,7 @@ function SettingsNavigation() {
 		<nav
 			ref={navigation}
 			aria-label="Settings"
-			// As wide as Inbox's list at its narrowest until dragged wider, and no wider than a third of the window.
+			// At its narrowest until dragged wider, and no wider than a third of the window.
 			style={{
 				width: `clamp(${LIST_MIN_WIDTH_PX}px, ${width ?? LIST_MIN_WIDTH_PX}px, ${NAVIGATION_MAX_WIDTH})`,
 			}}
@@ -262,7 +262,7 @@ function SettingsNavigation() {
 			/>
 			<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pt-3 pb-3">
 				{/* Your own settings first: they follow you from workspace to workspace. */}
-				{session.user && (
+				{session.person && (
 					<NavigationGroup label="You">
 						{yourSettingSections.map((section) => (
 							<SectionLink
@@ -295,7 +295,7 @@ function NavigationGroup({ label, children }: { label: string; children: ReactNo
 		// Named by its heading, so the General under You is told apart from the workspace's.
 		// biome-ignore lint/a11y/useSemanticElements: this groups links, not form controls, so a fieldset is wrong.
 		<div role="group" aria-labelledby={headingId} className="flex flex-col gap-px">
-			{/* A sidebar row's height, so the first heading lines up with Inbox across from it. */}
+			{/* A sidebar row's height, so the first heading lines up with the sidebar's first row across from it. */}
 			<div className="flex h-8 items-center gap-2 pr-1.5 pl-2">
 				<h2 id={headingId} className="m-0 flex-1 font-medium text-subtle-foreground text-xs">
 					{label}
@@ -365,26 +365,26 @@ export function SettingsListGroups({
 }) {
 	const { sections, counts } = useWorkspaceSections();
 	const { projects, bots } = useListed();
-	const { user } = useSession();
+	const { person: signedIn } = useSession();
 	return (
 		<>
-			{/* You first, on a card that opens your profile, which leads on to your Notifications. */}
-			{user && (
+			{/* You first, on a card that opens your account, which leads on to your Notifications. */}
+			{signedIn && (
 				<Link
 					from="/$workspace"
 					to="./settings/$section"
-					params={{ section: "profile" }}
+					params={{ section: "account" }}
 					state={linkState}
 					className={cn(
 						SETTINGS_CARD,
 						"focus-ring flex shrink-0 items-center gap-4 px-4 py-4 active:bg-row-selected",
 					)}
 				>
-					<PersonAvatar person={user} size={64} />
+					<PersonAvatar person={signedIn} size={64} />
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<span className="truncate font-semibold text-xl text-foreground">{user.name}</span>
+						<span className="truncate font-semibold text-xl text-foreground">{signedIn.name}</span>
 						<span className="truncate text-sm text-subtle-foreground">
-							Profile and notifications
+							Account and notifications
 						</span>
 					</span>
 					<ChevronRight aria-hidden size={18} className="shrink-0 text-subtle-foreground" />
@@ -430,7 +430,7 @@ export function SettingsListGroups({
 					{bots.map((bot) => (
 						<SettingsRow
 							key={bot.id}
-							icon={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={20} />}
+							icon={<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={20} />}
 							label={bot.name}
 							chevron
 							render={<Link {...botSettingsLink(bot)} />}
@@ -527,8 +527,8 @@ function useSettingsCrumbs(): Crumb[] {
 	if (item === undefined) {
 		return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
 	}
-	if (sectionId === "members") {
-		return [workspaceCrumb, sectionCrumb("members"), { label: <MemberName membershipId={item} /> }];
+	if (sectionId === "people") {
+		return [workspaceCrumb, sectionCrumb("people"), { label: <PersonName membershipId={item} /> }];
 	}
 	if (sectionId === "providers") {
 		return [workspaceCrumb, sectionCrumb("providers"), { label: <ProviderPageName id={item} /> }];
@@ -536,10 +536,10 @@ function useSettingsCrumbs(): Crumb[] {
 	return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
 }
 
-function MemberName({ membershipId }: { membershipId: string }) {
+function PersonName({ membershipId }: { membershipId: string }) {
 	const { workspace } = useWorkspace();
-	const { data: members } = useWorkspaceMembers(workspace?.id);
-	return members?.find((member) => member.id === membershipId)?.user.name ?? null;
+	const { data: memberships } = useMemberships(workspace?.id);
+	return memberships?.find((membership) => membership.id === membershipId)?.person.name ?? null;
 }
 
 /** The provider an address names, or one of the two model choices kept beside them. */

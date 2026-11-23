@@ -7,7 +7,7 @@ import {
 	useMoodLoop,
 	WATCHING_MOODS,
 } from "@sugabots/avatars";
-import type { BotColor, BotFace, BotShape } from "@sugabots/contracts";
+import type { BotColor, BotEyes, BotShape } from "@sugabots/contracts";
 import type { Ref } from "react";
 
 /*
@@ -22,7 +22,7 @@ import type { Ref } from "react";
 
 type BotAvatarProps = {
 	color: BotColor;
-	face?: BotFace;
+	eyes?: BotEyes;
 	shape: BotShape;
 	size?: number;
 	className?: string;
@@ -47,7 +47,7 @@ type BotAvatarProps = {
 
 export function BotAvatar({
 	color,
-	face = "pill",
+	eyes = "pill",
 	shape,
 	size = 32,
 	ringed,
@@ -58,7 +58,7 @@ export function BotAvatar({
 		return (
 			<LivelyBotFace
 				color={color}
-				face={face}
+				eyes={eyes}
 				shape={shape}
 				width={size}
 				height={size}
@@ -70,7 +70,7 @@ export function BotAvatar({
 	return (
 		<StillBotFace
 			color={color}
-			face={face}
+			eyes={eyes}
 			shape={shape}
 			width={size}
 			height={size}
@@ -80,10 +80,10 @@ export function BotAvatar({
 	);
 }
 
-/** A bot's look: what `BotAvatar` draws. */
-interface BotLook {
+/** A bot's avatar: what `BotAvatar` draws. */
+interface Avatar {
 	color: BotColor;
-	face: BotFace;
+	eyes: BotEyes;
 	shape: BotShape;
 }
 
@@ -97,7 +97,7 @@ export function WatchingAvatar({
 	busy,
 	watching,
 }: {
-	bot: BotLook;
+	bot: Avatar;
 	size: number;
 	busy: boolean;
 	watching: boolean;
@@ -107,7 +107,7 @@ export function WatchingAvatar({
 	return (
 		<BotAvatar
 			color={bot.color}
-			face={bot.face}
+			eyes={bot.eyes}
 			shape={bot.shape}
 			size={size}
 			lively={{ mood, watchPointer: true, watchTyping: true }}
@@ -124,7 +124,7 @@ export function TurnTakingAvatar({
 	size,
 	faceRef,
 }: {
-	bot: BotLook;
+	bot: Avatar;
 	size: number;
 	faceRef: Ref<LivelyFace>;
 }) {
@@ -132,7 +132,7 @@ export function TurnTakingAvatar({
 	return (
 		<BotAvatar
 			color={bot.color}
-			face={bot.face}
+			eyes={bot.eyes}
 			shape={bot.shape}
 			size={size}
 			lively={{ mood: movingTurn ? "idle" : "still", watchPointer: true, ref: faceRef }}

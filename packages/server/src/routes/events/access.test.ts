@@ -1,14 +1,14 @@
 import { handleFromName } from "@sugabots/contracts";
 import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { seedConversation } from "@sugabots/core/conversations/seed.test-support";
+import { seedChat } from "@sugabots/core/chats/seed.test-support";
 import {
 	bot,
+	membership,
 	message,
+	person,
 	projectMember,
 	turn,
-	user,
 	workspace,
-	workspaceMember,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { seedProject } from "@sugabots/core/workspaces/projects/seed.test-support";
@@ -21,48 +21,48 @@ import { StreamAccess } from "./access.ts";
 
 /** Who may listen to what. The workspace half is a membership query, so it runs against Postgres. */
 
-/** The access with its answers run as `userId`, with nothing else to reach. */
-function asSomebody(access: StreamAccess.Interface, userId: string) {
-	const asThem = CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId));
+/** The access with its answers run as `personId`, with nothing else to reach. */
+function asSomebody(access: StreamAccess.Interface, personId: string) {
+	const asThem = CurrentActor.provide(CurrentActor.AuthenticatedPersonId.vouchedFor(personId));
 	return {
 		workspace: (id: string) => Effect.runPromise(access.workspace(id).pipe(asThem)),
-		conversation: (id: string) => Effect.runPromise(access.conversation(id).pipe(asThem)),
+		chat: (id: string) => Effect.runPromise(access.chat(id).pipe(asThem)),
 	};
 }
 
 it("denies event access when no access dependency is configured", async () => {
-	const { workspace, conversation } = asSomebody(closedStreamAccess, crypto.randomUUID());
+	const { workspace, chat } = asSomebody(closedStreamAccess, crypto.randomUUID());
 
 	expect(await workspace("w1")).toBeUndefined();
-	expect(await conversation("c1")).toBeUndefined();
+	expect(await chat("c1")).toBeUndefined();
 });
 
 describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 	afterAll(closeDatabase);
 
 	/**
-	 * A workspace with a member in a project, an administrator the database has
-	 * put in it too, another member outside the project, and one person left
-	 * outside the workspace.
+	 * A workspace with an editor in a project, an administrator the database has
+	 * put in it too, another person in the workspace outside the project, and one
+	 * person left outside the workspace.
 	 */
 	async function fixture() {
 		const suffix = crypto.randomUUID();
 
-		const [member] = await onDatabase((db) =>
+		const [editor] = await onDatabase((db) =>
 			db
-				.insert(user)
-				.values({ name: "Member", email: `member-${suffix}@example.com` })
+				.insert(person)
+				.values({ name: "Editor", email: `editor-${suffix}@example.com` })
 				.returning(),
 		);
 		const [outsider] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({ name: "Outsider", email: `outsider-${suffix}@example.com` })
 				.returning(),
 		);
 		const [administrator] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({ name: "Admin", email: `admin-${suffix}@example.com` })
 				.returning(),
 		);
@@ -73,19 +73,19 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				.returning(),
 		);
 
-		if (!member || !outsider || !administrator || !space) {
+		if (!editor || !outsider || !administrator || !space) {
 			throw new Error("fixture did not insert");
 		}
 
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values([
-				{ workspaceId: space.id, userId: member.id },
-				{ workspaceId: space.id, userId: administrator.id, role: "admin" },
+			db.insert(membership).values([
+				{ workspaceId: space.id, personId: editor.id },
+				{ workspaceId: space.id, personId: administrator.id, role: "admin" },
 			]),
 		);
 
-		// A thread with a public bot, one with a private bot the member made, and
-		// a thread of a project the member is in.
+		// A chat with a public bot, one with a private bot the editor made, and
+		// a chat of a project the editor is in.
 		const [publicBot, privateBot] = await onDatabase((db) =>
 			db
 				.insert(bot)
@@ -96,9 +96,9 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 						handle: handleFromName(`Host ${visibility} ${suffix}`),
 						visibility,
 						color: "rose" as const,
-						face: "pill" as const,
+						eyes: "pill" as const,
 						model: "m",
-						createdById: member.id,
+						createdById: editor.id,
 					})),
 				)
 				.returning(),
@@ -108,7 +108,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				workspaceId: space.id,
 				name: "Room",
 				slug: `room-${suffix}`,
-				createdById: member.id,
+				createdById: editor.id,
 			}),
 		);
 		if (!publicBot || !privateBot || !room) {
@@ -117,47 +117,47 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 		await onDatabase((db) =>
 			db
 				.insert(projectMember)
-				.values({ workspaceId: space.id, projectId: room.id, userId: member.id }),
+				.values({ workspaceId: space.id, projectId: room.id, personId: editor.id }),
 		);
-		const conversation = await onDatabase((db) =>
-			seedConversation(db, {
+		const chat = await onDatabase((db) =>
+			seedChat(db, {
 				workspaceId: space.id,
-				kind: "project_thread",
+				kind: "project_chat",
 				botId: publicBot.id,
-				title: "A thread",
-				startedById: member.id,
+				title: "A chat",
+				startedById: editor.id,
 			}),
 		);
-		const privateThread = await onDatabase((db) =>
-			seedConversation(db, {
+		const privateChat = await onDatabase((db) =>
+			seedChat(db, {
 				workspaceId: space.id,
-				kind: "project_thread",
+				kind: "project_chat",
 				botId: privateBot.id,
-				title: "A private thread",
-				startedById: member.id,
+				title: "A private chat",
+				startedById: editor.id,
 			}),
 		);
-		const projectThread = await onDatabase((db) =>
-			seedConversation(db, {
+		const projectChat = await onDatabase((db) =>
+			seedChat(db, {
 				workspaceId: space.id,
-				kind: "project_thread",
+				kind: "project_chat",
 				projectId: room.id,
-				title: "A thread",
-				startedById: member.id,
+				title: "A chat",
+				startedById: editor.id,
 			}),
 		);
 		const [elsewhere] = await onDatabase((db) =>
 			db
-				.insert(user)
+				.insert(person)
 				.values({ name: "Elsewhere", email: `elsewhere-${suffix}@example.com` })
 				.returning(),
 		);
 		if (!elsewhere) throw new Error("fixture did not insert");
 		await onDatabase((db) =>
-			db.insert(workspaceMember).values({ workspaceId: space.id, userId: elsewhere.id }),
+			db.insert(membership).values({ workspaceId: space.id, personId: elsewhere.id }),
 		);
 		// A private bot of somebody outside the project, asked from it, and the
-		// public bot asked from the member's private thread.
+		// public bot asked from the editor's private chat.
 		const [elsewhereBot] = await onDatabase((db) =>
 			db
 				.insert(bot)
@@ -167,7 +167,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 					handle: handleFromName(`Elsewhere's ${suffix}`),
 					visibility: "private",
 					color: "rose",
-					face: "pill",
+					eyes: "pill",
 					model: "m",
 					createdById: elsewhere.id,
 				})
@@ -185,7 +185,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				db
 					.insert(message)
 					.values({
-						conversationId: askedFromId,
+						chatId: askedFromId,
 						authorBotId: askingBotId,
 						kind: "text",
 						status: "complete",
@@ -199,7 +199,7 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 				db
 					.insert(turn)
 					.values({
-						conversationId: askedFromId,
+						chatId: askedFromId,
 						botId: askingBotId,
 						triggerMessageId: reply.id,
 						status: "done",
@@ -210,13 +210,13 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 			);
 			if (!asking) throw new Error("fixture did not insert");
 			return onDatabase((db) =>
-				seedConversation(db, {
+				seedChat(db, {
 					workspaceId: space.id,
 					kind: "collaboration",
 					title,
 					collaboration: {
-						parentConversationId: askedFromId,
-						rootConversationId: askedFromId,
+						parentChatId: askedFromId,
+						rootChatId: askedFromId,
 						parentMessageId: reply.id,
 						turnId: asking.id,
 						collaboratorBotId,
@@ -227,51 +227,51 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 			);
 		};
 		const askedFromProject = await askedFrom(
-			projectThread.id,
+			projectChat.id,
 			publicBot.id,
 			elsewhereBot.id,
 			"Asked from the project",
 		);
-		const askedFromPrivateThread = await askedFrom(
-			privateThread.id,
+		const askedFromPrivateChat = await askedFrom(
+			privateChat.id,
 			privateBot.id,
 			publicBot.id,
-			"Asked from a private thread",
+			"Asked from a private chat",
 		);
 
 		// The real services, over the real database, since that is what the
 		// visibility joins are being checked against.
 		const streams = await runOnPostgres(Effect.provide(StreamAccess.Service, StreamAccess.layer));
 		return {
-			/** The streams `userId` is given. */
-			access: (userId: string) => onPostgresAs(userId)(streams),
-			member,
+			/** The streams `personId` is given. */
+			access: (personId: string) => onPostgresAs(personId)(streams),
+			editor,
 			administrator,
 			outsider,
 			elsewhere,
 			space,
 			room,
-			conversation,
-			privateThread,
-			projectThread,
+			chat,
+			privateChat,
+			projectChat,
 			askedFromProject,
-			askedFromPrivateThread,
+			askedFromPrivateChat,
 		};
 	}
 
-	it("gives a member the workspace stream", async () => {
-		const { access, member, space } = await fixture();
+	it("gives someone in the workspace its stream", async () => {
+		const { access, editor, space } = await fixture();
 
-		expect(await access(member.id).workspace(space.id)).toBe(`workspace:${space.id}`);
+		expect(await access(editor.id).workspace(space.id)).toBe(`workspace:${space.id}`);
 	});
 
-	it("gives a member the same stream when the workspace is named by its slug", async () => {
-		const { access, member, space } = await fixture();
+	it("gives someone in the workspace the same stream when it is named by its slug", async () => {
+		const { access, editor, space } = await fixture();
 
-		expect(await access(member.id).workspace(space.slug)).toBe(`workspace:${space.id}`);
+		expect(await access(editor.id).workspace(space.slug)).toBe(`workspace:${space.id}`);
 	});
 
-	it("gives someone who is not a member nothing", async () => {
+	it("gives someone outside the workspace nothing", async () => {
 		const { access, outsider, space } = await fixture();
 
 		expect(await access(outsider.id).workspace(space.id)).toBeUndefined();
@@ -279,109 +279,97 @@ describe.skipIf(!process.env.DATABASE_URL)("database access", () => {
 	});
 
 	it("gives nothing for a workspace that does not exist", async () => {
-		const { access, member } = await fixture();
+		const { access, editor } = await fixture();
 
-		expect(await access(member.id).workspace(crypto.randomUUID())).toBeUndefined();
+		expect(await access(editor.id).workspace(crypto.randomUUID())).toBeUndefined();
 	});
 
 	it("gives nothing for a slug that names no workspace, rather than raising on it", async () => {
-		const { access, member } = await fixture();
+		const { access, editor } = await fixture();
 
-		expect(await access(member.id).workspace("not-a-uuid")).toBeUndefined();
+		expect(await access(editor.id).workspace("not-a-uuid")).toBeUndefined();
 	});
 
-	it("gives a member a public bot's thread's stream", async () => {
-		const { access, elsewhere, conversation } = await fixture();
+	it("gives someone in the workspace a public bot's chat's stream", async () => {
+		const { access, elsewhere, chat } = await fixture();
 
-		expect(await access(elsewhere.id).conversation(conversation.id)).toBe(
-			`conversation:${conversation.id}`,
-		);
+		expect(await access(elsewhere.id).chat(chat.id)).toBe(`chat:${chat.id}`);
 	});
 
-	it("gives someone outside the workspace nothing for its threads", async () => {
-		const { access, outsider, conversation } = await fixture();
+	it("gives someone outside the workspace nothing for its chats", async () => {
+		const { access, outsider, chat } = await fixture();
 
-		expect(await access(outsider.id).conversation(conversation.id)).toBeUndefined();
+		expect(await access(outsider.id).chat(chat.id)).toBeUndefined();
 	});
 
-	it("gives nothing for a conversation that does not exist", async () => {
-		const { access, member } = await fixture();
+	it("gives nothing for a chat that does not exist", async () => {
+		const { access, editor } = await fixture();
 
-		expect(await access(member.id).conversation(crypto.randomUUID())).toBeUndefined();
+		expect(await access(editor.id).chat(crypto.randomUUID())).toBeUndefined();
 	});
 
-	it("lets every member hear the workspace's events about a public bot's thread", async () => {
-		const { access, member, elsewhere, outsider, conversation } = await fixture();
+	it("lets everyone in the workspace hear the workspace's events about a public bot's chat", async () => {
+		const { access, editor, elsewhere, outsider, chat } = await fixture();
 
-		expect(await access(member.id).hears(conversationAudience(conversation.id))).toBe(true);
-		expect(await access(elsewhere.id).hears(conversationAudience(conversation.id))).toBe(true);
-		expect(await access(outsider.id).hears(conversationAudience(conversation.id))).toBe(false);
+		expect(await access(editor.id).hears(chatAudience(chat.id))).toBe(true);
+		expect(await access(elsewhere.id).hears(chatAudience(chat.id))).toBe(true);
+		expect(await access(outsider.id).hears(chatAudience(chat.id))).toBe(false);
 	});
 
-	it("lets only a private bot's creator hear about its threads, not an administrator", async () => {
-		const { access, member, administrator, elsewhere, privateThread } = await fixture();
+	it("lets only a private bot's creator hear about its chats, not an administrator", async () => {
+		const { access, editor, administrator, elsewhere, privateChat } = await fixture();
 
-		expect(await access(member.id).hears(conversationAudience(privateThread.id))).toBe(true);
-		expect(await access(administrator.id).hears(conversationAudience(privateThread.id))).toBe(
-			false,
-		);
-		expect(await access(elsewhere.id).hears(conversationAudience(privateThread.id))).toBe(false);
+		expect(await access(editor.id).hears(chatAudience(privateChat.id))).toBe(true);
+		expect(await access(administrator.id).hears(chatAudience(privateChat.id))).toBe(false);
+		expect(await access(elsewhere.id).hears(chatAudience(privateChat.id))).toBe(false);
 	});
 
-	it("lets only the people in a project hear about its threads", async () => {
-		const { access, member, administrator, elsewhere, space, projectThread } = await fixture();
+	it("lets only the people in a project hear about its chats", async () => {
+		const { access, editor, administrator, elsewhere, space, projectChat } = await fixture();
 
-		expect(await access(member.id).hears(conversationAudience(projectThread.id))).toBe(true);
-		expect(await access(administrator.id).hears(conversationAudience(projectThread.id))).toBe(true);
+		expect(await access(editor.id).hears(chatAudience(projectChat.id))).toBe(true);
+		expect(await access(administrator.id).hears(chatAudience(projectChat.id))).toBe(true);
 		expect(await access(elsewhere.id).workspace(space.id)).toBe(`workspace:${space.id}`);
-		expect(await access(elsewhere.id).hears(conversationAudience(projectThread.id))).toBe(false);
+		expect(await access(elsewhere.id).hears(chatAudience(projectChat.id))).toBe(false);
 	});
 
-	it("keeps a collaboration with the conversation it was opened from, not the bot asked", async () => {
-		const { access, member, elsewhere, askedFromPrivateThread } = await fixture();
+	it("keeps a collaboration with the chat it was opened from, not the bot asked", async () => {
+		const { access, editor, elsewhere, askedFromPrivateChat } = await fixture();
 
-		expect(await access(member.id).conversation(askedFromPrivateThread.id)).toBe(
-			`conversation:${askedFromPrivateThread.id}`,
+		expect(await access(editor.id).chat(askedFromPrivateChat.id)).toBe(
+			`chat:${askedFromPrivateChat.id}`,
 		);
-		expect(await access(member.id).hears(conversationAudience(askedFromPrivateThread.id))).toBe(
-			true,
-		);
-		// Everyone reaches the public bot that was asked, but not the private thread.
-		expect(await access(elsewhere.id).conversation(askedFromPrivateThread.id)).toBeUndefined();
-		expect(await access(elsewhere.id).hears(conversationAudience(askedFromPrivateThread.id))).toBe(
-			false,
-		);
+		expect(await access(editor.id).hears(chatAudience(askedFromPrivateChat.id))).toBe(true);
+		// Everyone reaches the public bot that was asked, but not the private chat.
+		expect(await access(elsewhere.id).chat(askedFromPrivateChat.id)).toBeUndefined();
+		expect(await access(elsewhere.id).hears(chatAudience(askedFromPrivateChat.id))).toBe(false);
 	});
 
 	it("shows the project a collaboration with a private bot opened from it", async () => {
-		const { access, member, administrator, elsewhere, askedFromProject } = await fixture();
+		const { access, editor, administrator, elsewhere, askedFromProject } = await fixture();
 
-		expect(await access(member.id).conversation(askedFromProject.id)).toBe(
-			`conversation:${askedFromProject.id}`,
-		);
-		expect(await access(administrator.id).hears(conversationAudience(askedFromProject.id))).toBe(
-			true,
-		);
+		expect(await access(editor.id).chat(askedFromProject.id)).toBe(`chat:${askedFromProject.id}`);
+		expect(await access(administrator.id).hears(chatAudience(askedFromProject.id))).toBe(true);
 		// The private bot's creator is not in the project.
-		expect(await access(elsewhere.id).conversation(askedFromProject.id)).toBeUndefined();
-		expect(await access(elsewhere.id).hears(conversationAudience(askedFromProject.id))).toBe(false);
+		expect(await access(elsewhere.id).chat(askedFromProject.id)).toBeUndefined();
+		expect(await access(elsewhere.id).hears(chatAudience(askedFromProject.id))).toBe(false);
 	});
 
 	it("gives an administrator without a row in the project nothing, since reach is the row", async () => {
-		const { access, administrator, room, projectThread } = await fixture();
+		const { access, administrator, room, projectChat } = await fixture();
 		await onDatabase((db) =>
 			db
 				.delete(projectMember)
 				.where(
-					and(eq(projectMember.projectId, room.id), eq(projectMember.userId, administrator.id)),
+					and(eq(projectMember.projectId, room.id), eq(projectMember.personId, administrator.id)),
 				),
 		);
 
-		expect(await access(administrator.id).conversation(projectThread.id)).toBeUndefined();
+		expect(await access(administrator.id).chat(projectChat.id)).toBeUndefined();
 	});
 });
 
-/** Who hears what is said of the conversation `conversationId`. */
-function conversationAudience(conversationId: string) {
-	return { kind: "conversation" as const, conversationId };
+/** Who hears what is said of the chat `chatId`. */
+function chatAudience(chatId: string) {
+	return { kind: "chat" as const, chatId };
 }

@@ -12,29 +12,29 @@ export const healthResponseSchema = Schema.Struct({
 
 export type HealthResponse = typeof healthResponseSchema.Type;
 
-export const sessionUserSchema = Schema.Struct({
+export const signedInPersonSchema = Schema.Struct({
 	id: uuidSchema,
 	email: emailSchema,
 	name: Schema.String,
 	image: Schema.NullOr(Schema.String),
 });
 
-export type SessionUser = typeof sessionUserSchema.Type;
+export type SignedInPerson = typeof signedInPersonSchema.Type;
 
 /** A person named beside something they did, such as connecting a provider, while they are still in the workspace. */
 export const namedPersonSchema = Schema.Struct({
 	id: uuidSchema,
 	name: Schema.String,
-	/** As the workspace's members list shows it, for a picture of them where they have none of their own. */
+	/** As the workspace's list of people shows it, for a picture of them where they have none of their own. */
 	email: emailSchema,
 	image: Schema.NullOr(Schema.String),
 });
 
 export type NamedPerson = typeof namedPersonSchema.Type;
 
-export const USER_NAME_MAX_LENGTH = 100;
+export const PERSON_NAME_MAX_LENGTH = 100;
 
-export const userNameSchema = Schema.Trim.check(
+export const personNameSchema = Schema.Trim.check(
 	Schema.isMinLength(1),
-	Schema.isMaxLength(USER_NAME_MAX_LENGTH),
+	Schema.isMaxLength(PERSON_NAME_MAX_LENGTH),
 );

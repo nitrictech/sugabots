@@ -2,29 +2,29 @@ import type { Message, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
 import { Wrench } from "lucide-react";
 import { useId, useState } from "react";
-import type { ConnectionLook } from "@/lib/connections.ts";
+import type { MarkedConnector } from "@/lib/connectors.ts";
 import { useNow } from "@/lib/now.ts";
 import { BUILT_IN_HANDLE, splitToolKey } from "@/lib/tool-names.ts";
-import { Button } from "@/ui/button.tsx";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
 import {
-	Trace,
-	TraceCollapsible,
-	TraceCollapsibleContent,
-	TraceCollapsibleTrigger,
-	TraceDescription,
-	TraceIcon,
-	TraceLine,
-	TraceTitle,
-} from "@/ui/trace.tsx";
+	Activity,
+	ActivityCollapsible,
+	ActivityCollapsibleContent,
+	ActivityCollapsibleTrigger,
+	ActivityDescription,
+	ActivityIcon,
+	ActivityLine,
+	ActivityTitle,
+} from "@/ui/activity.tsx";
+import { Button } from "@/ui/button.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { ToolCallValue } from "./ToolCallValue.tsx";
 import { awaitsApproval, formatElapsed } from "./tool-activity.ts";
 import {
-	appOf,
 	describeStep,
 	noteOf,
 	stepDetails,
 	toolLineText,
+	toolSourceOf,
 	toolStepRuns,
 } from "./tool-steps.ts";
 
@@ -55,18 +55,18 @@ function DetailBlock({
  * How long a bot worked on a reply, as one line over it: "Working for 12s",
  * counting, while it does, and "Worked for 4m 1s" once it is done. Opening it
  * lists what the bot did on the way: what it said it was doing, then a line
- * for each app it used, which opens to its calls, each of which opens to what
+ * for each tool source it used, which opens to its calls, each of which opens to what
  * came back. Every level sits flush with the one above.
  */
 export function WorkedFor({
 	message,
-	looks,
+	markedConnectors,
 	fileNames,
 	className,
 }: {
 	message: Message;
-	looks: ReadonlyMap<string, ConnectionLook>;
-	/** The conversation's files by id, for the calls that read them. */
+	markedConnectors: ReadonlyMap<string, MarkedConnector>;
+	/** The chat's files by id, for the calls that read them. */
 	fileNames: ReadonlyMap<string, string>;
 	className?: string;
 }) {
@@ -74,28 +74,30 @@ export function WorkedFor({
 	const [toggled, setToggled] = useState<boolean>();
 	// A reply stopped on a call someone has to approve isn't being worked on.
 	const waiting = message.parts.some((part) => part.type === "tool_call" && awaitsApproval(part));
-	const working = message.status === "streaming" && !waiting;
+	const working = message.status === "writing" && !waiting;
 	const now = useNow(SECOND_MS, working);
 	const runs = toolStepRuns(message.parts);
 	const calls = runs.flatMap((run) => run.calls);
-	const label = waiting ? "Waiting for approval" : workedForText(message, now, calls, looks);
+	const label = waiting
+		? "Waiting for approval"
+		: workedForText(message, now, calls, markedConnectors);
 	if (!label) return null;
 	const line = (
-		<TraceLine status={working ? "running" : undefined}>
-			<TraceTitle className="tabular-nums">{label}</TraceTitle>
-		</TraceLine>
+		<ActivityLine status={working ? "running" : undefined}>
+			<ActivityTitle className="tabular-nums">{label}</ActivityTitle>
+		</ActivityLine>
 	);
 	return (
-		<Trace className={cn("border-border border-b pb-2.5", className)}>
+		<Activity className={cn("border-border border-b pb-2.5", className)}>
 			{calls.length === 0 ? (
 				line
 			) : (
-				<TraceCollapsible open={toggled ?? working} onOpenChange={setToggled}>
-					<TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
-					<TraceCollapsibleContent className={FLUSH}>
-						<Trace>
+				<ActivityCollapsible open={toggled ?? working} onOpenChange={setToggled}>
+					<ActivityCollapsibleTrigger>{line}</ActivityCollapsibleTrigger>
+					<ActivityCollapsibleContent className={FLUSH}>
+						<Activity>
 							{runs.flatMap((run, index) => {
-								const sections = byApp(run.calls);
+								const sections = byToolSource(run.calls);
 								return [
 									run.narration && (
 										<p
@@ -106,10 +108,10 @@ export function WorkedFor({
 										</p>
 									),
 									...sections.map((section, sectionIndex) => (
-										<AppSection
+										<ToolSourceSection
 											key={`steps@${section[0]?.id}`}
 											calls={section}
-											looks={looks}
+											markedConnectors={markedConnectors}
 											fileNames={fileNames}
 											current={
 												working && index === runs.length - 1 && sectionIndex === sections.length - 1
@@ -118,15 +120,15 @@ export function WorkedFor({
 									)),
 								];
 							})}
-						</Trace>
-					</TraceCollapsibleContent>
-				</TraceCollapsible>
+						</Activity>
+					</ActivityCollapsibleContent>
+				</ActivityCollapsible>
 			)}
-		</Trace>
+		</Activity>
 	);
 }
 
-/** What a collapsible's contents lose of `Trace`'s indent and rule, so each level sits flush with the one above. */
+/** What a collapsible's contents lose of `Activity`'s indent and rule, so each level sits flush with the one above. */
 const FLUSH = "ml-0 border-l-0 pl-0 pr-0";
 
 /**
@@ -137,25 +139,25 @@ function workedForText(
 	message: Message,
 	now: number,
 	calls: readonly ToolCallPart[],
-	looks: ReadonlyMap<string, ConnectionLook>,
+	markedConnectors: ReadonlyMap<string, MarkedConnector>,
 ): string | undefined {
 	const startedAt = Date.parse(message.createdAt);
-	if (message.status === "streaming") return `Working for ${formatElapsed(now - startedAt)}`;
+	if (message.status === "writing") return `Working for ${formatElapsed(now - startedAt)}`;
 	const workedMs = message.finishedAt ? Date.parse(message.finishedAt) - startedAt : 0;
 	// A reply recorded as done the moment it began has no time worth telling.
 	if (workedMs >= SECOND_MS) return `Worked for ${formatElapsed(workedMs)}`;
-	return calls.length > 0 ? toolLineText(calls, looks) : undefined;
+	return calls.length > 0 ? toolLineText(calls, markedConnectors) : undefined;
 }
 
 const SECOND_MS = 1_000;
 
 /**
- * Calls made one after another, split wherever the app changes, so each
- * section is one app's. Tools built into every bot share no app, so each of
- * them is its own: commands with commands, page reads with page reads.
+ * Calls made one after another, split wherever the tool source changes, so
+ * each section is one tool source's. Tools built into every bot share no
+ * tool source, so each of them is its own: commands with commands, page reads with page reads.
  */
-function byApp(calls: readonly ToolCallPart[]): ToolCallPart[][] {
-	const appKey = (call: ToolCallPart) => {
+function byToolSource(calls: readonly ToolCallPart[]): ToolCallPart[][] {
+	const toolSourceKey = (call: ToolCallPart) => {
 		const { handle } = splitToolKey(call.tool);
 		return handle === BUILT_IN_HANDLE ? call.tool : handle;
 	};
@@ -163,25 +165,25 @@ function byApp(calls: readonly ToolCallPart[]): ToolCallPart[][] {
 	for (const call of calls) {
 		const last = sections.at(-1);
 		const previous = last?.at(-1);
-		if (last && previous && appKey(previous) === appKey(call)) last.push(call);
+		if (last && previous && toolSourceKey(previous) === toolSourceKey(call)) last.push(call);
 		else sections.push([call]);
 	}
 	return sections;
 }
 
 /**
- * Calls a bot made one after another in one app, as one line saying so:
+ * Calls a bot made one after another in one tool source, as one line saying so:
  * "Used HubSpot for 4s · 3 steps". Opened, the calls, in a list that scrolls
  * once it is long. A single call needs no summary, so is shown as itself.
  */
-function AppSection({
+function ToolSourceSection({
 	calls,
-	looks,
+	markedConnectors,
 	fileNames,
 	current,
 }: {
 	calls: readonly ToolCallPart[];
-	looks: ReadonlyMap<string, ConnectionLook>;
+	markedConnectors: ReadonlyMap<string, MarkedConnector>;
 	fileNames: ReadonlyMap<string, string>;
 	/** The calls the bot is making now, open so the running one shows. */
 	current: boolean;
@@ -189,27 +191,36 @@ function AppSection({
 	const [toggled, setToggled] = useState<boolean>();
 	const first = calls[0];
 	if (!first) return null;
-	if (calls.length === 1) return <CallLine call={first} looks={looks} fileNames={fileNames} />;
+	if (calls.length === 1)
+		return <CallLine call={first} markedConnectors={markedConnectors} fileNames={fileNames} />;
 	const failed = calls.some((call) => call.status === "failed");
 	return (
-		<TraceCollapsible open={toggled ?? current} onOpenChange={setToggled}>
-			<TraceCollapsibleTrigger>
-				<TraceLine status={lineStatus(calls)}>
-					<CallMark call={first} look={looks.get(splitToolKey(first.tool).handle)} />
-					<TraceTitle>{toolLineText(calls, looks)}</TraceTitle>
-					<TraceDescription className={cn(failed && "text-destructive-text")}>
+		<ActivityCollapsible open={toggled ?? current} onOpenChange={setToggled}>
+			<ActivityCollapsibleTrigger>
+				<ActivityLine status={lineStatus(calls)}>
+					<CallMark
+						call={first}
+						connector={markedConnectors.get(splitToolKey(first.tool).handle)}
+					/>
+					<ActivityTitle>{toolLineText(calls, markedConnectors)}</ActivityTitle>
+					<ActivityDescription className={cn(failed && "text-destructive-text")}>
 						{calls.length} steps
-					</TraceDescription>
-				</TraceLine>
-			</TraceCollapsibleTrigger>
-			<TraceCollapsibleContent className={FLUSH}>
-				<Trace className="scrollbar-on-hover max-h-80 overflow-y-auto overscroll-contain">
+					</ActivityDescription>
+				</ActivityLine>
+			</ActivityCollapsibleTrigger>
+			<ActivityCollapsibleContent className={FLUSH}>
+				<Activity className="scrollbar-on-hover max-h-80 overflow-y-auto overscroll-contain">
 					{calls.map((call) => (
-						<CallLine key={call.id} call={call} looks={looks} fileNames={fileNames} />
+						<CallLine
+							key={call.id}
+							call={call}
+							markedConnectors={markedConnectors}
+							fileNames={fileNames}
+						/>
 					))}
-				</Trace>
-			</TraceCollapsibleContent>
-		</TraceCollapsible>
+				</Activity>
+			</ActivityCollapsibleContent>
+		</ActivityCollapsible>
 	);
 }
 
@@ -220,40 +231,40 @@ function lineStatus(calls: readonly ToolCallPart[]): "running" | "error" | undef
 	return undefined;
 }
 
-/** A call's app's mark, or a tool's for one built into every bot. */
-function CallMark({ call, look }: { call: ToolCallPart; look?: ConnectionLook }) {
+/** A call's tool source's mark, or a tool's for one built into every bot. */
+function CallMark({ call, connector }: { call: ToolCallPart; connector?: MarkedConnector }) {
 	return (
-		<TraceIcon>
+		<ActivityIcon>
 			{splitToolKey(call.tool).handle === BUILT_IN_HANDLE ? (
 				<Wrench strokeWidth={1.75} />
 			) : (
-				<ConnectionMark presetId={look?.presetId} name={appOf(call, look)} size="xs" />
+				<ConnectorMark markId={connector?.markId} name={toolSourceOf(call, connector)} size="xs" />
 			)}
-		</TraceIcon>
+		</ActivityIcon>
 	);
 }
 
 /** One call: its mark, what it did to what, and how it went; opened, what came back. */
 function CallLine({
 	call,
-	looks,
+	markedConnectors,
 	fileNames,
 }: {
 	call: ToolCallPart;
-	looks: ReadonlyMap<string, ConnectionLook>;
+	markedConnectors: ReadonlyMap<string, MarkedConnector>;
 	fileNames: ReadonlyMap<string, string>;
 }) {
 	const [inputShown, setInputShown] = useState(false);
-	const look = looks.get(splitToolKey(call.tool).handle);
+	const connector = markedConnectors.get(splitToolKey(call.tool).handle);
 	const { action, subject } = describeStep(call, fileNames);
 	const note = noteOf(call);
 	const details = stepDetails(call);
 	return (
-		<TraceCollapsible>
-			<TraceCollapsibleTrigger>
-				<TraceLine status={lineStatus([call])}>
-					<CallMark call={call} look={look} />
-					<TraceTitle>
+		<ActivityCollapsible>
+			<ActivityCollapsibleTrigger>
+				<ActivityLine status={lineStatus([call])}>
+					<CallMark call={call} connector={connector} />
+					<ActivityTitle>
 						{action}
 						{subject && (
 							<span
@@ -264,18 +275,18 @@ function CallLine({
 								{subject.text}
 							</span>
 						)}
-					</TraceTitle>
+					</ActivityTitle>
 					{note && (
-						<TraceDescription
+						<ActivityDescription
 							title={note.text}
 							className={cn("max-w-2/5 truncate", note.failed && "text-destructive-text")}
 						>
 							{note.text}
-						</TraceDescription>
+						</ActivityDescription>
 					)}
-				</TraceLine>
-			</TraceCollapsibleTrigger>
-			<TraceCollapsibleContent className={FLUSH}>
+				</ActivityLine>
+			</ActivityCollapsibleTrigger>
+			<ActivityCollapsibleContent className={FLUSH}>
 				<div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-list px-3.5 py-3 text-xs">
 					{call.error ? (
 						<DetailBlock label="Error" value={call.error} failed />
@@ -316,7 +327,7 @@ function CallLine({
 						</>
 					)}
 				</div>
-			</TraceCollapsibleContent>
-		</TraceCollapsible>
+			</ActivityCollapsibleContent>
+		</ActivityCollapsible>
 	);
 }

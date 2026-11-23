@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
-import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
-import { answerChallenge } from "@sugabots/core/conversations/tools/browser/vnc-authentication";
+import { DesktopViewer } from "@sugabots/core/chats/tools/browser/viewer";
+import { answerChallenge } from "@sugabots/core/chats/tools/browser/vnc-authentication";
 import { Context, Effect, Exit, Layer, Scope } from "effect";
 import {
 	HttpRouter,
@@ -13,8 +13,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createTestApp,
 	identifiedBy,
+	type PersonResolver,
 	testRoutes,
-	type UserResolver,
 	WEB_ORIGIN,
 } from "./app.test-support.ts";
 
@@ -23,16 +23,16 @@ import {
  * person's socket to the desktop's, here a stand-in that logs a viewer in as
  * x11vnc does, with VNC authentication, then echoes what it is sent.
  */
-const user = {
+const signedIn = {
 	id: "0199a3a0-0000-7000-8000-0000000000ff",
 	email: "sam@example.com",
 	name: "Sam",
 	image: null,
 };
-const resolveUser: UserResolver = async (headers) =>
-	headers.get("cookie") === "session=good" ? user : null;
+const resolvePerson: PersonResolver = async (headers) =>
+	headers.get("cookie") === "session=good" ? signedIn : null;
 const PATH =
-	"/api/conversations/0199a3a0-0000-7000-8000-000000000001/bots/0199a3a0-0000-7000-8000-000000000002/desktop";
+	"/api/chats/0199a3a0-0000-7000-8000-000000000001/bots/0199a3a0-0000-7000-8000-000000000002/desktop";
 
 const PASSWORD = "Abc-12_x";
 const CHALLENGE = Uint8Array.from({ length: 16 }, (_, index) => index * 7);
@@ -102,7 +102,7 @@ beforeAll(async () => {
 	apiPort = await served(
 		testRoutes(
 			Layer.mergeAll(
-				identifiedBy(resolveUser),
+				identifiedBy(resolvePerson),
 				Layer.succeed(DesktopViewer.Service, {
 					open: () =>
 						Effect.succeed({
@@ -165,7 +165,7 @@ describe("the desktop viewer's WebSocket", () => {
 	});
 
 	it("refuses a page on another origin, cookie or not", async () => {
-		const response = await createTestApp(identifiedBy(resolveUser)).fetch(
+		const response = await createTestApp(identifiedBy(resolvePerson)).fetch(
 			new Request(`http://localhost:3000${PATH}`, {
 				headers: { origin: "https://elsewhere.example", cookie: "session=good" },
 			}),
@@ -175,7 +175,7 @@ describe("the desktop viewer's WebSocket", () => {
 	});
 
 	it("refuses somebody who isn't signed in", async () => {
-		const response = await createTestApp(identifiedBy(resolveUser)).fetch(
+		const response = await createTestApp(identifiedBy(resolvePerson)).fetch(
 			new Request(`http://localhost:3000${PATH}`, { headers: { origin: WEB_ORIGIN } }),
 		);
 

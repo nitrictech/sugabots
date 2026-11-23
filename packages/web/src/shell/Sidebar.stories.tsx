@@ -4,7 +4,7 @@ import { expect, fn, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
 import { SessionContext } from "@/lib/session.ts";
-import { appHandlers, storyUser } from "@/story-app.tsx";
+import { appHandlers, storyPerson } from "@/story-app.tsx";
 import { IconRail } from "./IconRail.tsx";
 import { OwnerSidebar } from "./OwnerSidebar.tsx";
 import { SidebarView } from "./Sidebar.tsx";
@@ -23,7 +23,7 @@ const suga = {
 	name: "Suga",
 	slug: "suga",
 	timeZone: "UTC",
-	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+	setUpAt: "2026-09-01T00:00:00.000Z",
 };
 
 const nothing = { unreadMessages: 0, needsApproval: false, failedAutomations: 0 };
@@ -50,7 +50,7 @@ const meta = preview.meta({
 		view: undefined,
 		workspace: suga,
 		workspaces: [suga],
-		user: { name: "Rowan Ellis", email: "rowan@example.com" },
+		signedIn: { name: "Rowan Ellis", email: "rowan@example.com" },
 		onSignOut: fn(),
 		onNewBot: fn(),
 	},
@@ -73,7 +73,7 @@ const meta = preview.meta({
 });
 
 /**
- * Default: the workspace's sidebar, as on Inbox or a page of the workspace's
+ * Default: the workspace's sidebar, as on Approvals or a page of the workspace's
  * own: the projects, then the bots, the Personal Assistant first, and Settings
  * in the foot. Opening a project narrows it to the rail; see Owner open.
  */
@@ -95,10 +95,10 @@ export const OwnerOpen = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...appHandlers());
 	},
-	// Revenue's threads mark the ones that need you, so they ask who you are.
+	// Revenue's chats mark the ones that need you, so they ask who you are.
 	decorators: [
 		(Story) => (
-			<SessionContext value={{ user: storyUser, error: undefined, refresh: async () => {} }}>
+			<SessionContext value={{ person: storyPerson, error: undefined, refresh: async () => {} }}>
 				<Story />
 			</SessionContext>
 		),
@@ -114,11 +114,7 @@ export const OwnerOpen = meta.story({
 			/>
 		),
 		focus: (
-			<OwnerSidebar
-				owner={{ project: revenue }}
-				selectedConversationId={undefined}
-				page={undefined}
-			/>
+			<OwnerSidebar owner={{ project: revenue }} selectedChatId={undefined} page={undefined} />
 		),
 	},
 	play: async ({ canvas }) => {

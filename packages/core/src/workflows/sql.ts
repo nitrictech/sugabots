@@ -6,14 +6,14 @@ type LaneState = "idle" | "starting" | "running";
 
 /**
  * A lane runs one workflow execution at a time for its key (for example one
- * bot's turns in one conversation) and holds the requests waiting behind it. See
+ * bot's turns in one chat) and holds the requests waiting behind it. See
  * `workflows/lanes.ts`.
  */
 export const lane = pgTable(
 	"lane",
 	{
 		key: text("key").primaryKey(),
-		/** What the lane's work is about, such as a conversation, for asking whether anything is under way there. */
+		/** What the lane's work is about, such as a chat, for asking whether anything is under way there. */
 		subject: text("subject"),
 		state: text("state").$type<LaneState>().notNull().default("idle"),
 		/** The workflow starting or running in the lane, and what it was started with. */

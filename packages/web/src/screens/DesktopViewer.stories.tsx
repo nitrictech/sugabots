@@ -11,7 +11,7 @@ const meta = preview.meta({
 	component: DesktopScreen,
 	tags: ["ai-generated"],
 	args: {
-		conversationId: "0199a3a0-0000-7000-8000-000000000501",
+		chatId: "0199a3a0-0000-7000-8000-000000000501",
 		botId: "0199a3a0-0000-7000-8000-000000000502",
 		viewOnly: false,
 		offersReconnect: true,
@@ -42,14 +42,9 @@ export const Unreachable = meta.story({
 const openDesktop = fn();
 
 export const LiveCard = meta.story({
-	render: ({ conversationId, botId }) => (
+	render: ({ chatId, botId }) => (
 		<div className="max-w-115">
-			<LiveDesktopCard
-				conversationId={conversationId}
-				botId={botId}
-				botName="Growth Desk"
-				onOpen={openDesktop}
-			/>
+			<LiveDesktopCard chatId={chatId} botId={botId} botName="Growth Desk" onOpen={openDesktop} />
 		</div>
 	),
 	play: async ({ canvas, userEvent }) => {
@@ -82,11 +77,11 @@ export const Opened = meta.story({
 			);
 		},
 	],
-	render: function Opened({ conversationId }) {
+	render: function Opened({ chatId }) {
 		const bot = { ...growthDesk, usesComputer: true };
 		return (
 			<div className="fixed inset-0 flex">
-				<DesktopStage conversationId={conversationId} owner={{ bot }} bot={bot} onClose={fn()} />
+				<DesktopStage chatId={chatId} owner={{ bot }} bot={bot} onClose={fn()} />
 			</div>
 		);
 	},

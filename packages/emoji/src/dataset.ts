@@ -12,13 +12,13 @@ export interface EmojiDataset {
 	emojis: Emoji[];
 }
 
-export interface EmojiCategory {
+interface EmojiCategory {
 	/** What an emoji's `category` refers to, which is also the category's place in the picker. */
 	index: number;
 	label: string;
 }
 
-export type SkinTone = "light" | "medium-light" | "medium" | "medium-dark" | "dark";
+type SkinTone = "light" | "medium-light" | "medium" | "medium-dark" | "dark";
 
 export interface Emoji {
 	emoji: string;

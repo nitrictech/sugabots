@@ -19,13 +19,13 @@ const scenarios = {
 		label: "Just write",
 		message: "Can you find flights to Lisbon on Friday?",
 		replier: cast.tripPlanner,
-		why: "You're in a thread with Trip Planner, so Trip Planner answers.",
+		why: "You're in a chat with Trip Planner, so Trip Planner answers.",
 	},
 	mentionAnotherBot: {
 		label: "Mention another bot",
 		message: "Find flights, and check them with @budget-keeper",
 		replier: cast.tripPlanner,
-		why: "The thread's own bot still answers. It can bring Budget Keeper in itself, and you can read that exchange.",
+		why: "The chat's own bot still answers. It can bring Budget Keeper in itself, and you can read that exchange.",
 	},
 	mentionOnlyPeople: {
 		label: "Mention only people",
@@ -40,7 +40,7 @@ const scenarioLabels = Object.fromEntries(
 	Object.entries(scenarios).map(([name, scenario]) => [name, scenario.label]),
 ) as Record<ScenarioName, string>;
 
-/** Pick a message to send in a thread with Trip Planner and see who answers it. */
+/** Pick a message to send in a chat with Trip Planner and see who answers it. */
 export function WhoReplies() {
 	const [picked, setPicked] = useState<ScenarioName>("justWrite");
 	const scenario: Scenario = scenarios[picked];
@@ -48,7 +48,7 @@ export function WhoReplies() {
 	return (
 		<DemoCard>
 			<ChoiceChips
-				label="In a thread with Trip Planner:"
+				label="In a chat with Trip Planner:"
 				labelClassName="float-left pr-1 text-sm font-semibold"
 				className="border-b px-5 py-3"
 				options={scenarioLabels}

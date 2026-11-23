@@ -4,7 +4,7 @@ import { ActionForbidden } from "@sugabots/core/authorization/access";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { UserResolver } from "../../http/app.test-support.ts";
+import type { PersonResolver } from "../../http/app.test-support.ts";
 import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 /**
@@ -14,7 +14,7 @@ import { createTestApp, identifiedBy } from "../../http/app.test-support.ts";
 
 const WORKSPACE = "0199a3a0-0000-7000-8000-000000000001";
 
-const resolveUser: UserResolver = async () => ({
+const resolvePerson: PersonResolver = async () => ({
 	id: "0199a3a0-0000-7000-8000-000000000002",
 	name: "Ada",
 	email: "ada@example.com",
@@ -23,7 +23,7 @@ const resolveUser: UserResolver = async () => ({
 
 const usageOf = (month: Usage.Interface["month"], query: string) =>
 	createTestApp(
-		Layer.merge(identifiedBy(resolveUser), unimplemented(Usage.Service, { month })),
+		Layer.merge(identifiedBy(resolvePerson), unimplemented(Usage.Service, { month })),
 	).request(`/workspaces/${WORKSPACE}/usage?${query}`, {
 		headers: { authorization: "Bearer admin-token" },
 	});
@@ -32,12 +32,12 @@ const september: WorkspaceUsage = {
 	month: "2026-09",
 	timeZone: "Australia/Sydney",
 	usd: 94.2,
-	unpricedRequests: 0,
+	unknownCostRequests: 0,
 	days: [],
 	bots: [],
 	models: [],
-	systemBots: { usd: 5.65, unpricedRequests: 0 },
-	personalAssistants: { usd: 0, unpricedRequests: 0 },
+	systemBots: { usd: 5.65, unknownCostRequests: 0 },
+	personalAssistants: { usd: 0, unknownCostRequests: 0 },
 };
 
 describe("reading what the workspace's models cost", () => {
@@ -63,7 +63,7 @@ describe("reading what the workspace's models cost", () => {
 		expect(month).not.toHaveBeenCalled();
 	});
 
-	it("answers somebody who may not see the workspace's spend as forbidden", async () => {
+	it("answers somebody who may not see the workspace's usage as forbidden", async () => {
 		const response = await usageOf(
 			() => Effect.fail(new ActionForbidden({ permission: "workspace.usage.manage" })),
 			"month=2026-09",

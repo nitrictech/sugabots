@@ -5,18 +5,18 @@ import { noDatabase } from "../../database/testing.ts";
 import { type EgressHttpClients, EgressRefused } from "../network/egress.ts";
 import { type DiscoveredModel, emptyRegistry, type ModelRegistry } from "./dialects/index.ts";
 import { registryFrom } from "./dialects/registry.ts";
-import type { ModelProviderRepository } from "./model-provider-repository.ts";
+import type { ModelProviderStore } from "./model-provider-store.ts";
 import { fetchProviderModels, testProvider } from "./remote.ts";
 
-/** Discovery reads the connection the fake repository hands it, so nothing reaches the database. */
+/** Discovery reads the provider access the fake store hands it, so nothing reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
 
-function connection(
-	overrides: Partial<ModelProviderRepository.ProviderEndpoint>,
-): ModelProviderRepository.ProviderEndpoint {
+function access(
+	overrides: Partial<ModelProviderStore.ProviderAccess>,
+): ModelProviderStore.ProviderAccess {
 	return {
 		providerId: "provider-id",
-		preset: null,
+		builtIn: null,
 		baseUrl: "https://models.example/v1",
 		apiFormat: "openai",
 		apiKey: "secret",
@@ -26,12 +26,12 @@ function connection(
 	};
 }
 
-/** A repository that remembers what discovery told it, and reports it all as new. */
-function repository(found: ModelProviderRepository.ProviderEndpoint) {
+/** A store that remembers what discovery told it, and reports it all as new. */
+function store(found: ModelProviderStore.ProviderAccess) {
 	const synced: DiscoveredModel[][] = [];
 	return {
 		synced,
-		endpoint: vi.fn(() => Effect.succeed(found)),
+		access: vi.fn(() => Effect.succeed(found)),
 		syncDiscovered: vi.fn((_workspaceId: string, _providerId: string, models: DiscoveredModel[]) =>
 			Effect.sync(() => {
 				synced.push(models);
@@ -57,8 +57,8 @@ function clients(httpClient: (url: string, init?: RequestInit) => Promise<Respon
 
 /** Runs discovery for `found` against `httpClient`, consulting no registry unless given one. */
 function discover(
-	models: ReturnType<typeof repository>,
-	found: ModelProviderRepository.ProviderEndpoint,
+	models: ReturnType<typeof store>,
+	found: ModelProviderStore.ProviderAccess,
 	httpClient: (url: string, init?: RequestInit) => Promise<Response>,
 	registry: ModelRegistry = emptyRegistry,
 ) {
@@ -108,8 +108,8 @@ const knownModels = registryFrom(
 );
 
 it("uses the injected http client for model discovery", async () => {
-	const found = connection({ headers: { "x-workspace": "workspace" } });
-	const models = repository(found);
+	const found = access({ headers: { "x-workspace": "workspace" } });
+	const models = store(found);
 	const httpClient = vi.fn(async () =>
 		Response.json({ data: [{ id: "remote-model", name: "Remote model" }] }),
 	);
@@ -134,8 +134,8 @@ it("uses the injected http client for model discovery", async () => {
 });
 
 it("fills in from the registry what a listing says nothing about", async () => {
-	const found = connection({ preset: "openai", baseUrl: "https://api.openai.com/v1" });
-	const models = repository(found);
+	const found = access({ builtIn: "openai", baseUrl: "https://api.openai.com/v1" });
+	const models = store(found);
 	const httpClient = vi.fn(async () =>
 		Response.json({ data: [{ id: "gpt-4o", object: "model" }, { id: "text-embedding-3-small" }] }),
 	);
@@ -159,12 +159,12 @@ it("fills in from the registry what a listing says nothing about", async () => {
 });
 
 it("asks Anthropic for a whole page and keys with its own header", async () => {
-	const found = connection({
-		preset: "anthropic",
+	const found = access({
+		builtIn: "anthropic",
 		baseUrl: "https://api.anthropic.com",
 		apiFormat: "anthropic",
 	});
-	const models = repository(found);
+	const models = store(found);
 	const httpClient = vi.fn(async () =>
 		Response.json({
 			data: [{ id: "claude-sonnet-4-5", display_name: "Claude Sonnet 4.5", type: "model" }],
@@ -184,19 +184,19 @@ it("asks Anthropic for a whole page and keys with its own header", async () => {
 		{
 			modelId: "claude-sonnet-4-5",
 			displayName: "Claude Sonnet 4.5",
-			capabilities: ["tools", "reasoning", "vision"],
+			capabilities: ["tools", "thinking", "vision"],
 			contextLength: 200_000,
 		},
 	]);
 });
 
 it("asks Ollama about each model through its native API, without an authorization header", async () => {
-	const found = connection({
-		preset: "ollama",
+	const found = access({
+		builtIn: "ollama",
 		baseUrl: "http://127.0.0.1:11434/v1",
 		apiKey: undefined,
 	});
-	const models = repository(found);
+	const models = store(found);
 	const httpClient = vi.fn(async (url: string, init?: RequestInit) => {
 		if (url.endsWith("/api/tags")) {
 			return Response.json({ models: [{ name: "llama3.2:latest" }, { name: "nomic-embed-text" }] });
@@ -226,7 +226,7 @@ it("asks Ollama about each model through its native API, without an authorizatio
 		{
 			modelId: "llama3.2:latest",
 			displayName: null,
-			capabilities: ["tools", "reasoning"],
+			capabilities: ["tools", "thinking"],
 			contextLength: 131_072,
 		},
 		{
@@ -239,12 +239,12 @@ it("asks Ollama about each model through its native API, without an authorizatio
 });
 
 it("keeps a listed model when Ollama cannot describe it", async () => {
-	const found = connection({
-		preset: "ollama",
+	const found = access({
+		builtIn: "ollama",
 		baseUrl: "http://127.0.0.1:11434/v1",
 		apiKey: undefined,
 	});
-	const models = repository(found);
+	const models = store(found);
 	const httpClient = vi.fn(async (url: string) =>
 		url.endsWith("/api/tags")
 			? Response.json({ models: [{ name: "mystery" }] })
@@ -262,12 +262,12 @@ it("keeps a listed model when Ollama cannot describe it", async () => {
 });
 
 it("rejects invalid OpenRouter keys even when the public model list is accessible", async () => {
-	const found = connection({
-		preset: "openrouter",
+	const found = access({
+		builtIn: "openrouter",
 		baseUrl: "https://openrouter.ai/api/v1",
 		apiKey: "invalid-openrouter-key",
 	});
-	const models = repository(found);
+	const models = store(found);
 	const httpClient = async (url: string) =>
 		url === "https://openrouter.ai/api/v1/models"
 			? Response.json({ data: [] })
@@ -289,8 +289,8 @@ it("rejects invalid OpenRouter keys even when the public model list is accessibl
 });
 
 it("reads OpenRouter's own account of what a model can do", async () => {
-	const found = connection({ baseUrl: "https://openrouter.ai/api/v1" });
-	const models = repository(found);
+	const found = access({ baseUrl: "https://openrouter.ai/api/v1" });
+	const models = store(found);
 	const httpClient = vi.fn(async () =>
 		Response.json({
 			data: [
@@ -348,8 +348,8 @@ it.each([
 ])(
 	"names a %i from the listing as %s, which may be tried again: %s",
 	async (status, tag, isRetryable) => {
-		const found = connection({});
-		const models = repository(found);
+		const found = access({});
+		const models = store(found);
 
 		await expect(
 			discover(models, found, async () => new Response(null, { status })).result,
@@ -361,8 +361,8 @@ it.each([
 	["a blocked address", "privateNetwork", "DiscoveryAddressRefused", false],
 	["a name that doesn't resolve", "unresolved", "DiscoveryUnreachable", true],
 ] as const)("tells %s from the network policy apart", async (_, reason, tag, isRetryable) => {
-	const found = connection({});
-	const models = repository(found);
+	const found = access({});
+	const models = store(found);
 	const refused = async (): Promise<Response> => {
 		throw new EgressRefused({ reason });
 	};
@@ -374,8 +374,8 @@ it.each([
 });
 
 it("says a provider listing more models than we take has too many, not a wrong address", async () => {
-	const found = connection({});
-	const models = repository(found);
+	const found = access({});
+	const models = store(found);
 	const tooMany = Array.from({ length: 2_001 }, (_, index) => ({ id: `model-${index}` }));
 
 	await expect(
@@ -387,8 +387,8 @@ const UNREACHABLE =
 	"We can't reach the provider. Check its address, and that the server is running if it's your own. Then try again.";
 
 it("records a fixed sentence for an unreachable provider, and keeps the network's words out of it", async () => {
-	const found = connection({});
-	const models = repository(found);
+	const found = access({});
+	const models = store(found);
 	const httpClient = async () => {
 		throw new Error("getaddrinfo ENOTFOUND models.internal.example 10.0.0.7");
 	};
@@ -406,8 +406,8 @@ it("records a fixed sentence for an unreachable provider, and keeps the network'
 });
 
 it("records a model a listing names twice once", async () => {
-	const found = connection({});
-	const models = repository(found);
+	const found = access({});
+	const models = store(found);
 	const httpClient = vi.fn(async () => Response.json({ data: [{ id: "twice" }, { id: "twice" }] }));
 
 	await expect(discover(models, found, httpClient).result).resolves.toEqual({

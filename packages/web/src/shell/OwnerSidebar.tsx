@@ -17,18 +17,18 @@ export type OwnerSidebarPage = OwnerPageName | undefined;
 /**
  * The sidebar on a bot's or a project's pages, beside the rail: the way back to
  * everything, its own pages, a search over its work, then
- * `OwnerWork`. The rail names which bot or project it is. A bot's threads are
+ * `OwnerWork`. The rail names which bot or project it is. A bot's chats are
  * those of its default project.
  */
 export function OwnerSidebar({
 	owner,
-	selectedConversationId,
+	selectedChatId,
 	page,
 }: {
 	owner: ResourceOwner;
-	/** The thread open, marked in the list. */
-	selectedConversationId: string | undefined;
-	/** The owner's own page open, if one is: its files, automations, computer, connections or settings. */
+	/** The chat open, marked in the list. */
+	selectedChatId: string | undefined;
+	/** The owner's own page open, if one is: its files, automations, computer, connectors or settings. */
 	page: OwnerSidebarPage;
 }) {
 	const work = useOwnerWork(owner);
@@ -65,17 +65,13 @@ export function OwnerSidebar({
 				<div className="flex items-center gap-1">
 					<SearchField
 						look="sidebar"
-						label={`Search ${name}'s threads`}
+						label={`Search ${name}'s chats`}
 						placeholder="Search"
 						value={search}
 						onChange={setSearch}
 						className="flex-1"
 					/>
-					<IconButton
-						label="New thread"
-						variant="row"
-						render={ownerLink(owner, { page: "newThread" })}
-					>
+					<IconButton label="New chat" variant="row" render={ownerLink(owner, { page: "newChat" })}>
 						<SquarePen aria-hidden />
 					</IconButton>
 				</div>
@@ -83,7 +79,7 @@ export function OwnerSidebar({
 			<OwnerWork
 				owner={owner}
 				work={work}
-				selectedConversationId={selectedConversationId}
+				selectedChatId={selectedChatId}
 				search={search}
 				className="scrollbar-on-hover min-h-0 flex-1 overflow-y-auto px-3 pt-2 pb-3"
 			/>

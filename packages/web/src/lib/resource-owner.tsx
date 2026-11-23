@@ -7,31 +7,31 @@ import {
 	botAutomationFeedLink,
 	botAutomationsLink,
 	botComputerLink,
-	botConnectionLink,
-	botConnectionsLink,
+	botConnectorLink,
+	botConnectorsLink,
 	botFileLink,
 	botFilesLink,
 	botLink,
 	botNewAutomationLink,
-	botNewThreadLink,
+	botNewChatLink,
 	botSettingsLink,
-	conversationLink,
+	chatLink,
 	projectAutomationFeedLink,
 	projectAutomationsLink,
 	projectComputerLink,
-	projectConnectionLink,
-	projectConnectionsLink,
+	projectConnectorLink,
+	projectConnectorsLink,
 	projectFileLink,
 	projectFilesLink,
 	projectLink,
 	projectNewAutomationLink,
-	projectNewThreadLink,
+	projectNewChatLink,
 	projectSettingsLink,
 } from "@/lib/links.ts";
 
 /*
  * A bot or a project, whose pages look and work alike. A project holds its
- * threads, files, computer, connections and automations; a bot's are those of
+ * chats, files, computer, connectors and automations; a bot's are those of
  * its hidden default project, shown as the bot's own. So the pages for them
  * take either, and read the project they are about through here.
  */
@@ -39,7 +39,7 @@ import {
 /** A bot, shown as itself over its default project, or a project people made. */
 export type ResourceOwner = { bot: Bot } | { project: Project };
 
-/** The project whose threads, files, computer, connections and automations these are. */
+/** The project whose chats, files, computer, connectors and automations these are. */
 export function resourceProjectId(owner: ResourceOwner): string {
 	return "bot" in owner ? owner.bot.defaultProjectId : owner.project.id;
 }
@@ -49,13 +49,13 @@ export function ownerName(owner: ResourceOwner): string {
 	return "bot" in owner ? owner.bot.name : owner.project.name;
 }
 
-/** What the person may do with the owner's computer, connections and automations, as the API resolved it. */
+/** What the person may do with the owner's computer, connectors and automations, as the API resolved it. */
 export function resourcePermissions(owner: ResourceOwner): ResourcePermissions {
 	return "bot" in owner ? owner.bot.permissions.resources : owner.project.permissions.resources;
 }
 
 /**
- * The bot that works on the owner's threads and runs its automations: a bot
+ * The bot that works on the owner's chats and runs its automations: a bot
  * itself, or a project's lead bot. Undefined until the roster has it.
  */
 export function useLeadBot(owner: ResourceOwner): Bot | undefined {
@@ -65,19 +65,19 @@ export function useLeadBot(owner: ResourceOwner): Bot | undefined {
 
 /** One of the pages a bot and a project each have. */
 export type OwnerPage =
-	/** On a phone, the bot's or project's threads and pages; wider, a bot's new thread or a project's newest. */
+	/** On a phone, the bot's or project's chats and pages; wider, a bot's new chat or a project's newest. */
 	| { page: "home" }
-	| { page: "newThread" }
-	| { page: "thread"; conversationId: string }
+	| { page: "newChat" }
+	| { page: "chat"; chatId: string }
 	| { page: "files" }
 	/** One file, at `version` when one is given, else its current one. */
 	| { page: "file"; fileId: string; version?: number }
 	| { page: "automations" }
 	| { page: "newAutomation" }
-	/** An automation's own page, or with `itemPage` one of its runs. */
-	| { page: "automation"; automationId: string; itemPage?: string }
-	| { page: "connections" }
-	| { page: "connection"; connectionId: string }
+	/** An automation's own page, or with `nestedChatPage` one of its runs. */
+	| { page: "automation"; automationId: string; nestedChatPage?: string }
+	| { page: "connectors" }
+	| { page: "connector"; connectorId: string }
 	| { page: "computer" }
 	| { page: "settings" };
 
@@ -104,10 +104,10 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 		switch (to.page) {
 			case "home":
 				return botLink(bot);
-			case "newThread":
-				return botNewThreadLink(bot);
-			case "thread":
-				return conversationLink({ bot, conversationId: to.conversationId });
+			case "newChat":
+				return botNewChatLink(bot);
+			case "chat":
+				return chatLink({ bot, chatId: to.chatId });
 			case "files":
 				return botFilesLink(bot);
 			case "file":
@@ -117,11 +117,11 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 			case "newAutomation":
 				return botNewAutomationLink(bot);
 			case "automation":
-				return botAutomationFeedLink(bot, to.automationId, itemPageSearch(to.itemPage));
-			case "connections":
-				return botConnectionsLink(bot);
-			case "connection":
-				return botConnectionLink(bot, { id: to.connectionId });
+				return botAutomationFeedLink(bot, to.automationId, nestedChatPageSearch(to.nestedChatPage));
+			case "connectors":
+				return botConnectorsLink(bot);
+			case "connector":
+				return botConnectorLink(bot, { id: to.connectorId });
 			case "computer":
 				return botComputerLink(bot);
 			case "settings":
@@ -132,10 +132,10 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 	switch (to.page) {
 		case "home":
 			return projectLink(project);
-		case "newThread":
-			return projectNewThreadLink(project);
-		case "thread":
-			return conversationLink({ project, conversationId: to.conversationId });
+		case "newChat":
+			return projectNewChatLink(project);
+		case "chat":
+			return chatLink({ project, chatId: to.chatId });
 		case "files":
 			return projectFilesLink(project);
 		case "file":
@@ -145,11 +145,15 @@ export function ownerLinkOptions(owner: ResourceOwner, to: OwnerPage): OwnerLink
 		case "newAutomation":
 			return projectNewAutomationLink(project);
 		case "automation":
-			return projectAutomationFeedLink(project, to.automationId, itemPageSearch(to.itemPage));
-		case "connections":
-			return projectConnectionsLink(project);
-		case "connection":
-			return projectConnectionLink(project, { id: to.connectionId });
+			return projectAutomationFeedLink(
+				project,
+				to.automationId,
+				nestedChatPageSearch(to.nestedChatPage),
+			);
+		case "connectors":
+			return projectConnectorsLink(project);
+		case "connector":
+			return projectConnectorLink(project, { id: to.connectorId });
 		case "computer":
 			return projectComputerLink(project);
 		case "settings":
@@ -162,9 +166,9 @@ export function ownerLink(owner: ResourceOwner, to: OwnerPage): ReactElement {
 	return <Link {...ownerLinkOptions(owner, to)} />;
 }
 
-/** A run named in an automation's address, or nothing, so a link with none adds no `?itemPage=`. */
-function itemPageSearch(itemPage: string | undefined): { itemPage?: string } {
-	return itemPage === undefined ? {} : { itemPage };
+/** A run named in an automation's address, or nothing, so a link with none adds no `?nestedChatPage=`. */
+function nestedChatPageSearch(nestedChatPage: string | undefined): { nestedChatPage?: string } {
+	return nestedChatPage === undefined ? {} : { nestedChatPage };
 }
 
 /** A file's version named in its address, or nothing, so a link to its current one adds no `?version=`. */

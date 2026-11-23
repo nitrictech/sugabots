@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { SettingsControlRow } from "@/ui/settings-page.tsx";
 
 /**
- * A row of a model provider's connection: its label, then what it holds (a
+ * A row of a model provider's provider access: its label, then what it holds (a
  * value in the mono face, or the field that changes it), and its actions,
  * such as Replace.
  */

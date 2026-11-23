@@ -5,12 +5,12 @@ import { uuidSchema } from "./uuid.ts";
 
 /**
  * Projects: long-running pieces of work where many people and many bots
- * talk, in the project's threads, each led by one lead bot.
+ * talk, in the project's chats, each led by one lead bot.
  *
  * A project is reached by its members, and every workspace admin is one of
  * them. A public one is listed to everybody in the workspace to join; a
  * private one only to its members. Every bot also has a hidden default
- * project, where its own threads live, which is never listed: its threads are
+ * project, where its own chats live, which is never listed: its chats are
  * reached through the bot.
  */
 
@@ -28,7 +28,7 @@ export const slugSchema = Schema.String.check(
  * The stable address for a project, as it appears in a URL: a slug not shaped
  * like an id.
  *
- * It is unique within a workspace rather than across the installation: two
+ * It is unique within a workspace rather than across the server: two
  * workspaces may both have a `general`, and neither should have to know about
  * the other.
  */
@@ -88,18 +88,18 @@ export function leastUsedProjectColor(taken: readonly ProjectColor[]): ProjectCo
 /**
  * What the person may do with what a project holds besides its people and
  * bots, the same on a project and on a bot, whose are its default
- * project's: its threads' history, settings, files, connections, computer
+ * project's: its chats' history, settings, files, connectors, computer
  * and automations.
  */
 export const resourcePermissionsSchema = Schema.Struct({
-	/** Read its threads and what its automations' runs said, which managing them alone does not give. */
+	/** Read its chats and what its automations' runs said, which managing them alone does not give. */
 	readHistory: Schema.Boolean,
 	/** Open its settings: a bot's for whoever may change it, a project's for anyone in it. */
 	openSettings: Schema.Boolean,
-	/** Delete the files made in its threads. */
+	/** Delete the files made in its chats. */
 	deleteFiles: Schema.Boolean,
-	/** Add, change, sign in and remove its connections, its GitHub app among them. */
-	manageConnections: Schema.Boolean,
+	/** Add, change, sign in and remove its connectors, its GitHub app among them. */
+	manageConnectors: Schema.Boolean,
 	/** Decide what its computer may reach, and reset and upgrade it. */
 	manageComputer: Schema.Boolean,
 	/** Click and type on its computer's desktop, rather than only watch it. */
@@ -116,7 +116,7 @@ export const projectPermissionsSchema = Schema.Struct({
 	/** Change the project's name, address, colour, description, visibility and lead bot. */
 	rename: Schema.Boolean,
 	/** Invite and remove people. */
-	manageMembers: Schema.Boolean,
+	managePeople: Schema.Boolean,
 	/** Add and remove bots, which must be public. */
 	manageBots: Schema.Boolean,
 	/** Take yourself out of the project. Never for an administrator, who is in every one. */
@@ -142,7 +142,7 @@ export const projectSchema = Schema.Struct({
 	description: Schema.NullOr(Schema.String),
 	visibility: projectVisibilitySchema,
 	/**
-	 * The bot that works on the project and answers its threads unless another
+	 * The bot that works on the project and answers its chats unless another
 	 * is asked: one of its bots.
 	 */
 	leadBotId: uuidSchema,
@@ -192,7 +192,7 @@ export type ProjectUpdate = typeof projectUpdateSchema.Type;
 
 /** Somebody in a project. Every administrator is in every project people made. */
 export const projectMemberSchema = Schema.Struct({
-	userId: uuidSchema,
+	personId: uuidSchema,
 	name: Schema.String,
 	email: emailSchema,
 	image: Schema.NullOr(Schema.String),
@@ -203,7 +203,7 @@ export const projectMemberSchema = Schema.Struct({
 export type ProjectMember = typeof projectMemberSchema.Type;
 
 export const newProjectMemberSchema = Schema.Struct({
-	userId: uuidSchema,
+	personId: uuidSchema,
 });
 
 /**

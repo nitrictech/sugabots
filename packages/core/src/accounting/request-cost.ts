@@ -5,7 +5,7 @@ import {
 	Usd,
 	usageFromAiSdk,
 } from "@sugabots/accounting";
-import { providerPreset } from "@sugabots/contracts";
+import { providerBuiltIn } from "@sugabots/contracts";
 import type { LanguageModelUsage } from "ai";
 import type {
 	ModelRegistry,
@@ -29,11 +29,11 @@ export function requestCost(
 	usage: LanguageModelUsage,
 	registry: Pick<ModelRegistry, "cost" | "version">,
 ): ModelRequests.Cost | undefined {
-	const preset = provider.preset ? providerPreset(provider.preset) : undefined;
-	if (preset?.hosting === "local") return { usd: FREE, source: "local" };
-	if (preset?.credential === "sign-in") return { usd: FREE, source: "subscription" };
+	const builtIn = provider.builtIn ? providerBuiltIn(provider.builtIn) : undefined;
+	if (builtIn?.hosting === "local") return { usd: FREE, source: "local" };
+	if (builtIn?.credential === "sign-in") return { usd: FREE, source: "subscription" };
 
-	const reported = preset?.id === "openrouter" ? openRouterReportedCost(usage) : undefined;
+	const reported = builtIn?.id === "openrouter" ? openRouterReportedCost(usage) : undefined;
 	if (reported !== undefined) return { usd: reported, source: "provider-reported" };
 
 	const published = registry.cost(model, provider);

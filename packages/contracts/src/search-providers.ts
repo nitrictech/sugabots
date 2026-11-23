@@ -7,17 +7,17 @@ import { uuidSchema } from "./uuid.ts";
  * Search providers: where a workspace's `web_search` tool sends its queries.
  *
  * Search costs money per query, so the workspace that wants it configures and
- * pays for it. One provider per workspace, made from a preset the
+ * pays for it. One provider per workspace, made from a built-in provider the
  * way a model provider is, with the workspace's own key. `web_search` is
  * offered to a bot only while the provider is enabled and, where the
- * preset needs one, has a key.
+ * built-in provider needs one, has a key.
  */
 
-const searchProviderPresetIdSchema = Schema.Literals(["brave", "exa", "tavily", "searxng"]);
-export type SearchProviderPresetId = typeof searchProviderPresetIdSchema.Type;
+const builtInSearchProviderIdSchema = Schema.Literals(["brave", "exa", "tavily", "searxng"]);
+export type BuiltInSearchProviderId = typeof builtInSearchProviderIdSchema.Type;
 
 /** The provider a workspace has until it chooses another. */
-export const DEFAULT_SEARCH_PRESET: SearchProviderPresetId = "exa";
+export const DEFAULT_SEARCH_BUILT_IN: BuiltInSearchProviderId = "exa";
 
 /**
  * Where Exa answers without a key: its free MCP endpoint, rate limited. With
@@ -25,19 +25,19 @@ export const DEFAULT_SEARCH_PRESET: SearchProviderPresetId = "exa";
  */
 export const EXA_FREE_SEARCH_URL = "https://mcp.exa.ai/mcp";
 
-/** One entry in the search catalog: data about a search service we know how to call. */
-interface SearchProviderPreset {
-	id: SearchProviderPresetId;
+/** A built-in search provider: data about a search service we know how to call. */
+interface BuiltInSearchProvider {
+	id: BuiltInSearchProviderId;
 	name: string;
 	baseUrl: string;
-	/** A remote preset has a fixed address and wants a key; a local one is a server you run. */
+	/** A remote built-in provider has a fixed address and wants a key; a local one is a server you run. */
 	hosting: "remote" | "local";
 	requiresApiKey: boolean;
 	/** What it is good for, in the line under its name where one is chosen. */
 	description: string;
 }
 
-export const searchProviderCatalog: readonly SearchProviderPreset[] = [
+export const builtInSearchProviders: readonly BuiltInSearchProvider[] = [
 	{
 		id: "exa",
 		name: "Exa",
@@ -72,18 +72,18 @@ export const searchProviderCatalog: readonly SearchProviderPreset[] = [
 	},
 ];
 
-export function searchProviderPreset(id: SearchProviderPresetId): SearchProviderPreset {
-	const preset = searchProviderCatalog.find((candidate) => candidate.id === id);
-	if (!preset) {
-		throw new Error(`Unknown search provider preset: ${id}`);
+export function searchBuiltInProvider(id: BuiltInSearchProviderId): BuiltInSearchProvider {
+	const builtIn = builtInSearchProviders.find((candidate) => candidate.id === id);
+	if (!builtIn) {
+		throw new Error(`Unknown built-in search provider: ${id}`);
 	}
-	return preset;
+	return builtIn;
 }
 
 export const searchProviderSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	preset: searchProviderPresetIdSchema,
+	builtIn: builtInSearchProviderIdSchema,
 	name: Schema.String,
 	baseUrl: providerUrlSchema,
 	/** Whether bots in this workspace are offered `web_search`. */
@@ -98,13 +98,13 @@ export type SearchProvider = typeof searchProviderSchema.Type;
 
 const apiKeySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
 
-/** A workspace's search provider, set or replaced: the preset supplies everything but the key. */
+/** A workspace's search provider, set or replaced: the built-in provider supplies everything but the key. */
 export const newSearchProviderSchema = Schema.Struct({
-	preset: searchProviderPresetIdSchema,
+	builtIn: builtInSearchProviderIdSchema,
 	/** Switched on as it is set, so one call can turn the default on. */
 	enabled: Schema.optional(Schema.Boolean),
 	apiKey: Schema.optional(apiKeySchema),
-	/** Only a local preset's address is worth changing. */
+	/** Only a local built-in provider's address is worth changing. */
 	baseUrl: Schema.optional(providerUrlSchema),
 });
 

@@ -11,7 +11,7 @@ const workspace = {
 	name: "Suga Workspace",
 	slug: "suga",
 	timeZone: "UTC",
-	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+	setUpAt: "2026-09-01T00:00:00.000Z",
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
 
@@ -33,7 +33,7 @@ const september: WorkspaceUsage = {
 	month: "2026-09",
 	timeZone: "UTC",
 	usd: 94.2,
-	unpricedRequests: 0,
+	unknownCostRequests: 0,
 	days: days("2026-09", SEPTEMBER_DAYS, 30),
 	bots: [
 		bot("Growth Desk", "green", "pill", 30.14),
@@ -60,24 +60,24 @@ const september: WorkspaceUsage = {
 		),
 		model("qwen3.5:4b", "Qwen 3.5 4B", "Ollama", "ollama", 0),
 	],
-	systemBots: { usd: 5.65, unpricedRequests: 0 },
-	personalAssistants: { usd: 0, unpricedRequests: 0 },
+	systemBots: { usd: 5.65, unknownCostRequests: 0 },
+	personalAssistants: { usd: 0, unknownCostRequests: 0 },
 };
 
 function bot(
 	name: string,
 	color: WorkspaceUsage["bots"][number]["color"],
-	face: WorkspaceUsage["bots"][number]["face"],
+	eyes: WorkspaceUsage["bots"][number]["eyes"],
 	usd: number,
 ) {
 	return {
 		botId: `bot-${name}`,
 		name,
 		color,
-		face,
+		eyes,
 		shape: "circle" as const,
 		usd,
-		unpricedRequests: 0,
+		unknownCostRequests: 0,
 	};
 }
 
@@ -85,16 +85,16 @@ function model(
 	id: string,
 	displayName: string,
 	providerName: string,
-	preset: WorkspaceUsage["models"][number]["preset"],
+	builtIn: WorkspaceUsage["models"][number]["builtIn"],
 	usd: number,
 ) {
 	return {
 		model: id,
 		displayName,
 		providerName,
-		preset,
+		builtIn,
 		usd,
-		unpricedRequests: 0,
+		unknownCostRequests: 0,
 	};
 }
 
@@ -110,19 +110,19 @@ const answering = (...months: WorkspaceUsage[]) =>
 	http.get(usageUrl, ({ request }) => {
 		const asked = new URL(request.url).searchParams.get("month") ?? "";
 		const found = months.find((usage) => usage.month === asked);
-		return HttpResponse.json(found ?? nothingSpent(asked));
+		return HttpResponse.json(found ?? noUsage(asked));
 	});
 
-const nothingSpent = (month: string): WorkspaceUsage => ({
+const noUsage = (month: string): WorkspaceUsage => ({
 	month,
 	timeZone: "UTC",
 	usd: 0,
-	unpricedRequests: 0,
+	unknownCostRequests: 0,
 	days: days(month, [], 30),
 	bots: [],
 	models: [],
-	systemBots: { usd: 0, unpricedRequests: 0 },
-	personalAssistants: { usd: 0, unpricedRequests: 0 },
+	systemBots: { usd: 0, unknownCostRequests: 0 },
+	personalAssistants: { usd: 0, unknownCostRequests: 0 },
 });
 
 function QueryPreview({ children }: { children: ReactNode }) {
@@ -235,17 +235,17 @@ export const EarlierMonth = meta.story({
 /**
  * Some requests couldn't be priced, such as one to a model with no published
  * price. They are counted beneath the breakdown, and a bot whose every request
- * went unpriced shows a dash rather than a misleading $0.00.
+ * had an unknown cost shows a dash rather than a misleading $0.00.
  */
-export const SomeUnpriced = meta.story({
+export const SomeUnknownCost = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			answering({
 				...september,
-				unpricedRequests: 3,
+				unknownCostRequests: 3,
 				bots: [
 					...september.bots,
-					{ ...bot("Custom Endpoint", "teal", "wink", 0), unpricedRequests: 3 },
+					{ ...bot("Custom Provider", "teal", "wink", 0), unknownCostRequests: 3 },
 				],
 			}),
 		);
@@ -253,7 +253,7 @@ export const SomeUnpriced = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByText(
-				"Estimated from each provider's published prices. 3 requests couldn't be priced and aren't included. Your provider bills you directly.",
+				"Estimated from each provider's published prices. 3 requests have an unknown cost and aren't included. Your provider bills you directly.",
 			),
 		).toBeInTheDocument();
 		await expect(canvas.getByText("Not priced")).toBeInTheDocument();
@@ -261,7 +261,7 @@ export const SomeUnpriced = meta.story({
 });
 
 /** A month nothing was spent in says so, rather than showing an empty list. */
-export const NothingSpent = meta.story({
+export const NoUsage = meta.story({
 	beforeEach({ msw }) {
 		msw.use(answering());
 	},
@@ -294,7 +294,7 @@ export const InWorkspaceTimeZone = meta.story({
 
 /**
  * A workspace in a time zone this browser doesn't have still shows its
- * spend: this month and today are taken in UTC instead.
+ * usage: this month and today are taken in UTC instead.
  */
 export const TimeZoneUnknownToBrowser = meta.story({
 	beforeEach({ msw }) {

@@ -1,4 +1,4 @@
-import type { BotColor, BotFace, BotShape, SystemBotKey } from "@sugabots/contracts";
+import type { BotColor, BotEyes, BotShape, SystemBotKey } from "@sugabots/contracts";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
@@ -11,13 +11,13 @@ import { bot } from "../../database/schema.ts";
  *
  * One is born without a model, since a new workspace offers none, and is given
  * the first model somebody switches on, which is the one they pick while
- * onboarding. From then on it always has one: an administrator can change it
+ * workspace setup. From then on it always has one: an administrator can change it
  * but not clear it, and the workspace cannot stop offering it until the bot
  * is moved to another. Compaction runs on the model of the bot it compacts
  * for, and on its own only for a bot with none.
  */
 
-/** The system bot that compacts what a bot reads when its conversation gets long. */
+/** The system bot that compacts what a bot reads when its chat gets long. */
 export const COMPACT_SYSTEM_BOT: SystemBotKey = "compact";
 
 export interface SystemBotDefinition {
@@ -26,7 +26,7 @@ export interface SystemBotDefinition {
 	name: string;
 	description: string;
 	color: BotColor;
-	face: BotFace;
+	eyes: BotEyes;
 	shape: BotShape;
 	prompt: string;
 }
@@ -35,11 +35,11 @@ export const SYSTEM_BOTS: readonly SystemBotDefinition[] = [
 	{
 		key: COMPACT_SYSTEM_BOT,
 		name: "Compaction",
-		description: "Compacts long conversations so bots can keep reading them.",
+		description: "Compacts long chats so bots can keep reading them.",
 		color: "purple",
-		face: "square",
+		eyes: "square",
 		shape: "circle",
-		prompt: "Summarize what a bot needs to carry on the conversation. Do not invent details.",
+		prompt: "Summarize what a bot needs to carry on the chat. Do not invent details.",
 	},
 ];
 

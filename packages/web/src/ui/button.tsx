@@ -3,16 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 
 /*
- * The button. The variant and size names are shadcn's, so a component installed
- * from a shadcn registry, such as AI Elements, uses this button rather than
- * bringing a look of its own; map any variant it uses that this lacks when it
- * is installed.
- *
- * The design draws buttons as pills: the accent primary, a neutral chip for
- * everything secondary (`muted` where it sits on a card's fill), and bare
- * text for links, quiet actions and destructive ones.
- *
- * An icon-only control is an `IconButton`, which requires a label. A link
+ * The button. An icon-only control is an `IconButton`, which requires a label. A link
  * styled as a button gets `buttonStyles(...)` on its `<a>`, so it stays a link.
  */
 

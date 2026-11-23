@@ -2,7 +2,7 @@ import { BadRequest, Conflict, NotFound } from "@sugabots/contracts/http";
 import { BotAdministration } from "@sugabots/core/workspaces/bots/bot-administration";
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { asSessionUser } from "../../auth/middleware.ts";
+import { asSignedInPerson } from "../../auth/middleware.ts";
 import { ServerApi } from "../../http/api.ts";
 import { asHttpError, refusals } from "../../http/errors.ts";
 
@@ -11,35 +11,35 @@ export const botRoutes = HttpApiBuilder.group(ServerApi, "bots", (handlers) =>
 		const bots = yield* BotAdministration.Service;
 		return handlers
 			.handle("list", ({ params }) =>
-				bots.list({ workspace: params.workspace }).pipe(asSessionUser, asHttpError(botErrors)),
+				bots.list({ workspace: params.workspace }).pipe(asSignedInPerson, asHttpError(botErrors)),
 			)
 			.handle("create", ({ params, payload }) =>
 				bots
 					.create({ workspace: params.workspace, bot: payload })
-					.pipe(asSessionUser, asHttpError(botErrors)),
+					.pipe(asSignedInPerson, asHttpError(botErrors)),
 			)
 			.handle("update", ({ params, payload }) =>
 				bots
 					.update({ botId: params.botId, changes: payload })
-					.pipe(asSessionUser, asHttpError(botErrors)),
+					.pipe(asSignedInPerson, asHttpError(botErrors)),
 			)
 			.handle("remove", ({ params }) =>
-				bots.remove({ botId: params.botId }).pipe(asSessionUser, asHttpError(botErrors)),
+				bots.remove({ botId: params.botId }).pipe(asSignedInPerson, asHttpError(botErrors)),
 			)
 			.handle("pin", ({ params }) =>
 				bots
 					.setPinned({ botId: params.botId, pinned: true })
-					.pipe(asSessionUser, asHttpError(botErrors)),
+					.pipe(asSignedInPerson, asHttpError(botErrors)),
 			)
 			.handle("unpin", ({ params }) =>
 				bots
 					.setPinned({ botId: params.botId, pinned: false })
-					.pipe(asSessionUser, asHttpError(botErrors)),
+					.pipe(asSignedInPerson, asHttpError(botErrors)),
 			)
 			.handle("ensureAssistant", ({ params, payload }) =>
 				bots
 					.ensureAssistant({ workspace: params.workspace, model: payload.model })
-					.pipe(asSessionUser, asHttpError(botErrors)),
+					.pipe(asSignedInPerson, asHttpError(botErrors)),
 			);
 	}),
 );

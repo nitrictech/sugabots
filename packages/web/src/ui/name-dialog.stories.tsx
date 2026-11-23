@@ -8,7 +8,7 @@ const meta = preview.meta({
 	component: NameDialog,
 	tags: ["ai-generated"],
 	args: {
-		title: "Rename thread",
+		title: "Rename chat",
 		name: "Pricing page",
 		maxLength: 80,
 		placeholder: "e.g. Pricing",

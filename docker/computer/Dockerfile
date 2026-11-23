@@ -84,7 +84,7 @@ RUN mkdir -p /nix/store /nix/var/nix && chown -R 1000:1000 /nix
 # Chromium's managed policy, root's so bots can't change it. No page from
 # outside the computer may reach the computer itself or its network, such as
 # Playwright MCP, which has no password, and Chromium doesn't ask. And the
-# browser connects as the rest of the computer does, so its egress rules,
+# browser connects as the rest of the computer does, so its network mode's rules,
 # which allow hosts by the name a TLS connection gives, let it through: over
 # TCP rather than QUIC, and without Encrypted Client Hello, which hides that
 # name behind the CDN's own (Cloudflare's cloudflare-ech.com).

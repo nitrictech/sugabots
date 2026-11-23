@@ -1,13 +1,13 @@
 import type { AutomationTrigger } from "./automations.ts";
 import { handleFromName } from "./bots.ts";
-import type { ListedThread, ProjectThread } from "./chats.ts";
+import type { ListedChat, ProjectChat } from "./chats.ts";
 import {
-	type Connection,
-	type ConnectionToolWithAccess,
-	type ConnectionWithTools,
+	type Connector,
+	type ConnectorToolWithAccess,
+	type ConnectorWithTools,
 	toolAccessCountsOf,
-} from "./connections.ts";
-import type { PersonParticipant } from "./conversations.ts";
+} from "./connectors.ts";
+import type { PersonParticipant } from "./messages.ts";
 
 /**
  * A person as the API shows them, for tests and stories. The handle is derived
@@ -29,19 +29,19 @@ export function testPerson({
 	return { kind: "person", id, name, email: email ?? `${handle}@example.com`, handle, image };
 }
 
-/** A connection for tests and stories, with every tool in full, as the server holds it. */
-export type TestConnection = Omit<Connection, "toolCounts"> & { tools: ConnectionToolWithAccess[] };
+/** A connector for tests and stories, with every tool in full, as the server holds it. */
+export type TestConnector = Omit<Connector, "toolCounts"> & { tools: ConnectorToolWithAccess[] };
 
-/** `connection` as its bot's list gives it: how many tools are at each setting, not the tools. */
-export function listedConnection({ tools, ...connection }: TestConnection): Connection {
-	return { ...connection, toolCounts: toolAccessCountsOf(tools) };
+/** `connector` as its bot's list gives it: how many tools are at each setting, not the tools. */
+export function listedConnector({ tools, ...connector }: TestConnector): Connector {
+	return { ...connector, toolCounts: toolAccessCountsOf(tools) };
 }
 
-/** `connection` as reading it on its own gives it: its tools, without their descriptions. */
-export function connectionWithTools(connection: TestConnection): ConnectionWithTools {
+/** `connector` as reading it on its own gives it: its tools, without their descriptions. */
+export function connectorWithTools(connector: TestConnector): ConnectorWithTools {
 	return {
-		...listedConnection(connection),
-		tools: connection.tools.map(({ description: _, ...tool }) => tool),
+		...listedConnector(connector),
+		tools: connector.tools.map(({ description: _, ...tool }) => tool),
 	};
 }
 
@@ -72,20 +72,20 @@ export function automationTriggers(
 	);
 }
 
-/** A project's thread as its list shows it, with nothing new in it unless `standing` says. */
-export function listedThread(
-	thread: ProjectThread,
-	standing: Partial<Omit<ListedThread, "conversation">> = {},
-): ListedThread {
+/** A project's chat as its list shows it, with nothing new in it unless `standing` says. */
+export function listedChat(
+	chat: ProjectChat,
+	standing: Partial<Omit<ListedChat, "chat">> = {},
+): ListedChat {
 	return {
-		conversation: thread,
+		chat,
 		lastMessage: null,
 		participants: [],
 		messageCount: 1,
 		unreadMessages: 0,
 		needsApproval: false,
 		mentionsYou: false,
-		activity: null,
+		status: null,
 		...standing,
 	};
 }

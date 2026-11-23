@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import {
 	botColorSchema,
-	botFaceSchema,
+	botEyesSchema,
 	botShapeSchema,
 	modelIdSchema,
 	systemBotKeySchema,
@@ -24,7 +24,7 @@ export const systemBotSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.NullOr(Schema.String),
 	color: botColorSchema,
-	face: botFaceSchema,
+	eyes: botEyesSchema,
 	shape: botShapeSchema,
 	/**
 	 * The model it runs on. `null` only while the workspace offers no model at

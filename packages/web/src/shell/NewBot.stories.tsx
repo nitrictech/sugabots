@@ -39,23 +39,23 @@ function Preview({ models, children }: { models: boolean; children: ReactNode })
 						{
 							providerId: "0199a3a0-0000-7000-8000-000000000201",
 							providerName: "Anthropic",
-							providerPreset: "anthropic",
+							providerBuiltIn: "anthropic",
 							modelId: "claude-sonnet",
 							displayName: "Claude Sonnet",
-							capabilities: ["tools", "vision", "reasoning"],
+							capabilities: ["tools", "vision", "thinking"],
 						},
 						{
 							providerId: "0199a3a0-0000-7000-8000-000000000202",
 							providerName: "OpenAI",
-							providerPreset: "openai",
+							providerBuiltIn: "openai",
 							modelId: "gpt-5",
 							displayName: "GPT-5",
-							capabilities: ["tools", "vision", "reasoning"],
+							capabilities: ["tools", "vision", "thinking"],
 						},
 						{
 							providerId: "0199a3a0-0000-7000-8000-000000000201",
 							providerName: "Anthropic",
-							providerPreset: "anthropic",
+							providerBuiltIn: "anthropic",
 							modelId: "claude-haiku",
 							displayName: "Claude Haiku",
 							capabilities: ["tools", "vision"],
@@ -63,7 +63,7 @@ function Preview({ models, children }: { models: boolean; children: ReactNode })
 						{
 							providerId: "0199a3a0-0000-7000-8000-000000000202",
 							providerName: "OpenAI",
-							providerPreset: "openai",
+							providerBuiltIn: "openai",
 							modelId: "gpt-5-mini",
 							displayName: "GPT-5 mini",
 							capabilities: ["tools"],
@@ -93,18 +93,18 @@ const meta = preview.meta({
 });
 
 /**
- * Opened from a project: a row of looks drawn at random and a model, beside the
+ * Opened from a project: a row of avatars drawn at random and a model, beside the
  * bot as it will be, named over it.
  */
 export const InAProject = meta.story({
 	play: async ({ userEvent }) => {
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
 		await expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
-		const looks = within(within(dialog).getByRole("group", { name: "Looks" })).getAllByRole(
+		const avatars = within(within(dialog).getByRole("group", { name: "Avatars" })).getAllByRole(
 			"radio",
 		);
-		await expect(looks).toHaveLength(7);
-		await expect(looks[0]).toBeChecked();
+		await expect(avatars).toHaveLength(7);
+		await expect(avatars[0]).toBeChecked();
 		await userEvent.type(within(dialog).getByRole("textbox", { name: "Name" }), "Support Desk");
 		await expect(within(dialog).getByRole("button", { name: /^Claude Sonnet/ })).toHaveAttribute(
 			"aria-pressed",
@@ -156,7 +156,7 @@ export const MadeAsShown = meta.story({
 				name: "Support Desk",
 				color: "teal",
 				shape: "star",
-				face: "wink",
+				eyes: "wink",
 				model: "claude-sonnet",
 			}),
 		]);

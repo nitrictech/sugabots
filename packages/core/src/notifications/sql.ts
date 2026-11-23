@@ -15,7 +15,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, updatedStamp } from "../database/sql.ts";
-import { bot, project, user } from "../workspaces/sql.ts";
+import { bot, person, project } from "../workspaces/sql.ts";
 
 const notificationLevel = (name: string) => text(name).$type<NotificationLevel>();
 
@@ -26,9 +26,9 @@ const levelIsValid = (name: string, column: Parameters<typeof sql>[1]) =>
 export const notificationSettings = pgTable(
 	"notification_settings",
 	{
-		userId: uuid("user_id")
+		personId: uuid("person_id")
 			.primaryKey()
-			.references(() => user.id, { onDelete: "cascade" }),
+			.references(() => person.id, { onDelete: "cascade" }),
 		level: notificationLevel("level").notNull(),
 		pausedUntil: timestamp("paused_until", { withTimezone: true }),
 		quietHours: jsonb("quiet_hours").$type<QuietHours>(),
@@ -56,9 +56,9 @@ export const notificationOverride = pgTable(
 	"notification_override",
 	{
 		id: primaryKey(),
-		userId: uuid("user_id")
+		personId: uuid("person_id")
 			.notNull()
-			.references(() => user.id, { onDelete: "cascade" }),
+			.references(() => person.id, { onDelete: "cascade" }),
 		projectId: uuid("project_id").references(() => project.id, { onDelete: "cascade" }),
 		botId: uuid("bot_id").references(() => bot.id, { onDelete: "cascade" }),
 		level: notificationLevel("level"),
@@ -76,10 +76,10 @@ export const notificationOverride = pgTable(
 			sql`num_nonnulls(${table.projectId}, ${table.botId}) = 1`,
 		),
 		uniqueIndex("notification_override_project_idx")
-			.on(table.userId, table.projectId)
+			.on(table.personId, table.projectId)
 			.where(sql`${table.projectId} is not null`),
 		uniqueIndex("notification_override_bot_idx")
-			.on(table.userId, table.botId)
+			.on(table.personId, table.botId)
 			.where(sql`${table.botId} is not null`),
 	],
 );

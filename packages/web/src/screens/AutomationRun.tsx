@@ -1,7 +1,7 @@
 import type {
 	BotParticipant,
+	ChatDetails,
 	ChatMessageItem,
-	ConversationDetails,
 	Participant,
 	Run,
 } from "@sugabots/contracts";
@@ -100,7 +100,7 @@ export function RunDivider({ at }: { at: string }) {
 export function NextRunDivider({
 	automation,
 }: {
-	automation: NonNullable<ConversationDetails["automation"]>;
+	automation: NonNullable<ChatDetails["automation"]>;
 }) {
 	const full = useAutomations(automation.projectId).data?.find((one) => one.id === automation.id);
 	const words = automation.state === "paused" ? "Paused" : full && nextRunWords(full);
@@ -114,26 +114,26 @@ export function NextRunDivider({
  * A run that completed and said something needs no word on how it went, and
  * one that completed saying nothing had nothing to report. The latest
  * failure, while the automation is still failing, offers to run it again or to
- * see to the connection it needs. One still running says so with dots.
+ * see to the connector it needs. One still running says so with dots.
  */
 export function RunMessage({
 	item,
 	bot,
 	automation,
-	conversationId,
+	chatId,
 	latest,
 	mentionable,
 }: {
 	item: RunItem;
 	bot: BotParticipant;
-	automation: Pick<NonNullable<ConversationDetails["automation"]>, "id" | "projectId">;
-	conversationId: string;
+	automation: Pick<NonNullable<ChatDetails["automation"]>, "id" | "projectId">;
+	chatId: string;
 	/** The newest failure while the automation is still failing, which may be retried. */
 	latest: boolean;
 	/** Who the report may mention, drawn as chips. */
 	mentionable: Participant[];
 }) {
-	const controls = useAutomationControls(conversationId, automation);
+	const controls = useAutomationControls(chatId, automation);
 	const owner = useOwnerOfProject(automation.projectId);
 	const mayRun = owner !== undefined && resourcePermissions(owner).runAutomations;
 	const [retryFailure, setRetryFailure] = useState<unknown>();
@@ -153,7 +153,7 @@ export function RunMessage({
 			className="flex gap-3.5 px-5 pt-3.5 pb-0.5"
 		>
 			<span aria-hidden className="mt-0.5 flex w-9 shrink-0 justify-center">
-				<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={36} />
+				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={36} />
 			</span>
 			<div className="flex min-w-0 flex-1 flex-col items-start">
 				<div className="flex items-center gap-2 pb-px">
@@ -188,10 +188,10 @@ export function RunMessage({
 						)}
 						{owner && (
 							<Link
-								{...ownerLinkOptions(owner, { page: "connections" })}
+								{...ownerLinkOptions(owner, { page: "connectors" })}
 								className={buttonStyles({ variant: "secondary", size: "sm" })}
 							>
-								Fix connection
+								Fix connector
 							</Link>
 						)}
 					</div>
@@ -202,7 +202,7 @@ export function RunMessage({
 }
 
 /**
- * A failed run, at the top of its own conversation, drawn as it is in its automation's
+ * A failed run, at the top of its own chat, drawn as it is in its automation's
  * feed: its bot's message saying why, offering to run it again while it is
  * the automation's latest run.
  */
@@ -224,7 +224,7 @@ export function FailedRunMessage({
 			item={{
 				kind: "run",
 				id: run.id,
-				conversationId: run.conversationId,
+				chatId: run.chatId,
 				automationName: run.automationName,
 				triggerKind: run.trigger.kind,
 				state: run.state,
@@ -234,7 +234,7 @@ export function FailedRunMessage({
 			}}
 			bot={bot}
 			automation={automation}
-			conversationId={run.rootConversationId}
+			chatId={run.rootChatId}
 			latest={latestRunId === run.id}
 			mentionable={[]}
 		/>

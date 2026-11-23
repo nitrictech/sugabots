@@ -6,16 +6,15 @@ import { engineering, growthDesk, revenue } from "@/shell/story-fixtures.ts";
 import {
 	appHandlers,
 	StoryApp,
-	storyChatActivity,
 	storyChatDetails,
-	storyConversationFor,
-	storyThreadFor,
-	storyUser,
+	storyChatFor,
+	storyPerson,
+	storySecondChatFor,
 	storyWorkspace,
 } from "@/story-app.tsx";
 
 /*
- * The app on a phone: Home, Inbox, Approvals and You as tabs along the foot,
+ * The app on a phone: Home, Approvals and You as tabs along the foot,
  * each its own page, and anything opened from them covering the tabs.
  */
 
@@ -37,7 +36,7 @@ const meta = preview.meta({
 });
 
 /**
- * Home: the projects the person is in, each opening its threads, then
+ * Home: the projects the person is in, each opening its chats, then
  * the bots they pinned, with Home marked among the tabs.
  */
 export const Home = meta.story({
@@ -58,50 +57,33 @@ export const Home = meta.story({
 	},
 });
 
-/** Inbox as a tab: titled large, with no Back, over the tabs. */
-export const Inbox = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/inbox`} />,
+/** Approvals as a tab: titled large, with no Back, over the tabs, and nothing waiting. */
+export const Approvals = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/approvals`} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { level: 1, name: "Inbox" })).toBeVisible();
+		await expect(await canvas.findByText(/^Nothing waiting/)).toBeVisible();
 		await expect(canvas.queryByRole("link", { name: "Back" })).toBeNull();
 		const tabs = canvas.getByRole("navigation", { name: "Tabs" });
-		await expect(within(tabs).getByRole("link", { name: /^Inbox/ })).toHaveAttribute(
+		await expect(within(tabs).getByRole("link", { name: /^Approvals/ })).toHaveAttribute(
 			"aria-current",
 			"page",
 		);
 	},
 });
 
-/**
- * Unread mentions and waiting approvals counted on the Inbox and Approvals
- * tabs, each at its icon's corner: one tab open beneath its count, one not,
- * and a count of two digits.
- */
+/** Waiting approvals counted on the Approvals tab, at its icon's corner, in two digits. */
 export const TabCounts = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			http.get(`${API}/workspaces/:workspace/chats/attention`, () =>
-				HttpResponse.json({
-					unreadInInbox: 7,
-					waitingApprovals: 12,
-					unreadForYou: 7,
-				}),
+				HttpResponse.json({ waitingApprovals: 12, unreadForYou: 7 }),
 			),
 		);
 	},
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/inbox`} />,
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/home`} />,
 	play: async ({ canvas }) => {
 		const tabs = await canvas.findByRole("navigation", { name: "Tabs" }, { timeout: 10_000 });
-		await expect(await within(tabs).findByText("7 unread messages for you")).toBeInTheDocument();
 		await expect(await within(tabs).findByText("12 waiting on you")).toBeInTheDocument();
-	},
-});
-
-/** Approvals as a tab, with nothing waiting. */
-export const Approvals = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/approvals`} />,
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByText(/^Nothing waiting/)).toBeVisible();
 	},
 });
 
@@ -111,8 +93,8 @@ export const You = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
 		await expect(
-			await canvas.findByRole("link", { name: new RegExp(storyUser.name) }),
-		).toHaveAttribute("href", `/${storyWorkspace.slug}/settings/profile`);
+			await canvas.findByRole("link", { name: new RegExp(storyPerson.name) }),
+		).toHaveAttribute("href", `/${storyWorkspace.slug}/settings/account`);
 		await expect(await canvas.findByRole("link", { name: "Computers" })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/settings/computers`,
@@ -121,11 +103,11 @@ export const You = meta.story({
 	},
 });
 
-/** Your profile, opened from your card: your account and appearance, then Notifications. */
-export const Profile = meta.story({
-	render: () => <StoryApp path={`/${storyWorkspace.slug}/settings/profile`} />,
+/** Your account, opened from your card: your account and appearance, then Notifications. */
+export const Account = meta.story({
+	render: () => <StoryApp path={`/${storyWorkspace.slug}/settings/account`} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: storyUser.name })).toBeVisible();
+		await expect(await canvas.findByRole("heading", { name: storyPerson.name })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Notifications" })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/settings/notifications`,
@@ -141,13 +123,13 @@ export const ProjectPart = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { level: 1, name: "Bots" })).toBeVisible();
 		await expect(await canvas.findByRole("link", { name: growthDesk.name })).toBeVisible();
-		await expect(canvas.queryByRole("group", { name: "Members" })).toBeNull();
+		await expect(canvas.queryByRole("heading", { name: "People" })).toBeNull();
 	},
 });
 
 const plan: WrittenFileSummary = {
 	id: "0199a3a0-0000-7000-8000-0000000000f1",
-	conversationId: storyThreadFor(growthDesk).id,
+	chatId: storyChatFor(growthDesk).id,
 	kind: "document",
 	title: "Q4 outreach plan",
 	version: 1,
@@ -186,7 +168,7 @@ export const OpenFile = meta.story({
 });
 
 /**
- * A bot's new-thread composer, opened from its page: the tabs stay, with Home
+ * A bot's new-chat composer, opened from its page: the tabs stay, with Home
  * marked, until the composer is typed in.
  */
 export const Opened = meta.story({
@@ -216,47 +198,45 @@ export const Files = meta.story({
 	},
 });
 
-const longThread = storyConversationFor(growthDesk);
+const longChat = storySecondChatFor(growthDesk);
 const LONG_TITLE = "Bot setup and purpose definition for the quarter";
 
 /**
- * A thread with a bot: its name heads its messages, and over them a pill with
- * its name, shortened to fit, and the bot it is with, as every bot's thread's pill is,
- * between Back and the ⋯, which holds the computer and Mark done.
+ * A chat with a bot: its name heads its messages, and over them a pill with
+ * its name, shortened to fit, and the bot it is with, as every bot's chat's pill is,
+ * between Back and the ⋯, which holds the computer and Resolve.
  */
-export const BotThread = meta.story({
+export const BotChat = meta.story({
 	beforeEach({ msw }) {
 		const details = storyChatDetails(growthDesk);
 		msw.use(
-			http.get(`${API}/conversations/${longThread.id}`, () =>
+			http.get(`${API}/chats/${longChat.id}`, () =>
 				HttpResponse.json({
 					...details,
-					conversation: {
-						...details.conversation,
-						id: longThread.id,
-						rootConversationId: longThread.id,
-						kind: "project_thread",
+					chat: {
+						...details.chat,
+						id: longChat.id,
+						rootChatId: longChat.id,
+						kind: "project_chat",
 						title: LONG_TITLE,
 					},
 				}),
 			),
-			http.get(`${API}/conversations/${longThread.id}/activity`, () =>
-				HttpResponse.json(storyChatActivity),
-			),
+			http.get(`${API}/chats/${longChat.id}/context`, () => HttpResponse.json(null)),
 		);
 	},
 	render: () => (
-		<StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/threads/${longThread.id}`} />
+		<StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/chats/${longChat.id}`} />
 	),
 	play: async ({ canvas, userEvent }) => {
-		const more = await canvas.findByRole("button", { name: "More for this thread" });
-		await expect(canvas.queryByRole("button", { name: "Mark done" })).toBeNull();
-		// Back returns to the bot the thread is with.
+		const more = await canvas.findByRole("button", { name: "More for this chat" });
+		await expect(canvas.queryByRole("button", { name: "Resolve" })).toBeNull();
+		// Back returns to the bot the chat is with.
 		await expect(canvas.getByRole("link", { name: `Back to ${growthDesk.name}` })).toHaveAttribute(
 			"href",
 			`/${storyWorkspace.slug}/bots/${growthDesk.handle}`,
 		);
-		// The thread's name heads its messages, and the pill over them, shortened to fit.
+		// The chat's name heads its messages, and the pill over them, shortened to fit.
 		await expect(await canvas.findByRole("heading", { level: 2, name: LONG_TITLE })).toBeVisible();
 		const pill = canvas
 			.getByText(LONG_TITLE, { selector: "button[aria-hidden] span" })
@@ -265,56 +245,56 @@ export const BotThread = meta.story({
 		await expect(pill?.right).toBeLessThanOrEqual(more.getBoundingClientRect().left);
 		await userEvent.click(more);
 		const menu = await screen.findByRole("menu");
-		await expect(within(menu).getByRole("menuitem", { name: "Mark done" })).toBeVisible();
+		await expect(within(menu).getByRole("menuitem", { name: "Resolve" })).toBeVisible();
 		await expect(within(menu).getByRole("menuitem", { name: "Computer" })).toBeVisible();
 	},
 });
 
-/** A project: its work to pick from, as its sidebar lists it, its Files, and + to start a thread. */
+/** A project: its work to pick from, as its sidebar lists it, its Files, and + to start a chat. */
 export const Project = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/projects/${revenue.slug}`} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { level: 1, name: revenue.name }),
 		).toBeInTheDocument();
-		const work = await canvas.findByRole("region", { name: "Threads" });
+		const work = await canvas.findByRole("region", { name: "Chats" });
 		await expect(await within(work).findByRole("link", { name: /Planning/ })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Files" })).toBeVisible();
-		await expect(canvas.getByRole("link", { name: `New thread in ${revenue.name}` })).toBeVisible();
+		await expect(canvas.getByRole("link", { name: `New chat in ${revenue.name}` })).toBeVisible();
 	},
 });
 
-/** A bot, as a project is: its threads to pick from, its Files, and + to start a thread. */
+/** A bot, as a project is: its chats to pick from, its Files, and + to start a chat. */
 export const Bot = meta.story({
 	render: () => <StoryApp path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}`} />,
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByRole("heading", { level: 1, name: growthDesk.name }),
 		).toBeInTheDocument();
-		const work = await canvas.findByRole("region", { name: "Threads" });
+		const work = await canvas.findByRole("region", { name: "Chats" });
 		await expect(
-			await within(work).findByRole("link", { name: new RegExp(storyThreadFor(growthDesk).title) }),
+			await within(work).findByRole("link", { name: new RegExp(storyChatFor(growthDesk).title) }),
 		).toBeVisible();
 		await expect(canvas.getByRole("link", { name: "Files" })).toBeVisible();
 		await expect(
-			canvas.getByRole("link", { name: `New thread with ${growthDesk.name}` }),
+			canvas.getByRole("link", { name: `New chat with ${growthDesk.name}` }),
 		).toBeVisible();
 	},
 });
 
 /**
- * A bot's computer, from a thread's More menu: a sheet from the foot of the
+ * A bot's computer, from a chat's More menu: a sheet from the foot of the
  * screen, here saying why there is none.
  */
 export const Computer = meta.story({
 	render: () => (
 		<StoryApp
-			path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/threads/${storyThreadFor(growthDesk).id}`}
+			path={`/${storyWorkspace.slug}/bots/${growthDesk.handle}/chats/${storyChatFor(growthDesk).id}`}
 		/>
 	),
 	// Opened, for a look at the sheet; what it says waits on the workspace's computers, which vary.
 	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "More for this thread" }));
+		await userEvent.click(await canvas.findByRole("button", { name: "More for this chat" }));
 		await userEvent.click(await screen.findByRole("menuitem", { name: "Computer" }));
 		await expect(
 			await screen.findByRole("dialog", { name: `${growthDesk.name}'s computer` }),

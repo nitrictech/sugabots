@@ -90,7 +90,7 @@ function BotRow({
 	const nameClassName = "focus-ring rounded-sm hover:underline";
 	return (
 		<SettingsRow
-			icon={<BotAvatar color={bot.color} face={bot.face} shape={bot.shape} size={24} />}
+			icon={<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={24} />}
 			label={
 				usable ? (
 					<Link {...botLink(bot)} className={nameClassName}>

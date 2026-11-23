@@ -1,4 +1,4 @@
-import type { BotLook } from "@sugabots/avatars";
+import type { AvatarParts } from "@sugabots/avatars";
 import GithubSlugger from "github-slugger";
 import type { MDXContent } from "mdx/types";
 import { type DocGroup, docGroups } from "@/docs/nav";
@@ -25,7 +25,7 @@ export interface Heading {
 export interface DocPage extends Frontmatter {
 	slug: string;
 	group: Pick<DocGroup, "title" | "tone">;
-	bot: BotLook;
+	bot: AvatarParts;
 	Content: MDXContent;
 	headings: readonly Heading[];
 	/** The page as Markdown, headed by its title and description, for readers who want to paste it elsewhere. */

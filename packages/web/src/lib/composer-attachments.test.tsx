@@ -120,7 +120,7 @@ describe("useComposerAttachments", () => {
 		const [request] = FakeRequest.made;
 		expect(request?.method).toBe("POST");
 		expect(request?.url).toBe(
-			`https://api.test/conversations/${chatId}/files?name=report.pdf&type=application%2Fpdf`,
+			`https://api.test/chats/${chatId}/files?name=report.pdf&type=application%2Fpdf`,
 		);
 		expect(request?.withCredentials).toBe(true);
 		expect(request?.body).toBe(file);
@@ -142,7 +142,7 @@ describe("useComposerAttachments", () => {
 		const { result } = renderHook(() => useComposerAttachments(chatId));
 		act(() => result.current.attach?.([new File(["x"], "notes.weird")]));
 		expect(FakeRequest.made[0]?.url).toBe(
-			`https://api.test/conversations/${chatId}/files?name=notes.weird`,
+			`https://api.test/chats/${chatId}/files?name=notes.weird`,
 		);
 	});
 
@@ -192,7 +192,7 @@ describe("useComposerAttachments", () => {
 		await settle();
 		expect(result.current.items).toEqual([]);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId: "0199a3a0-0000-7000-8000-0000000000f2" },
+			params: { chatId, fileId: "0199a3a0-0000-7000-8000-0000000000f2" },
 		});
 	});
 
@@ -206,7 +206,7 @@ describe("useComposerAttachments", () => {
 		act(() => result.current.remove(result.current.items[0]?.key ?? ""));
 		expect(result.current.items).toEqual([]);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
 	});
 
@@ -266,7 +266,7 @@ describe("useComposerAttachments", () => {
 		unmount();
 		expect(inFlight?.aborted).toBe(true);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
 	});
 
@@ -366,7 +366,7 @@ describe("useComposerAttachments", () => {
 		const [item] = result.current.items;
 		expect(item?.upload).toMatchObject({ state: "failed", retryable: true });
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
 
 		const freshId = "0199a3a0-0000-7000-8000-0000000000f3";
@@ -407,7 +407,7 @@ describe("useComposerAttachments", () => {
 		expect(client.api.chats.removeFile).not.toHaveBeenCalled();
 		taken?.putBack(new Error("The connection dropped"));
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
 	});
 
@@ -437,13 +437,13 @@ describe("useComposerAttachments", () => {
 		expect(result.current.leftOut).toBe(0);
 		expect(stillUploading?.aborted).toBe(true);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId: waitingId },
+			params: { chatId, fileId: waitingId },
 		});
 
 		act(() => taken?.putBack(new Error("The connection dropped")));
 		expect(result.current.items).toEqual([]);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
 	});
 });

@@ -8,11 +8,7 @@ import {
 import { isApiFailure } from "@sugabots/sdk";
 import { Option, Schema } from "effect";
 import { useEffect, useRef, useState } from "react";
-import {
-	removeConversationFile,
-	UploadInterrupted,
-	uploadConversationFile,
-} from "@/lib/conversation-files.ts";
+import { removeChatFile, UploadInterrupted, uploadChatFile } from "@/lib/chat-files.ts";
 
 /** Where a file attached in the composer has got to. */
 export type AttachmentUpload =
@@ -86,13 +82,13 @@ export function canSend(draftText: string, items: readonly ComposerAttachment[])
 }
 
 /**
- * The composer's attachments for the chat `conversationId`. Each file uploads as soon
+ * The composer's attachments for the chat `chatId`. Each file uploads as soon
  * as it is attached. They are kept in memory only, so leaving the chat stops
  * the uploads still going, removes the files uploaded and not sent, which
  * would otherwise count toward the files a person can have waiting, and
  * empties the composer for the next chat.
  */
-export function useComposerAttachments(conversationId: string): ComposerAttachments {
+export function useComposerAttachments(chatId: string): ComposerAttachments {
 	const [items, setItems] = useState<readonly ComposerAttachment[]>([]);
 	const [leftOut, setLeftOut] = useState(0);
 	// The source of truth, so a handler reads what the last one wrote without waiting for a render.
@@ -118,8 +114,8 @@ export function useComposerAttachments(conversationId: string): ComposerAttachme
 		inFlight.current.set(key, controller);
 		setUpload(key, { state: "uploading", progress: 0 });
 		const stillWanted = () => inFlight.current.get(key) === controller;
-		uploadConversationFile({
-			conversationId,
+		uploadChatFile({
+			chatId,
 			file,
 			signal: controller.signal,
 			onProgress: (progress) => {
@@ -129,7 +125,7 @@ export function useComposerAttachments(conversationId: string): ComposerAttachme
 			(uploaded) => {
 				// Removed while it was finishing: it has to go from the API too.
 				if (!stillWanted()) {
-					removeConversationFile(conversationId, uploaded.id);
+					removeChatFile(chatId, uploaded.id);
 					return;
 				}
 				inFlight.current.delete(key);
@@ -165,7 +161,7 @@ export function useComposerAttachments(conversationId: string): ComposerAttachme
 		inFlight.current.get(key)?.abort();
 		inFlight.current.delete(key);
 		if (item.upload.state === "uploaded") {
-			removeConversationFile(conversationId, item.upload.attachment.id);
+			removeChatFile(chatId, item.upload.attachment.id);
 		}
 		setLeftOut(0);
 		commit((items) => items.filter((candidate) => candidate.key !== key));
@@ -180,7 +176,7 @@ export function useComposerAttachments(conversationId: string): ComposerAttachme
 	function takeForSending(draftText: string): FilesForSending | undefined {
 		const taken = current.current;
 		if (!canSend(draftText, taken)) return undefined;
-		const takenFrom = conversationId;
+		const takenFrom = chatId;
 		const fileIds = uploadedFileIds(taken);
 		setLeftOut(0);
 		commit(() => []);
@@ -193,7 +189,7 @@ export function useComposerAttachments(conversationId: string): ComposerAttachme
 				if (returned) return;
 				returned = true;
 				if (openChatId.current !== takenFrom) {
-					for (const fileId of fileIds) removeConversationFile(takenFrom, fileId);
+					for (const fileId of fileIds) removeChatFile(takenFrom, fileId);
 					return;
 				}
 				if (!isFileGoneRefusal(sendFailure)) {
@@ -203,7 +199,7 @@ export function useComposerAttachments(conversationId: string): ComposerAttachme
 				// The API attaches all of a message's files or none, without saying
 				// which was missing, so each uploads again. The ones still there go,
 				// so they stop counting toward the files a person can have waiting.
-				for (const fileId of fileIds) removeConversationFile(takenFrom, fileId);
+				for (const fileId of fileIds) removeChatFile(takenFrom, fileId);
 				commit((items) => [
 					...taken.map((item): ComposerAttachment => ({ ...item, upload: FILE_GONE })),
 					...items,
@@ -213,20 +209,20 @@ export function useComposerAttachments(conversationId: string): ComposerAttachme
 	}
 
 	useEffect(() => {
-		openChatId.current = conversationId;
+		openChatId.current = chatId;
 		const uploads = inFlight.current;
 		return () => {
 			openChatId.current = undefined;
 			for (const controller of uploads.values()) controller.abort();
 			uploads.clear();
 			for (const fileId of uploadedFileIds(current.current)) {
-				removeConversationFile(conversationId, fileId);
+				removeChatFile(chatId, fileId);
 			}
 			current.current = [];
 			setItems([]);
 			setLeftOut(0);
 		};
-	}, [conversationId]);
+	}, [chatId]);
 
 	return {
 		items,
