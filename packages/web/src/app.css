@@ -846,3 +846,101 @@
 @utility view-transition-tabs {
 	view-transition-name: tabs;
 }
+
+/* A document being edited (`screens/LiveDocument.tsx`). The editor writes plain elements, so they are styled here, as a bot's markdown is by its renderer. */
+.live-document {
+	outline: none;
+	color: var(--body-foreground);
+	font-size: 14px;
+	line-height: 1.65;
+}
+
+.live-document > * + * {
+	margin-top: 0.75em;
+}
+
+.live-document h1,
+.live-document h2,
+.live-document h3 {
+	color: var(--foreground);
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+.live-document h1 {
+	font-size: 22px;
+}
+
+.live-document h2 {
+	margin-top: 1.4em;
+	font-size: 18px;
+}
+
+.live-document h3 {
+	margin-top: 1.2em;
+	font-size: 15px;
+}
+
+.live-document ul {
+	padding-left: 1.4em;
+	list-style: disc;
+}
+
+.live-document ol {
+	padding-left: 1.4em;
+	list-style: decimal;
+}
+
+.live-document blockquote {
+	padding-left: 0.9em;
+	border-left: 2px solid var(--border-strong);
+	color: var(--muted-foreground);
+}
+
+.live-document a {
+	color: var(--link);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.live-document code {
+	padding: 1px 5px;
+	border-radius: 4px;
+	background: var(--chip);
+	font: 500 13px var(--font-mono);
+}
+
+.live-document pre {
+	padding: 10px 12px;
+	border: 1px solid var(--border-strong);
+	border-radius: 8px;
+	background: var(--rail);
+}
+
+.live-document pre code {
+	padding: 0;
+	background: none;
+}
+
+/* Someone else's caret in the document, in their colour, with their name above it. */
+.live-document .collaboration-carets__caret {
+	position: relative;
+	margin: 0 -1px;
+	border-right: 1px solid;
+	border-left: 1px solid;
+	pointer-events: none;
+	word-break: normal;
+}
+
+.live-document .collaboration-carets__label {
+	position: absolute;
+	top: -1.4em;
+	left: -1px;
+	padding: 1px 5px;
+	border-radius: 4px 4px 4px 0;
+	color: #fff;
+	font: 500 11px var(--font-sans);
+	line-height: 1.3;
+	white-space: nowrap;
+	user-select: none;
+}

@@ -3,6 +3,7 @@ import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
+import { LiveDocuments } from "@sugabots/core/artifacts/live";
 import { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
@@ -114,6 +115,7 @@ const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
 	unimplemented(WorkspaceTimeZone.Service),
 	unimplemented(Artifacts.Service),
 	unimplemented(ArtifactPages.Service),
+	unimplemented(LiveDocuments.Service),
 	unimplemented(AgentAdministration.Service),
 	unimplemented(Onboarding.Service),
 	unimplemented(ModelProviderSetup.Service),

@@ -25,6 +25,7 @@ import {
 	blobDeletion,
 } from "../database/schema.ts";
 import { Ids, isUuid } from "../ids/ids.ts";
+import { LiveDocuments } from "./live.ts";
 
 /**
  * Reading a pod's artifacts, for people. Seeing them takes `pod.read`, the
@@ -63,6 +64,11 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
  * artifacts of its own pod and no other. Every change names the version it
  * was based on and is refused with `Stale` if another landed first,
  * so one writer never silently overwrites another.
+ *
+ * A `document` people have opened in the editor is live (see `live.ts`): its
+ * content is what the live document holds, an agent's change is made to that,
+ * and the version the change writes is a snapshot of it, people's edits
+ * included.
  */
 export interface AuthoringInterface {
 	readonly list: (by: AgentInPod) => Effect.Effect<ArtifactSummary[]>;
@@ -175,7 +181,34 @@ export const makeAuthoring = Effect.gen(function* () {
 	const operation = yield* serviceOperations<AuthoringInterface>("Artifacts.Authoring");
 	const blobs = yield* BlobStore.Service;
 	const ids = yield* Ids.Service;
+	const live = yield* LiveDocuments.Service;
 	const atVersion = atVersionIn(blobs);
+
+	/** The artifact with what its live document holds, when it has one. */
+	const withLiveContent = (shown: Artifact) =>
+		shown.kind !== "document"
+			? Effect.succeed(shown)
+			: Effect.map(live.markdown(shown.id), (markdown) =>
+					markdown === undefined ? shown : { ...shown, content: markdown },
+				);
+
+	/** How people in a live document see the agent's change signed. */
+	const authorOfChange = (by: AgentInPod) =>
+		query((db) =>
+			db
+				.select({ name: agent.name, color: agent.color, face: agent.face, shape: agent.shape })
+				.from(agent)
+				.where(eq(agent.id, by.agentId)),
+		).pipe(
+			Effect.flatMap(([row]) =>
+				row
+					? Effect.succeed({
+							name: row.name,
+							look: { color: row.color, face: row.face, shape: row.shape },
+						})
+					: Effect.die(new Error(`Agent ${by.agentId} changed a document but has no row`)),
+			),
+		);
 
 	/**
 	 * Puts `content` in the blob store as a new version of `artifactId`, then
@@ -259,7 +292,7 @@ export const makeAuthoring = Effect.gen(function* () {
 					const found = yield* artifactIn(by.podId, artifactId);
 					const shown = found && (yield* atVersion(found, found.artifact.currentVersion));
 					if (!shown) return yield* new NotFound({ artifactId });
-					return shown;
+					return yield* withLiveContent(shown);
 				}),
 			),
 
@@ -321,6 +354,9 @@ export const makeAuthoring = Effect.gen(function* () {
 								),
 							),
 					);
+					if (written.kind === "document") {
+						yield* live.rewrite(written.id, yield* authorOfChange(by), () => content);
+					}
 					return { ...written, content };
 				}),
 			),
@@ -338,11 +374,20 @@ export const makeAuthoring = Effect.gen(function* () {
 						if (baseVersion !== found.artifact.currentVersion) {
 							return yield* new Stale({ currentVersion: found.artifact.currentVersion });
 						}
-						const current = (yield* atVersion(found, found.artifact.currentVersion))?.content ?? "";
-						const matches = current.split(oldText).length - 1;
-						if (oldText === "" || matches !== 1) return yield* new EditTextUnmatched({ matches });
-						// A function, so `$` in the new text is never read as a replacement pattern.
-						const edited = current.replace(oldText, () => newText);
+						const inLive =
+							found.artifact.kind === "document"
+								? yield* live.rewrite(found.artifact.id, yield* authorOfChange(by), (markdown) =>
+										replacedOnce(markdown, oldText, newText),
+									)
+								: undefined;
+						const current =
+							inLive?.markdown ??
+							(yield* atVersion(found, found.artifact.currentVersion))?.content ??
+							"";
+						const edited = inLive?.changed ? current : replacedOnce(current, oldText, newText);
+						if (edited === undefined) {
+							return yield* new EditTextUnmatched({ matches: occurrences(current, oldText) });
+						}
 						const written = yield* withContent(
 							found.artifact.id,
 							found.artifact.kind,
@@ -360,7 +405,9 @@ export const layerNoDeps = Layer.effect(Service, make);
 
 export const layer = layerNoDeps.pipe(Layer.provide(Authorization.layer));
 
-export const authoringLayer = Layer.effect(Authoring, makeAuthoring);
+export const authoringLayer = Layer.effect(Authoring, makeAuthoring).pipe(
+	Layer.provide(LiveDocuments.layer),
+);
 
 /**
  * Version `version` of an artifact in `podId`, read without asking who wants
@@ -375,6 +422,17 @@ export const readVersionUnchecked =
 			if (!found) return undefined;
 			return yield* atVersionIn(blobs)(found, version);
 		});
+
+/** How many times `text` appears in `content`. */
+const occurrences = (content: string, text: string) =>
+	text === "" ? 0 : content.split(text).length - 1;
+
+/** `content` with the one place `oldText` appears replaced, or `undefined` if it isn't there exactly once. */
+const replacedOnce = (content: string, oldText: string, newText: string) =>
+	occurrences(content, oldText) === 1
+		? // A function, so `$` in the new text is never read as a replacement pattern.
+			content.replace(oldText, () => newText)
+		: undefined;
 
 /** A version's content as kept in the blob store. */
 interface StoredContent {

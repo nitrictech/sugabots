@@ -25,6 +25,8 @@
 		"pg": "^8.23.1"
 	},
 	"devDependencies": {
-		"@types/pg": "catalog:"
+		"@hocuspocus/provider": "^4.9.0",
+		"@types/pg": "catalog:",
+		"yjs": "^13.6.33"
 	}
 }

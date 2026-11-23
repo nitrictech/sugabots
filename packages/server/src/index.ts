@@ -2,6 +2,7 @@ import { NodeRuntime } from "@effect/platform-node";
 import { Usage } from "@sugabots/core/accounting/usage";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
+import { LiveDocuments } from "@sugabots/core/artifacts/live";
 import { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { BlobDeletions } from "@sugabots/core/blob-store/deletions";
@@ -108,6 +109,7 @@ const WorkspacesAndProviders = Layer.mergeAll(
 	GitHubConnections.layer,
 	ConnectionSetup.layer,
 	Artifacts.layer,
+	LiveDocuments.layer,
 	ArtifactPages.layer,
 	ModelTrials.layer,
 	Usage.layer,

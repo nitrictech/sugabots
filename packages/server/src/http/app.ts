@@ -42,6 +42,7 @@ import { ServerApi } from "./api.ts";
 import { contentPageRoutes, onlyPagesOnContentHost } from "./content-pages.ts";
 import { desktopViewerRoutes } from "./desktop-viewer.ts";
 import { failureResponse } from "./errors.ts";
+import { liveDocumentRoutes } from "./live-documents.ts";
 import type { HttpServices } from "./services.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
 
@@ -107,6 +108,7 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 	),
 	betterAuthRoutes,
 	desktopViewerRoutes,
+	liveDocumentRoutes,
 	contentPageRoutes,
 ).pipe(
 	// Each handler's Effect runs against the process's database, which the

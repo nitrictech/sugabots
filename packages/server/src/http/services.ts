@@ -1,6 +1,7 @@
 import type { Usage } from "@sugabots/core/accounting/usage";
 import type { Accounts } from "@sugabots/core/accounts/accounts";
 import type { Artifacts } from "@sugabots/core/artifacts/artifacts";
+import type { LiveDocuments } from "@sugabots/core/artifacts/live";
 import type { ArtifactPages } from "@sugabots/core/artifacts/pages";
 import type { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
 import type { ChatView } from "@sugabots/core/conversations/chats/chat-view";
@@ -57,6 +58,7 @@ export type HttpServices =
 	| GitHubConnections.Service
 	| ConnectionSetup.Service
 	| Artifacts.Service
+	| LiveDocuments.Service
 	| ArtifactPages.Service
 	| ModelTrials.Service
 	| Usage.Service

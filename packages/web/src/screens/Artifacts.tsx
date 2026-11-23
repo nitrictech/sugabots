@@ -19,6 +19,7 @@ import { failureMessage } from "@/lib/failure.ts";
 import { artifactLink, artifactsLink } from "@/lib/links.ts";
 import { formatClockTime, formatListTime } from "@/lib/list-time.ts";
 import { usePaneWidth } from "@/lib/pane-width.ts";
+import { useSession } from "@/lib/session.ts";
 import { Page } from "@/shell/Page.tsx";
 import { type CloseStage, Stage, StageMark } from "@/shell/Stage.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
@@ -34,6 +35,7 @@ import { MoreMenu } from "@/ui/more-menu.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import { useCopy } from "@/ui/use-copy.ts";
 import { ARTIFACT_KINDS } from "./artifact-kinds.tsx";
+import { LiveDocument } from "./LiveDocument.tsx";
 
 type Loading = "loading" | "failed";
 
@@ -228,6 +230,12 @@ export function ArtifactStage({
 	const shown = useArtifact(pod.id, artifactId, version);
 	const versions = useArtifactVersions(pod.id, artifactId);
 	const remove = useDeleteArtifact(pod.id);
+	const { user } = useSession();
+	// A document's current version is edited where it is read; an earlier version is only read.
+	const editing =
+		shown.data?.kind === "document" &&
+		shown.data.shownVersion.number === shown.data.version &&
+		user;
 	async function deleteArtifact() {
 		try {
 			await remove.mutateAsync(artifactId);
@@ -245,6 +253,16 @@ export function ArtifactStage({
 			now={new Date()}
 			onVersionChange={onVersionChange}
 			onClose={onClose}
+			editor={
+				editing ? (
+					<LiveDocument
+						podId={pod.id}
+						artifactId={artifactId}
+						title={shown.data?.title ?? ""}
+						as={{ name: editing.name, email: editing.email, image: editing.image }}
+					/>
+				) : undefined
+			}
 			deletion={
 				pod.permissions.deleteArtifacts
 					? {
@@ -275,10 +293,13 @@ export function ArtifactStageView({
 	now,
 	onVersionChange,
 	onClose,
+	editor,
 	deletion,
 }: {
 	pod: Pod;
 	artifact: Artifact | Loading;
+	/** Shown in place of the artifact's content, to edit it. */
+	editor?: ReactNode;
 	/** Newest first. */
 	versions: readonly ArtifactVersionSummary[];
 	now: Date;
@@ -352,11 +373,13 @@ export function ArtifactStageView({
 			}
 			onClose={onClose}
 		>
-			<kind.Full
-				title={artifact.title}
-				content={artifact.content}
-				at={{ podId: artifact.podId, artifactId: artifact.id, version: shown.number }}
-			/>
+			{editor ?? (
+				<kind.Full
+					title={artifact.title}
+					content={artifact.content}
+					at={{ podId: artifact.podId, artifactId: artifact.id, version: shown.number }}
+				/>
+			)}
 			{deletion && (
 				<DeleteDialog
 					open={confirmingDelete}
