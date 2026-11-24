@@ -256,7 +256,7 @@ describe("links in the document", () => {
 		caretIn("run it");
 
 		expect(followed).toBe(false);
-		const open = within(await linkMenu()).getByRole("button", { name: "Open link" });
+		const open = within(await linkMenu()).getByRole("button", { name: "Open link (Alt + Enter)" });
 		expect(open).toHaveProperty("disabled", true);
 		expect(opened).not.toHaveBeenCalled();
 		expect(screen.queryByRole("dialog")).toBeNull();
@@ -285,9 +285,27 @@ describe("links in the document", () => {
 		const menu = await linkMenu();
 
 		expect(menu.textContent).toContain(PLAN);
-		fireEvent.click(within(menu).getByRole("button", { name: "Open link" }));
+		fireEvent.click(within(menu).getByRole("button", { name: "Open link (Alt + Enter)" }));
 		expect(opened.mock.calls).toEqual([[PLAN, ...NEW_TAB]]);
 		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	it("opens the link whose menu shows on Alt and Enter, and nothing once the caret has left it", async () => {
+		await editingLinks("0199a3a0-0000-7000-8000-00000000000c");
+		const editor = caretIn("the plan");
+		await linkMenu();
+
+		const leftToTheEditor = fireEvent.keyDown(editor.view.dom, { key: "Enter", altKey: true });
+
+		expect(leftToTheEditor).toBe(false);
+		expect(opened.mock.calls).toEqual([[PLAN, ...NEW_TAB]]);
+		expect(screen.queryByRole("dialog")).toBeNull();
+
+		editor.commands.focus("start");
+		await waitFor(() => expect(screen.queryByRole("toolbar", { name: "Link" })).toBeNull());
+		fireEvent.keyDown(editor.view.dom, { key: "Enter", altKey: true });
+
+		expect(opened).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps a long address's host whole in the menu, cutting only what follows it", async () => {
@@ -365,7 +383,7 @@ describe("links in the document", () => {
 		const menu = await linkMenu();
 
 		expect(menu.textContent).toContain(CHART);
-		fireEvent.click(within(menu).getByRole("button", { name: "Open link" }));
+		fireEvent.click(within(menu).getByRole("button", { name: "Open link (Alt + Enter)" }));
 		expect(opened.mock.calls).toEqual([[CHART, ...NEW_TAB]]);
 	});
 

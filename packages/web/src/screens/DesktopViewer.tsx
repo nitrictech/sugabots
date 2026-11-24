@@ -9,6 +9,7 @@ import { useDesktopInUse } from "@/lib/desktop.ts";
 import { agentSettingsLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
+import { IS_MAC } from "@/lib/platform.ts";
 import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useBackToHere } from "@/lib/settings-back.tsx";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
@@ -585,8 +586,6 @@ const COPY_KEYS = [
 
 /** The person's input a browser counts as a gesture, letting the page write the clipboard. */
 const GESTURE_EVENTS = ["pointerdown", "keydown"] as const;
-
-const IS_MAC = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
 /** ⌘ and `code` on a Mac, Ctrl and `code` elsewhere, without the Shift or Alt of a different shortcut. */
 function isCommandShortcut(event: KeyboardEvent, code: string): boolean {

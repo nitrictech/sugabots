@@ -14,6 +14,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { IS_MAC } from "@/lib/platform.ts";
 import { CopyIconButton } from "@/ui/copy-icon-button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -29,10 +30,11 @@ import { isInApp, LeavingDialog, LINK_WORDING } from "./leaving-the-app.tsx";
  * A click on a link, with any button or key held, does what the editor does
  * with it: it places the caret, as on any words, or selects a linked image,
  * as any image. It opens nothing, and the browser never follows a link here
- * by itself. The link's menu is the way to open it. Bots write into a
- * document, directly and as suggestions, and nothing records who wrote a
- * link, so a link's words need not say where it goes. The menu shows the
- * real address beside the button that opens it, so opening it doesn't ask.
+ * by itself. The link's menu is the way to open it, by its button or, while
+ * the menu shows, with Alt and Enter. Bots write into a document, directly
+ * and as suggestions, and nothing records who wrote a link, so a link's
+ * words need not say where it goes. The menu shows the real address beside
+ * the button that opens it, so opening it doesn't ask.
  *
  * Where the text can't be edited, no caret can go and there is no menu, so a
  * click on a link opens it instead, and asks first when it leaves the app, as
@@ -75,6 +77,13 @@ export function LiveDocumentText({
 	}
 	const editable = editor.isEditable;
 	const menu = useLinkMenu(editor, page, { offered: editable && !askBoxOpen });
+	/** Opens the link whose menu shows on Alt and Enter, before the editor takes the key for a new line. */
+	function openLinkOnKeys(event: KeyboardEvent<HTMLElement>) {
+		if (!menu.shown || !isOpenLinkKeys(event)) return;
+		event.preventDefault();
+		event.stopPropagation();
+		open(menu.shown.link.href, { addressShown: true });
+	}
 	return (
 		<>
 			<article
@@ -82,6 +91,7 @@ export function LiveDocumentText({
 				className={className}
 				onClick={handleClickInText}
 				onAuxClick={handleClickInText}
+				onKeyDownCapture={openLinkOnKeys}
 				onKeyDown={menu.onKeyDown}
 			>
 				<EditorContent editor={editor} />
@@ -167,6 +177,13 @@ function endsSelecting(click: MouseEvent, link: Element): boolean {
 		selection.getRangeAt(0).intersectsNode(link)
 	);
 }
+
+/** Whether the keys are the ones that open a link: Alt and Enter, Option and Enter on a Mac, and no others. */
+const isOpenLinkKeys = (event: KeyboardEvent) =>
+	event.key === "Enter" && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+
+/** The keys that open a link, as the button that also opens it says them. */
+const OPEN_LINK_KEYS = IS_MAC ? "Option + Enter" : "Alt + Enter";
 
 /** Opens `href` in a new tab that gets no referrer and no hold on this one. */
 function openInNewTab(href: string): void {
@@ -318,7 +335,8 @@ function LinkMenu({
 					</Tooltip>
 					<MenuDivider />
 					<IconButton
-						label="Open link"
+						label={`Open link (${OPEN_LINK_KEYS})`}
+						aria-keyshortcuts="Alt+Enter"
 						side="top"
 						disabled={!linkMayGoTo(link.href)}
 						onClick={() => onOpen(link.href)}
